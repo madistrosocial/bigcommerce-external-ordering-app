@@ -99,13 +99,17 @@ export const MOCK_USERS: User[] = [
 ];
 
 export const seedDatabase = async () => {
-  const productCount = await db.products.count();
-  if (productCount === 0) {
-    await db.products.bulkAdd(MOCK_PRODUCTS);
-  }
+  try {
+    const productCount = await db.products.count();
+    if (productCount === 0) {
+      await db.products.bulkPut(MOCK_PRODUCTS);
+    }
 
-  const userCount = await db.users.count();
-  if (userCount === 0) {
-    await db.users.bulkAdd(MOCK_USERS);
+    const userCount = await db.users.count();
+    if (userCount === 0) {
+      await db.users.bulkPut(MOCK_USERS);
+    }
+  } catch (error) {
+    console.error('Failed to seed database:', error);
   }
 };
