@@ -37,13 +37,58 @@ export default function Catalog() {
     const qty = quantities[qtyKey] || 1;
     
     addToCart(product, qty, variant);
-    setQuantities(prev => ({ ...prev, [qtyKey]: 0 }));
+    setQuantities(prev => {
+      const next = { ...prev };
+      delete next[qtyKey];
+      return next;
+    });
     
     toast({
       title: "Added to cart",
       description: `${qty}x ${product.name} ${variant ? `(${variant.sku})` : ''} added.`,
       duration: 1000,
     });
+  };
+
+  const handleAddAll = (product: api.Product) => {
+    const variants = typeof product.variants === 'string' ? JSON.parse(product.variants) : product.variants;
+    let addedCount = 0;
+
+    if (variants && Array.isArray(variants) && variants.length > 0) {
+      variants.forEach(v => {
+        const qtyKey = `${product.id}-${v.id}`;
+        const qty = quantities[qtyKey];
+        if (qty > 0) {
+          addToCart(product, qty, v);
+          addedCount += qty;
+        }
+      });
+    } else {
+      const qtyKey = `${product.id}`;
+      const qty = quantities[qtyKey];
+      if (qty > 0) {
+        addToCart(product, qty);
+        addedCount += qty;
+      }
+    }
+
+    if (addedCount > 0) {
+      setQuantities(prev => {
+        const next = { ...prev };
+        Object.keys(next).forEach(key => {
+          if (key.startsWith(`${product.id}-`) || key === `${product.id}`) {
+            delete next[key];
+          }
+        });
+        return next;
+      });
+
+      toast({
+        title: "Added to cart",
+        description: `Multiple items from ${product.name} added.`,
+        duration: 1000,
+      });
+    }
   };
 
   return (
@@ -74,10 +119,10 @@ export default function Catalog() {
                 <div className="mt-2 flex items-center text-xs font-medium text-primary">
                   {(() => {
                     const variants = typeof product.variants === 'string' ? JSON.parse(product.variants) : product.variants;
-                    if (variants && Array.isArray(variants) && variants.length > 0) {
+                    if (variants && Array.isArray(variants) && (variants.length > 0 || product.variants?.length > 0)) {
                       return (
                         <>
-                          {variants.length} Variants Available 
+                          {(variants || []).length} Variants Available 
                           {expandedProduct === product.id ? <ChevronUp className="ml-1 h-3 w-3"/> : <ChevronDown className="ml-1 h-3 w-3"/>}
                         </>
                       );
@@ -86,20 +131,32 @@ export default function Catalog() {
                   })()}
                 </div>
               </div>
+              <div className="flex flex-col justify-center">
+                <Button 
+                  size="sm" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleAddAll(product);
+                  }}
+                  disabled={!Object.keys(quantities).some(k => (k.startsWith(`${product.id}-`) || k === `${product.id}`) && quantities[k] > 0)}
+                >
+                  Add to Cart
+                </Button>
+              </div>
             </div>
 
             {expandedProduct === product.id && (
               <div className="bg-slate-50 p-4 border-t space-y-4">
                 {(() => {
                   const variants = typeof product.variants === 'string' ? JSON.parse(product.variants) : product.variants;
-                  if (variants && Array.isArray(variants) && variants.length > 0) {
-                    return variants.map((v: any) => {
+                  if (variants && Array.isArray(variants) && (variants.length > 0 || product.variants?.length > 0)) {
+                    return (variants || []).map((v: any) => {
                       const qtyKey = `${product.id}-${v.id}`;
                       return (
                         <div key={v.id} className="flex items-center justify-between gap-4 border-b border-slate-200 pb-3 last:border-0 last:pb-0">
                           <div className="flex-1">
                             <div className="font-bold text-sm">
-                              {v.option_values.map((ov: any) => ov.label).join(' / ')}
+                              {v.option_values ? v.option_values.map((ov: any) => ov.label).join(' / ') : v.sku}
                             </div>
                             <div className="text-xs text-slate-500">SKU: {v.sku} • Stock: {v.stock_level}</div>
                             <div className="font-bold text-primary mt-1">${parseFloat(v.price).toFixed(2)}</div>
@@ -113,9 +170,6 @@ export default function Catalog() {
                               value={quantities[qtyKey] || ""}
                               onChange={(e) => handleQtyChange(qtyKey, e.target.value)}
                             />
-                            <Button size="sm" onClick={() => handleAdd(product, v)} disabled={!(quantities[qtyKey] > 0)}>
-                              Add
-                            </Button>
                           </div>
                         </div>
                       );
@@ -135,9 +189,6 @@ export default function Catalog() {
                           value={quantities[`${product.id}`] || ""}
                           onChange={(e) => handleQtyChange(`${product.id}`, e.target.value)}
                         />
-                        <Button size="sm" onClick={() => handleAdd(product)} disabled={!(quantities[`${product.id}`] > 0)}>
-                          Add
-                        </Button>
                       </div>
                     </div>
                   );
