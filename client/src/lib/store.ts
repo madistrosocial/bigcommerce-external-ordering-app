@@ -1,7 +1,5 @@
 import { create } from 'zustand';
-import { db, User, Product, Order } from './db';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect } from 'react';
+import type { User, Product } from './api';
 
 interface CartItem {
   product: Product;
@@ -18,6 +16,7 @@ interface AppState {
   toggleOfflineMode: () => void;
   addToCart: (product: Product, quantity: number) => void;
   removeFromCart: (productId: number) => void;
+  updateCartQuantity: (productId: number, delta: number) => void;
   clearCart: () => void;
   getCartTotal: () => number;
 }
@@ -53,6 +52,14 @@ export const useStore = create<AppState>((set, get) => ({
     return { cart: [...state.cart, { product, quantity }] };
   }),
 
+  updateCartQuantity: (productId, delta) => set((state) => ({
+    cart: state.cart.map(item =>
+      item.product.id === productId
+        ? { ...item, quantity: Math.max(0, item.quantity + delta) }
+        : item
+    ).filter(item => item.quantity > 0)
+  })),
+
   removeFromCart: (productId) => set((state) => ({
     cart: state.cart.filter(item => item.product.id !== productId)
   })),
@@ -61,6 +68,6 @@ export const useStore = create<AppState>((set, get) => ({
 
   getCartTotal: () => {
     const { cart } = get();
-    return cart.reduce((total, item) => total + (item.product.price * item.quantity), 0);
+    return cart.reduce((total, item) => total + (parseFloat(item.product.price) * item.quantity), 0);
   }
 }));

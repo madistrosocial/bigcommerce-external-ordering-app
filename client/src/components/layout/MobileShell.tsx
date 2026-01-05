@@ -1,5 +1,6 @@
 import { useStore } from "@/lib/store";
 import { useLocation } from "wouter";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { 
   Menu, 
   ShoppingCart, 
@@ -14,9 +15,9 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/toaster";
 import { useToast } from "@/hooks/use-toast";
-import { useEffect, useState } from "react";
-import { db } from "@/lib/db";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
+import * as api from "@/lib/api";
 
 interface MobileShellProps {
   children: React.ReactNode;
@@ -28,7 +29,21 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
   const { currentUser, isOfflineMode, toggleOfflineMode, logout, cart } = useStore();
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
-  const [isSyncing, setIsSyncing] = useState(false);
+  const queryClient = useQueryClient();
+
+  const { data: pendingOrders = [] } = useQuery({
+    queryKey: ['orders', 'pending'],
+    queryFn: api.getPendingSyncOrders,
+    refetchInterval: isOfflineMode ? false : 30000, // Refetch every 30s when online
+    enabled: !!currentUser && currentUser.role === 'agent'
+  });
+
+  const syncOrderMutation = useMutation({
+    mutationFn: (orderId: number) => api.syncOrder(orderId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    }
+  });
 
   const handleSync = async () => {
     if (isOfflineMode) {
@@ -40,27 +55,31 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
       return;
     }
 
-    setIsSyncing(true);
-    // Simulate network delay
-    setTimeout(async () => {
-      // Find pending orders
-      const pendingOrders = await db.orders.where('status').equals('pending_sync').toArray();
+    if (pendingOrders.length === 0) {
+      toast({
+        title: "Up to date",
+        description: "No pending orders to sync.",
+      });
+      return;
+    }
+
+    // Sync all pending orders
+    try {
+      await Promise.all(pendingOrders.map(order => 
+        syncOrderMutation.mutateAsync(order.id!)
+      ));
       
-      if (pendingOrders.length > 0) {
-        // "Sync" them
-        await db.orders.bulkPut(pendingOrders.map(o => ({ ...o, status: 'synced' })));
-        toast({
-          title: "Sync Complete",
-          description: `Synced ${pendingOrders.length} orders to BigCommerce.`,
-        });
-      } else {
-        toast({
-          title: "Up to date",
-          description: "No pending orders to sync.",
-        });
-      }
-      setIsSyncing(false);
-    }, 1500);
+      toast({
+        title: "Sync Complete",
+        description: `Synced ${pendingOrders.length} orders to BigCommerce.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Sync Failed",
+        description: "Could not sync some orders.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleLogout = () => {
@@ -72,12 +91,11 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-20">
-      {/* Top Bar */}
       <header className="sticky top-0 z-40 w-full border-b bg-white dark:bg-slate-950 px-4 h-16 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-2">
           <Sheet>
             <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="md:hidden">
+              <Button variant="ghost" size="icon" className="md:hidden" data-testid="button-menu">
                 <Menu className="h-6 w-6" />
               </Button>
             </SheetTrigger>
@@ -99,6 +117,7 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
                         variant={location === '/admin' ? 'secondary' : 'ghost'} 
                         className="w-full justify-start"
                         onClick={() => setLocation('/admin')}
+                        data-testid="nav-admin"
                       >
                         <Package className="mr-2 h-5 w-5" />
                         Products & Inventory
@@ -106,6 +125,7 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
                       <Button 
                         variant="ghost" 
                         className="w-full justify-start"
+                        data-testid="nav-users"
                       >
                         <Users className="mr-2 h-5 w-5" />
                         User Management
@@ -117,6 +137,7 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
                         variant={location === '/catalog' ? 'secondary' : 'ghost'} 
                         className="w-full justify-start"
                         onClick={() => setLocation('/catalog')}
+                        data-testid="nav-catalog"
                       >
                         <Package className="mr-2 h-5 w-5" />
                         Product Catalog
@@ -125,6 +146,7 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
                         variant={location === '/orders' ? 'secondary' : 'ghost'} 
                         className="w-full justify-start"
                         onClick={() => setLocation('/orders')}
+                        data-testid="nav-orders"
                       >
                         <ShoppingCart className="mr-2 h-5 w-5" />
                         Order History
@@ -141,12 +163,13 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
                       size="sm"
                       onClick={toggleOfflineMode}
                       className={cn(isOfflineMode && "bg-orange-500 hover:bg-orange-600")}
+                      data-testid="button-toggle-offline"
                     >
                       {isOfflineMode ? <WifiOff className="h-4 w-4 mr-2"/> : <Wifi className="h-4 w-4 mr-2"/>}
                       {isOfflineMode ? "ON" : "OFF"}
                     </Button>
                   </div>
-                  <Button variant="destructive" className="w-full" onClick={handleLogout}>
+                  <Button variant="destructive" className="w-full" onClick={handleLogout} data-testid="button-logout">
                     <LogOut className="mr-2 h-4 w-4" />
                     Sign Out
                   </Button>
@@ -161,42 +184,49 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
         </div>
 
         <div className="flex items-center gap-2">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={handleSync}
-            disabled={isSyncing || isOfflineMode}
-            className={cn(isSyncing && "animate-spin")}
-          >
-            <RefreshCw className="h-5 w-5" />
-          </Button>
-          
           {currentUser.role === 'agent' && (
-            <Button 
-              variant="default" 
-              size="icon" 
-              className="relative"
-              onClick={() => setLocation('/cart')}
-            >
-              <ShoppingCart className="h-5 w-5" />
-              {cart.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px]">
-                  {cart.length}
-                </span>
-              )}
-            </Button>
+            <>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={handleSync}
+                disabled={syncOrderMutation.isPending || isOfflineMode}
+                className={cn(syncOrderMutation.isPending && "animate-spin")}
+                data-testid="button-sync"
+              >
+                <RefreshCw className="h-5 w-5" />
+                {pendingOrders.length > 0 && !isOfflineMode && (
+                  <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px]">
+                    {pendingOrders.length}
+                  </span>
+                )}
+              </Button>
+              
+              <Button 
+                variant="default" 
+                size="icon" 
+                className="relative"
+                onClick={() => setLocation('/cart')}
+                data-testid="button-cart"
+              >
+                <ShoppingCart className="h-5 w-5" />
+                {cart.length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px]" data-testid="badge-cart-count">
+                    {cart.length}
+                  </span>
+                )}
+              </Button>
+            </>
           )}
         </div>
       </header>
 
-      {/* Offline Banner */}
       {isOfflineMode && (
         <div className="bg-orange-500 text-white text-xs font-bold text-center py-1 uppercase tracking-wide">
           Offline Mode Active - Orders will be queued
         </div>
       )}
 
-      {/* Main Content */}
       <main className="p-4 md:p-6 max-w-4xl mx-auto animate-in fade-in duration-300">
         {children}
       </main>

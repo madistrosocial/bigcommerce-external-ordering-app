@@ -1,23 +1,25 @@
 import { MobileShell } from "@/components/layout/MobileShell";
-import { db, Product } from "@/lib/db";
 import { useStore } from "@/lib/store";
-import { useLiveQuery } from "dexie-react-hooks";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Minus, ShoppingCart } from "lucide-react";
+import { Search, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import * as api from "@/lib/api";
 
 export default function Catalog() {
   const [search, setSearch] = useState("");
-  // Only show pinned products in agent catalog
-  const products = useLiveQuery(
-    () => db.products
-      .filter(p => p.is_pinned === true)
-      .filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()))
-      .toArray(),
-    [search]
+  const { data: allProducts = [] } = useQuery({ 
+    queryKey: ['products', 'pinned'], 
+    queryFn: api.getPinnedProducts 
+  });
+  
+  // Filter products by search query
+  const products = allProducts.filter(p => 
+    p.name.toLowerCase().includes(search.toLowerCase()) || 
+    p.sku.toLowerCase().includes(search.toLowerCase())
   );
   
   const { addToCart, cart } = useStore();
@@ -27,7 +29,7 @@ export default function Catalog() {
     return cart.find(item => item.product.id === productId)?.quantity || 0;
   };
 
-  const handleAdd = (product: Product) => {
+  const handleAdd = (product: typeof products[0]) => {
     addToCart(product, 1);
     toast({
       title: "Added to cart",
@@ -42,17 +44,18 @@ export default function Catalog() {
         <div className="relative">
           <Search className="absolute left-3 top-2.5 h-5 w-5 text-slate-400" />
           <Input 
-            placeholder="Search BigCommerce inventory..." 
+            placeholder="Search products..." 
             className="pl-10 bg-white dark:bg-slate-800"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            data-testid="input-search"
           />
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-20">
-        {products?.map((product) => (
-          <div key={product.id} className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border overflow-hidden flex flex-col h-full">
+        {products.map((product) => (
+          <div key={product.id} className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border overflow-hidden flex flex-col h-full" data-testid={`product-${product.id}`}>
             <div className="relative aspect-video sm:aspect-square bg-slate-100">
               <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
               {product.is_pinned && (
@@ -60,7 +63,7 @@ export default function Catalog() {
                   Featured
                 </Badge>
               )}
-              <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+              <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded" data-testid={`stock-${product.id}`}>
                 {product.stock_level} in stock
               </div>
             </div>
@@ -76,19 +79,20 @@ export default function Catalog() {
               </p>
 
               <div className="flex items-center justify-between mt-auto pt-4 border-t">
-                <span className="text-xl font-bold text-slate-900 dark:text-white">
-                  ${product.price.toFixed(2)}
+                <span className="text-xl font-bold text-slate-900 dark:text-white" data-testid={`price-${product.id}`}>
+                  ${parseFloat(product.price).toFixed(2)}
                 </span>
                 
                 <Button 
                   size="sm" 
                   onClick={() => handleAdd(product)}
                   className="gap-2"
+                  data-testid={`button-add-${product.id}`}
                 >
                   <Plus className="h-4 w-4" />
                   Add
                   {getQtyInCart(product.id) > 0 && (
-                    <Badge variant="secondary" className="ml-1 px-1.5 h-5 min-w-[1.25rem]">
+                    <Badge variant="secondary" className="ml-1 px-1.5 h-5 min-w-[1.25rem]" data-testid={`cart-qty-${product.id}`}>
                       {getQtyInCart(product.id)}
                     </Badge>
                   )}
@@ -97,9 +101,9 @@ export default function Catalog() {
             </div>
           </div>
         ))}
-        {products?.length === 0 && (
-          <div className="col-span-full text-center py-10 text-slate-500">
-            No products found matching "{search}"
+        {products.length === 0 && (
+          <div className="col-span-full text-center py-10 text-slate-500" data-testid="text-no-products">
+            {search ? `No products found matching "${search}"` : 'No products available. Contact admin to add products to the catalog.'}
           </div>
         )}
       </div>

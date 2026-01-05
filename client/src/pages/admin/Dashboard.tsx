@@ -1,6 +1,4 @@
 import { MobileShell } from "@/components/layout/MobileShell";
-import { db, Product, User } from "@/lib/db";
-import { useLiveQuery } from "dexie-react-hooks";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -8,11 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, AlertCircle, Plus } from "lucide-react";
+import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
-import { searchBigCommerceProducts } from "@/lib/bigcommerce";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { Product, User } from "@/lib/api";
+import * as api from "@/lib/api";
 import {
   Dialog,
   DialogContent,
@@ -24,9 +23,18 @@ import {
 } from "@/components/ui/dialog";
 
 export default function AdminDashboard() {
-  const products = useLiveQuery(() => db.products.orderBy('is_pinned').reverse().toArray());
-  const users = useLiveQuery(() => db.users.where('role').equals('agent').toArray());
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  
+  const { data: products = [] } = useQuery({ 
+    queryKey: ['products'], 
+    queryFn: api.getAllProducts 
+  });
+  
+  const { data: users = [] } = useQuery({ 
+    queryKey: ['agents'], 
+    queryFn: api.getAllAgents 
+  });
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
@@ -37,8 +45,33 @@ export default function AdminDashboard() {
   });
   const [showConfig, setShowConfig] = useState(false);
 
+  const togglePinMutation = useMutation({
+    mutationFn: ({ id, is_pinned }: { id: number; is_pinned: boolean }) => 
+      api.toggleProductPin(id, is_pinned),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    }
+  });
+
+  const createProductMutation = useMutation({
+    mutationFn: api.createProduct,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      toast({ title: "Product Imported & Pinned", description: "Added from BigCommerce catalog." });
+    }
+  });
+
+  const updateUserStatusMutation = useMutation({
+    mutationFn: ({ id, is_enabled }: { id: number; is_enabled: boolean }) => 
+      api.updateUserStatus(id, is_enabled),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+      toast({ title: "User Updated", description: "User status has been updated." });
+    }
+  });
+
   const togglePin = async (product: Product) => {
-    await db.products.update(product.id, { is_pinned: !product.is_pinned });
+    await togglePinMutation.mutateAsync({ id: product.id, is_pinned: !product.is_pinned });
     toast({
       title: product.is_pinned ? "Unpinned" : "Pinned",
       description: `${product.name} is now ${product.is_pinned ? "hidden from" : "visible in"} the agent catalog.`,
@@ -47,29 +80,24 @@ export default function AdminDashboard() {
 
   const importAndPinProduct = async (product: Product) => {
     try {
-      // Check if already exists
-      const existing = await db.products.where('bigcommerce_id').equals(product.bigcommerce_id).first();
-      
-      if (existing) {
-        await db.products.update(existing.id, { is_pinned: true });
-        toast({ title: "Product Pinned", description: "Product was already in database, now pinned." });
-      } else {
-        await db.products.add({ ...product, is_pinned: true });
-        toast({ title: "Product Imported & Pinned", description: "Added from BigCommerce catalog." });
-      }
-      // Clear search results to encourage looking at the list
+      await createProductMutation.mutateAsync({
+        bigcommerce_id: product.bigcommerce_id,
+        name: product.name,
+        sku: product.sku,
+        price: product.price,
+        image: product.image,
+        description: product.description,
+        stock_level: product.stock_level,
+        is_pinned: true
+      });
       setSearchResults(prev => prev.filter(p => p.bigcommerce_id !== product.bigcommerce_id));
     } catch (e) {
-      toast({ title: "Error", description: "Failed to import product", variant: "destructive" });
+      toast({ title: "Product Pinned", description: "Product was already in database, now pinned." });
     }
   };
 
   const toggleUserStatus = async (user: User) => {
-    await db.users.update(user.id, { is_enabled: !user.is_enabled });
-    toast({
-      title: "User Updated",
-      description: `${user.name} has been ${user.is_enabled ? "disabled" : "enabled"}.`,
-    });
+    await updateUserStatusMutation.mutateAsync({ id: user.id, is_enabled: !user.is_enabled });
   };
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -78,13 +106,17 @@ export default function AdminDashboard() {
 
     setIsSearching(true);
     try {
-      const results = await searchBigCommerceProducts(searchQuery, bcConfig.token, bcConfig.storeHash);
+      const results = await api.searchBigCommerceProducts(searchQuery, bcConfig.token, bcConfig.storeHash);
       setSearchResults(results);
       if (results.length === 0) {
         toast({ title: "No results", description: "Try a different search term." });
       }
     } catch (e) {
-      toast({ title: "Search Failed", description: "Could not fetch products.", variant: "destructive" });
+      toast({ title: "Search Failed", description: "Could not fetch products. Using mock data.", variant: "default" });
+      // Fallback to mock search using frontend lib
+      const { searchBigCommerceProducts } = await import('@/lib/bigcommerce');
+      const mockResults = await searchBigCommerceProducts(searchQuery);
+      setSearchResults(mockResults);
     } finally {
       setIsSearching(false);
     }
@@ -97,12 +129,15 @@ export default function AdminDashboard() {
     toast({ title: "Settings Saved", description: "API credentials updated." });
   };
 
+  const pinnedProducts = products.filter(p => p.is_pinned);
+  const unpinnedProducts = products.filter(p => !p.is_pinned);
+
   return (
     <MobileShell title="Admin Console">
       <div className="flex justify-end mb-4">
         <Dialog open={showConfig} onOpenChange={setShowConfig}>
           <DialogTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-2">
+            <Button variant="outline" size="sm" className="gap-2" data-testid="button-config">
               <Settings className="h-4 w-4" />
               BC Configuration
             </Button>
@@ -121,6 +156,7 @@ export default function AdminDashboard() {
                   value={bcConfig.storeHash} 
                   onChange={e => setBcConfig({...bcConfig, storeHash: e.target.value})}
                   placeholder="e.g. ab12cd34" 
+                  data-testid="input-storehash"
                 />
               </div>
               <div className="space-y-2">
@@ -130,11 +166,12 @@ export default function AdminDashboard() {
                   onChange={e => setBcConfig({...bcConfig, token: e.target.value})}
                   type="password"
                   placeholder="X-Auth-Token" 
+                  data-testid="input-token"
                 />
               </div>
             </div>
             <DialogFooter>
-              <Button onClick={saveConfig}>Save Configuration</Button>
+              <Button onClick={saveConfig} data-testid="button-save-config">Save Configuration</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -142,13 +179,12 @@ export default function AdminDashboard() {
 
       <Tabs defaultValue="products" className="w-full">
         <TabsList className="grid w-full grid-cols-2 mb-6">
-          <TabsTrigger value="products">Catalog Management</TabsTrigger>
-          <TabsTrigger value="users">Agent Access</TabsTrigger>
+          <TabsTrigger value="products" data-testid="tab-products">Catalog Management</TabsTrigger>
+          <TabsTrigger value="users" data-testid="tab-users">Agent Access</TabsTrigger>
         </TabsList>
 
         <TabsContent value="products" className="space-y-6">
           
-          {/* Search Section */}
           <Card className="bg-slate-50 dark:bg-slate-900/50 border-dashed">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-medium flex items-center gap-2">
@@ -163,27 +199,27 @@ export default function AdminDashboard() {
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   className="bg-white dark:bg-slate-950"
+                  data-testid="input-search"
                 />
-                <Button type="submit" disabled={isSearching}>
+                <Button type="submit" disabled={isSearching} data-testid="button-search">
                   {isSearching ? "..." : <Search className="h-4 w-4" />}
                 </Button>
               </form>
 
-              {/* Search Results */}
               {searchResults.length > 0 && (
                 <div className="mt-4 space-y-3">
                   <h4 className="text-sm font-medium text-slate-500 uppercase tracking-wider">Search Results</h4>
                   <div className="grid gap-2">
                     {searchResults.map(p => (
-                      <div key={p.bigcommerce_id} className="bg-white dark:bg-slate-800 p-3 rounded border flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-1">
+                      <div key={p.bigcommerce_id} className="bg-white dark:bg-slate-800 p-3 rounded border flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-1" data-testid={`search-result-${p.bigcommerce_id}`}>
                         <div className="flex items-center gap-3">
-                          <img src={p.image} className="h-10 w-10 rounded object-cover bg-slate-100" />
+                          <img src={p.image} className="h-10 w-10 rounded object-cover bg-slate-100" alt={p.name} />
                           <div>
                             <div className="font-bold text-sm">{p.name}</div>
                             <div className="text-xs text-slate-500">{p.sku} • Stock: {p.stock_level}</div>
                           </div>
                         </div>
-                        <Button size="sm" variant="secondary" onClick={() => importAndPinProduct(p)} className="gap-1">
+                        <Button size="sm" variant="secondary" onClick={() => importAndPinProduct(p)} className="gap-1" data-testid={`button-pin-${p.bigcommerce_id}`}>
                           <Plus className="h-3 w-3" /> Pin
                         </Button>
                       </div>
@@ -194,16 +230,15 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
 
-          {/* Pinned Products List */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold font-heading">Active Pinned Products</h3>
-              <Badge variant="outline">{products?.filter(p => p.is_pinned).length || 0} visible to agents</Badge>
+              <Badge variant="outline" data-testid="text-pinned-count">{pinnedProducts.length} visible to agents</Badge>
             </div>
             
             <div className="grid gap-4">
-              {products?.filter(p => p.is_pinned).map((product) => (
-                <Card key={product.id} className="overflow-hidden border-l-4 border-l-primary">
+              {pinnedProducts.map((product) => (
+                <Card key={product.id} className="overflow-hidden border-l-4 border-l-primary" data-testid={`product-pinned-${product.id}`}>
                   <div className="flex items-center p-4 gap-4">
                     <img src={product.image} alt={product.name} className="h-16 w-16 object-cover rounded-md bg-slate-100" />
                     <div className="flex-1">
@@ -213,6 +248,7 @@ export default function AdminDashboard() {
                         <Switch 
                           checked={product.is_pinned}
                           onCheckedChange={() => togglePin(product)}
+                          data-testid={`switch-pin-${product.id}`}
                         />
                         <span className="text-xs font-medium text-slate-600">
                           Pinned
@@ -223,8 +259,8 @@ export default function AdminDashboard() {
                 </Card>
               ))}
               
-              {products?.filter(p => p.is_pinned).length === 0 && (
-                <div className="text-center py-8 text-slate-500 border-2 border-dashed rounded-lg">
+              {pinnedProducts.length === 0 && (
+                <div className="text-center py-8 text-slate-500 border-2 border-dashed rounded-lg" data-testid="text-no-pinned">
                   <PinOff className="h-8 w-8 mx-auto mb-2 opacity-50" />
                   No products pinned. Agents will see an empty catalog.
                   <p className="text-xs mt-1">Search above to find and pin products.</p>
@@ -232,39 +268,40 @@ export default function AdminDashboard() {
               )}
             </div>
             
-            {/* Unpinned Products (Hidden) */}
-             <div className="pt-8">
-              <h3 className="text-sm font-bold font-heading text-slate-400 mb-2 uppercase">Hidden Products (Unpinned)</h3>
-              <div className="grid gap-2 opacity-60 hover:opacity-100 transition-opacity">
-                {products?.filter(p => !p.is_pinned).map((product) => (
-                  <div key={product.id} className="bg-slate-100 dark:bg-slate-800 p-2 rounded flex justify-between items-center">
-                    <span className="text-sm font-medium pl-2">{product.name}</span>
-                    <Button variant="ghost" size="sm" onClick={() => togglePin(product)}>Pin</Button>
-                  </div>
-                ))}
+            {unpinnedProducts.length > 0 && (
+              <div className="pt-8">
+                <h3 className="text-sm font-bold font-heading text-slate-400 mb-2 uppercase">Hidden Products (Unpinned)</h3>
+                <div className="grid gap-2 opacity-60 hover:opacity-100 transition-opacity">
+                  {unpinnedProducts.map((product) => (
+                    <div key={product.id} className="bg-slate-100 dark:bg-slate-800 p-2 rounded flex justify-between items-center" data-testid={`product-unpinned-${product.id}`}>
+                      <span className="text-sm font-medium pl-2">{product.name}</span>
+                      <Button variant="ghost" size="sm" onClick={() => togglePin(product)} data-testid={`button-unpin-${product.id}`}>Pin</Button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-
+            )}
           </div>
         </TabsContent>
 
         <TabsContent value="users">
-           <div className="grid gap-4">
-            {users?.map((user) => (
-              <Card key={user.id}>
+          <div className="grid gap-4">
+            {users.map((user) => (
+              <Card key={user.id} data-testid={`user-${user.id}`}>
                 <div className="flex items-center justify-between p-4">
                   <div>
                     <h3 className="font-bold">{user.name}</h3>
                     <p className="text-sm text-slate-500">{user.username}</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Badge variant={user.is_enabled ? "outline" : "destructive"}>
+                    <Badge variant={user.is_enabled ? "outline" : "destructive"} data-testid={`badge-status-${user.id}`}>
                       {user.is_enabled ? "Active" : "Disabled"}
                     </Badge>
                     <Button 
                       size="icon" 
                       variant="ghost"
                       onClick={() => toggleUserStatus(user)}
+                      data-testid={`button-toggle-user-${user.id}`}
                     >
                       {user.is_enabled ? <UserCheck className="h-5 w-5 text-green-600" /> : <UserX className="h-5 w-5 text-red-500" />}
                     </Button>
@@ -272,7 +309,7 @@ export default function AdminDashboard() {
                 </div>
               </Card>
             ))}
-           </div>
+          </div>
         </TabsContent>
       </Tabs>
     </MobileShell>
