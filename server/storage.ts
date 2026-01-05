@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, users, products, orders } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, users, products, orders, settings } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
 
 export interface IStorage {
@@ -24,6 +24,10 @@ export interface IStorage {
   getOrdersByUser(userId: number): Promise<Order[]>;
   getPendingSyncOrders(): Promise<Order[]>;
   updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void>;
+
+  // Setting operations
+  getSetting(key: string): Promise<any>;
+  setSetting(key: string, value: any): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -104,6 +108,7 @@ export class DatabaseStorage implements IStorage {
     }).where(eq(orders.id, id));
   }
 
+  // Setting operations
   async getSetting(key: string): Promise<any> {
     const result = await db.select().from(settings).where(eq(settings.key, key));
     return result[0];

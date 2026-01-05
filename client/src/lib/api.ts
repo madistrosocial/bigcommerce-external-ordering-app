@@ -152,7 +152,22 @@ export async function syncOrder(id: number): Promise<{ success: boolean; bigcomm
 
 // BigCommerce
 export async function searchBigCommerceProducts(query: string, token: string, storeHash: string): Promise<Product[]> {
-  const res = await fetch(`${API_BASE}/bigcommerce/products/search?query=${encodeURIComponent(query)}&token=${encodeURIComponent(token)}&storeHash=${encodeURIComponent(storeHash)}`);
+  const res = await fetch(`${API_BASE}/bigcommerce/products/search?query=${encodeURIComponent(query)}`);
   if (!res.ok) throw new Error('BigCommerce search failed');
   return res.json();
+}
+
+export async function getSetting(key: string): Promise<{ key: string; value: any }> {
+  const res = await fetch(`${API_BASE}/settings/${key}`);
+  if (!res.ok) throw new Error('Failed to fetch setting');
+  return res.json();
+}
+
+export async function saveSetting(key: string, value: any): Promise<void> {
+  const res = await fetch(`${API_BASE}/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, value })
+  });
+  if (!res.ok) throw new Error('Failed to save setting');
 }

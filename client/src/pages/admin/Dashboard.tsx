@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Product, User } from "@/lib/api";
 import * as api from "@/lib/api";
@@ -107,6 +107,7 @@ export default function AdminDashboard() {
 
     setIsSearching(true);
     try {
+      // Use the config from state if available, but the proxy will now use server-side settings
       const results = await api.searchBigCommerceProducts(searchQuery, bcConfig.token, bcConfig.storeHash);
       setSearchResults(results as any);
       if (results.length === 0) {
@@ -117,17 +118,29 @@ export default function AdminDashboard() {
       // Fallback to mock search using frontend lib
       const { searchBigCommerceProducts } = await import('@/lib/bigcommerce');
       const mockResults = await searchBigCommerceProducts(searchQuery);
-      setSearchResults(mockResults);
+      setSearchResults(mockResults as any);
     } finally {
       setIsSearching(false);
     }
   };
 
-  const saveConfig = () => {
-    localStorage.setItem('bc_store_hash', bcConfig.storeHash);
-    localStorage.setItem('bc_token', bcConfig.token);
-    setShowConfig(false);
-    toast({ title: "Settings Saved", description: "API credentials updated." });
+  useEffect(() => {
+    // Fetch settings from server instead of localStorage
+    api.getSetting("bigcommerce_config").then(setting => {
+      if (setting && setting.value) {
+        setBcConfig(setting.value);
+      }
+    });
+  }, []);
+
+  const saveConfig = async () => {
+    try {
+      await api.saveSetting("bigcommerce_config", bcConfig);
+      setShowConfig(false);
+      toast({ title: "Settings Saved", description: "API credentials updated on server." });
+    } catch (e) {
+      toast({ title: "Error", description: "Failed to save configuration.", variant: "destructive" });
+    }
   };
 
   const pinnedProducts = products.filter(p => p.is_pinned);

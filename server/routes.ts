@@ -175,7 +175,6 @@ export async function registerRoutes(
     }
   });
 
-  // Get pending sync orders
   app.get("/api/orders/pending", async (req, res) => {
     try {
       const orders = await storage.getPendingSyncOrders();
