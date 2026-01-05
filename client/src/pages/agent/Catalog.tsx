@@ -5,18 +5,19 @@ import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus } from "lucide-react";
+import { Search, Plus, Minus, ChevronDown, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
+import { Card } from "@/components/ui/card";
 
 export default function Catalog() {
   const [search, setSearch] = useState("");
+  const [expandedProduct, setExpandedProduct] = useState<number | null>(null);
   const { data: allProducts = [] } = useQuery({ 
     queryKey: ['products', 'pinned'], 
     queryFn: api.getPinnedProducts 
   });
   
-  // Filter products by search query
   const products = allProducts.filter(p => 
     p.name.toLowerCase().includes(search.toLowerCase()) || 
     p.sku.toLowerCase().includes(search.toLowerCase())
@@ -25,15 +26,11 @@ export default function Catalog() {
   const { addToCart, cart } = useStore();
   const { toast } = useToast();
 
-  const getQtyInCart = (productId: number) => {
-    return cart.find(item => item.product.id === productId)?.quantity || 0;
-  };
-
-  const handleAdd = (product: typeof products[0]) => {
-    addToCart(product, 1);
+  const handleAdd = (product: api.Product, variant?: any) => {
+    addToCart(product, 1, variant);
     toast({
       title: "Added to cart",
-      description: `${product.name} added.`,
+      description: `${product.name} ${variant ? `(${variant.sku})` : ''} added.`,
       duration: 1000,
     });
   };
@@ -48,64 +45,57 @@ export default function Catalog() {
             className="pl-10 bg-white dark:bg-slate-800"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            data-testid="input-search"
           />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-20">
+      <div className="space-y-4 pb-20">
         {products.map((product) => (
-          <div key={product.id} className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border overflow-hidden flex flex-col h-full" data-testid={`product-${product.id}`}>
-            <div className="relative aspect-video sm:aspect-square bg-slate-100">
-              <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
-              {product.is_pinned && (
-                <Badge className="absolute top-2 left-2 bg-primary text-white hover:bg-primary">
-                  Featured
-                </Badge>
-              )}
-              <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded" data-testid={`stock-${product.id}`}>
-                {product.stock_level} in stock
-              </div>
-            </div>
-            
-            <div className="p-4 flex-1 flex flex-col">
-              <div className="mb-2">
-                <h3 className="font-bold text-lg leading-tight line-clamp-2">{product.name}</h3>
-                <p className="text-xs text-slate-500 mt-1">SKU: {product.sku}</p>
-              </div>
-              
-              <p className="text-sm text-slate-600 line-clamp-2 mb-4 flex-1">
-                {product.description}
-              </p>
-
-              <div className="flex items-center justify-between mt-auto pt-4 border-t">
-                <span className="text-xl font-bold text-slate-900 dark:text-white" data-testid={`price-${product.id}`}>
-                  ${parseFloat(product.price).toFixed(2)}
-                </span>
+          <Card key={product.id} className="overflow-hidden">
+            <div className="flex p-4 gap-4">
+              <img src={product.image} className="h-20 w-20 object-cover rounded" alt={product.name} />
+              <div className="flex-1">
+                <h3 className="font-bold">{product.name}</h3>
+                <p className="text-xs text-slate-500">SKU: {product.sku}</p>
+                <p className="font-bold mt-1 text-primary">${parseFloat(product.price).toFixed(2)}</p>
                 
-                <Button 
-                  size="sm" 
-                  onClick={() => handleAdd(product)}
-                  className="gap-2"
-                  data-testid={`button-add-${product.id}`}
-                >
-                  <Plus className="h-4 w-4" />
-                  Add
-                  {getQtyInCart(product.id) > 0 && (
-                    <Badge variant="secondary" className="ml-1 px-1.5 h-5 min-w-[1.25rem]" data-testid={`cart-qty-${product.id}`}>
-                      {getQtyInCart(product.id)}
-                    </Badge>
-                  )}
-                </Button>
+                {product.variants && product.variants.length > 0 ? (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="mt-2 h-8 text-xs"
+                    onClick={() => setExpandedProduct(expandedProduct === product.id ? null : product.id)}
+                  >
+                    {product.variants.length} Variants {expandedProduct === product.id ? <ChevronUp className="ml-1 h-3 w-3"/> : <ChevronDown className="ml-1 h-3 w-3"/>}
+                  </Button>
+                ) : (
+                  <Button size="sm" className="mt-2 h-8 text-xs" onClick={() => handleAdd(product)}>
+                    <Plus className="mr-1 h-3 w-3" /> Add to Cart
+                  </Button>
+                )}
               </div>
             </div>
-          </div>
+
+            {expandedProduct === product.id && product.variants && (
+              <div className="bg-slate-50 p-4 border-t space-y-3">
+                {product.variants.map((v: any) => (
+                  <div key={v.id} className="flex items-center justify-between text-sm">
+                    <div>
+                      <div className="font-medium">{v.option_values.map((ov: any) => ov.label).join(' / ')}</div>
+                      <div className="text-xs text-slate-500">{v.sku} • Stock: {v.stock_level}</div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-bold">${parseFloat(v.price).toFixed(2)}</span>
+                      <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => handleAdd(product, v)}>
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
         ))}
-        {products.length === 0 && (
-          <div className="col-span-full text-center py-10 text-slate-500" data-testid="text-no-products">
-            {search ? `No products found matching "${search}"` : 'No products available. Contact admin to add products to the catalog.'}
-          </div>
-        )}
       </div>
     </MobileShell>
   );

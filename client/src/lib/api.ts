@@ -10,6 +10,7 @@ export interface Product {
   stock_level: number;
   is_pinned: boolean;
   bigcommerce_id: number;
+  variants: any[];
 }
 
 export interface User {
@@ -22,6 +23,8 @@ export interface User {
 
 export interface OrderItem {
   product_id: number;
+  bigcommerce_product_id?: number;
+  variant_id?: number;
   quantity: number;
   price_at_sale: string;
   name: string;

@@ -22,13 +22,14 @@ export const products = pgTable("products", {
   description: text("description").notNull(),
   stock_level: integer("stock_level").notNull().default(0),
   is_pinned: boolean("is_pinned").notNull().default(false),
+  variants: jsonb("variants").notNull().default([]), // Array of variants
 });
 
 export const orders = pgTable("orders", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   customer_name: text("customer_name").notNull(),
   status: text("status").notNull(), // 'pending_sync' or 'synced'
-  items: jsonb("items").notNull(), // Array of order items
+  items: jsonb("items").notNull(), // Array of order items including variant info
   total: decimal("total", { precision: 10, scale: 2 }).notNull(),
   date: timestamp("date").notNull().defaultNow(),
   created_by_user_id: integer("created_by_user_id").notNull().references(() => users.id),

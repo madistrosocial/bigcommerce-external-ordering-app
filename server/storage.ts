@@ -20,6 +20,7 @@ export interface IStorage {
 
   // Order operations
   createOrder(order: InsertOrder): Promise<Order>;
+  getOrder(id: number): Promise<Order | undefined>;
   getOrdersByUser(userId: number): Promise<Order[]>;
   getPendingSyncOrders(): Promise<Order[]>;
   updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void>;
@@ -80,6 +81,11 @@ export class DatabaseStorage implements IStorage {
   // Order operations
   async createOrder(order: InsertOrder): Promise<Order> {
     const result = await db.insert(orders).values(order).returning();
+    return result[0];
+  }
+
+  async getOrder(id: number): Promise<Order | undefined> {
+    const result = await db.select().from(orders).where(eq(orders.id, id));
     return result[0];
   }
 

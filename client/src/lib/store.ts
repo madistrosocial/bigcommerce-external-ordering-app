@@ -3,6 +3,7 @@ import type { User, Product } from './api';
 
 interface CartItem {
   product: Product;
+  variant?: any;
   quantity: number;
 }
 
@@ -14,9 +15,9 @@ interface AppState {
   login: (user: User) => void;
   logout: () => void;
   toggleOfflineMode: () => void;
-  addToCart: (product: Product, quantity: number) => void;
-  removeFromCart: (productId: number) => void;
-  updateCartQuantity: (productId: number, delta: number) => void;
+  addToCart: (product: Product, quantity: number, variant?: any) => void;
+  removeFromCart: (productId: number, variantId?: number) => void;
+  updateCartQuantity: (productId: number, delta: number, variantId?: number) => void;
   clearCart: () => void;
   getCartTotal: () => number;
 }
@@ -38,30 +39,35 @@ export const useStore = create<AppState>((set, get) => ({
 
   toggleOfflineMode: () => set((state) => ({ isOfflineMode: !state.isOfflineMode })),
 
-  addToCart: (product, quantity) => set((state) => {
-    const existing = state.cart.find(item => item.product.id === product.id);
+  addToCart: (product, quantity, variant) => set((state) => {
+    const existing = state.cart.find(item => 
+      item.product.id === product.id && 
+      (!variant || item.variant?.id === variant.id)
+    );
     if (existing) {
       return {
         cart: state.cart.map(item => 
-          item.product.id === product.id 
+          item.product.id === product.id && (!variant || item.variant?.id === variant.id)
             ? { ...item, quantity: item.quantity + quantity }
             : item
         )
       };
     }
-    return { cart: [...state.cart, { product, quantity }] };
+    return { cart: [...state.cart, { product, quantity, variant }] };
   }),
 
-  updateCartQuantity: (productId, delta) => set((state) => ({
+  updateCartQuantity: (productId, delta, variantId) => set((state) => ({
     cart: state.cart.map(item =>
-      item.product.id === productId
+      item.product.id === productId && (!variantId || item.variant?.id === variantId)
         ? { ...item, quantity: Math.max(0, item.quantity + delta) }
         : item
     ).filter(item => item.quantity > 0)
   })),
 
-  removeFromCart: (productId) => set((state) => ({
-    cart: state.cart.filter(item => item.product.id !== productId)
+  removeFromCart: (productId, variantId) => set((state) => ({
+    cart: state.cart.filter(item => 
+      !(item.product.id === productId && (!variantId || item.variant?.id === variantId))
+    )
   })),
 
   clearCart: () => set({ cart: [] }),
