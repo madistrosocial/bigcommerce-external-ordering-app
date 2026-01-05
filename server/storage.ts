@@ -39,7 +39,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createUser(user: InsertUser): Promise<User> {
-    const result = await db.insert(users).values(user).returning();
+    const result = await db.insert(users).values([user]).returning();
     return result[0];
   }
 
@@ -66,7 +66,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createProduct(product: InsertProduct): Promise<Product> {
-    const result = await db.insert(products).values(product).returning();
+    const result = await db.insert(products).values([product]).returning();
     return result[0];
   }
 
@@ -80,7 +80,7 @@ export class DatabaseStorage implements IStorage {
 
   // Order operations
   async createOrder(order: InsertOrder): Promise<Order> {
-    const result = await db.insert(orders).values(order).returning();
+    const result = await db.insert(orders).values([order]).returning();
     return result[0];
   }
 

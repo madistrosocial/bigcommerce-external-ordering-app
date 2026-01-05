@@ -196,8 +196,8 @@ export async function registerRoutes(
       }
 
       // Get BigCommerce credentials
-      const storeHash = process.env.BC_STORE_HASH || req.query.storeHash || localStorage?.getItem?.('bc_store_hash');
-      const token = process.env.BC_TOKEN || req.query.token || localStorage?.getItem?.('bc_token');
+      const storeHash = process.env.BC_STORE_HASH || (req.query.storeHash as string);
+      const token = process.env.BC_TOKEN || (req.query.token as string);
 
       if (storeHash && token) {
         const bcOrderData = {
@@ -225,7 +225,7 @@ export async function registerRoutes(
           {
             method: 'POST',
             headers: {
-              'X-Auth-Token': token,
+              'X-Auth-Token': String(token),
               'Content-Type': 'application/json',
               'Accept': 'application/json'
             },
@@ -266,7 +266,7 @@ export async function registerRoutes(
         `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(query as string)}&include=primary_image,variants`,
         {
           headers: {
-            'X-Auth-Token': token as string,
+            'X-Auth-Token': String(token),
             'Content-Type': 'application/json',
             'Accept': 'application/json'
           }

@@ -23,8 +23,10 @@ export default function Catalog() {
     p.sku.toLowerCase().includes(search.toLowerCase())
   );
   
+  const { addToCart, cart } = useStore();
+  const { toast } = useToast();
   const [quantities, setQuantities] = useState<Record<string, number>>({});
-  
+
   const handleQtyChange = (key: string, val: string) => {
     const n = parseInt(val);
     setQuantities(prev => ({ ...prev, [key]: isNaN(n) ? 0 : n }));

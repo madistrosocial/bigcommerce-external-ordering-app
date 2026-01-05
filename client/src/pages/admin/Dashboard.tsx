@@ -78,7 +78,7 @@ export default function AdminDashboard() {
     });
   };
 
-  const importAndPinProduct = async (product: Product) => {
+  const importAndPinProduct = async (product: any) => {
     try {
       await createProductMutation.mutateAsync({
         bigcommerce_id: product.bigcommerce_id,
@@ -88,9 +88,10 @@ export default function AdminDashboard() {
         image: product.image,
         description: product.description,
         stock_level: product.stock_level,
-        is_pinned: true
+        is_pinned: true,
+        variants: product.variants || []
       });
-      setSearchResults(prev => prev.filter(p => p.bigcommerce_id !== product.bigcommerce_id));
+      setSearchResults(prev => prev.filter((p: any) => p.bigcommerce_id !== product.bigcommerce_id));
     } catch (e) {
       toast({ title: "Product Pinned", description: "Product was already in database, now pinned." });
     }
@@ -107,7 +108,7 @@ export default function AdminDashboard() {
     setIsSearching(true);
     try {
       const results = await api.searchBigCommerceProducts(searchQuery, bcConfig.token, bcConfig.storeHash);
-      setSearchResults(results);
+      setSearchResults(results as any);
       if (results.length === 0) {
         toast({ title: "No results", description: "Try a different search term." });
       }
