@@ -70,6 +70,40 @@ export default function AdminDashboard() {
     }
   });
 
+  const resyncProductsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/products/resync', { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to re-sync products');
+      }
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      
+      if (data.errors > 0) {
+        toast({ 
+          title: "Partial Re-sync", 
+          description: `Updated ${data.updated} products, but ${data.errors} failed. Check server logs for details.`,
+          variant: "default"
+        });
+      } else {
+        toast({ 
+          title: "Products Re-synced", 
+          description: `Successfully updated ${data.updated} products with latest variant data from BigCommerce.` 
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Re-sync Failed", 
+        description: error.message, 
+        variant: "destructive" 
+      });
+    }
+  });
+
   const togglePin = async (product: Product) => {
     await togglePinMutation.mutateAsync({ id: product.id, is_pinned: !product.is_pinned });
     toast({
@@ -247,7 +281,20 @@ export default function AdminDashboard() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold font-heading">Active Pinned Products</h3>
-              <Badge variant="outline" data-testid="text-pinned-count">{pinnedProducts.length} visible to agents</Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" data-testid="text-pinned-count">{pinnedProducts.length} visible to agents</Badge>
+                {pinnedProducts.length > 0 && (
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    onClick={() => resyncProductsMutation.mutate()}
+                    disabled={resyncProductsMutation.isPending}
+                    data-testid="button-resync-products"
+                  >
+                    {resyncProductsMutation.isPending ? "Re-syncing..." : "Re-sync Variants"}
+                  </Button>
+                )}
+              </div>
             </div>
             
             <div className="grid gap-4">

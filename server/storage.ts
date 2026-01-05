@@ -17,6 +17,7 @@ export interface IStorage {
   createProduct(product: InsertProduct): Promise<Product>;
   updateProductPin(id: number, is_pinned: boolean): Promise<void>;
   updateProduct(id: number, updates: Partial<InsertProduct>): Promise<void>;
+  updateProductByBigCommerceId(bcId: number, updates: Partial<InsertProduct>): Promise<void>;
 
   // Order operations
   createOrder(order: InsertOrder): Promise<Order>;
@@ -80,6 +81,10 @@ export class DatabaseStorage implements IStorage {
 
   async updateProduct(id: number, updates: Partial<InsertProduct>): Promise<void> {
     await db.update(products).set(updates).where(eq(products.id, id));
+  }
+
+  async updateProductByBigCommerceId(bcId: number, updates: Partial<InsertProduct>): Promise<void> {
+    await db.update(products).set(updates).where(eq(products.bigcommerce_id, bcId));
   }
 
   // Order operations

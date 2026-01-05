@@ -67,6 +67,109 @@ export async function registerRoutes(
     }
   });
 
+  // Re-sync all pinned products from BigCommerce
+  app.post("/api/products/resync", async (req, res) => {
+    try {
+      const pinnedProducts = await storage.getPinnedProducts();
+      
+      if (pinnedProducts.length === 0) {
+        return res.json({ message: "No pinned products to re-sync", updated: 0 });
+      }
+
+      const setting = await storage.getSetting('bigcommerce_config');
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+
+      if (setting && setting.value) {
+        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        storeHash = config.storeHash || storeHash;
+        token = config.token || token;
+      }
+
+      if (!token || !storeHash) {
+        return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      }
+
+      let updated = 0;
+      let errors = 0;
+
+      // Re-fetch each product from BigCommerce
+      for (const product of pinnedProducts) {
+        try {
+          const response = await fetch(
+            `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product.bigcommerce_id}?include=variants`,
+            {
+              headers: {
+                'X-Auth-Token': String(token),
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              }
+            }
+          );
+
+          if (!response.ok) {
+            console.error(`Failed to fetch product ${product.bigcommerce_id}:`, response.status, response.statusText);
+            errors++;
+            continue;
+          }
+
+          const { data: p } = await response.json();
+          
+          // Transform variant data with full option_values
+          // Always preserve at least one variant (base variant if no variants returned)
+          const variants = (p.variants && p.variants.length > 0) 
+            ? p.variants.map((v: any) => ({
+                id: v.id,
+                sku: v.sku,
+                price: v.price?.toString() || p.price?.toString() || product.price,
+                stock_level: v.inventory_level || 0,
+                option_values: (v.option_values || []).map((ov: any) => ({
+                  id: ov.id,
+                  option_id: ov.option_id,
+                  label: ov.label,
+                  option_display_name: ov.option_display_name
+                }))
+              }))
+            : product.variants; // Keep existing variants if none returned
+
+          // Update the product with fresh variant data
+          await storage.updateProductByBigCommerceId(product.bigcommerce_id, {
+            variants,
+            price: p.price?.toString() || product.price,
+            stock_level: p.inventory_level || 0,
+            name: p.name || product.name,
+            sku: p.sku || product.sku,
+            image: p.primary_image?.url_standard || product.image,
+            description: p.description ? p.description.replace(/<[^>]*>?/gm, '') : product.description,
+          });
+
+          updated++;
+        } catch (err) {
+          console.error(`Failed to re-sync product ${product.bigcommerce_id}:`, err);
+          errors++;
+        }
+      }
+
+      if (errors > 0 && updated === 0) {
+        return res.status(502).json({ 
+          error: `Failed to re-sync all ${pinnedProducts.length} products. Check server logs for details.`,
+          updated: 0,
+          errors
+        });
+      }
+
+      res.json({ 
+        message: errors > 0 
+          ? `Re-synced ${updated} products (${errors} failed)`
+          : `Re-synced ${updated} products successfully`, 
+        updated,
+        errors
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ===== USER ROUTES =====
   
   // Get all agents (for admin user management)
