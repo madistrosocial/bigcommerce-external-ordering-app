@@ -31,6 +31,7 @@ export default function Cart() {
         product_id: item.product.id,
         bigcommerce_product_id: item.product.bigcommerce_id,
         variant_id: item.variant?.id,
+        variant_option_values: item.variant?.option_values, // Include for BigCommerce sync
         quantity: item.quantity,
         price_at_sale: item.variant?.price || item.product.price,
         name: item.variant ? `${item.product.name} (${item.variant.sku})` : item.product.name,

@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertOrderSchema } from "@shared/schema";
+import { insertProductSchema, insertOrderSchema, type InsertProduct, type InsertOrder } from "@shared/schema";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 
@@ -35,7 +35,7 @@ export async function registerRoutes(
   // Create/Import product from BigCommerce search
   app.post("/api/products", async (req, res) => {
     try {
-      const productData = insertProductSchema.parse(req.body);
+      const productData = insertProductSchema.parse(req.body) as InsertProduct;
       
       // Check if product already exists by BigCommerce ID
       const existing = await storage.getProductByBigCommerceId(productData.bigcommerce_id);
@@ -156,7 +156,7 @@ export async function registerRoutes(
   // Create order
   app.post("/api/orders", async (req, res) => {
     try {
-      const orderData = insertOrderSchema.parse(req.body);
+      const orderData = insertOrderSchema.parse(req.body) as InsertOrder;
       const order = await storage.createOrder(orderData);
       res.json(order);
     } catch (error: any) {
@@ -205,53 +205,95 @@ export async function registerRoutes(
         token = config.token || token;
       }
 
-      if (storeHash && token) {
-        const bcOrderData = {
-          billing_address: {
-            first_name: order.customer_name,
-            last_name: "Customer",
-            street_1: "123 Main St",
-            city: "Austin",
-            state_privileged: "Texas",
-            zip: "78701",
-            country: "United States",
-            email: "customer@example.com"
-          },
-          products: (order.items as any[]).map(item => ({
-            product_id: item.bigcommerce_product_id || item.product_id,
+      if (!storeHash || !token) {
+        return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      }
+
+      // Split customer name into first and last name
+      const nameParts = order.customer_name.trim().split(/\s+/);
+      const firstName = nameParts[0] || "Customer";
+      const lastName = nameParts.slice(1).join(" ") || "Customer";
+
+      // Prepare BigCommerce order data using v2 API format
+      const bcOrderData = {
+        status_id: 1, // Pending
+        customer_id: 0, // Guest checkout
+        billing_address: {
+          first_name: firstName,
+          last_name: lastName,
+          street_1: "123 Main St",
+          city: "Austin",
+          state: "Texas",
+          zip: "78701",
+          country: "United States",
+          country_iso2: "US",
+          email: "customer@example.com"
+        },
+        products: (order.items as any[]).map(item => {
+          const productData: any = {
+            product_id: item.bigcommerce_product_id,
             quantity: item.quantity,
             price_inc_tax: parseFloat(item.price_at_sale),
-            price_ex_tax: parseFloat(item.price_at_sale),
-            variant_id: item.variant_id
-          }))
-        };
-
-        const response = await fetch(
-          `https://api.bigcommerce.com/stores/${storeHash}/v3/orders`,
-          {
-            method: 'POST',
-            headers: {
-              'X-Auth-Token': String(token),
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            },
-            body: JSON.stringify(bcOrderData)
+            price_ex_tax: parseFloat(item.price_at_sale)
+          };
+          
+          // Include product_options if variant has option_values
+          // Note: We need to fetch the variant details to get option_values
+          // For now, if item has variant info with option_values, map them
+          if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
+            productData.product_options = item.variant_option_values.map((ov: any) => ({
+              id: ov.option_id,
+              value: String(ov.id)
+            }));
           }
-        );
+          
+          return productData;
+        })
+      };
 
-        if (response.ok) {
-          const data = await response.json();
-          const bcOrderId = data.data.id;
-          await storage.updateOrderStatus(id, 'synced', bcOrderId);
-          return res.json({ success: true, bigcommerce_order_id: bcOrderId });
+      console.log('Creating BigCommerce order:', JSON.stringify(bcOrderData, null, 2));
+
+      // Use v2 Orders API for creation
+      const response = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
+        {
+          method: 'POST',
+          headers: {
+            'X-Auth-Token': String(token),
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(bcOrderData)
         }
+      );
+
+      const responseText = await response.text();
+      console.log('BigCommerce API response:', response.status, responseText);
+
+      if (response.ok) {
+        const data = JSON.parse(responseText);
+        const bcOrderId = data.id;
+        console.log('✅ BigCommerce order created successfully:', bcOrderId);
+        await storage.updateOrderStatus(id, 'synced', bcOrderId);
+        return res.json({ success: true, bigcommerce_order_id: bcOrderId });
+      } else {
+        // Parse error response
+        let errorMessage = `BigCommerce API error: ${response.status}`;
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.title || errorData.message || JSON.stringify(errorData);
+        } catch (e) {
+          errorMessage = responseText || errorMessage;
+        }
+        
+        console.error('❌ BigCommerce order creation failed:', errorMessage);
+        return res.status(response.status).json({ 
+          error: errorMessage,
+          details: responseText
+        });
       }
-      
-      // Fallback for demo or if credentials missing
-      const bcOrderId = Math.floor(Math.random() * 100000) + 50000;
-      await storage.updateOrderStatus(id, 'synced', bcOrderId);
-      res.json({ success: true, bigcommerce_order_id: bcOrderId });
     } catch (error: any) {
+      console.error('❌ Order sync error:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -307,12 +349,15 @@ export async function registerRoutes(
         description: p.description.replace(/<[^>]*>?/gm, ''),
         stock_level: p.inventory_level || 0,
         is_pinned: false,
-        variants: p.variants.map((v: any) => ({
+        // Always include variants array, regardless of option count
+        variants: (p.variants || []).map((v: any) => ({
           id: v.id,
           sku: v.sku,
           price: v.price?.toString() || p.price.toString(),
           stock_level: v.inventory_level || 0,
-          option_values: v.option_values.map((ov: any) => ({
+          option_values: (v.option_values || []).map((ov: any) => ({
+            id: ov.id, // option value ID - needed for BigCommerce order API
+            option_id: ov.option_id, // option ID - needed for BigCommerce order API
             label: ov.label,
             option_display_name: ov.option_display_name
           }))

@@ -146,7 +146,10 @@ export async function syncOrder(id: number): Promise<{ success: boolean; bigcomm
   const res = await fetch(`${API_BASE}/orders/${id}/sync`, {
     method: 'POST'
   });
-  if (!res.ok) throw new Error('Failed to sync order');
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ error: 'Failed to sync order' }));
+    throw new Error(errorData.error || 'Failed to sync order');
+  }
   return res.json();
 }
 

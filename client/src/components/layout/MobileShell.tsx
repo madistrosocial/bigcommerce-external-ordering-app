@@ -65,18 +65,30 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
 
     // Sync all pending orders
     try {
-      await Promise.all(pendingOrders.map(order => 
+      const results = await Promise.allSettled(pendingOrders.map(order => 
         syncOrderMutation.mutateAsync(order.id!)
       ));
       
-      toast({
-        title: "Sync Complete",
-        description: `Synced ${pendingOrders.length} orders to BigCommerce.`,
-      });
-    } catch (error) {
+      const succeeded = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected');
+      
+      if (failed.length === 0) {
+        toast({
+          title: "Sync Complete",
+          description: `Successfully synced ${succeeded} order(s) to BigCommerce.`,
+        });
+      } else {
+        const errorDetails = failed.map((f: any) => f.reason?.message || 'Unknown error').join(', ');
+        toast({
+          title: `Sync Partially Failed`,
+          description: `Synced ${succeeded} order(s). Failed: ${failed.length}. Error: ${errorDetails}`,
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
       toast({
         title: "Sync Failed",
-        description: "Could not sync some orders.",
+        description: error.message || "Could not sync orders.",
         variant: "destructive",
       });
     }
