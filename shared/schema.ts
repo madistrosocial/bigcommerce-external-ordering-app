@@ -36,6 +36,12 @@ export const orders = pgTable("orders", {
   bigcommerce_order_id: integer("bigcommerce_order_id"),
 });
 
+export const settings = pgTable("settings", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  key: text("key").notNull().unique(),
+  value: jsonb("value").notNull(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertProductSchema = createInsertSchema(products).omit({ id: true });

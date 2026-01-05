@@ -103,6 +103,20 @@ export class DatabaseStorage implements IStorage {
       ...(bcOrderId && { bigcommerce_order_id: bcOrderId }) 
     }).where(eq(orders.id, id));
   }
+
+  async getSetting(key: string): Promise<any> {
+    const result = await db.select().from(settings).where(eq(settings.key, key));
+    return result[0];
+  }
+
+  async setSetting(key: string, value: any): Promise<void> {
+    const existing = await this.getSetting(key);
+    if (existing) {
+      await db.update(settings).set({ value }).where(eq(settings.key, key));
+    } else {
+      await db.insert(settings).values({ key, value });
+    }
+  }
 }
 
 export const storage = new DatabaseStorage();

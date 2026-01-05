@@ -195,9 +195,16 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Order not found" });
       }
 
-      // Get BigCommerce credentials
-      const storeHash = process.env.BC_STORE_HASH || (req.query.storeHash as string);
-      const token = process.env.BC_TOKEN || (req.query.token as string);
+      // Get BigCommerce credentials from DB
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+
+      if (setting && setting.value) {
+        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        storeHash = config.storeHash || storeHash;
+        token = config.token || token;
+      }
 
       if (storeHash && token) {
         const bcOrderData = {
@@ -252,13 +259,24 @@ export async function registerRoutes(
 
   // ===== BIGCOMMERCE PROXY =====
   
-  // Proxy for BigCommerce catalog search
+  // BigCommerce proxy for products
   app.get("/api/bigcommerce/products/search", async (req, res) => {
     try {
-      const { query, token, storeHash } = req.query;
+      const { query } = req.query;
+      
+      // Fetch setting from database instead of localStorage
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+
+      if (setting && setting.value) {
+        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        storeHash = config.storeHash || storeHash;
+        token = config.token || token;
+      }
 
       if (!token || !storeHash || !query) {
-        return res.status(400).json({ error: "Missing required parameters" });
+        return res.status(400).json({ error: "Missing required parameters (search query or credentials)" });
       }
 
       // Call BigCommerce API for products
@@ -304,6 +322,26 @@ export async function registerRoutes(
 
       res.json(products);
 
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ===== SETTINGS ROUTES =====
+  app.get("/api/settings/:key", async (req, res) => {
+    try {
+      const setting = await storage.getSetting(req.params.key);
+      res.json(setting || { key: req.params.key, value: null });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/settings", async (req, res) => {
+    try {
+      const { key, value } = req.body;
+      await storage.setSetting(key, value);
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
