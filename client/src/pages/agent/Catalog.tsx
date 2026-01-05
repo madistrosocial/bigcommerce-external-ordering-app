@@ -23,14 +23,23 @@ export default function Catalog() {
     p.sku.toLowerCase().includes(search.toLowerCase())
   );
   
-  const { addToCart, cart } = useStore();
-  const { toast } = useToast();
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  
+  const handleQtyChange = (key: string, val: string) => {
+    const n = parseInt(val);
+    setQuantities(prev => ({ ...prev, [key]: isNaN(n) ? 0 : n }));
+  };
 
   const handleAdd = (product: api.Product, variant?: any) => {
-    addToCart(product, 1, variant);
+    const qtyKey = variant ? `${product.id}-${variant.id}` : `${product.id}`;
+    const qty = quantities[qtyKey] || 1;
+    
+    addToCart(product, qty, variant);
+    setQuantities(prev => ({ ...prev, [qtyKey]: 0 }));
+    
     toast({
       title: "Added to cart",
-      description: `${product.name} ${variant ? `(${variant.sku})` : ''} added.`,
+      description: `${qty}x ${product.name} ${variant ? `(${variant.sku})` : ''} added.`,
       duration: 1000,
     });
   };
@@ -52,46 +61,77 @@ export default function Catalog() {
       <div className="space-y-4 pb-20">
         {products.map((product) => (
           <Card key={product.id} className="overflow-hidden">
-            <div className="flex p-4 gap-4">
+            <div 
+              className="flex p-4 gap-4 cursor-pointer hover:bg-slate-50 transition-colors"
+              onClick={() => setExpandedProduct(expandedProduct === product.id ? null : product.id)}
+            >
               <img src={product.image} className="h-20 w-20 object-cover rounded" alt={product.name} />
               <div className="flex-1">
-                <h3 className="font-bold">{product.name}</h3>
-                <p className="text-xs text-slate-500">SKU: {product.sku}</p>
-                <p className="font-bold mt-1 text-primary">${parseFloat(product.price).toFixed(2)}</p>
-                
-                {product.variants && product.variants.length > 0 ? (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="mt-2 h-8 text-xs"
-                    onClick={() => setExpandedProduct(expandedProduct === product.id ? null : product.id)}
-                  >
-                    {product.variants.length} Variants {expandedProduct === product.id ? <ChevronUp className="ml-1 h-3 w-3"/> : <ChevronDown className="ml-1 h-3 w-3"/>}
-                  </Button>
-                ) : (
-                  <Button size="sm" className="mt-2 h-8 text-xs" onClick={() => handleAdd(product)}>
-                    <Plus className="mr-1 h-3 w-3" /> Add to Cart
-                  </Button>
-                )}
+                <h3 className="font-bold text-lg">{product.name}</h3>
+                <p className="text-sm text-slate-500">Base Price: ${parseFloat(product.price).toFixed(2)}</p>
+                <div className="mt-2 flex items-center text-xs font-medium text-primary">
+                  {product.variants && product.variants.length > 0 ? (
+                    <>
+                      {product.variants.length} Variants Available 
+                      {expandedProduct === product.id ? <ChevronUp className="ml-1 h-3 w-3"/> : <ChevronDown className="ml-1 h-3 w-3"/>}
+                    </>
+                  ) : (
+                    <span>No variants - Click to add</span>
+                  )}
+                </div>
               </div>
             </div>
 
-            {expandedProduct === product.id && product.variants && (
-              <div className="bg-slate-50 p-4 border-t space-y-3">
-                {product.variants.map((v: any) => (
-                  <div key={v.id} className="flex items-center justify-between text-sm">
-                    <div>
-                      <div className="font-medium">{v.option_values.map((ov: any) => ov.label).join(' / ')}</div>
-                      <div className="text-xs text-slate-500">{v.sku} • Stock: {v.stock_level}</div>
+            {expandedProduct === product.id && (
+              <div className="bg-slate-50 p-4 border-t space-y-4">
+                {product.variants && product.variants.length > 0 ? (
+                  product.variants.map((v: any) => {
+                    const qtyKey = `${product.id}-${v.id}`;
+                    return (
+                      <div key={v.id} className="flex items-center justify-between gap-4 border-b border-slate-200 pb-3 last:border-0 last:pb-0">
+                        <div className="flex-1">
+                          <div className="font-bold text-sm">
+                            {v.option_values.map((ov: any) => ov.label).join(' / ')}
+                          </div>
+                          <div className="text-xs text-slate-500">SKU: {v.sku} • Stock: {v.stock_level}</div>
+                          <div className="font-bold text-primary mt-1">${parseFloat(v.price).toFixed(2)}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Input 
+                            type="number" 
+                            min="0"
+                            placeholder="Qty"
+                            className="w-20 h-9 bg-white"
+                            value={quantities[qtyKey] || ""}
+                            onChange={(e) => handleQtyChange(qtyKey, e.target.value)}
+                          />
+                          <Button size="sm" onClick={() => handleAdd(product, v)} disabled={!(quantities[qtyKey] > 0)}>
+                            Add
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="text-xs text-slate-500">SKU: {product.sku} • Stock: {product.stock_level}</div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-bold">${parseFloat(v.price).toFixed(2)}</span>
-                      <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => handleAdd(product, v)}>
-                        <Plus className="h-3 w-3" />
+                    <div className="flex items-center gap-2">
+                      <Input 
+                        type="number" 
+                        min="0"
+                        placeholder="Qty"
+                        className="w-20 h-9 bg-white"
+                        value={quantities[`${product.id}`] || ""}
+                        onChange={(e) => handleQtyChange(`${product.id}`, e.target.value)}
+                      />
+                      <Button size="sm" onClick={() => handleAdd(product)} disabled={!(quantities[`${product.id}`] > 0)}>
+                        Add
                       </Button>
                     </div>
                   </div>
-                ))}
+                )}
               </div>
             )}
           </Card>

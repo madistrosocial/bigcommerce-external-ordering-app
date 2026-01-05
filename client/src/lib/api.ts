@@ -93,6 +93,19 @@ export async function updateUserStatus(id: number, is_enabled: boolean): Promise
   if (!res.ok) throw new Error('Failed to update user status');
 }
 
+export async function createUser(userData: any): Promise<User> {
+  const res = await fetch(`${API_BASE}/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(userData)
+  });
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.error || 'Failed to create user');
+  }
+  return res.json();
+}
+
 export async function login(username: string, password: string): Promise<User> {
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: 'POST',

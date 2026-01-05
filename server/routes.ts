@@ -81,6 +81,32 @@ export async function registerRoutes(
     }
   });
 
+  // Create user (admin only)
+  app.post("/api/users", async (req, res) => {
+    try {
+      const { username, password, name, role } = req.body;
+      
+      const existing = await storage.getUserByUsername(username);
+      if (existing) {
+        return res.status(400).json({ error: "Username already exists" });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const user = await storage.createUser({
+        username,
+        password: hashedPassword,
+        name,
+        role: role || 'agent',
+        is_enabled: true
+      });
+
+      const { password: _, ...safeUser } = user;
+      res.json(safeUser);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Update user enabled status
   app.patch("/api/users/:id/status", async (req, res) => {
     try {
@@ -169,10 +195,9 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Order not found" });
       }
 
-      // Get BigCommerce credentials from somewhere - for now we'll assume they are stored in environment or session
-      // In a real app, you'd probably store these per user or per store in the database
-      const storeHash = process.env.BC_STORE_HASH;
-      const token = process.env.BC_TOKEN;
+      // Get BigCommerce credentials
+      const storeHash = process.env.BC_STORE_HASH || req.query.storeHash || localStorage?.getItem?.('bc_store_hash');
+      const token = process.env.BC_TOKEN || req.query.token || localStorage?.getItem?.('bc_token');
 
       if (storeHash && token) {
         const bcOrderData = {

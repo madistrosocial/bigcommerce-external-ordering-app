@@ -285,6 +285,56 @@ export default function AdminDashboard() {
         </TabsContent>
 
         <TabsContent value="users">
+          <div className="mb-6">
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button className="w-full gap-2">
+                  <Plus className="h-4 w-4" /> Add New Agent
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create Agent Account</DialogTitle>
+                  <DialogDescription>
+                    Fill in the details to create a new sales agent account.
+                  </DialogDescription>
+                </DialogHeader>
+                <form 
+                  className="space-y-4 py-4"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.currentTarget);
+                    const data = Object.fromEntries(formData);
+                    try {
+                      await api.createUser(data);
+                      queryClient.invalidateQueries({ queryKey: ['agents'] });
+                      toast({ title: "User Created", description: "New agent account is ready." });
+                      (e.target as HTMLFormElement).reset();
+                    } catch (err: any) {
+                      toast({ title: "Error", description: err.message, variant: "destructive" });
+                    }
+                  }}
+                >
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Full Name</Label>
+                    <Input id="name" name="name" placeholder="John Doe" required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="username">Username (Email)</Label>
+                    <Input id="username" name="username" type="email" placeholder="john@example.com" required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="password">Password</Label>
+                    <Input id="password" name="password" type="password" placeholder="••••••••" required />
+                  </div>
+                  <DialogFooter>
+                    <Button type="submit">Create Account</Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
+
           <div className="grid gap-4">
             {users.map((user) => (
               <Card key={user.id} data-testid={`user-${user.id}`}>
