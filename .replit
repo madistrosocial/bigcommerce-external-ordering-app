@@ -13,13 +13,50 @@ externalPort = 80
 localPort = 5001
 externalPort = 3000
 
+[[ports]]
+localPort = 5002
+externalPort = 3002
+
+[[ports]]
+localPort = 5003
+externalPort = 3003
+
+[[ports]]
+localPort = 5004
+externalPort = 3001
+
+[[ports]]
+localPort = 5005
+externalPort = 4200
+
+[[ports]]
+localPort = 5006
+externalPort = 5000
+
+[[ports]]
+localPort = 5007
+externalPort = 5173
+
+[[ports]]
+localPort = 5008
+externalPort = 6000
+
+[[ports]]
+localPort = 5009
+externalPort = 6800
+
+[[ports]]
+localPort = 5010
+externalPort = 8000
+
 [env]
 PORT = "5000"
 
 [deployment]
-deploymentTarget = "static"
+deploymentTarget = "autoscale"
 build = ["npm", "run", "build"]
 publicDir = "dist/public"
+run = ["node", "./dist/index.cjs"]
 
 [workflows]
 runButton = "Project"
@@ -39,8 +76,8 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run dev:client"
+args = "npm run dev"
 waitForPort = 5000
 
 [agent]
-mockupState = "MOCKUP"
+mockupState = "FULLSTACK"
