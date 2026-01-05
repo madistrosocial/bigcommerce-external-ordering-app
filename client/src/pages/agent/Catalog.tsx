@@ -11,10 +11,10 @@ import { useToast } from "@/hooks/use-toast";
 
 export default function Catalog() {
   const [search, setSearch] = useState("");
+  // Only show pinned products in agent catalog
   const products = useLiveQuery(
     () => db.products
-      .orderBy('is_pinned')
-      .reverse() // Pinned first
+      .filter(p => p.is_pinned === true)
       .filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()))
       .toArray(),
     [search]
