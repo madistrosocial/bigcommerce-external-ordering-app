@@ -99,6 +99,7 @@ export default function AdminDashboard() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents'] });
       queryClient.invalidateQueries({ queryKey: ['admins'] });
+      queryClient.invalidateQueries({ queryKey: ['users'] });
       toast({ title: "User Deleted", description: "User has been removed." });
     },
     onError: (error: any) => {
@@ -406,6 +407,7 @@ export default function AdminDashboard() {
                       await api.createUser(data);
                       queryClient.invalidateQueries({ queryKey: ['agents'] });
                       queryClient.invalidateQueries({ queryKey: ['admins'] });
+                      queryClient.invalidateQueries({ queryKey: ['users'] });
                       toast({ title: "User Created", description: `New ${data.role} account is ready.` });
                       (e.target as HTMLFormElement).reset();
                     } catch (err: any) {

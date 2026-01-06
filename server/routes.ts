@@ -210,6 +210,13 @@ export async function registerRoutes(
     try {
       const { username, password, name, role } = req.body;
       
+      // Validate role
+      const validRoles = ['admin', 'agent'];
+      const normalizedRole = (role || 'agent').toLowerCase();
+      if (!validRoles.includes(normalizedRole)) {
+        return res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+      }
+      
       const existing = await storage.getUserByUsername(username);
       if (existing) {
         return res.status(400).json({ error: "Username already exists" });
@@ -220,7 +227,7 @@ export async function registerRoutes(
         username,
         password: hashedPassword,
         name,
-        role: role || 'agent',
+        role: normalizedRole,
         is_enabled: true
       });
 
