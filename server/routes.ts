@@ -290,6 +290,12 @@ export async function registerRoutes(
     try {
       // Parse and create order with status 'pending_sync'
       const orderData = insertOrderSchema.parse(req.body) as InsertOrder;
+      
+      // Validate billing address is provided for BigCommerce orders
+      if (!orderData.billing_address || !orderData.billing_address.street_1) {
+        return res.status(400).json({ error: "Billing address is required for order creation" });
+      }
+      
       orderData.status = 'pending_sync';
       const order = await storage.createOrder(orderData);
       
@@ -318,17 +324,7 @@ export async function registerRoutes(
             const bcOrderData = {
               status_id: 1,
               customer_id: order.bigcommerce_customer_id || 0,
-              billing_address: order.billing_address || {
-                first_name: firstName,
-                last_name: lastName,
-                street_1: "123 Main St",
-                city: "Austin",
-                state: "Texas",
-                zip: "78701",
-                country: "United States",
-                country_iso2: "US",
-                email: "customer@example.com"
-              },
+              billing_address: order.billing_address,
               products: (order.items as any[]).map(item => {
                 const productData: any = {
                   product_id: item.bigcommerce_product_id,
@@ -625,6 +621,125 @@ export async function registerRoutes(
       }));
 
       res.json(products);
+
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // BigCommerce customer search
+  app.get("/api/bigcommerce/customers/search", async (req, res) => {
+    try {
+      const { query } = req.query;
+      if (!query) {
+        return res.json([]);
+      }
+
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+
+      if (setting && setting.value) {
+        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        storeHash = config.storeHash || storeHash;
+        token = config.token || token;
+      }
+
+      if (!storeHash || !token) {
+        return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      }
+
+      // Search customers by name or email (try both)
+      const searchParam = (query as string).includes('@') 
+        ? `email:like=${encodeURIComponent(query as string)}`
+        : `name:like=${encodeURIComponent(query as string)}`;
+      const response = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?${searchParam}&limit=10`,
+        {
+          headers: {
+            'X-Auth-Token': String(token),
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`BigCommerce API error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      // Transform to simplified format
+      const customers = data.data.map((c: any) => ({
+        id: c.id,
+        first_name: c.first_name,
+        last_name: c.last_name,
+        email: c.email,
+        phone: c.phone || '',
+        company: c.company || ''
+      }));
+
+      res.json(customers);
+
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get BigCommerce customer addresses
+  app.get("/api/bigcommerce/customers/:customerId/addresses", async (req, res) => {
+    try {
+      const { customerId } = req.params;
+
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+
+      if (setting && setting.value) {
+        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        storeHash = config.storeHash || storeHash;
+        token = config.token || token;
+      }
+
+      if (!storeHash || !token) {
+        return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      }
+
+      const response = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/customers/addresses?customer_id:in=${customerId}`,
+        {
+          headers: {
+            'X-Auth-Token': String(token),
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`BigCommerce API error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      // Return addresses
+      const addresses = data.data.map((a: any) => ({
+        id: a.id,
+        first_name: a.first_name,
+        last_name: a.last_name,
+        company: a.company || '',
+        street_1: a.address1,
+        street_2: a.address2 || '',
+        city: a.city,
+        state: a.state_or_province,
+        zip: a.postal_code,
+        country: a.country,
+        country_iso2: a.country_code,
+        phone: a.phone || ''
+      }));
+
+      res.json(addresses);
 
     } catch (error: any) {
       res.status(500).json({ error: error.message });

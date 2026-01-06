@@ -18,6 +18,21 @@ export default function Catalog() {
     queryFn: api.getPinnedProducts 
   });
   
+  const { data: inventorySetting } = useQuery({
+    queryKey: ['settings', 'show_inventory_counts'],
+    queryFn: () => api.getSetting('show_inventory_counts')
+  });
+  
+  // Default to showing counts unless explicitly set to false
+  const showInventoryCounts = inventorySetting?.value !== false && inventorySetting?.value !== 'false';
+  
+  const formatStock = (stockLevel: number) => {
+    if (showInventoryCounts) {
+      return `Stock: ${stockLevel}`;
+    }
+    return stockLevel > 0 ? 'Available' : 'Out of stock';
+  };
+  
   const products = allProducts.filter(p => 
     p.name.toLowerCase().includes(search.toLowerCase()) || 
     p.sku.toLowerCase().includes(search.toLowerCase())
@@ -113,9 +128,9 @@ export default function Catalog() {
               onClick={() => setExpandedProduct(expandedProduct === product.id ? null : product.id)}
             >
               <img src={product.image} className="h-20 w-20 object-cover rounded" alt={product.name} />
-              <div className="flex-1">
-                <h3 className="font-bold text-lg">{product.name}</h3>
-                <p className="text-sm text-slate-500">Base Price: ${parseFloat(product.price).toFixed(2)}</p>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-sm leading-tight line-clamp-2">{product.name}</h3>
+                <p className="text-xs text-slate-500 mt-1">Base Price: ${parseFloat(product.price).toFixed(2)}</p>
                 <div className="mt-2 flex items-center text-xs font-medium text-primary">
                   {(() => {
                     const variants = typeof product.variants === 'string' ? JSON.parse(product.variants) : product.variants;
@@ -153,18 +168,35 @@ export default function Catalog() {
                                     ? v.option_values.map((ov: any) => ov.label).join(' / ') 
                                     : (v.sku || `Variant ${v.id}`)}
                                 </div>
-                                <div className="text-xs text-slate-500">SKU: {v.sku} • Stock: {v.stock_level}</div>
+                                <div className="text-xs text-slate-500">SKU: {v.sku} • {formatStock(v.stock_level)}</div>
                                 <div className="font-bold text-primary mt-1">${parseFloat(v.price).toFixed(2)}</div>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1">
+                                <Button 
+                                  variant="outline" 
+                                  size="icon" 
+                                  className="h-8 w-8"
+                                  onClick={(e) => { e.stopPropagation(); handleQtyChange(qtyKey, String(Math.max(0, (quantities[qtyKey] || 0) - 1))); }}
+                                >
+                                  <Minus className="h-3 w-3" />
+                                </Button>
                                 <Input 
                                   type="number" 
                                   min="0"
-                                  placeholder="Qty"
-                                  className="w-20 h-9 bg-white"
+                                  placeholder="0"
+                                  className="w-14 h-8 bg-white text-center"
                                   value={quantities[qtyKey] || ""}
                                   onChange={(e) => handleQtyChange(qtyKey, e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
                                 />
+                                <Button 
+                                  variant="outline" 
+                                  size="icon" 
+                                  className="h-8 w-8"
+                                  onClick={(e) => { e.stopPropagation(); handleQtyChange(qtyKey, String((quantities[qtyKey] || 0) + 1)); }}
+                                >
+                                  <Plus className="h-3 w-3" />
+                                </Button>
                               </div>
                             </div>
                           );
@@ -185,23 +217,40 @@ export default function Catalog() {
                   return (
                     <div className="flex items-center justify-between gap-4">
                       <div className="flex-1">
-                        <div className="text-xs text-slate-500">SKU: {product.sku} • Stock: {product.stock_level}</div>
+                        <div className="text-xs text-slate-500">SKU: {product.sku} • {formatStock(product.stock_level)}</div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          className="h-8 w-8"
+                          onClick={(e) => { e.stopPropagation(); handleQtyChange(`${product.id}`, String(Math.max(0, (quantities[`${product.id}`] || 0) - 1))); }}
+                        >
+                          <Minus className="h-3 w-3" />
+                        </Button>
                         <Input 
                           type="number" 
                           min="0"
-                          placeholder="Qty"
-                          className="w-20 h-9 bg-white"
+                          placeholder="0"
+                          className="w-14 h-8 bg-white text-center"
                           value={quantities[`${product.id}`] || ""}
                           onChange={(e) => handleQtyChange(`${product.id}`, e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
                         />
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          className="h-8 w-8"
+                          onClick={(e) => { e.stopPropagation(); handleQtyChange(`${product.id}`, String((quantities[`${product.id}`] || 0) + 1)); }}
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
                         <Button 
                           size="sm" 
                           onClick={() => handleAddAll(product)}
                           disabled={!(quantities[`${product.id}`] > 0)}
                         >
-                          Add to Cart
+                          Add
                         </Button>
                       </div>
                     </div>

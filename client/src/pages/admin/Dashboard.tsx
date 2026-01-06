@@ -56,6 +56,7 @@ export default function AdminDashboard() {
     token: localStorage.getItem('bc_token') || ''
   });
   const [googleSheetsWebhook, setGoogleSheetsWebhook] = useState('');
+  const [showInventoryCounts, setShowInventoryCounts] = useState(true);
   const [showConfig, setShowConfig] = useState(false);
 
   const togglePinMutation = useMutation({
@@ -184,15 +185,19 @@ export default function AdminDashboard() {
       if (setting && setting.value) {
         setGoogleSheetsWebhook(setting.value);
       }
-    }).catch(() => {
-      // Setting doesn't exist yet
-    });
+    }).catch(() => {});
+    api.getSetting("show_inventory_counts").then(setting => {
+      if (setting && setting.value !== null) {
+        setShowInventoryCounts(setting.value === true || setting.value === 'true');
+      }
+    }).catch(() => {});
   }, []);
 
   const saveConfig = async () => {
     try {
       await api.saveSetting("bigcommerce_config", bcConfig);
       await api.saveSetting("google_sheets_webhook", googleSheetsWebhook);
+      await api.saveSetting("show_inventory_counts", showInventoryCounts);
       setShowConfig(false);
       toast({ title: "Settings Saved", description: "Configuration updated on server." });
     } catch (e) {
@@ -201,7 +206,6 @@ export default function AdminDashboard() {
   };
 
   const pinnedProducts = products.filter(p => p.is_pinned);
-  const unpinnedProducts = products.filter(p => !p.is_pinned);
 
   return (
     <MobileShell title="Admin Console">
@@ -256,6 +260,22 @@ export default function AdminDashboard() {
                   <p className="text-xs text-slate-500">
                     Orders will be logged to this webhook after checkout.
                   </p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                <h3 className="font-semibold text-sm">Agent Visibility Settings</h3>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Show Inventory Counts</Label>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {showInventoryCounts ? "Agents see numeric stock counts" : "Agents see only 'Available' or 'Out of stock'"}
+                    </p>
+                  </div>
+                  <Switch 
+                    checked={showInventoryCounts}
+                    onCheckedChange={setShowInventoryCounts}
+                    data-testid="switch-inventory-visibility"
+                  />
                 </div>
               </div>
             </div>
@@ -370,19 +390,6 @@ export default function AdminDashboard() {
               )}
             </div>
             
-            {unpinnedProducts.length > 0 && (
-              <div className="pt-8">
-                <h3 className="text-sm font-bold font-heading text-slate-400 mb-2 uppercase">Hidden Products (Unpinned)</h3>
-                <div className="grid gap-2 opacity-60 hover:opacity-100 transition-opacity">
-                  {unpinnedProducts.map((product) => (
-                    <div key={product.id} className="bg-slate-100 dark:bg-slate-800 p-2 rounded flex justify-between items-center" data-testid={`product-unpinned-${product.id}`}>
-                      <span className="text-sm font-medium pl-2">{product.name}</span>
-                      <Button variant="ghost" size="sm" onClick={() => togglePin(product)} data-testid={`button-unpin-${product.id}`}>Pin</Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </TabsContent>
 

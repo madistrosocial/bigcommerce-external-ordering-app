@@ -186,6 +186,42 @@ export async function searchBigCommerceProducts(query: string, token: string, st
   return res.json();
 }
 
+export interface BigCommerceCustomer {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  company: string;
+}
+
+export interface BigCommerceAddress {
+  id: number;
+  first_name: string;
+  last_name: string;
+  company: string;
+  street_1: string;
+  street_2: string;
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+  country_iso2: string;
+  phone: string;
+}
+
+export async function searchBigCommerceCustomers(query: string): Promise<BigCommerceCustomer[]> {
+  const res = await fetch(`${API_BASE}/bigcommerce/customers/search?query=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error('Customer search failed');
+  return res.json();
+}
+
+export async function getCustomerAddresses(customerId: number): Promise<BigCommerceAddress[]> {
+  const res = await fetch(`${API_BASE}/bigcommerce/customers/${customerId}/addresses`);
+  if (!res.ok) throw new Error('Failed to fetch addresses');
+  return res.json();
+}
+
 export async function getSetting(key: string): Promise<{ key: string; value: any }> {
   const res = await fetch(`${API_BASE}/settings/${key}`);
   if (!res.ok) throw new Error('Failed to fetch setting');
