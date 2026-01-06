@@ -8,7 +8,10 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   getAllAgents(): Promise<User[]>;
+  getAllAdmins(): Promise<User[]>;
+  getAllUsers(): Promise<User[]>;
   updateUserStatus(id: number, is_enabled: boolean): Promise<void>;
+  deleteUser(id: number): Promise<void>;
 
   // Product operations
   getAllProducts(): Promise<Product[]>;
@@ -52,8 +55,20 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(users).where(eq(users.role, 'agent'));
   }
 
+  async getAllAdmins(): Promise<User[]> {
+    return db.select().from(users).where(eq(users.role, 'admin'));
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return db.select().from(users);
+  }
+
   async updateUserStatus(id: number, is_enabled: boolean): Promise<void> {
     await db.update(users).set({ is_enabled }).where(eq(users.id, id));
+  }
+
+  async deleteUser(id: number): Promise<void> {
+    await db.delete(users).where(eq(users.id, id));
   }
 
   // Product operations

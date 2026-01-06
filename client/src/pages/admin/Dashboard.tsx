@@ -6,7 +6,25 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus } from "lucide-react";
+import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus, Trash2, Shield, UserCog } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -31,9 +49,14 @@ export default function AdminDashboard() {
     queryFn: api.getAllProducts 
   });
   
-  const { data: users = [] } = useQuery({ 
+  const { data: agents = [] } = useQuery({ 
     queryKey: ['agents'], 
     queryFn: api.getAllAgents 
+  });
+
+  const { data: admins = [] } = useQuery({ 
+    queryKey: ['admins'], 
+    queryFn: api.getAllAdmins 
   });
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -66,7 +89,20 @@ export default function AdminDashboard() {
       api.updateUserStatus(id, is_enabled),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents'] });
+      queryClient.invalidateQueries({ queryKey: ['admins'] });
       toast({ title: "User Updated", description: "User status has been updated." });
+    }
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: (id: number) => api.deleteUser(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+      queryClient.invalidateQueries({ queryKey: ['admins'] });
+      toast({ title: "User Deleted", description: "User has been removed." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Delete Failed", description: error.message, variant: "destructive" });
     }
   });
 
@@ -349,15 +385,15 @@ export default function AdminDashboard() {
           <div className="mb-6">
             <Dialog>
               <DialogTrigger asChild>
-                <Button className="w-full gap-2">
-                  <Plus className="h-4 w-4" /> Add New Agent
+                <Button className="w-full gap-2" data-testid="button-add-user">
+                  <Plus className="h-4 w-4" /> Add New User
                 </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Create Agent Account</DialogTitle>
+                  <DialogTitle>Create User Account</DialogTitle>
                   <DialogDescription>
-                    Fill in the details to create a new sales agent account.
+                    Fill in the details to create a new user account.
                   </DialogDescription>
                 </DialogHeader>
                 <form 
@@ -369,7 +405,8 @@ export default function AdminDashboard() {
                     try {
                       await api.createUser(data);
                       queryClient.invalidateQueries({ queryKey: ['agents'] });
-                      toast({ title: "User Created", description: "New agent account is ready." });
+                      queryClient.invalidateQueries({ queryKey: ['admins'] });
+                      toast({ title: "User Created", description: `New ${data.role} account is ready.` });
                       (e.target as HTMLFormElement).reset();
                     } catch (err: any) {
                       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -378,49 +415,157 @@ export default function AdminDashboard() {
                 >
                   <div className="space-y-2">
                     <Label htmlFor="name">Full Name</Label>
-                    <Input id="name" name="name" placeholder="John Doe" required />
+                    <Input id="name" name="name" placeholder="John Doe" required data-testid="input-user-name" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="username">Username (Email)</Label>
-                    <Input id="username" name="username" type="email" placeholder="john@example.com" required />
+                    <Input id="username" name="username" type="email" placeholder="john@example.com" required data-testid="input-user-email" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="password">Password</Label>
-                    <Input id="password" name="password" type="password" placeholder="••••••••" required />
+                    <Input id="password" name="password" type="password" placeholder="••••••••" required data-testid="input-user-password" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="role">Role</Label>
+                    <Select name="role" defaultValue="agent">
+                      <SelectTrigger data-testid="select-role">
+                        <SelectValue placeholder="Select role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="agent">Agent (Sales)</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <DialogFooter>
-                    <Button type="submit">Create Account</Button>
+                    <Button type="submit" data-testid="button-create-user">Create Account</Button>
                   </DialogFooter>
                 </form>
               </DialogContent>
             </Dialog>
           </div>
 
-          <div className="grid gap-4">
-            {users.map((user) => (
-              <Card key={user.id} data-testid={`user-${user.id}`}>
-                <div className="flex items-center justify-between p-4">
-                  <div>
-                    <h3 className="font-bold">{user.name}</h3>
-                    <p className="text-sm text-slate-500">{user.username}</p>
+          <Tabs defaultValue="agents" className="w-full">
+            <TabsList className="grid w-full grid-cols-2 mb-4">
+              <TabsTrigger value="agents" className="gap-2" data-testid="tab-agents">
+                <UserCog className="h-4 w-4" /> Agents ({agents.length})
+              </TabsTrigger>
+              <TabsTrigger value="admins" className="gap-2" data-testid="tab-admins">
+                <Shield className="h-4 w-4" /> Admins ({admins.length})
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="agents">
+              <div className="grid gap-4">
+                {agents.map((user) => (
+                  <Card key={user.id} data-testid={`user-agent-${user.id}`}>
+                    <div className="flex items-center justify-between p-4">
+                      <div>
+                        <h3 className="font-bold">{user.name}</h3>
+                        <p className="text-sm text-slate-500">{user.username}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={user.is_enabled ? "outline" : "destructive"} data-testid={`badge-status-${user.id}`}>
+                          {user.is_enabled ? "Active" : "Disabled"}
+                        </Badge>
+                        <Button 
+                          size="icon" 
+                          variant="ghost"
+                          onClick={() => toggleUserStatus(user)}
+                          data-testid={`button-toggle-user-${user.id}`}
+                        >
+                          {user.is_enabled ? <UserCheck className="h-5 w-5 text-green-600" /> : <UserX className="h-5 w-5 text-red-500" />}
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button size="icon" variant="ghost" data-testid={`button-delete-user-${user.id}`}>
+                              <Trash2 className="h-5 w-5 text-red-500" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete User?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will permanently delete {user.name}'s account. This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => deleteUserMutation.mutate(user.id)}>
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+                {agents.length === 0 && (
+                  <div className="text-center py-8 text-slate-500 border-2 border-dashed rounded-lg">
+                    No agents yet. Create one using the button above.
                   </div>
-                  <div className="flex items-center gap-3">
-                    <Badge variant={user.is_enabled ? "outline" : "destructive"} data-testid={`badge-status-${user.id}`}>
-                      {user.is_enabled ? "Active" : "Disabled"}
-                    </Badge>
-                    <Button 
-                      size="icon" 
-                      variant="ghost"
-                      onClick={() => toggleUserStatus(user)}
-                      data-testid={`button-toggle-user-${user.id}`}
-                    >
-                      {user.is_enabled ? <UserCheck className="h-5 w-5 text-green-600" /> : <UserX className="h-5 w-5 text-red-500" />}
-                    </Button>
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="admins">
+              <div className="grid gap-4">
+                {admins.map((user) => (
+                  <Card key={user.id} data-testid={`user-admin-${user.id}`}>
+                    <div className="flex items-center justify-between p-4">
+                      <div className="flex items-center gap-2">
+                        <Shield className="h-4 w-4 text-blue-600" />
+                        <div>
+                          <h3 className="font-bold">{user.name}</h3>
+                          <p className="text-sm text-slate-500">{user.username}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={user.is_enabled ? "outline" : "destructive"} data-testid={`badge-status-${user.id}`}>
+                          {user.is_enabled ? "Active" : "Disabled"}
+                        </Badge>
+                        <Button 
+                          size="icon" 
+                          variant="ghost"
+                          onClick={() => toggleUserStatus(user)}
+                          data-testid={`button-toggle-admin-${user.id}`}
+                        >
+                          {user.is_enabled ? <UserCheck className="h-5 w-5 text-green-600" /> : <UserX className="h-5 w-5 text-red-500" />}
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button size="icon" variant="ghost" data-testid={`button-delete-admin-${user.id}`}>
+                              <Trash2 className="h-5 w-5 text-red-500" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete Admin?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will permanently delete {user.name}'s admin account. This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => deleteUserMutation.mutate(user.id)}>
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+                {admins.length === 0 && (
+                  <div className="text-center py-8 text-slate-500 border-2 border-dashed rounded-lg">
+                    No additional admins. Create one using the button above.
                   </div>
-                </div>
-              </Card>
-            ))}
-          </div>
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
         </TabsContent>
       </Tabs>
     </MobileShell>

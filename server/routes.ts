@@ -176,9 +176,30 @@ export async function registerRoutes(
   app.get("/api/users/agents", async (req, res) => {
     try {
       const agents = await storage.getAllAgents();
-      // Don't send passwords to frontend
       const safeAgents = agents.map(({ password, ...user }) => user);
       res.json(safeAgents);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get all admins
+  app.get("/api/users/admins", async (req, res) => {
+    try {
+      const admins = await storage.getAllAdmins();
+      const safeAdmins = admins.map(({ password, ...user }) => user);
+      res.json(safeAdmins);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get all users
+  app.get("/api/users", async (req, res) => {
+    try {
+      const allUsers = await storage.getAllUsers();
+      const safeUsers = allUsers.map(({ password, ...user }) => user);
+      res.json(safeUsers);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -217,6 +238,17 @@ export async function registerRoutes(
       const { is_enabled } = req.body;
       
       await storage.updateUserStatus(id, is_enabled);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Delete user
+  app.delete("/api/users/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteUser(id);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

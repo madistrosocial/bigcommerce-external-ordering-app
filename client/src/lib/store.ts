@@ -74,6 +74,9 @@ export const useStore = create<AppState>((set, get) => ({
 
   getCartTotal: () => {
     const { cart } = get();
-    return cart.reduce((total, item) => total + (parseFloat(item.product.price) * item.quantity), 0);
+    return cart.reduce((total, item) => {
+      const price = item.variant?.price || item.product.price;
+      return total + (parseFloat(price) * item.quantity);
+    }, 0);
   }
 }));

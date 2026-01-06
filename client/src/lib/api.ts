@@ -84,6 +84,18 @@ export async function getAllAgents(): Promise<User[]> {
   return res.json();
 }
 
+export async function getAllAdmins(): Promise<User[]> {
+  const res = await fetch(`${API_BASE}/users/admins`);
+  if (!res.ok) throw new Error('Failed to fetch admins');
+  return res.json();
+}
+
+export async function getAllUsers(): Promise<User[]> {
+  const res = await fetch(`${API_BASE}/users`);
+  if (!res.ok) throw new Error('Failed to fetch users');
+  return res.json();
+}
+
 export async function updateUserStatus(id: number, is_enabled: boolean): Promise<void> {
   const res = await fetch(`${API_BASE}/users/${id}/status`, {
     method: 'PATCH',
@@ -91,6 +103,13 @@ export async function updateUserStatus(id: number, is_enabled: boolean): Promise
     body: JSON.stringify({ is_enabled })
   });
   if (!res.ok) throw new Error('Failed to update user status');
+}
+
+export async function deleteUser(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/users/${id}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('Failed to delete user');
 }
 
 export async function createUser(userData: any): Promise<User> {
