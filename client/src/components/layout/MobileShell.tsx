@@ -9,10 +9,20 @@ import {
   LogOut, 
   Wifi, 
   WifiOff, 
-  RefreshCw 
+  RefreshCw,
+  User,
+  ChevronDown
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Toaster } from "@/components/ui/toaster";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
@@ -230,6 +240,35 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
               </Button>
             </>
           )}
+          
+          {/* Desktop/Tablet user menu - visible on md screens and up */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="hidden md:flex items-center gap-2" data-testid="button-user-menu">
+                <User className="h-5 w-5" />
+                <span className="text-sm font-medium max-w-[120px] truncate">{currentUser.name}</span>
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>
+                <div className="flex flex-col">
+                  <span>{currentUser.name}</span>
+                  <span className="text-xs font-normal text-slate-500">{currentUser.role}</span>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={toggleOfflineMode} data-testid="menu-toggle-offline">
+                {isOfflineMode ? <WifiOff className="mr-2 h-4 w-4" /> : <Wifi className="mr-2 h-4 w-4" />}
+                Offline Mode: {isOfflineMode ? "ON" : "OFF"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleLogout} className="text-red-600" data-testid="menu-logout">
+                <LogOut className="mr-2 h-4 w-4" />
+                Sign Out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
