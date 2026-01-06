@@ -66,7 +66,8 @@ Preferred communication style: Simple, everyday language.
 - **Drizzle ORM**: Type-safe database queries and schema management
 
 ### Third-Party Services
-- **BigCommerce**: External e-commerce platform for product catalog source and order syncing (integration prepared but uses mock data)
+- **BigCommerce**: External e-commerce platform for product catalog source and order syncing (fully integrated with v2 Orders API)
+- **Google Sheets**: Order backup integration was requested but dismissed - user declined to provide credentials. To enable in future, user needs to provide Google Service Account JSON and spreadsheet ID.
 
 ### Key npm Packages
 - `@tanstack/react-query`: Server state management
