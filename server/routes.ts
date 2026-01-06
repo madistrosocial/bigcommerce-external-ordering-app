@@ -251,16 +251,6 @@ export async function registerRoutes(
     }
   });
 
-  // Delete user
-  app.delete("/api/users/:id", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      await storage.deleteUser(id);
-      res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
 
   // Login endpoint
   app.post("/api/auth/login", async (req, res) => {
@@ -295,12 +285,140 @@ export async function registerRoutes(
 
   // ===== ORDER ROUTES =====
   
-  // Create order
+  // Create order with immediate sync attempt
   app.post("/api/orders", async (req, res) => {
     try {
+      // Parse and create order with status 'pending_sync'
       const orderData = insertOrderSchema.parse(req.body) as InsertOrder;
+      orderData.status = 'pending_sync';
       const order = await storage.createOrder(orderData);
-      res.json(order);
+      
+      // Get settings
+      const bcSetting = await storage.getSetting("bigcommerce_config");
+      const webhookSetting = await storage.getSetting("google_sheets_webhook");
+      
+      let bcSuccess = false;
+      let bcOrderId: number | undefined;
+      let bcError = "";
+      let sheetsSuccess = false;
+      let sheetsError = "";
+      
+      // Try to sync to BigCommerce
+      if (bcSetting && bcSetting.value) {
+        const config = typeof bcSetting.value === 'string' ? JSON.parse(bcSetting.value) : bcSetting.value;
+        const storeHash = config.storeHash;
+        const token = config.token;
+        
+        if (storeHash && token) {
+          try {
+            const nameParts = order.customer_name.trim().split(/\s+/);
+            const firstName = nameParts[0] || "Customer";
+            const lastName = nameParts.slice(1).join(" ") || "Customer";
+            
+            const bcOrderData = {
+              status_id: 1,
+              customer_id: order.bigcommerce_customer_id || 0,
+              billing_address: order.billing_address || {
+                first_name: firstName,
+                last_name: lastName,
+                street_1: "123 Main St",
+                city: "Austin",
+                state: "Texas",
+                zip: "78701",
+                country: "United States",
+                country_iso2: "US",
+                email: "customer@example.com"
+              },
+              products: (order.items as any[]).map(item => {
+                const productData: any = {
+                  product_id: item.bigcommerce_product_id,
+                  quantity: item.quantity,
+                  price_inc_tax: parseFloat(item.price_at_sale),
+                  price_ex_tax: parseFloat(item.price_at_sale)
+                };
+                if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
+                  productData.product_options = item.variant_option_values.map((ov: any) => ({
+                    id: ov.option_id,
+                    value: String(ov.id)
+                  }));
+                }
+                return productData;
+              })
+            };
+            
+            const response = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
+              {
+                method: 'POST',
+                headers: {
+                  'X-Auth-Token': String(token),
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                },
+                body: JSON.stringify(bcOrderData)
+              }
+            );
+            
+            if (response.ok) {
+              const data = await response.json();
+              bcOrderId = data.id;
+              bcSuccess = true;
+              await storage.updateOrderStatus(order.id!, 'synced', bcOrderId);
+            } else {
+              const errorText = await response.text();
+              bcError = `BigCommerce sync failed: ${errorText}`;
+            }
+          } catch (e: any) {
+            bcError = `BigCommerce sync error: ${e.message}`;
+          }
+        }
+      }
+      
+      // Log to Google Sheets webhook
+      if (webhookSetting && webhookSetting.value) {
+        try {
+          const webhookUrl = typeof webhookSetting.value === 'string' ? webhookSetting.value : null;
+          if (webhookUrl) {
+            const sheetsData = {
+              order_id: order.id,
+              customer_name: order.customer_name,
+              total: order.total,
+              date: order.date,
+              bigcommerce_order_id: bcOrderId || null,
+              bigcommerce_synced: bcSuccess,
+              items: order.items
+            };
+            
+            const sheetsResponse = await fetch(webhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(sheetsData)
+            });
+            
+            sheetsSuccess = sheetsResponse.ok;
+            if (!sheetsSuccess) {
+              sheetsError = `Google Sheets logging failed: ${sheetsResponse.statusText}`;
+            }
+          }
+        } catch (e: any) {
+          sheetsError = `Google Sheets logging error: ${e.message}`;
+        }
+      }
+      
+      // Return comprehensive status
+      const updatedOrder = await storage.getOrder(order.id!);
+      res.json({
+        order: updatedOrder,
+        bigcommerce: {
+          success: bcSuccess,
+          order_id: bcOrderId,
+          error: bcError || undefined
+        },
+        google_sheets: {
+          success: sheetsSuccess,
+          error: sheetsError || undefined
+        }
+      });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }

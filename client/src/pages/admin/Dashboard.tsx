@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus, Trash2, Shield, UserCog } from "lucide-react";
+import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus, Shield, UserCog } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -14,17 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -66,6 +55,7 @@ export default function AdminDashboard() {
     storeHash: localStorage.getItem('bc_store_hash') || '',
     token: localStorage.getItem('bc_token') || ''
   });
+  const [googleSheetsWebhook, setGoogleSheetsWebhook] = useState('');
   const [showConfig, setShowConfig] = useState(false);
 
   const togglePinMutation = useMutation({
@@ -94,18 +84,6 @@ export default function AdminDashboard() {
     }
   });
 
-  const deleteUserMutation = useMutation({
-    mutationFn: (id: number) => api.deleteUser(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
-      queryClient.invalidateQueries({ queryKey: ['admins'] });
-      queryClient.invalidateQueries({ queryKey: ['users'] });
-      toast({ title: "User Deleted", description: "User has been removed." });
-    },
-    onError: (error: any) => {
-      toast({ title: "Delete Failed", description: error.message, variant: "destructive" });
-    }
-  });
 
   const resyncProductsMutation = useMutation({
     mutationFn: async () => {
@@ -202,13 +180,21 @@ export default function AdminDashboard() {
         setBcConfig(setting.value);
       }
     });
+    api.getSetting("google_sheets_webhook").then(setting => {
+      if (setting && setting.value) {
+        setGoogleSheetsWebhook(setting.value);
+      }
+    }).catch(() => {
+      // Setting doesn't exist yet
+    });
   }, []);
 
   const saveConfig = async () => {
     try {
       await api.saveSetting("bigcommerce_config", bcConfig);
+      await api.saveSetting("google_sheets_webhook", googleSheetsWebhook);
       setShowConfig(false);
-      toast({ title: "Settings Saved", description: "API credentials updated on server." });
+      toast({ title: "Settings Saved", description: "Configuration updated on server." });
     } catch (e) {
       toast({ title: "Error", description: "Failed to save configuration.", variant: "destructive" });
     }
@@ -227,32 +213,50 @@ export default function AdminDashboard() {
               BC Configuration
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>BigCommerce API Settings</DialogTitle>
+              <DialogTitle>Integration Settings</DialogTitle>
               <DialogDescription>
-                Enter your Store Hash and Access Token to fetch real data.
+                Configure external service integrations.
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Store Hash</Label>
-                <Input 
-                  value={bcConfig.storeHash} 
-                  onChange={e => setBcConfig({...bcConfig, storeHash: e.target.value})}
-                  placeholder="e.g. ab12cd34" 
-                  data-testid="input-storehash"
-                />
+            <div className="space-y-6 py-4">
+              <div className="space-y-4">
+                <h3 className="font-semibold text-sm">BigCommerce API</h3>
+                <div className="space-y-2">
+                  <Label>Store Hash</Label>
+                  <Input 
+                    value={bcConfig.storeHash} 
+                    onChange={e => setBcConfig({...bcConfig, storeHash: e.target.value})}
+                    placeholder="e.g. ab12cd34" 
+                    data-testid="input-storehash"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Access Token</Label>
+                  <Input 
+                    value={bcConfig.token} 
+                    onChange={e => setBcConfig({...bcConfig, token: e.target.value})}
+                    type="password"
+                    placeholder="X-Auth-Token" 
+                    data-testid="input-token"
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Access Token</Label>
-                <Input 
-                  value={bcConfig.token} 
-                  onChange={e => setBcConfig({...bcConfig, token: e.target.value})}
-                  type="password"
-                  placeholder="X-Auth-Token" 
-                  data-testid="input-token"
-                />
+              <div className="space-y-4">
+                <h3 className="font-semibold text-sm">Google Sheets Backup</h3>
+                <div className="space-y-2">
+                  <Label>Google Apps Script Webhook URL</Label>
+                  <Input 
+                    value={googleSheetsWebhook} 
+                    onChange={e => setGoogleSheetsWebhook(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/..." 
+                    data-testid="input-sheets-webhook"
+                  />
+                  <p className="text-xs text-slate-500">
+                    Orders will be logged to this webhook after checkout.
+                  </p>
+                </div>
               </div>
             </div>
             <DialogFooter>
@@ -478,27 +482,6 @@ export default function AdminDashboard() {
                         >
                           {user.is_enabled ? <UserCheck className="h-5 w-5 text-green-600" /> : <UserX className="h-5 w-5 text-red-500" />}
                         </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button size="icon" variant="ghost" data-testid={`button-delete-user-${user.id}`}>
-                              <Trash2 className="h-5 w-5 text-red-500" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete User?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will permanently delete {user.name}'s account. This action cannot be undone.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => deleteUserMutation.mutate(user.id)}>
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
                       </div>
                     </div>
                   </Card>
@@ -535,27 +518,6 @@ export default function AdminDashboard() {
                         >
                           {user.is_enabled ? <UserCheck className="h-5 w-5 text-green-600" /> : <UserX className="h-5 w-5 text-red-500" />}
                         </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button size="icon" variant="ghost" data-testid={`button-delete-admin-${user.id}`}>
-                              <Trash2 className="h-5 w-5 text-red-500" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete Admin?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will permanently delete {user.name}'s admin account. This action cannot be undone.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => deleteUserMutation.mutate(user.id)}>
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
                       </div>
                     </div>
                   </Card>

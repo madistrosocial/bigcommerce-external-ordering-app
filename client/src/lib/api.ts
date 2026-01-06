@@ -105,13 +105,6 @@ export async function updateUserStatus(id: number, is_enabled: boolean): Promise
   if (!res.ok) throw new Error('Failed to update user status');
 }
 
-export async function deleteUser(id: number): Promise<void> {
-  const res = await fetch(`${API_BASE}/users/${id}`, {
-    method: 'DELETE'
-  });
-  if (!res.ok) throw new Error('Failed to delete user');
-}
-
 export async function createUser(userData: any): Promise<User> {
   const res = await fetch(`${API_BASE}/users`, {
     method: 'POST',
@@ -139,13 +132,27 @@ export async function login(username: string, password: string): Promise<User> {
 }
 
 // Orders
-export async function createOrder(order: Omit<Order, 'id' | 'date'>): Promise<Order> {
+export async function createOrder(order: Omit<Order, 'id' | 'date'>): Promise<{
+  order: Order;
+  bigcommerce: {
+    success: boolean;
+    order_id?: number;
+    error?: string;
+  };
+  google_sheets: {
+    success: boolean;
+    error?: string;
+  };
+}> {
   const res = await fetch(`${API_BASE}/orders`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(order)
   });
-  if (!res.ok) throw new Error('Failed to create order');
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to create order' }));
+    throw new Error(error.error || 'Failed to create order');
+  }
   return res.json();
 }
 

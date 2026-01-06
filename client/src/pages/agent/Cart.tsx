@@ -26,12 +26,12 @@ export default function Cart() {
 
     const orderData = {
       customer_name: customerName,
-      status: (isOfflineMode ? 'pending_sync' : 'synced') as 'pending_sync' | 'synced',
+      status: 'pending_sync' as const,
       items: cart.map(item => ({
         product_id: item.product.id,
         bigcommerce_product_id: item.product.bigcommerce_id,
         variant_id: item.variant?.id,
-        variant_option_values: item.variant?.option_values, // Include for BigCommerce sync
+        variant_option_values: item.variant?.option_values,
         quantity: item.quantity,
         price_at_sale: item.variant?.price || item.product.price,
         name: item.variant ? `${item.product.name} (${item.variant.sku})` : item.product.name,
@@ -39,20 +39,35 @@ export default function Cart() {
         image: item.product.image
       })),
       total: total.toFixed(2),
-      created_by_user_id: currentUser?.id || 0,
-      bigcommerce_order_id: isOfflineMode ? undefined : Math.floor(Math.random() * 100000) + 50000
+      created_by_user_id: currentUser?.id || 0
     };
 
     try {
-      const order = await api.createOrder(orderData);
-      toast({
-        title: order.status === 'pending_sync' ? "Order Queued" : "Order Created",
-        description: order.status === 'pending_sync' ? "Saved locally" : "Order confirmed",
-      });
+      const response = await api.createOrder(orderData);
+      
+      // Handle new response format with BigCommerce and Google Sheets status
+      const bcSuccess = response.bigcommerce?.success || false;
+      const sheetsSuccess = response.google_sheets?.success || false;
+      
+      if (bcSuccess) {
+        toast({
+          title: "Order Created Successfully",
+          description: `BigCommerce Order #${response.bigcommerce.order_id}${sheetsSuccess ? ' (Logged to Sheets)' : ''}`,
+        });
+      } else {
+        // Show failure but confirm local save
+        const errorMsg = response.bigcommerce?.error || "BigCommerce sync failed";
+        toast({
+          title: "Order Saved Locally",
+          description: `${errorMsg}${sheetsSuccess ? ' - Logged to Sheets' : ''}`,
+          variant: "destructive"
+        });
+      }
+      
       clearCart();
       setLocation('/orders');
-    } catch (e) {
-      toast({ title: "Error creating order", variant: "destructive" });
+    } catch (e: any) {
+      toast({ title: "Error creating order", description: e.message, variant: "destructive" });
     }
   };
 

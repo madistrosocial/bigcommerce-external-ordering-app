@@ -28,12 +28,15 @@ export const products = pgTable("products", {
 export const orders = pgTable("orders", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   customer_name: text("customer_name").notNull(),
+  bigcommerce_customer_id: integer("bigcommerce_customer_id"),
+  billing_address: jsonb("billing_address"),
   status: text("status").notNull(), // 'pending_sync' or 'synced'
   items: jsonb("items").notNull(), // Array of order items including variant info
   total: decimal("total", { precision: 10, scale: 2 }).notNull(),
   date: timestamp("date").notNull().defaultNow(),
   created_by_user_id: integer("created_by_user_id").notNull().references(() => users.id),
   bigcommerce_order_id: integer("bigcommerce_order_id"),
+  google_sheets_logged: boolean("google_sheets_logged").notNull().default(false),
 });
 
 export const settings = pgTable("settings", {
