@@ -14,6 +14,7 @@ interface AppState {
   
   login: (user: User) => void;
   logout: () => void;
+  setOfflineMode: (offline: boolean) => void;
   toggleOfflineMode: () => void;
   addToCart: (product: Product, quantity: number, variant?: any) => void;
   removeFromCart: (productId: number, variantId?: number) => void;
@@ -24,7 +25,7 @@ interface AppState {
 
 export const useStore = create<AppState>((set, get) => ({
   currentUser: JSON.parse(localStorage.getItem('vansales_user') || 'null'),
-  isOfflineMode: false,
+  isOfflineMode: !navigator.onLine,
   cart: [],
 
   login: (user) => {
@@ -37,6 +38,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ currentUser: null, cart: [] });
   },
 
+  setOfflineMode: (offline) => set({ isOfflineMode: offline }),
   toggleOfflineMode: () => set((state) => ({ isOfflineMode: !state.isOfflineMode })),
 
   addToCart: (product, quantity, variant) => set((state) => {

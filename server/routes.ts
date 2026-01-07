@@ -325,6 +325,7 @@ export async function registerRoutes(
               status_id: 1,
               customer_id: order.bigcommerce_customer_id || 0,
               billing_address: order.billing_address,
+              staff_notes: order.order_note || undefined,
               products: (order.items as any[]).map(item => {
                 const productData: any = {
                   product_id: item.bigcommerce_product_id,
@@ -363,9 +364,11 @@ export async function registerRoutes(
             } else {
               const errorText = await response.text();
               bcError = `BigCommerce sync failed: ${errorText}`;
+              await storage.updateOrderSyncError(order.id!, bcError);
             }
           } catch (e: any) {
             bcError = `BigCommerce sync error: ${e.message}`;
+            await storage.updateOrderSyncError(order.id!, bcError);
           }
         }
       }
@@ -437,6 +440,172 @@ export async function registerRoutes(
       res.json(orders);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/orders/drafts", async (req, res) => {
+    try {
+      const drafts = await storage.getDraftOrders();
+      res.json(drafts);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Create draft order (for offline mode)
+  app.post("/api/orders/draft", async (req, res) => {
+    try {
+      const orderData = insertOrderSchema.parse(req.body) as InsertOrder;
+      orderData.status = 'draft';
+      const order = await storage.createOrder(orderData);
+      res.json(order);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Submit draft order (when back online)
+  app.post("/api/orders/:id/submit-draft", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { bigcommerce_customer_id, billing_address } = req.body;
+      
+      const order = await storage.getOrder(id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      if (order.status !== 'draft') {
+        return res.status(400).json({ error: "Order is not a draft" });
+      }
+
+      // Update order with customer data
+      await storage.updateOrderForSubmission(id, {
+        bigcommerce_customer_id,
+        billing_address,
+        status: 'pending_sync'
+      });
+
+      // Get updated order
+      const updatedOrder = await storage.getOrder(id);
+
+      // Get settings
+      const bcSetting = await storage.getSetting("bigcommerce_config");
+      const webhookSetting = await storage.getSetting("google_sheets_webhook");
+      
+      let bcSuccess = false;
+      let bcOrderId: number | undefined;
+      let bcError = "";
+      let sheetsSuccess = false;
+      let sheetsError = "";
+      
+      // Try to sync to BigCommerce
+      if (bcSetting && bcSetting.value) {
+        const config = typeof bcSetting.value === 'string' ? JSON.parse(bcSetting.value) : bcSetting.value;
+        const storeHash = config.storeHash;
+        const token = config.token;
+        
+        if (storeHash && token) {
+          try {
+            const bcOrderData = {
+              status_id: 1,
+              customer_id: bigcommerce_customer_id || 0,
+              billing_address: billing_address,
+              staff_notes: updatedOrder!.order_note || undefined,
+              products: (updatedOrder!.items as any[]).map(item => {
+                const productData: any = {
+                  product_id: item.bigcommerce_product_id,
+                  quantity: item.quantity,
+                  price_inc_tax: parseFloat(item.price_at_sale),
+                  price_ex_tax: parseFloat(item.price_at_sale)
+                };
+                if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
+                  productData.product_options = item.variant_option_values.map((ov: any) => ({
+                    id: ov.option_id,
+                    value: String(ov.id)
+                  }));
+                }
+                return productData;
+              })
+            };
+            
+            const response = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
+              {
+                method: 'POST',
+                headers: {
+                  'X-Auth-Token': String(token),
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                },
+                body: JSON.stringify(bcOrderData)
+              }
+            );
+            
+            if (response.ok) {
+              const data = await response.json();
+              bcOrderId = data.id;
+              bcSuccess = true;
+              await storage.updateOrderStatus(id, 'synced', bcOrderId);
+            } else {
+              const errorText = await response.text();
+              bcError = `BigCommerce sync failed: ${errorText}`;
+              await storage.updateOrderSyncError(id, bcError);
+            }
+          } catch (e: any) {
+            bcError = `BigCommerce sync error: ${e.message}`;
+            await storage.updateOrderSyncError(id, bcError);
+          }
+        }
+      }
+      
+      // Log to Google Sheets webhook
+      if (webhookSetting && webhookSetting.value && bcSuccess) {
+        try {
+          const webhookUrl = typeof webhookSetting.value === 'string' ? webhookSetting.value : null;
+          if (webhookUrl) {
+            const sheetsData = {
+              order_id: id,
+              customer_name: updatedOrder!.customer_name,
+              total: updatedOrder!.total,
+              date: updatedOrder!.date,
+              bigcommerce_order_id: bcOrderId || null,
+              bigcommerce_synced: bcSuccess,
+              items: updatedOrder!.items
+            };
+            
+            const sheetsResponse = await fetch(webhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(sheetsData)
+            });
+            
+            sheetsSuccess = sheetsResponse.ok;
+            if (!sheetsSuccess) {
+              sheetsError = `Google Sheets logging failed: ${sheetsResponse.statusText}`;
+            }
+          }
+        } catch (e: any) {
+          sheetsError = `Google Sheets logging error: ${e.message}`;
+        }
+      }
+      
+      // Return comprehensive status
+      const finalOrder = await storage.getOrder(id);
+      res.json({
+        order: finalOrder,
+        bigcommerce: {
+          success: bcSuccess,
+          order_id: bcOrderId,
+          error: bcError || undefined
+        },
+        google_sheets: {
+          success: sheetsSuccess,
+          error: sheetsError || undefined
+        }
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
     }
   });
 

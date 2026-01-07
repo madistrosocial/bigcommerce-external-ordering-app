@@ -28,9 +28,12 @@ export const products = pgTable("products", {
 export const orders = pgTable("orders", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   customer_name: text("customer_name").notNull(),
+  customer_email: text("customer_email"),
   bigcommerce_customer_id: integer("bigcommerce_customer_id"),
   billing_address: jsonb("billing_address"),
-  status: text("status").notNull(), // 'pending_sync' or 'synced'
+  status: text("status").notNull(), // 'draft', 'pending_sync', 'failed', or 'synced'
+  sync_error: text("sync_error"), // Error message from failed BigCommerce sync
+  order_note: text("order_note"), // Agent order notes
   items: jsonb("items").notNull(), // Array of order items including variant info
   total: decimal("total", { precision: 10, scale: 2 }).notNull(),
   date: timestamp("date").notNull().defaultNow(),

@@ -6,12 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Trash2, Plus, Minus, CreditCard, Search, MapPin, User, Loader2 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Trash2, Plus, Minus, CreditCard, Search, MapPin, User, Loader2, WifiOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 
 export default function Cart() {
-  const { cart, removeFromCart, updateCartQuantity, clearCart, getCartTotal, currentUser } = useStore();
+  const { cart, removeFromCart, updateCartQuantity, clearCart, getCartTotal, currentUser, isOfflineMode, setOfflineMode } = useStore();
   const [customerSearch, setCustomerSearch] = useState("");
   const [searchResults, setSearchResults] = useState<api.BigCommerceCustomer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<api.BigCommerceCustomer | null>(null);
@@ -19,10 +20,28 @@ export default function Cart() {
   const [selectedAddress, setSelectedAddress] = useState<api.BigCommerceAddress | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [orderNote, setOrderNote] = useState("");
+  const [manualCustomerName, setManualCustomerName] = useState("");
+  const [manualCustomerEmail, setManualCustomerEmail] = useState("");
+  const [manualCustomerNote, setManualCustomerNote] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
   const total = getCartTotal();
+
+  useEffect(() => {
+    const handleOnline = () => setOfflineMode(false);
+    const handleOffline = () => setOfflineMode(true);
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [setOfflineMode]);
 
   const debounce = (fn: Function, ms: number) => {
     let timeout: NodeJS.Timeout;
@@ -34,7 +53,7 @@ export default function Cart() {
 
   const searchCustomers = useCallback(
     debounce(async (query: string) => {
-      if (query.length < 2) {
+      if (query.length < 2 || isOfflineMode) {
         setSearchResults([]);
         return;
       }
@@ -43,20 +62,24 @@ export default function Cart() {
         const results = await api.searchBigCommerceCustomers(query);
         setSearchResults(results);
         setShowResults(true);
-      } catch (e) {
+      } catch (e: any) {
         console.error('Customer search error:', e);
+        if (e.message?.includes('fetch') || e.message?.includes('network')) {
+          setOfflineMode(true);
+          toast({ title: "Connection lost", description: "Switched to offline mode", variant: "destructive" });
+        }
       } finally {
         setIsSearching(false);
       }
     }, 300),
-    []
+    [isOfflineMode]
   );
 
   useEffect(() => {
-    if (customerSearch && !selectedCustomer) {
+    if (customerSearch && !selectedCustomer && !isOfflineMode) {
       searchCustomers(customerSearch);
     }
-  }, [customerSearch]);
+  }, [customerSearch, isOfflineMode]);
 
   const handleSelectCustomer = async (customer: api.BigCommerceCustomer) => {
     setSelectedCustomer(customer);
@@ -70,12 +93,16 @@ export default function Cart() {
       if (addresses.length > 0) {
         setSelectedAddress(addresses[0]);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to load addresses:', e);
+      if (e.message?.includes('fetch') || e.message?.includes('network')) {
+        setOfflineMode(true);
+        toast({ title: "Connection lost", description: "Switched to offline mode", variant: "destructive" });
+      }
     }
   };
 
-  const handleCheckout = async () => {
+  const handleOnlineCheckout = async () => {
     if (!selectedCustomer) {
       toast({ title: "Please select a customer", variant: "destructive" });
       return;
@@ -85,6 +112,8 @@ export default function Cart() {
       toast({ title: "Please select a shipping address", description: "A valid shipping address is required for checkout.", variant: "destructive" });
       return;
     }
+
+    setIsSubmitting(true);
 
     const billingAddress = {
       first_name: selectedAddress.first_name,
@@ -103,9 +132,11 @@ export default function Cart() {
 
     const orderData = {
       customer_name: `${selectedCustomer.first_name} ${selectedCustomer.last_name}`,
+      customer_email: selectedCustomer.email,
       status: 'pending_sync' as const,
       bigcommerce_customer_id: selectedCustomer.id,
       billing_address: billingAddress,
+      order_note: orderNote || undefined,
       items: cart.map(item => ({
         product_id: item.product.id,
         bigcommerce_product_id: item.product.bigcommerce_id,
@@ -135,8 +166,8 @@ export default function Cart() {
       } else {
         const errorMsg = response.bigcommerce?.error || "BigCommerce sync failed";
         toast({
-          title: "Order Saved Locally",
-          description: `${errorMsg}${sheetsSuccess ? ' - Logged to Sheets' : ''}`,
+          title: "Order Failed",
+          description: errorMsg,
           variant: "destructive"
         });
       }
@@ -144,7 +175,57 @@ export default function Cart() {
       clearCart();
       setLocation('/orders');
     } catch (e: any) {
-      toast({ title: "Error creating order", description: e.message, variant: "destructive" });
+      if (e.message?.includes('fetch') || e.message?.includes('network')) {
+        setOfflineMode(true);
+        toast({ title: "Connection lost", description: "Please try again or save as draft", variant: "destructive" });
+      } else {
+        toast({ title: "Error creating order", description: e.message, variant: "destructive" });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleOfflineCheckout = async () => {
+    if (!manualCustomerName.trim()) {
+      toast({ title: "Please enter customer name", variant: "destructive" });
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    const orderData = {
+      customer_name: manualCustomerName.trim(),
+      customer_email: manualCustomerEmail.trim() || undefined,
+      status: 'draft' as const,
+      order_note: [orderNote, manualCustomerNote].filter(Boolean).join(' | ') || undefined,
+      items: cart.map(item => ({
+        product_id: item.product.id,
+        bigcommerce_product_id: item.product.bigcommerce_id,
+        variant_id: item.variant?.id,
+        variant_option_values: item.variant?.option_values,
+        quantity: item.quantity,
+        price_at_sale: item.variant?.price || item.product.price,
+        name: item.variant ? `${item.product.name} (${item.variant.sku})` : item.product.name,
+        sku: item.variant?.sku || item.product.sku,
+        image: item.product.image
+      })),
+      total: total.toFixed(2),
+      created_by_user_id: currentUser?.id || 0
+    };
+
+    try {
+      await api.createDraftOrder(orderData);
+      toast({
+        title: "Draft Order Saved",
+        description: "Order saved locally. Submit it when back online.",
+      });
+      clearCart();
+      setLocation('/orders');
+    } catch (e: any) {
+      toast({ title: "Error saving draft", description: e.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -163,112 +244,166 @@ export default function Cart() {
   return (
     <MobileShell title="Checkout" showBack>
       <div className="space-y-6 pb-24">
-        <div className="space-y-4">
-          <div className="relative">
-            <Label className="text-xs font-medium text-slate-500 mb-1 block">Customer</Label>
-            <div className="relative">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <Input 
-                placeholder="Search customer by name or email..." 
-                className="pl-9"
-                value={customerSearch}
-                onChange={e => setCustomerSearch(e.target.value)}
-                onFocus={() => {
-                  if (selectedCustomer) {
-                    setShowResults(false);
-                  }
-                }}
-                data-testid="input-customer-search"
-              />
-              {isSearching && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-slate-400" />}
+        {isOfflineMode && (
+          <Card className="p-3 bg-orange-50 border-orange-200">
+            <div className="flex items-center gap-2 text-orange-700">
+              <WifiOff className="h-4 w-4" />
+              <span className="font-medium text-sm">Offline Mode - Orders will be saved as drafts</span>
             </div>
-            
-            {showResults && searchResults.length > 0 && (
-              <Card className="absolute z-20 w-full mt-1 max-h-48 overflow-auto shadow-lg">
-                {searchResults.map(customer => (
-                  <div 
-                    key={customer.id}
-                    className="p-3 hover:bg-slate-50 cursor-pointer border-b last:border-0"
-                    onClick={() => handleSelectCustomer(customer)}
-                    data-testid={`customer-result-${customer.id}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <User className="h-4 w-4 text-slate-400" />
-                      <span className="font-medium">{customer.first_name} {customer.last_name}</span>
+          </Card>
+        )}
+
+        {!isOfflineMode ? (
+          <div className="space-y-4">
+            <div className="relative">
+              <Label className="text-xs font-medium text-slate-500 mb-1 block">Customer</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                <Input 
+                  placeholder="Search customer by name or email..." 
+                  className="pl-9"
+                  value={customerSearch}
+                  onChange={e => setCustomerSearch(e.target.value)}
+                  onFocus={() => {
+                    if (selectedCustomer) {
+                      setShowResults(false);
+                    }
+                  }}
+                  data-testid="input-customer-search"
+                />
+                {isSearching && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-slate-400" />}
+              </div>
+              
+              {showResults && searchResults.length > 0 && (
+                <Card className="absolute z-20 w-full mt-1 max-h-48 overflow-auto shadow-lg">
+                  {searchResults.map(customer => (
+                    <div 
+                      key={customer.id}
+                      className="p-3 hover:bg-slate-50 cursor-pointer border-b last:border-0"
+                      onClick={() => handleSelectCustomer(customer)}
+                      data-testid={`customer-result-${customer.id}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-slate-400" />
+                        <span className="font-medium">{customer.first_name} {customer.last_name}</span>
+                      </div>
+                      <div className="text-xs text-slate-500 ml-6">{customer.email}</div>
                     </div>
-                    <div className="text-xs text-slate-500 ml-6">{customer.email}</div>
+                  ))}
+                </Card>
+              )}
+            </div>
+
+            {selectedCustomer && (
+              <Card className="p-3 bg-green-50 border-green-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 text-green-700">
+                      <User className="h-4 w-4" />
+                      <span className="font-medium">{selectedCustomer.first_name} {selectedCustomer.last_name}</span>
+                    </div>
+                    <div className="text-xs text-green-600 mt-1">
+                      {selectedCustomer.email} {selectedCustomer.phone && `• ${selectedCustomer.phone}`}
+                    </div>
                   </div>
-                ))}
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="text-green-600 hover:text-red-500"
+                    onClick={() => {
+                      setSelectedCustomer(null);
+                      setCustomerAddresses([]);
+                      setSelectedAddress(null);
+                      setCustomerSearch("");
+                    }}
+                    data-testid="button-clear-customer"
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </Card>
+            )}
+
+            {selectedCustomer && customerAddresses.length > 0 && (
+              <div>
+                <Label className="text-xs font-medium text-slate-500 mb-2 block">Shipping Address</Label>
+                <div className="space-y-2">
+                  {customerAddresses.map(addr => (
+                    <Card 
+                      key={addr.id}
+                      className={`p-3 cursor-pointer transition-colors ${selectedAddress?.id === addr.id ? 'border-primary bg-primary/5' : 'hover:border-slate-300'}`}
+                      onClick={() => setSelectedAddress(addr)}
+                      data-testid={`address-${addr.id}`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <MapPin className={`h-4 w-4 mt-0.5 ${selectedAddress?.id === addr.id ? 'text-primary' : 'text-slate-400'}`} />
+                        <div className="text-sm">
+                          <div className="font-medium">{addr.street_1}</div>
+                          {addr.street_2 && <div>{addr.street_2}</div>}
+                          <div className="text-slate-500">{addr.city}, {addr.state} {addr.zip}</div>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {selectedCustomer && customerAddresses.length === 0 && (
+              <Card className="p-3 bg-yellow-50 border-yellow-200">
+                <div className="flex items-start gap-2 text-yellow-700">
+                  <MapPin className="h-4 w-4 mt-0.5" />
+                  <div>
+                    <div className="font-medium text-sm">No addresses found</div>
+                    <div className="text-xs">This customer has no saved shipping addresses in BigCommerce. Please add an address to their account before placing an order.</div>
+                  </div>
+                </div>
               </Card>
             )}
           </div>
-
-          {selectedCustomer && (
-            <Card className="p-3 bg-green-50 border-green-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2 text-green-700">
-                    <User className="h-4 w-4" />
-                    <span className="font-medium">{selectedCustomer.first_name} {selectedCustomer.last_name}</span>
-                  </div>
-                  <div className="text-xs text-green-600 mt-1">
-                    {selectedCustomer.email} {selectedCustomer.phone && `• ${selectedCustomer.phone}`}
-                  </div>
-                </div>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="text-green-600 hover:text-red-500"
-                  onClick={() => {
-                    setSelectedCustomer(null);
-                    setCustomerAddresses([]);
-                    setSelectedAddress(null);
-                    setCustomerSearch("");
-                  }}
-                  data-testid="button-clear-customer"
-                >
-                  Clear
-                </Button>
-              </div>
-            </Card>
-          )}
-
-          {selectedCustomer && customerAddresses.length > 0 && (
+        ) : (
+          <div className="space-y-4">
             <div>
-              <Label className="text-xs font-medium text-slate-500 mb-2 block">Shipping Address</Label>
-              <div className="space-y-2">
-                {customerAddresses.map(addr => (
-                  <Card 
-                    key={addr.id}
-                    className={`p-3 cursor-pointer transition-colors ${selectedAddress?.id === addr.id ? 'border-primary bg-primary/5' : 'hover:border-slate-300'}`}
-                    onClick={() => setSelectedAddress(addr)}
-                    data-testid={`address-${addr.id}`}
-                  >
-                    <div className="flex items-start gap-2">
-                      <MapPin className={`h-4 w-4 mt-0.5 ${selectedAddress?.id === addr.id ? 'text-primary' : 'text-slate-400'}`} />
-                      <div className="text-sm">
-                        <div className="font-medium">{addr.street_1}</div>
-                        {addr.street_2 && <div>{addr.street_2}</div>}
-                        <div className="text-slate-500">{addr.city}, {addr.state} {addr.zip}</div>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
+              <Label className="text-xs font-medium text-slate-500 mb-1 block">Customer Name *</Label>
+              <Input 
+                placeholder="Enter customer name" 
+                value={manualCustomerName}
+                onChange={e => setManualCustomerName(e.target.value)}
+                data-testid="input-manual-customer-name"
+              />
             </div>
-          )}
+            <div>
+              <Label className="text-xs font-medium text-slate-500 mb-1 block">Customer Email</Label>
+              <Input 
+                placeholder="Enter customer email (optional)" 
+                type="email"
+                value={manualCustomerEmail}
+                onChange={e => setManualCustomerEmail(e.target.value)}
+                data-testid="input-manual-customer-email"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-medium text-slate-500 mb-1 block">Customer Note</Label>
+              <Textarea 
+                placeholder="Additional customer details (optional)" 
+                value={manualCustomerNote}
+                onChange={e => setManualCustomerNote(e.target.value)}
+                className="min-h-[60px]"
+                data-testid="input-manual-customer-note"
+              />
+            </div>
+          </div>
+        )}
 
-          {selectedCustomer && customerAddresses.length === 0 && (
-            <Card className="p-3 bg-yellow-50 border-yellow-200">
-              <div className="flex items-start gap-2 text-yellow-700">
-                <MapPin className="h-4 w-4 mt-0.5" />
-                <div>
-                  <div className="font-medium text-sm">No addresses found</div>
-                  <div className="text-xs">This customer has no saved shipping addresses in BigCommerce. Please add an address to their account before placing an order.</div>
-                </div>
-              </div>
-            </Card>
-          )}
+        <div>
+          <Label className="text-xs font-medium text-slate-500 mb-1 block">Order Note</Label>
+          <Textarea 
+            placeholder="Add notes for this order (optional)" 
+            value={orderNote}
+            onChange={e => setOrderNote(e.target.value)}
+            className="min-h-[80px]"
+            data-testid="input-order-note"
+          />
         </div>
         
         <div className="space-y-3">
@@ -292,7 +427,25 @@ export default function Cart() {
 
         <div className="fixed bottom-0 left-0 right-0 bg-white p-4 border-t flex justify-between items-center">
           <span className="font-bold text-xl">${total.toFixed(2)}</span>
-          <Button onClick={handleCheckout} disabled={!selectedCustomer || !selectedAddress} data-testid="button-submit-order">Submit Order</Button>
+          {isOfflineMode ? (
+            <Button 
+              onClick={handleOfflineCheckout} 
+              disabled={!manualCustomerName.trim() || isSubmitting}
+              data-testid="button-save-draft"
+            >
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save Draft
+            </Button>
+          ) : (
+            <Button 
+              onClick={handleOnlineCheckout} 
+              disabled={!selectedCustomer || !selectedAddress || isSubmitting}
+              data-testid="button-submit-order"
+            >
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Submit Order
+            </Button>
+          )}
         </div>
       </div>
     </MobileShell>

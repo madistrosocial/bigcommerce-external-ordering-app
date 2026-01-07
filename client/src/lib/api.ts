@@ -35,12 +35,17 @@ export interface OrderItem {
 export interface Order {
   id?: number;
   customer_name: string;
-  status: 'pending_sync' | 'synced';
+  customer_email?: string;
+  status: 'draft' | 'pending_sync' | 'failed' | 'synced';
+  sync_error?: string;
+  order_note?: string;
   items: OrderItem[];
   total: string;
   date?: string;
   created_by_user_id: number;
   bigcommerce_order_id?: number;
+  bigcommerce_customer_id?: number;
+  billing_address?: any;
 }
 
 const API_BASE = '/api';
@@ -176,6 +181,45 @@ export async function syncOrder(id: number): Promise<{ success: boolean; bigcomm
     const errorData = await res.json().catch(() => ({ error: 'Failed to sync order' }));
     throw new Error(errorData.error || 'Failed to sync order');
   }
+  return res.json();
+}
+
+export async function createDraftOrder(order: Omit<Order, 'id' | 'date'>): Promise<Order> {
+  const res = await fetch(`${API_BASE}/orders/draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(order)
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to create draft order' }));
+    throw new Error(error.error || 'Failed to create draft order');
+  }
+  return res.json();
+}
+
+export async function submitDraftOrder(orderId: number, customerData: {
+  bigcommerce_customer_id: number;
+  billing_address: any;
+}): Promise<{
+  order: Order;
+  bigcommerce: { success: boolean; order_id?: number; error?: string };
+  google_sheets: { success: boolean; error?: string };
+}> {
+  const res = await fetch(`${API_BASE}/orders/${orderId}/submit-draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(customerData)
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to submit draft order' }));
+    throw new Error(error.error || 'Failed to submit draft order');
+  }
+  return res.json();
+}
+
+export async function getDraftOrders(): Promise<Order[]> {
+  const res = await fetch(`${API_BASE}/orders/drafts`);
+  if (!res.ok) throw new Error('Failed to fetch draft orders');
   return res.json();
 }
 

@@ -41,7 +41,18 @@ Preferred communication style: Simple, everyday language.
 ### Key Data Models
 - **Users**: Admin and agent accounts with enable/disable functionality
 - **Products**: Catalog items with BigCommerce ID references, pinning for featured items
-- **Orders**: Sales orders with pending_sync/synced status for offline support
+- **Orders**: Sales orders with status tracking (draft/pending_sync/failed/synced), order notes, sync error capture
+
+### Order Status Flow
+1. **Draft** - Created offline with manual customer input, no BigCommerce sync
+2. **Pending** - Awaiting sync to BigCommerce
+3. **Synced** - Successfully synced with BigCommerce order ID
+4. **Failed** - Sync attempt failed, error message stored in sync_error field
+
+### Offline Mode
+- Automatic detection via browser online/offline events
+- When offline: Customer search disabled, manual input fields shown
+- Draft orders can be submitted when back online with automatic customer matching
 
 ### Directory Structure
 ```

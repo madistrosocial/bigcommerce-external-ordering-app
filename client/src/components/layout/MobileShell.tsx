@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Toaster } from "@/components/ui/toaster";
 import { useToast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import * as api from "@/lib/api";
 
@@ -36,10 +36,29 @@ interface MobileShellProps {
 }
 
 export function MobileShell({ children, title = "VanSales Pro", showBack = false }: MobileShellProps) {
-  const { currentUser, isOfflineMode, toggleOfflineMode, logout, cart } = useStore();
+  const { currentUser, isOfflineMode, setOfflineMode, toggleOfflineMode, logout, cart } = useStore();
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setOfflineMode(false);
+      toast({ title: "Back Online", description: "You can now sync orders to BigCommerce." });
+    };
+    const handleOffline = () => {
+      setOfflineMode(true);
+      toast({ title: "Offline Mode", description: "Orders will be saved as drafts.", variant: "destructive" });
+    };
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [setOfflineMode, toast]);
 
   const { data: pendingOrders = [] } = useQuery({
     queryKey: ['orders', 'pending'],

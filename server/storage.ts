@@ -26,7 +26,10 @@ export interface IStorage {
   getOrder(id: number): Promise<Order | undefined>;
   getOrdersByUser(userId: number): Promise<Order[]>;
   getPendingSyncOrders(): Promise<Order[]>;
+  getDraftOrders(): Promise<Order[]>;
   updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void>;
+  updateOrderSyncError(id: number, error: string): Promise<void>;
+  updateOrderForSubmission(id: number, updates: { bigcommerce_customer_id: number; billing_address: any; status: string }): Promise<void>;
 
   // Setting operations
   getSetting(key: string): Promise<any>;
@@ -116,10 +119,29 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(orders).where(eq(orders.status, 'pending_sync'));
   }
 
+  async getDraftOrders(): Promise<Order[]> {
+    return db.select().from(orders).where(eq(orders.status, 'draft')).orderBy(desc(orders.date));
+  }
+
   async updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void> {
     await db.update(orders).set({ 
       status, 
       ...(bcOrderId && { bigcommerce_order_id: bcOrderId }) 
+    }).where(eq(orders.id, id));
+  }
+
+  async updateOrderSyncError(id: number, error: string): Promise<void> {
+    await db.update(orders).set({ 
+      status: 'failed',
+      sync_error: error 
+    }).where(eq(orders.id, id));
+  }
+
+  async updateOrderForSubmission(id: number, updates: { bigcommerce_customer_id: number; billing_address: any; status: string }): Promise<void> {
+    await db.update(orders).set({
+      bigcommerce_customer_id: updates.bigcommerce_customer_id,
+      billing_address: updates.billing_address,
+      status: updates.status
     }).where(eq(orders.id, id));
   }
 
