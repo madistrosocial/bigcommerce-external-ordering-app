@@ -1,0 +1,208 @@
+Apply the following updates to the existing van sales ordering app. These changes must integrate with the current BigCommerce sync, offline handling, order history, inventory logic, and user management already implemented.
+
+0️⃣ System Admin Protection
+
+Remove the option to disable a System Admin account.
+
+Rules:
+
+System Admin users must always remain enabled.
+
+UI must not show disable controls for System Admins.
+
+Backend must reject any attempt to disable a System Admin.
+
+Non-admin users can still be enabled or disabled as currently implemented.
+
+1️⃣ Order Sync Errors & Status Tracking
+Sync Error Notes
+
+If an order fails to sync to BigCommerce:
+
+Capture the full error message returned by the BigCommerce API.
+
+Save this error message on the order record.
+
+Display the error message clearly in Order History.
+
+Sync Status Visibility
+
+Every order must have a clear sync status:
+
+Synced
+
+Pending
+
+Failed
+
+Draft (Offline)
+
+Any order that is not synced must clearly show:
+
+Why it is not yet synced (offline, missing customer, API error, inventory issue, etc.).
+
+2️⃣ Delete Unsynced Orders
+
+Add an option in Order History to delete orders that:
+
+Have NOT synced to BigCommerce.
+
+Rules:
+
+Only allow deletion if:
+
+No BigCommerce order ID exists.
+
+Status is Pending, Failed, or Draft (Offline).
+
+Orders that successfully synced to BigCommerce must NOT be deletable.
+
+Deleting an order must:
+
+Remove it from local storage.
+
+Remove it from offline cache if present.
+
+3️⃣ Quantity Limits Based on Inventory
+
+When adding product quantities:
+
+The maximum quantity allowed must NOT exceed available inventory.
+
+This rule must apply:
+
+Whether inventory count is displayed or hidden.
+
+For manual input and for + / − buttons.
+
+If the agent attempts to exceed available inventory:
+
+Prevent the increase.
+
+Display a clear validation message.
+
+4️⃣ Checkout Order Notes
+
+Add an Order Note field on the Checkout page.
+
+This note must:
+
+Be saved with the local order record.
+
+Sync to the BigCommerce order note field when the order is created.
+
+Display the order note in Order History.
+
+5️⃣ Automatic Offline Mode Handling
+
+Offline mode must be triggered automatically when:
+
+Internet connection is unavailable.
+
+BigCommerce API is unreachable.
+
+The app must:
+
+Gracefully switch to offline mode.
+
+Never crash due to network or API failures.
+
+Clearly indicate offline status in the UI.
+
+6️⃣ Offline Checkout Behavior (Draft Orders)
+When Offline Mode is ACTIVE
+
+Disable BigCommerce customer search and autocomplete.
+
+Replace with manual input fields:
+
+Customer Name
+
+Customer Email
+
+Customer Note (optional)
+
+Orders created while offline must:
+
+Be saved as Draft.
+
+NOT attempt BigCommerce sync.
+
+Be marked as Draft (Offline) in Order History.
+
+7️⃣ Draft Order Submission When Back Online
+When Offline Mode is OFF
+
+Enable a “Submit Order” action for draft orders.
+
+On submission:
+
+Automatically search BigCommerce customers using:
+
+Email first.
+
+Name as fallback.
+
+If a matching customer is found:
+
+Select the customer.
+
+Load all available shipping addresses.
+
+Require the agent to select a shipping address.
+
+Proceed with BigCommerce order creation.
+
+If NO customer is found:
+
+Re-enable the BigCommerce customer search field.
+
+Require the agent to manually select a customer before submission.
+
+8️⃣ UX & Safety Rules
+
+Never show “Order Successful” unless:
+
+A valid BigCommerce order_id is returned.
+
+Clearly differentiate in UI:
+
+Draft
+
+Pending
+
+Failed
+
+Synced
+
+Draft and failed orders must persist across reloads.
+
+Offline behavior must respect existing inventory visibility settings.
+
+9️⃣ Non-Goals (Do NOT Change)
+
+Do NOT modify:
+
+Product pinning logic.
+
+Inventory visibility toggle behavior.
+
+Existing successful BigCommerce sync flow.
+
+Do NOT reintroduce user deletion.
+
+Expected Outcome
+
+After implementation:
+
+System Admin access is protected.
+
+Orders never falsely succeed.
+
+Failed syncs are transparent and actionable.
+
+Inventory limits are strictly enforced.
+
+Offline orders are safe, recoverable, and resumable.
+
+Agents can confidently operate online or offline.
