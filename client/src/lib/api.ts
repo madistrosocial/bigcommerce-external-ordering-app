@@ -19,6 +19,7 @@ export interface User {
   name: string;
   role: 'admin' | 'agent';
   is_enabled: boolean;
+  allow_bigcommerce_search: boolean;
 }
 
 export interface OrderItem {
@@ -108,6 +109,24 @@ export async function updateUserStatus(id: number, is_enabled: boolean): Promise
     body: JSON.stringify({ is_enabled })
   });
   if (!res.ok) throw new Error('Failed to update user status');
+}
+
+export async function updateUserPermission(id: number, allow_bigcommerce_search: boolean): Promise<void> {
+  const res = await fetch(`${API_BASE}/users/${id}/permission`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ allow_bigcommerce_search })
+  });
+  if (!res.ok) throw new Error('Failed to update user permission');
+}
+
+export async function agentBigCommerceSearch(query: string, userId: number): Promise<Product[]> {
+  const res = await fetch(`${API_BASE}/agent/bigcommerce/search?query=${encodeURIComponent(query)}&userId=${userId}`);
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Search failed' }));
+    throw new Error(error.error || 'BigCommerce search failed');
+  }
+  return res.json();
 }
 
 export async function createUser(userData: any): Promise<User> {

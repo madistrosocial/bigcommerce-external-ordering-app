@@ -251,6 +251,18 @@ export async function registerRoutes(
     }
   });
 
+  // Update user BigCommerce search permission
+  app.patch("/api/users/:id/permission", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { allow_bigcommerce_search } = req.body;
+      
+      await storage.updateUserPermission(id, allow_bigcommerce_search);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // Login endpoint
   app.post("/api/auth/login", async (req, res) => {
@@ -725,7 +737,86 @@ export async function registerRoutes(
 
   // ===== BIGCOMMERCE PROXY =====
   
-  // BigCommerce proxy for products
+  // Agent-facing BigCommerce product search (requires permission)
+  app.get("/api/agent/bigcommerce/search", async (req, res) => {
+    try {
+      const { query, userId } = req.query;
+      
+      if (!userId) {
+        return res.status(401).json({ error: "User ID required" });
+      }
+      
+      // Check if user has permission
+      const user = await storage.getUser(parseInt(userId as string));
+      if (!user || !user.allow_bigcommerce_search) {
+        return res.status(403).json({ error: "BigCommerce search not permitted for this user" });
+      }
+      
+      // Fetch setting from database
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+
+      if (setting && setting.value) {
+        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        storeHash = config.storeHash || storeHash;
+        token = config.token || token;
+      }
+
+      if (!token || !storeHash || !query) {
+        return res.status(400).json({ error: "Missing required parameters" });
+      }
+
+      // Call BigCommerce API for products
+      const response = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(query as string)}&include=primary_image,variants`,
+        {
+          headers: {
+            'X-Auth-Token': String(token),
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`BigCommerce API error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      // Transform to our format (same as admin endpoint)
+      const products = data.data.map((p: any) => ({
+        id: p.id,
+        bigcommerce_id: p.id,
+        name: p.name,
+        sku: p.sku,
+        price: p.price.toString(),
+        image: p.primary_image?.url_standard || '',
+        description: p.description.replace(/<[^>]*>?/gm, ''),
+        stock_level: p.inventory_level || 0,
+        is_pinned: false,
+        variants: (p.variants || []).map((v: any) => ({
+          id: v.id,
+          sku: v.sku,
+          price: v.price?.toString() || p.price.toString(),
+          stock_level: v.inventory_level || 0,
+          option_values: (v.option_values || []).map((ov: any) => ({
+            id: ov.id,
+            option_id: ov.option_id,
+            label: ov.label,
+            option_display_name: ov.option_display_name
+          }))
+        }))
+      }));
+
+      res.json(products);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // BigCommerce proxy for products (admin use)
   app.get("/api/bigcommerce/products/search", async (req, res) => {
     try {
       const { query } = req.query;

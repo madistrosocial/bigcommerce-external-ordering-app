@@ -1,0 +1,157 @@
+1️⃣ Agent Search Toggle: Pinned Products vs BigCommerce Inventory (HIGH PRIORITY)
+Toggle Behavior
+
+In the Agent page, add a toggle switch labeled:
+“Search BigCommerce Inventory”
+
+Default state:
+
+OFF
+
+When Toggle is OFF
+
+Keep existing behavior:
+
+Agent search only queries pinned products
+
+Results come from the local pinned product dataset
+
+When Toggle is ON
+
+Agent search must:
+
+Query the live BigCommerce catalog
+
+Search by product name
+
+Search results must:
+
+Display product cards using the same UI as pinned products
+
+Include:
+
+Product name
+
+Variant name (if applicable)
+
+SKU
+
+Price
+
+Inventory (respect inventory visibility toggle)
+
+Quantity input (+ / − and manual input)
+
+Cart Behavior
+
+Clicking a result card allows:
+
+Entering quantity
+
+Adding directly to cart
+
+Products added via this search:
+
+Are NOT pinned
+
+Do NOT persist on the page
+
+Only exist in the cart for checkout
+
+2️⃣ Permission Control for BigCommerce Inventory Search
+Admin Control
+
+Add a per-agent permission:
+“Allow search on full BigCommerce inventory”
+
+Default:
+
+Disabled
+
+Enforcement:
+
+If permission is disabled:
+
+Toggle is hidden or disabled
+
+Backend rejects BigCommerce search requests
+
+If enabled:
+
+Toggle is usable
+
+3️⃣ Inventory Validation (Previously Identified – Must Fix)
+
+Enforce strict inventory limits:
+
+Quantity must never exceed available inventory
+
+Zero-inventory products cannot be added to cart
+
+Applies to:
+
+Pinned products
+
+BigCommerce inventory search results
+
+Manual input and + / − buttons
+
+Prevent invalid input before checkout
+
+Show a clear validation message
+
+4️⃣ BigCommerce Order Failure Stability (Previously Identified – Must Fix)
+
+BigCommerce order rejection must:
+
+Never crash the app
+
+Be caught and handled gracefully
+
+On failure:
+
+Mark order as Failed
+
+Save the BigCommerce error message
+
+Display the error in Order History
+
+UI must remain usable after failure
+
+5️⃣ Draft Order Recovery (Previously Identified – Must Fix)
+
+Draft orders created offline must:
+
+Allow customer search again when online
+
+Allow editing customer name and email if auto-match fails
+
+Require valid BigCommerce customer selection before submission
+
+Draft orders must always be recoverable and editable
+
+6️⃣ Do NOT Change
+
+Product pinning logic
+
+Inventory visibility toggle behavior
+
+Checkout order note behavior
+
+Offline detection logic
+
+Existing successful BigCommerce sync logic
+
+Expected Result
+
+After implementation:
+
+Agents can switch between pinned-only search and full catalog search
+
+Admin controls who can access full catalog
+
+Inventory limits are enforced everywhere
+
+BigCommerce failures never crash the app
+
+Draft orders can always be corrected and submitted

@@ -10,6 +10,7 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   role: text("role").notNull(), // 'admin' or 'agent'
   is_enabled: boolean("is_enabled").notNull().default(true),
+  allow_bigcommerce_search: boolean("allow_bigcommerce_search").notNull().default(false),
 });
 
 export const products = pgTable("products", {

@@ -53,6 +53,19 @@ Preferred communication style: Simple, everyday language.
 - Automatic detection via browser online/offline events
 - When offline: Customer search disabled, manual input fields shown
 - Draft orders can be submitted when back online with automatic customer matching
+- If auto-match fails, agent can edit customer details and manually search BigCommerce
+
+### Agent Permissions
+- `allow_bigcommerce_search` field on users table controls agent catalog search
+- When enabled, agents see toggle to search full BigCommerce catalog (not just pinned products)
+- Backend validates permission before allowing BigCommerce search API calls
+- Admin can toggle permission per-agent in Users tab
+
+### Inventory Validation
+- Cart quantity inputs are clamped to available stock level
+- +/- buttons respect inventory limits
+- Zero-inventory items cannot be added to cart
+- Validation accounts for items already in cart
 
 ### Directory Structure
 ```

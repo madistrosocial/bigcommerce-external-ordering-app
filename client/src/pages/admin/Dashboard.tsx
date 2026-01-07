@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus, Shield, UserCog } from "lucide-react";
+import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus, Shield, UserCog, Globe } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -82,6 +82,15 @@ export default function AdminDashboard() {
       queryClient.invalidateQueries({ queryKey: ['agents'] });
       queryClient.invalidateQueries({ queryKey: ['admins'] });
       toast({ title: "User Updated", description: "User status has been updated." });
+    }
+  });
+
+  const updateUserPermissionMutation = useMutation({
+    mutationFn: ({ id, allow_bigcommerce_search }: { id: number; allow_bigcommerce_search: boolean }) => 
+      api.updateUserPermission(id, allow_bigcommerce_search),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+      toast({ title: "Permission Updated", description: "Agent's BigCommerce search permission updated." });
     }
   });
 
@@ -472,23 +481,38 @@ export default function AdminDashboard() {
               <div className="grid gap-4">
                 {agents.map((user) => (
                   <Card key={user.id} data-testid={`user-agent-${user.id}`}>
-                    <div className="flex items-center justify-between p-4">
-                      <div>
-                        <h3 className="font-bold">{user.name}</h3>
-                        <p className="text-sm text-slate-500">{user.username}</p>
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="font-bold">{user.name}</h3>
+                          <p className="text-sm text-slate-500">{user.username}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={user.is_enabled ? "outline" : "destructive"} data-testid={`badge-status-${user.id}`}>
+                            {user.is_enabled ? "Active" : "Disabled"}
+                          </Badge>
+                          <Button 
+                            size="icon" 
+                            variant="ghost"
+                            onClick={() => toggleUserStatus(user)}
+                            data-testid={`button-toggle-user-${user.id}`}
+                          >
+                            {user.is_enabled ? <UserCheck className="h-5 w-5 text-green-600" /> : <UserX className="h-5 w-5 text-red-500" />}
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={user.is_enabled ? "outline" : "destructive"} data-testid={`badge-status-${user.id}`}>
-                          {user.is_enabled ? "Active" : "Disabled"}
-                        </Badge>
-                        <Button 
-                          size="icon" 
-                          variant="ghost"
-                          onClick={() => toggleUserStatus(user)}
-                          data-testid={`button-toggle-user-${user.id}`}
-                        >
-                          {user.is_enabled ? <UserCheck className="h-5 w-5 text-green-600" /> : <UserX className="h-5 w-5 text-red-500" />}
-                        </Button>
+                      <div className="flex items-center justify-between pt-2 border-t">
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <Globe className="h-4 w-4" />
+                          <span>Allow BigCommerce Search</span>
+                        </div>
+                        <Switch 
+                          checked={user.allow_bigcommerce_search || false}
+                          onCheckedChange={(checked) => 
+                            updateUserPermissionMutation.mutate({ id: user.id, allow_bigcommerce_search: checked })
+                          }
+                          data-testid={`switch-bc-permission-${user.id}`}
+                        />
                       </div>
                     </div>
                   </Card>
