@@ -144,7 +144,7 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
               <div className="flex flex-col h-full py-6">
                 <div className="mb-8 px-2">
                   <h2 className="text-2xl font-bold font-heading text-slate-900 dark:text-white uppercase tracking-wider">
-                    VanSales<span className="text-primary">Pro</span>
+                    MidAtlantic Distribution<span className="text-primary">Sales</span>
                   </h2>
                   <p className="text-sm text-slate-500 mt-1">
                     Logged in as {currentUser.name}
