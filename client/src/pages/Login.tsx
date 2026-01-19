@@ -61,7 +61,7 @@ export default function Login() {
           <div className="mx-auto bg-slate-900 text-white p-3 rounded-full w-fit mb-4">
             <Truck className="h-8 w-8" />
           </div>
-          <CardTitle className="text-2xl font-heading uppercase tracking-wide">VanSales Pro</CardTitle>
+          <CardTitle className="text-2xl font-heading uppercase tracking-wide">MidAtlantic Distribution</CardTitle>
           <CardDescription>Enter your credentials to access the system</CardDescription>
         </CardHeader>
         <CardContent>
