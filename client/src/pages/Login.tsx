@@ -109,7 +109,7 @@ export default function Login() {
             </Button>
           </form>
         </CardContent>
-        <CardFooter className="flex flex-col gap-2 bg-slate-50 p-4 border-t">
+        <CardFooter className="flex flex-col gap-2 bg-slate-50 p-4 border-t" style="display:none;">
           <p className="text-xs text-slate-500 text-center mb-2">Demo Quick Login (password: demo123):</p>
           <div className="grid grid-cols-2 gap-2 w-full">
             <Button variant="outline" size="sm" onClick={() => demoLogin('agent')} disabled={isLoading} data-testid="button-demo-agent">
