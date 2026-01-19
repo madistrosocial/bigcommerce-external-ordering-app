@@ -39,21 +39,21 @@ export default function Login() {
     }
   };
 
-  const demoLogin = async (demoRole: 'admin' | 'agent') => {
-    setIsLoading(true);
-    setError("");
+//  const demoLogin = async (demoRole: 'admin' | 'agent') => {
+//    setIsLoading(true);
+//    setError("");
     
-    try {
-      const demoUser = demoRole === 'admin' ? 'admin@vansales.com' : 'agent1@vansales.com';
-      const user = await apiLogin(demoUser, 'demo123');
-      login(user);
-    } catch (err: any) {
-      setError(err.message || "Demo login failed");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+//    try {
+//      const demoUser = demoRole === 'admin' ? 'admin@vansales.com' : 'agent1@vansales.com';
+//      const user = await apiLogin(demoUser, 'demo123');
+ //     login(user);
+ //   } catch (err: any) {
+ //     setError(err.message || "Demo login failed");
+//    } finally {
+//      setIsLoading(false);
+//    }
+//  };
+//
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 p-4">
       <Card className="w-full max-w-md shadow-lg border-t-4 border-t-primary">
@@ -109,6 +109,7 @@ export default function Login() {
             </Button>
           </form>
         </CardContent>
+        {/*
         <CardFooter className="flex flex-col gap-2 bg-slate-50 p-4 border-t" style="display:none;">
           <p className="text-xs text-slate-500 text-center mb-2">Demo Quick Login (password: demo123):</p>
           <div className="grid grid-cols-2 gap-2 w-full">
@@ -120,6 +121,7 @@ export default function Login() {
             </Button>
           </div>
         </CardFooter>
+        */}
       </Card>
     </div>
   );
