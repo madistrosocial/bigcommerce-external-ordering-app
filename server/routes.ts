@@ -333,59 +333,62 @@ export async function registerRoutes(
             const firstName = nameParts[0] || "Customer";
             const lastName = nameParts.slice(1).join(" ") || "Customer";
 
-        const billingAddressWithCompany = {
-            ...order.billing_address,
-            company:
-              order.billing_address.company ||
-              order.customer_company ||
-              ""
-          };
 
-
+          const billingAddressWithCompany = {
+          ...order.billing_address,
+          company:
+            order.billing_address.company ||
+            order.customer_company ||
+            ""
+        };
+        
+        const isPickup = order.shipping_method === "pickup";
+        
         const shippingLineItem = isPickup
-        ? { name: "Store Pickup", price: 0 }
-        : { name: "Flat Rate Shipping", price: 35 };
-      
-      const bcOrderData = {
-        status_id: 1,
-        customer_id: order.bigcommerce_customer_id || 0,
-        billing_address: billingAddressWithCompany,
-        staff_notes: order.order_note || undefined,
-      
-        shipping_addresses: [
-          {
-            ...billingAddressWithCompany,
-            company: billingAddressWithCompany.company
-          }
-        ],
-      
-        products: [
-          ...(order.items as any[]).map(item => {
-            const productData: any = {
-              product_id: item.bigcommerce_product_id,
-              quantity: item.quantity,
-              price_inc_tax: parseFloat(item.price_at_sale),
-              price_ex_tax: parseFloat(item.price_at_sale)
-            };
-      
-            if (item.variant_option_values?.length) {
-              productData.product_options = item.variant_option_values.map((ov: any) => ({
-                id: ov.option_id,
-                value: String(ov.id)
-              }));
+          ? { name: "Store Pickup", price: 0 }
+          : { name: "Flat Rate Shipping", price: 35 };
+        
+        const bcOrderData = {
+          status_id: 1,
+          customer_id: order.bigcommerce_customer_id || 0,
+          billing_address: billingAddressWithCompany,
+          staff_notes: order.order_note || undefined,
+        
+          shipping_addresses: [
+            {
+              ...billingAddressWithCompany,
+              company: billingAddressWithCompany.company
             }
-      
-            return productData;
-          }),
-      
-          {
-            name: shippingLineItem.name,
-            quantity: 1,
-            price_inc_tax: shippingLineItem.price,
-            price_ex_tax: shippingLineItem.price
-          }
-        ]
-      };
+          ],
+        
+          products: [
+            ...(order.items as any[]).map(item => {
+              const productData: any = {
+                product_id: item.bigcommerce_product_id,
+                quantity: item.quantity,
+                price_inc_tax: parseFloat(item.price_at_sale),
+                price_ex_tax: parseFloat(item.price_at_sale)
+              };
+        
+              if (item.variant_option_values?.length) {
+                productData.product_options = item.variant_option_values.map((ov: any) => ({
+                  id: ov.option_id,
+                  value: String(ov.id)
+                }));
+              }
+        
+              return productData;
+            }),
+        
+            {
+              name: shippingLineItem.name,
+              quantity: 1,
+              price_inc_tax: shippingLineItem.price,
+              price_ex_tax: shippingLineItem.price
+            }
+          ]
+        };
+
 
 
             
