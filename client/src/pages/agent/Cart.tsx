@@ -139,6 +139,7 @@ export default function Cart() {
       status: 'pending_sync' as const,
       bigcommerce_customer_id: selectedCustomer.id,
       billing_address: billingAddress,
+      shipping_method: shippingMethod,
       order_note: orderNote || undefined,
       items: cart.map(item => ({
         product_id: item.product.id,
@@ -201,6 +202,7 @@ export default function Cart() {
       customer_name: manualCustomerName.trim(),
       customer_email: manualCustomerEmail.trim() || undefined,
       status: 'draft' as const,
+      shipping_method: shippingMethod,
       order_note: [orderNote, manualCustomerNote].filter(Boolean).join(' | ') || undefined,
       items: cart.map(item => ({
         product_id: item.product.id,
@@ -426,32 +428,6 @@ export default function Cart() {
             </div>
           </div>
         )}
-
-
-        <div className="space-y-2">
-          <Label>Shipping Method</Label>
-        
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              value="flat"
-              checked={shippingMethod === "flat"}
-              onChange={() => setShippingMethod("flat")}
-            />
-            Flat Rate ($35)
-          </label>
-        
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              value="pickup"
-              checked={shippingMethod === "pickup"}
-              onChange={() => setShippingMethod("pickup")}
-            />
-            Store Pickup (Free)
-          </label>
-        </div>
-
 
         
         <div>
