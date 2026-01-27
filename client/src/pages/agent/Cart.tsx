@@ -27,6 +27,9 @@ export default function Cart() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  
+  const [shippingMethod, setShippingMethod] = useState<"pickup" | "flat">("flat");
+
 
   const total = getCartTotal();
 
@@ -424,6 +427,33 @@ export default function Cart() {
           </div>
         )}
 
+
+        <div className="space-y-2">
+          <Label>Shipping Method</Label>
+        
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              value="flat"
+              checked={shippingMethod === "flat"}
+              onChange={() => setShippingMethod("flat")}
+            />
+            Flat Rate ($35)
+          </label>
+        
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              value="pickup"
+              checked={shippingMethod === "pickup"}
+              onChange={() => setShippingMethod("pickup")}
+            />
+            Store Pickup (Free)
+          </label>
+        </div>
+
+
+        
         <div>
           <Label className="text-xs font-medium text-slate-500 mb-1 block">Order Note</Label>
           <Textarea 
