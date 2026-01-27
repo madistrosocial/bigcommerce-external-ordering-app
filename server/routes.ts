@@ -357,35 +357,29 @@ export async function registerRoutes(
           shipping_addresses: [
             {
               ...billingAddressWithCompany,
-              company: billingAddressWithCompany.company
+              company: billingAddressWithCompany.company,
+              shipping_cost_ex_tax: isPickup ? 0 : 35,
+              shipping_cost_inc_tax: isPickup ? 0 : 35
             }
           ],
         
-          products: [
-            ...(order.items as any[]).map(item => {
+            products: (order.items as any[]).map(item => {
               const productData: any = {
                 product_id: item.bigcommerce_product_id,
                 quantity: item.quantity,
                 price_inc_tax: parseFloat(item.price_at_sale),
                 price_ex_tax: parseFloat(item.price_at_sale)
               };
-        
+            
               if (item.variant_option_values?.length) {
                 productData.product_options = item.variant_option_values.map((ov: any) => ({
                   id: ov.option_id,
                   value: String(ov.id)
                 }));
               }
-        
+            
               return productData;
-            }),
-        
-            {
-              name: shippingLineItem.name,
-              quantity: 1,
-              price_inc_tax: shippingLineItem.price,
-              price_ex_tax: shippingLineItem.price
-            }
+            })
           ]
         };
 
@@ -582,35 +576,29 @@ export async function registerRoutes(
             
               shipping_addresses: [
                 {
-                  ...billingAddressWithCompany
+                  ...billingAddressWithCompany,
+                  shipping_cost_ex_tax: isPickup ? 0 : 35,
+                  shipping_cost_inc_tax: isPickup ? 0 : 35
                 }
               ],
             
-              products: [
-                ...(updatedOrder!.items as any[]).map(item => {
+                products: (order.items as any[]).map(item => {
                   const productData: any = {
                     product_id: item.bigcommerce_product_id,
                     quantity: item.quantity,
                     price_inc_tax: parseFloat(item.price_at_sale),
                     price_ex_tax: parseFloat(item.price_at_sale)
                   };
-            
+                
                   if (item.variant_option_values?.length) {
                     productData.product_options = item.variant_option_values.map((ov: any) => ({
                       id: ov.option_id,
                       value: String(ov.id)
                     }));
                   }
-            
+                
                   return productData;
-                }),
-            
-                {
-                  name: shippingLineItem.name,
-                  quantity: 1,
-                  price_inc_tax: shippingLineItem.price,
-                  price_ex_tax: shippingLineItem.price
-                }
+                })
               ]
             };
 
@@ -809,35 +797,29 @@ export async function registerRoutes(
         
           shipping_addresses: [
             {
-              ...billingAddressWithCompany
+              ...billingAddressWithCompany,
+              shipping_cost_ex_tax: isPickup ? 0 : 35,
+              shipping_cost_inc_tax: isPickup ? 0 : 35
             }
           ],
         
-          products: [
-            ...(order.items as any[]).map(item => {
+            products: (order.items as any[]).map(item => {
               const productData: any = {
                 product_id: item.bigcommerce_product_id,
                 quantity: item.quantity,
                 price_inc_tax: parseFloat(item.price_at_sale),
                 price_ex_tax: parseFloat(item.price_at_sale)
               };
-        
+            
               if (item.variant_option_values?.length) {
                 productData.product_options = item.variant_option_values.map((ov: any) => ({
                   id: ov.option_id,
                   value: String(ov.id)
                 }));
               }
-        
+            
               return productData;
-            }),
-        
-            {
-              name: shippingLineItem.name,
-              quantity: 1,
-              price_inc_tax: shippingLineItem.price,
-              price_ex_tax: shippingLineItem.price
-            }
+            })
           ]
         };
 
