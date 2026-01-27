@@ -356,10 +356,11 @@ export async function registerRoutes(
         
           shipping_addresses: [
             {
-              ...billingAddressWithCompany,
-              company: billingAddressWithCompany.company,
-              shipping_cost_ex_tax: isPickup ? 0 : 35,
-              shipping_cost_inc_tax: isPickup ? 0 : 35
+            ...billingAddressWithCompany,
+            company: billingAddressWithCompany.company,
+            shipping_method: isPickup ? "Store Pickup" : "Flat Rate",
+            shipping_cost_ex_tax: isPickup ? 0 : 35,
+            shipping_cost_inc_tax: isPickup ? 0 : 35
             }
           ],
         
@@ -380,7 +381,6 @@ export async function registerRoutes(
             
               return productData;
             })
-          ]
         };
 
 
@@ -576,9 +576,11 @@ export async function registerRoutes(
             
               shipping_addresses: [
                 {
-                  ...billingAddressWithCompany,
-                  shipping_cost_ex_tax: isPickup ? 0 : 35,
-                  shipping_cost_inc_tax: isPickup ? 0 : 35
+                ...billingAddressWithCompany,
+                company: billingAddressWithCompany.company,
+                shipping_method: isPickup ? "Store Pickup" : "Flat Rate",
+                shipping_cost_ex_tax: isPickup ? 0 : 35,
+                shipping_cost_inc_tax: isPickup ? 0 : 35
                 }
               ],
             
@@ -599,7 +601,6 @@ export async function registerRoutes(
                 
                   return productData;
                 })
-              ]
             };
 
 
@@ -797,9 +798,11 @@ export async function registerRoutes(
         
           shipping_addresses: [
             {
-              ...billingAddressWithCompany,
-              shipping_cost_ex_tax: isPickup ? 0 : 35,
-              shipping_cost_inc_tax: isPickup ? 0 : 35
+            ...billingAddressWithCompany,
+            company: billingAddressWithCompany.company,
+            shipping_method: isPickup ? "Store Pickup" : "Flat Rate",
+            shipping_cost_ex_tax: isPickup ? 0 : 35,
+            shipping_cost_inc_tax: isPickup ? 0 : 35
             }
           ],
         
@@ -820,7 +823,6 @@ export async function registerRoutes(
             
               return productData;
             })
-          ]
         };
 
 
