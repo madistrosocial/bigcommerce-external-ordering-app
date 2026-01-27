@@ -328,6 +328,35 @@ export default function Cart() {
               <div>
                 <Label className="text-xs font-medium text-slate-500 mb-2 block">Shipping Address</Label>
                 <div className="space-y-2">
+
+                  <Label>Shipping Method</Label>
+                
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="shippingMethod"
+                        value="pickup"
+                        checked={shippingMethod === 'pickup'}
+                        onChange={() => setShippingMethod('pickup')}
+                      />
+                      <span>Store Pickup</span>
+                      <span className="ml-auto font-medium">$0.00</span>
+                    </label>
+                
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="shippingMethod"
+                        value="flat"
+                        checked={shippingMethod === 'flat'}
+                        onChange={() => setShippingMethod('flat')}
+                      />
+                      <span>Flat Rate Shipping</span>
+                      <span className="ml-auto font-medium">$35.00</span>
+                    </label>
+                  </div>
+
                   {customerAddresses.map(addr => (
                     <Card 
                       key={addr.id}
