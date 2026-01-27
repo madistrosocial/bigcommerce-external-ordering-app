@@ -650,7 +650,7 @@ export async function registerRoutes(
       const nameParts = order.customer_name.trim().split(/\s+/);
       const firstName = nameParts[0] || "Customer";
       const lastName = nameParts.slice(1).join(" ") || "Customer";
-
+/*
       // Prepare BigCommerce order data using v2 API format
       const bcOrderData = {
         status_id: 1, // Pending
@@ -687,7 +687,44 @@ export async function registerRoutes(
           return productData;
         })
       };
+*/
+      const billingAddressWithCompany = {
+        ...order.billing_address,
+        company:
+          order.billing_address.company ||
+          order.customer_company ||
+          ""
+      };
+      
+      const bcOrderData = {
+        status_id: 1,
+        customer_id: order.bigcommerce_customer_id || 0,
+        billing_address: billingAddressWithCompany,
+        staff_notes: order.order_note || undefined,
+        products: (order.items as any[]).map(item => {
+          const productData: any = {
+            product_id: item.bigcommerce_product_id,
+            quantity: item.quantity,
+            price_inc_tax: parseFloat(item.price_at_sale),
+            price_ex_tax: parseFloat(item.price_at_sale)
+          };
+      
+          if (
+            item.variant_option_values &&
+            Array.isArray(item.variant_option_values) &&
+            item.variant_option_values.length > 0
+          ) {
+            productData.product_options = item.variant_option_values.map((ov: any) => ({
+              id: ov.option_id,
+              value: String(ov.id)
+            }));
+          }
+      
+          return productData;
+        })
+      };
 
+      
       console.log('Creating BigCommerce order:', JSON.stringify(bcOrderData, null, 2));
 
       // Use v2 Orders API for creation
