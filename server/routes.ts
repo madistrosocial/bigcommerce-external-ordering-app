@@ -341,42 +341,52 @@ export async function registerRoutes(
               ""
           };
 
-        const isPickup = order.shipping_method === 'pickup';
-        
-        const bcOrderData = {
-          status_id: 1,
-          customer_id: order.bigcommerce_customer_id || 0,
-          billing_address: billingAddressWithCompany,
-          staff_notes: order.order_note || undefined,
-        
-          shipping_addresses: [
-            {
-              ...billingAddressWithCompany,
-              company: billingAddressWithCompany.company,
-              shipping_method: isPickup ? "Store Pickup" : "Flat Rate",
-              shipping_cost_ex_tax: isPickup ? 0 : 35,
-              shipping_cost_inc_tax: isPickup ? 0 : 35
-            }
-          ],
-        
-          products: (order.items as any[]).map(item => {
+
+        const shippingLineItem = isPickup
+        ? { name: "Store Pickup", price: 0 }
+        : { name: "Flat Rate Shipping", price: 35 };
+      
+      const bcOrderData = {
+        status_id: 1,
+        customer_id: order.bigcommerce_customer_id || 0,
+        billing_address: billingAddressWithCompany,
+        staff_notes: order.order_note || undefined,
+      
+        shipping_addresses: [
+          {
+            ...billingAddressWithCompany,
+            company: billingAddressWithCompany.company
+          }
+        ],
+      
+        products: [
+          ...(order.items as any[]).map(item => {
             const productData: any = {
               product_id: item.bigcommerce_product_id,
               quantity: item.quantity,
               price_inc_tax: parseFloat(item.price_at_sale),
               price_ex_tax: parseFloat(item.price_at_sale)
             };
-        
+      
             if (item.variant_option_values?.length) {
               productData.product_options = item.variant_option_values.map((ov: any) => ({
                 id: ov.option_id,
                 value: String(ov.id)
               }));
             }
-        
+      
             return productData;
-          })
-        };
+          }),
+      
+          {
+            name: shippingLineItem.name,
+            quantity: 1,
+            price_inc_tax: shippingLineItem.price,
+            price_ex_tax: shippingLineItem.price
+          }
+        ]
+      };
+
 
             
             const response = await fetch(
@@ -552,42 +562,55 @@ export async function registerRoutes(
                 ""
             };
 
+
+
+
             const isPickup = updatedOrder!.shipping_method === "pickup";
 
-        
-        const bcOrderData = {
-          status_id: 1,
-          customer_id: bigcommerce_customer_id || 0,
-          billing_address: billingAddressWithCompany,
-          staff_notes: updatedOrder!.order_note || undefined,
-        
-          shipping_addresses: [
-            {
-              ...billingAddressWithCompany,
-              shipping_method: isPickup ? "Store Pickup" : "Flat Rate",
-              shipping_cost_ex_tax: isPickup ? 0 : 35,
-              shipping_cost_inc_tax: isPickup ? 0 : 35
-            }
-          ],
-        
-          products: (updatedOrder!.items as any[]).map(item => {
-            const productData: any = {
-              product_id: item.bigcommerce_product_id,
-              quantity: item.quantity,
-              price_inc_tax: parseFloat(item.price_at_sale),
-              price_ex_tax: parseFloat(item.price_at_sale)
+            const shippingLineItem = isPickup
+              ? { name: "Store Pickup", price: 0 }
+              : { name: "Flat Rate Shipping", price: 35 };
+            
+            const bcOrderData = {
+              status_id: 1,
+              customer_id: bigcommerce_customer_id || 0,
+              billing_address: billingAddressWithCompany,
+              staff_notes: updatedOrder!.order_note || undefined,
+            
+              shipping_addresses: [
+                {
+                  ...billingAddressWithCompany
+                }
+              ],
+            
+              products: [
+                ...(updatedOrder!.items as any[]).map(item => {
+                  const productData: any = {
+                    product_id: item.bigcommerce_product_id,
+                    quantity: item.quantity,
+                    price_inc_tax: parseFloat(item.price_at_sale),
+                    price_ex_tax: parseFloat(item.price_at_sale)
+                  };
+            
+                  if (item.variant_option_values?.length) {
+                    productData.product_options = item.variant_option_values.map((ov: any) => ({
+                      id: ov.option_id,
+                      value: String(ov.id)
+                    }));
+                  }
+            
+                  return productData;
+                }),
+            
+                {
+                  name: shippingLineItem.name,
+                  quantity: 1,
+                  price_inc_tax: shippingLineItem.price,
+                  price_ex_tax: shippingLineItem.price
+                }
+              ]
             };
-        
-            if (item.variant_option_values?.length) {
-              productData.product_options = item.variant_option_values.map((ov: any) => ({
-                id: ov.option_id,
-                value: String(ov.id)
-              }));
-            }
-        
-            return productData;
-          })
-        };
+
 
 
             /*
@@ -760,7 +783,6 @@ export async function registerRoutes(
         })
       };
 */
-        const isPickup = order.shipping_method === "pickup";
         
         const billingAddressWithCompany = {
           ...order.billing_address,
@@ -770,6 +792,12 @@ export async function registerRoutes(
             ""
         };
         
+        const isPickup = order.shipping_method === "pickup";
+        
+        const shippingLineItem = isPickup
+          ? { name: "Store Pickup", price: 0 }
+          : { name: "Flat Rate Shipping", price: 35 };
+        
         const bcOrderData = {
           status_id: 1,
           customer_id: order.bigcommerce_customer_id || 0,
@@ -778,31 +806,38 @@ export async function registerRoutes(
         
           shipping_addresses: [
             {
-              ...billingAddressWithCompany,
-              shipping_method: isPickup ? "Store Pickup" : "Flat Rate",
-              shipping_cost_ex_tax: isPickup ? 0 : 35,
-              shipping_cost_inc_tax: isPickup ? 0 : 35
+              ...billingAddressWithCompany
             }
           ],
         
-          products: (order.items as any[]).map(item => {
-            const productData: any = {
-              product_id: item.bigcommerce_product_id,
-              quantity: item.quantity,
-              price_inc_tax: parseFloat(item.price_at_sale),
-              price_ex_tax: parseFloat(item.price_at_sale)
-            };
+          products: [
+            ...(order.items as any[]).map(item => {
+              const productData: any = {
+                product_id: item.bigcommerce_product_id,
+                quantity: item.quantity,
+                price_inc_tax: parseFloat(item.price_at_sale),
+                price_ex_tax: parseFloat(item.price_at_sale)
+              };
         
-            if (item.variant_option_values?.length) {
-              productData.product_options = item.variant_option_values.map((ov: any) => ({
-                id: ov.option_id,
-                value: String(ov.id)
-              }));
+              if (item.variant_option_values?.length) {
+                productData.product_options = item.variant_option_values.map((ov: any) => ({
+                  id: ov.option_id,
+                  value: String(ov.id)
+                }));
+              }
+        
+              return productData;
+            }),
+        
+            {
+              name: shippingLineItem.name,
+              quantity: 1,
+              price_inc_tax: shippingLineItem.price,
+              price_ex_tax: shippingLineItem.price
             }
-        
-            return productData;
-          })
+          ]
         };
+
 
 
 
