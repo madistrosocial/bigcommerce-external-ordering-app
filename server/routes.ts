@@ -519,6 +519,44 @@ export async function registerRoutes(
         
         if (storeHash && token) {
           try {
+
+            const billingAddressWithCompany = {
+              ...billing_address,
+              company:
+                billing_address.company ||
+                updatedOrder!.customer_company ||
+                ""
+            };
+            
+            const bcOrderData = {
+              status_id: 1,
+              customer_id: bigcommerce_customer_id || 0,
+              billing_address: billingAddressWithCompany,
+              staff_notes: updatedOrder!.order_note || undefined,
+              products: (updatedOrder!.items as any[]).map(item => {
+                const productData: any = {
+                  product_id: item.bigcommerce_product_id,
+                  quantity: item.quantity,
+                  price_inc_tax: parseFloat(item.price_at_sale),
+                  price_ex_tax: parseFloat(item.price_at_sale)
+                };
+            
+                if (
+                  item.variant_option_values &&
+                  Array.isArray(item.variant_option_values) &&
+                  item.variant_option_values.length > 0
+                ) {
+                  productData.product_options = item.variant_option_values.map((ov: any) => ({
+                    id: ov.option_id,
+                    value: String(ov.id)
+                  }));
+                }
+            
+                return productData;
+              })
+            };
+
+            /*
             const bcOrderData = {
               status_id: 1,
               customer_id: bigcommerce_customer_id || 0,
@@ -540,6 +578,7 @@ export async function registerRoutes(
                 return productData;
               })
             };
+            */
             
             const response = await fetch(
               `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
