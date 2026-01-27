@@ -333,7 +333,14 @@ export async function registerRoutes(
             const firstName = nameParts[0] || "Customer";
             const lastName = nameParts.slice(1).join(" ") || "Customer";
 
-            
+        const billingAddressWithCompany = {
+            ...order.billing_address,
+            company:
+              order.billing_address.company ||
+              order.customer_company ||
+              ""
+          };
+
         const isPickup = order.shipping_method === 'pickup';
         
         const bcOrderData = {
@@ -544,34 +551,44 @@ export async function registerRoutes(
                 updatedOrder!.customer_company ||
                 ""
             };
-            
-            const bcOrderData = {
-              status_id: 1,
-              customer_id: bigcommerce_customer_id || 0,
-              billing_address: billingAddressWithCompany,
-              staff_notes: updatedOrder!.order_note || undefined,
-              products: (updatedOrder!.items as any[]).map(item => {
-                const productData: any = {
-                  product_id: item.bigcommerce_product_id,
-                  quantity: item.quantity,
-                  price_inc_tax: parseFloat(item.price_at_sale),
-                  price_ex_tax: parseFloat(item.price_at_sale)
-                };
-            
-                if (
-                  item.variant_option_values &&
-                  Array.isArray(item.variant_option_values) &&
-                  item.variant_option_values.length > 0
-                ) {
-                  productData.product_options = item.variant_option_values.map((ov: any) => ({
-                    id: ov.option_id,
-                    value: String(ov.id)
-                  }));
-                }
-            
-                return productData;
-              })
+
+            const isPickup = updatedOrder!.shipping_method === "pickup";
+
+        
+        const bcOrderData = {
+          status_id: 1,
+          customer_id: bigcommerce_customer_id || 0,
+          billing_address: billingAddressWithCompany,
+          staff_notes: updatedOrder!.order_note || undefined,
+        
+          shipping_addresses: [
+            {
+              ...billingAddressWithCompany,
+              shipping_method: isPickup ? "Store Pickup" : "Flat Rate",
+              shipping_cost_ex_tax: isPickup ? 0 : 35,
+              shipping_cost_inc_tax: isPickup ? 0 : 35
+            }
+          ],
+        
+          products: (updatedOrder!.items as any[]).map(item => {
+            const productData: any = {
+              product_id: item.bigcommerce_product_id,
+              quantity: item.quantity,
+              price_inc_tax: parseFloat(item.price_at_sale),
+              price_ex_tax: parseFloat(item.price_at_sale)
             };
+        
+            if (item.variant_option_values?.length) {
+              productData.product_options = item.variant_option_values.map((ov: any) => ({
+                id: ov.option_id,
+                value: String(ov.id)
+              }));
+            }
+        
+            return productData;
+          })
+        };
+
 
             /*
             const bcOrderData = {
@@ -704,8 +721,7 @@ export async function registerRoutes(
 
       // Split customer name into first and last name
       const nameParts = order.customer_name.trim().split(/\s+/);
-      const firstName = nameParts[0] || "Customer";
-      const lastName = nameParts.slice(1).join(" ") || "Customer";
+
 /*
       // Prepare BigCommerce order data using v2 API format
       const bcOrderData = {
@@ -744,41 +760,51 @@ export async function registerRoutes(
         })
       };
 */
-      const billingAddressWithCompany = {
-        ...order.billing_address,
-        company:
-          order.billing_address.company ||
-          order.customer_company ||
-          ""
-      };
-      
-      const bcOrderData = {
-        status_id: 1,
-        customer_id: order.bigcommerce_customer_id || 0,
-        billing_address: billingAddressWithCompany,
-        staff_notes: order.order_note || undefined,
-        products: (order.items as any[]).map(item => {
-          const productData: any = {
-            product_id: item.bigcommerce_product_id,
-            quantity: item.quantity,
-            price_inc_tax: parseFloat(item.price_at_sale),
-            price_ex_tax: parseFloat(item.price_at_sale)
-          };
-      
-          if (
-            item.variant_option_values &&
-            Array.isArray(item.variant_option_values) &&
-            item.variant_option_values.length > 0
-          ) {
-            productData.product_options = item.variant_option_values.map((ov: any) => ({
-              id: ov.option_id,
-              value: String(ov.id)
-            }));
-          }
-      
-          return productData;
-        })
-      };
+        const isPickup = order.shipping_method === "pickup";
+        
+        const billingAddressWithCompany = {
+          ...order.billing_address,
+          company:
+            order.billing_address.company ||
+            order.customer_company ||
+            ""
+        };
+        
+        const bcOrderData = {
+          status_id: 1,
+          customer_id: order.bigcommerce_customer_id || 0,
+          billing_address: billingAddressWithCompany,
+          staff_notes: order.order_note || undefined,
+        
+          shipping_addresses: [
+            {
+              ...billingAddressWithCompany,
+              shipping_method: isPickup ? "Store Pickup" : "Flat Rate",
+              shipping_cost_ex_tax: isPickup ? 0 : 35,
+              shipping_cost_inc_tax: isPickup ? 0 : 35
+            }
+          ],
+        
+          products: (order.items as any[]).map(item => {
+            const productData: any = {
+              product_id: item.bigcommerce_product_id,
+              quantity: item.quantity,
+              price_inc_tax: parseFloat(item.price_at_sale),
+              price_ex_tax: parseFloat(item.price_at_sale)
+            };
+        
+            if (item.variant_option_values?.length) {
+              productData.product_options = item.variant_option_values.map((ov: any) => ({
+                id: ov.option_id,
+                value: String(ov.id)
+              }));
+            }
+        
+            return productData;
+          })
+        };
+
+
 
       
       console.log('Creating BigCommerce order:', JSON.stringify(bcOrderData, null, 2));
