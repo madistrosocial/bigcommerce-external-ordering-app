@@ -27,9 +27,6 @@ export default function Cart() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  
-  const [shippingMethod, setShippingMethod] = useState<"pickup" | "flat">("flat");
-
 
   const total = getCartTotal();
 
@@ -139,7 +136,6 @@ export default function Cart() {
       status: 'pending_sync' as const,
       bigcommerce_customer_id: selectedCustomer.id,
       billing_address: billingAddress,
-      shipping_method: shippingMethod,
       order_note: orderNote || undefined,
       items: cart.map(item => ({
         product_id: item.product.id,
@@ -202,7 +198,6 @@ export default function Cart() {
       customer_name: manualCustomerName.trim(),
       customer_email: manualCustomerEmail.trim() || undefined,
       status: 'draft' as const,
-      shipping_method: shippingMethod,
       order_note: [orderNote, manualCustomerNote].filter(Boolean).join(' | ') || undefined,
       items: cart.map(item => ({
         product_id: item.product.id,
@@ -333,35 +328,6 @@ export default function Cart() {
               <div>
                 <Label className="text-xs font-medium text-slate-500 mb-2 block">Shipping Address</Label>
                 <div className="space-y-2">
-
-                  <Label>Shipping Method</Label>
-                
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="shippingMethod"
-                        value="pickup"
-                        checked={shippingMethod === 'pickup'}
-                        onChange={() => setShippingMethod('pickup')}
-                      />
-                      <span>Store Pickup</span>
-                      <span className="ml-auto font-medium">$0.00</span>
-                    </label>
-                
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="shippingMethod"
-                        value="flat"
-                        checked={shippingMethod === 'flat'}
-                        onChange={() => setShippingMethod('flat')}
-                      />
-                      <span>Flat Rate Shipping</span>
-                      <span className="ml-auto font-medium">$35.00</span>
-                    </label>
-                  </div>
-
                   {customerAddresses.map(addr => (
                     <Card 
                       key={addr.id}
@@ -429,7 +395,6 @@ export default function Cart() {
           </div>
         )}
 
-        
         <div>
           <Label className="text-xs font-medium text-slate-500 mb-1 block">Order Note</Label>
           <Textarea 
