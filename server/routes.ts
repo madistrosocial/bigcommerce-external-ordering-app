@@ -5,6 +5,9 @@ import { insertProductSchema, insertOrderSchema, type InsertProduct, type Insert
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 
+import { requireAuth, requireRole } from "./middleware/auth";
+
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -195,15 +198,17 @@ export async function registerRoutes(
   });
 
   // Get all users
-  app.get("/api/users", async (req, res) => {
-    try {
+  app.get(
+    "/api/users",
+    requireAuth,
+    requireRole("admin"),
+    async (req, res) => {
       const allUsers = await storage.getAllUsers();
-      const safeUsers = allUsers.map(({ password, ...user }) => user);
+      const safeUsers = allUsers.map(({ password, ...u }) => u);
       res.json(safeUsers);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
     }
-  });
+  );
+
 
   // Create user (admin only)
   app.post("/api/users", async (req, res) => {
