@@ -17,61 +17,53 @@ import { useStore } from "@/lib/store";
 
 
 function ProtectedRoute({
-    component: Component,
-    role,
-  }: {
-    component: React.ComponentType;
-    role?: "admin" | "agent";
-  }) {
-    const { currentUser } = useStore();
-  
-    if (!currentUser) {
-      return <Redirect to="/" />;
-    }
-  
-    if (role && currentUser.role !== role) {
-      return <Redirect to="/" />;
-    }
-  
-    return <Component />;
+  component: Component,
+  role,
+}: {
+  component: React.ComponentType;
+  role?: "admin" | "agent";
+}) {
+  const { currentUser } = useStore();
+
+  // Not logged in → go to Login ("/")
+  if (!currentUser) {
+    return <Redirect to="/" />;
+  }
+
+  // Logged in but wrong role
+  if (role && currentUser.role !== role) {
+    return <Redirect to="/" />;
+  }
+
+  return <Component />;
 }
 
 function Router() {
   return (
     <Switch>
-      {/* Public */}
       <Route path="/" component={Login} />
 
-      {/* Admin */}
       <Route path="/admin">
-        <ProtectedRoute role="admin">
-          <AdminDashboard />
-        </ProtectedRoute>
+        <ProtectedRoute component={AdminDashboard} role="admin" />
       </Route>
 
-      {/* Agent */}
       <Route path="/catalog">
-        <ProtectedRoute role="agent">
-          <Catalog />
-        </ProtectedRoute>
+        <ProtectedRoute component={Catalog} role="agent" />
       </Route>
 
       <Route path="/cart">
-        <ProtectedRoute role="agent">
-          <Cart />
-        </ProtectedRoute>
+        <ProtectedRoute component={Cart} role="agent" />
       </Route>
 
       <Route path="/orders">
-        <ProtectedRoute role="agent">
-          <Orders />
-        </ProtectedRoute>
+        <ProtectedRoute component={Orders} role="agent" />
       </Route>
 
       <Route component={NotFound} />
     </Switch>
   );
 }
+
 
 
 function App() {
