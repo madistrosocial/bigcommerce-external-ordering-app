@@ -4,6 +4,14 @@ import { storage } from "../storage";
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const userId = req.headers["x-user-id"];
 
+  function requireAuth(req, res, next) {
+    if (!req.session.user) {
+      return res.redirect("/");
+    }
+    next();
+  }
+
+
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized" });
   }
