@@ -16,27 +16,31 @@ import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { useStore } from "@/lib/store";
 
 
+import { Redirect } from "wouter";
+import { useStore } from "@/lib/store";
+
 function ProtectedRoute({
   component: Component,
   role,
-}: {
-  component: React.ComponentType;
-  role?: "admin" | "agent";
-}) {
-  const { currentUser } = useStore();
-
-  // Not logged in → go to Login ("/")
-  if (!currentUser) {
-    return <Redirect to="/" />;
-  }
-
-  // Logged in but wrong role
-  if (role && currentUser.role !== role) {
-    return <Redirect to="/" />;
-  }
-
-  return <Component />;
+  }: {
+    component: React.ComponentType;
+    role?: "admin" | "agent";
+  }) {
+    const { currentUser } = useStore();
+  
+    // Not logged in → go to Login ("/")
+    if (!currentUser) {
+      return <Redirect to="/" />;
+    }
+  
+    // Logged in but wrong role
+    if (role && currentUser.role !== role) {
+      return <Redirect to="/" />;
+    }
+  
+    return <Component />;
 }
+
 
 function Router() {
   return (
