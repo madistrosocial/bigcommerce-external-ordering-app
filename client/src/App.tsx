@@ -11,18 +11,45 @@ import Cart from "@/pages/agent/Cart";
 import Orders from "@/pages/agent/Orders";
 import NotFound from "@/pages/not-found";
 
+import ProtectedRoute from "@/components/auth/ProtectedRoute";
+
 function Router() {
   return (
     <Switch>
+      {/* Public */}
       <Route path="/" component={Login} />
-      <Route path="/admin" component={AdminDashboard} />
-      <Route path="/catalog" component={Catalog} />
-      <Route path="/cart" component={Cart} />
-      <Route path="/orders" component={Orders} />
+
+      {/* Admin */}
+      <Route path="/admin">
+        <ProtectedRoute role="admin">
+          <AdminDashboard />
+        </ProtectedRoute>
+      </Route>
+
+      {/* Agent */}
+      <Route path="/catalog">
+        <ProtectedRoute role="agent">
+          <Catalog />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/cart">
+        <ProtectedRoute role="agent">
+          <Cart />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/orders">
+        <ProtectedRoute role="agent">
+          <Orders />
+        </ProtectedRoute>
+      </Route>
+
       <Route component={NotFound} />
     </Switch>
   );
 }
+
 
 function App() {
   return (
