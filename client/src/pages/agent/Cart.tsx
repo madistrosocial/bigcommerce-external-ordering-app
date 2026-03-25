@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 
 export default function Cart() {
-  const { cart, removeFromCart, updateCartQuantity, clearCart, getCartTotal, currentUser, isOfflineMode, setOfflineMode } = useStore();
+  const { cart, removeFromCartAtIndex, updateCartQuantityAtIndex, clearCart, getCartTotal, currentUser, isOfflineMode, setOfflineMode } = useStore();
   const [customerSearch, setCustomerSearch] = useState("");
   const [searchResults, setSearchResults] = useState<api.BigCommerceCustomer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<api.BigCommerceCustomer | null>(null);
@@ -408,7 +408,7 @@ export default function Cart() {
         
         <div className="space-y-3">
           {cart.map((item, idx) => (
-            <Card key={`${item.product.id}-${item.variant?.id || idx}`} className="p-3 flex gap-3 items-center">
+            <Card key={item.lineId} className="p-3 flex gap-3 items-center">
               <img src={item.product.image} className="h-12 w-12 object-cover rounded" alt="" />
               <div className="flex-1 min-w-0">
                 <h4 className="font-semibold text-sm leading-tight line-clamp-2">{item.product.name}</h4>
@@ -429,10 +429,10 @@ export default function Cart() {
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantity(item.product.id, -1, item.variant?.id)}><Minus className="h-3 w-3"/></Button>
+                <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantityAtIndex(idx, -1)}><Minus className="h-3 w-3"/></Button>
                 <span className="text-sm w-6 text-center">{item.quantity}</span>
-                <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantity(item.product.id, 1, item.variant?.id)}><Plus className="h-3 w-3"/></Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => removeFromCart(item.product.id, item.variant?.id)}><Trash2 className="h-4 w-4"/></Button>
+                <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantityAtIndex(idx, 1)}><Plus className="h-3 w-3"/></Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => removeFromCartAtIndex(idx)}><Trash2 className="h-4 w-4"/></Button>
               </div>
             </Card>
           ))}

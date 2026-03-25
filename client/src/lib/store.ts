@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { User, Product } from './api';
 
 export interface CartItem {
+  lineId: string;
   product: Product;
   variant?: any;
   quantity: number;
@@ -29,10 +30,16 @@ interface AppState {
     discountType?: 'free' | 'percent' | null,
     discountValue?: number | null
   ) => void;
+  removeFromCartAtIndex: (index: number) => void;
+  updateCartQuantityAtIndex: (index: number, delta: number) => void;
   removeFromCart: (productId: number, variantId?: number) => void;
   updateCartQuantity: (productId: number, delta: number, variantId?: number) => void;
   clearCart: () => void;
   getCartTotal: () => number;
+}
+
+function makeLineId() {
+  return Math.random().toString(36).slice(2, 10);
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -58,15 +65,17 @@ export const useStore = create<AppState>((set, get) => ({
     const resolvedOriginal = originalPrice ?? rawPrice;
     const resolvedPrice = priceAtSale ?? rawPrice;
 
+    // Only merge into an existing line if product, variant AND price all match
     const existing = state.cart.find(item =>
       item.product.id === product.id &&
-      (!variant || item.variant?.id === variant.id)
+      (!variant || item.variant?.id === variant.id) &&
+      item.price_at_sale === resolvedPrice
     );
 
     if (existing) {
       return {
         cart: state.cart.map(item =>
-          item.product.id === product.id && (!variant || item.variant?.id === variant.id)
+          item.lineId === existing.lineId
             ? { ...item, quantity: item.quantity + quantity }
             : item
         )
@@ -77,6 +86,7 @@ export const useStore = create<AppState>((set, get) => ({
       cart: [
         ...state.cart,
         {
+          lineId: makeLineId(),
           product,
           quantity,
           variant,
@@ -89,6 +99,19 @@ export const useStore = create<AppState>((set, get) => ({
     };
   }),
 
+  removeFromCartAtIndex: (index) => set((state) => ({
+    cart: state.cart.filter((_, i) => i !== index)
+  })),
+
+  updateCartQuantityAtIndex: (index, delta) => set((state) => ({
+    cart: state.cart
+      .map((item, i) =>
+        i === index ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item
+      )
+      .filter(item => item.quantity > 0)
+  })),
+
+  // Legacy helpers kept for any code that still uses them
   updateCartQuantity: (productId, delta, variantId) => set((state) => ({
     cart: state.cart.map(item =>
       item.product.id === productId && (!variantId || item.variant?.id === variantId)
