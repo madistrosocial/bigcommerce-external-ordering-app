@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertProductSchema, insertOrderSchema, type InsertProduct, type InsertOrder } from "@shared/schema";
@@ -9,11 +9,49 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  
+
+  // ===== AUTH MIDDLEWARE =====
+
+  /**
+   * Reads x-user-id from the request header, looks up the user in the DB,
+   * and verifies the account is active. Attaches the user to req as (req as any).authUser.
+   */
+  const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.headers['x-user-id'];
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+    const user = await storage.getUser(parseInt(userId as string)).catch(() => null);
+    if (!user || !user.is_enabled) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    (req as any).authUser = user;
+    next();
+  };
+
+  /**
+   * Extends requireAuth — additionally verifies the caller has role === 'admin'.
+   */
+  const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.headers['x-user-id'];
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+    const user = await storage.getUser(parseInt(userId as string)).catch(() => null);
+    if (!user || !user.is_enabled) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    if (user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    (req as any).authUser = user;
+    next();
+  };
+
   // ===== PRODUCT ROUTES =====
   
   // Get all products (for admin view)
-  app.get("/api/products", async (req, res) => {
+  app.get("/api/products", requireAdmin, async (req, res) => {
     try {
       const products = await storage.getAllProducts();
       res.json(products);
@@ -33,7 +71,7 @@ export async function registerRoutes(
   });
 
   // Create/Import product from BigCommerce search
-  app.post("/api/products", async (req, res) => {
+  app.post("/api/products", requireAdmin, async (req, res) => {
     try {
       const productData = insertProductSchema.parse(req.body) as InsertProduct;
       
@@ -55,7 +93,7 @@ export async function registerRoutes(
   });
 
   // Toggle product pin status
-  app.patch("/api/products/:id/pin", async (req, res) => {
+  app.patch("/api/products/:id/pin", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { is_pinned } = req.body;
@@ -68,7 +106,7 @@ export async function registerRoutes(
   });
 
   // Re-sync all pinned products from BigCommerce
-  app.post("/api/products/resync", async (req, res) => {
+  app.post("/api/products/resync", requireAdmin, async (req, res) => {
     try {
       const pinnedProducts = await storage.getPinnedProducts();
       
@@ -173,7 +211,7 @@ export async function registerRoutes(
   // ===== USER ROUTES =====
   
   // Get all agents (for admin user management)
-  app.get("/api/users/agents", async (req, res) => {
+  app.get("/api/users/agents", requireAdmin, async (req, res) => {
     try {
       const agents = await storage.getAllAgents();
       const safeAgents = agents.map(({ password, ...user }) => user);
@@ -184,7 +222,7 @@ export async function registerRoutes(
   });
 
   // Get all admins
-  app.get("/api/users/admins", async (req, res) => {
+  app.get("/api/users/admins", requireAdmin, async (req, res) => {
     try {
       const admins = await storage.getAllAdmins();
       const safeAdmins = admins.map(({ password, ...user }) => user);
@@ -195,7 +233,7 @@ export async function registerRoutes(
   });
 
   // Get all users
-  app.get("/api/users", async (req, res) => {
+  app.get("/api/users", requireAdmin, async (req, res) => {
     try {
       const allUsers = await storage.getAllUsers();
       const safeUsers = allUsers.map(({ password, ...user }) => user);
@@ -206,7 +244,7 @@ export async function registerRoutes(
   });
 
   // Create user (admin only)
-  app.post("/api/users", async (req, res) => {
+  app.post("/api/users", requireAdmin, async (req, res) => {
     try {
       const { username, password, name, role } = req.body;
       
@@ -239,7 +277,7 @@ export async function registerRoutes(
   });
 
   // Update user enabled status
-  app.patch("/api/users/:id/status", async (req, res) => {
+  app.patch("/api/users/:id/status", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { is_enabled } = req.body;
@@ -252,7 +290,7 @@ export async function registerRoutes(
   });
 
   // Update user BigCommerce search permission
-  app.patch("/api/users/:id/permission", async (req, res) => {
+  app.patch("/api/users/:id/permission", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { allow_bigcommerce_search } = req.body;
@@ -298,7 +336,7 @@ export async function registerRoutes(
   // ===== ORDER ROUTES =====
   
   // Create order with immediate sync attempt
-  app.post("/api/orders", async (req, res) => {
+  app.post("/api/orders", requireAuth, async (req, res) => {
     try {
       // Parse and create order with status 'pending_sync'
       const orderData = insertOrderSchema.parse(req.body) as InsertOrder;
@@ -436,7 +474,7 @@ export async function registerRoutes(
   });
 
   // Get orders by user
-  app.get("/api/orders/user/:userId", async (req, res) => {
+  app.get("/api/orders/user/:userId", requireAuth, async (req, res) => {
     try {
       const userId = parseInt(req.params.userId);
       const orders = await storage.getOrdersByUser(userId);
@@ -446,7 +484,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/orders/pending", async (req, res) => {
+  app.get("/api/orders/pending", requireAuth, async (req, res) => {
     try {
       const orders = await storage.getPendingSyncOrders();
       res.json(orders);
@@ -455,7 +493,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/orders/drafts", async (req, res) => {
+  app.get("/api/orders/drafts", requireAuth, async (req, res) => {
     try {
       const drafts = await storage.getDraftOrders();
       res.json(drafts);
@@ -465,7 +503,7 @@ export async function registerRoutes(
   });
 
   // Create draft order (for offline mode)
-  app.post("/api/orders/draft", async (req, res) => {
+  app.post("/api/orders/draft", requireAuth, async (req, res) => {
     try {
       const orderData = insertOrderSchema.parse(req.body) as InsertOrder;
       orderData.status = 'draft';
@@ -477,7 +515,7 @@ export async function registerRoutes(
   });
 
   // Submit draft order (when back online)
-  app.post("/api/orders/:id/submit-draft", async (req, res) => {
+  app.post("/api/orders/:id/submit-draft", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { bigcommerce_customer_id, billing_address } = req.body;
@@ -622,7 +660,7 @@ export async function registerRoutes(
   });
 
   // Sync order to BigCommerce
-  app.post("/api/orders/:id/sync", async (req, res) => {
+  app.post("/api/orders/:id/sync", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const order = await storage.getOrder(id);
@@ -887,7 +925,7 @@ export async function registerRoutes(
   });
 
   // BigCommerce proxy for products (admin use)
-  app.get("/api/bigcommerce/products/search", async (req, res) => {
+  app.get("/api/bigcommerce/products/search", requireAdmin, async (req, res) => {
     try {
       const { query } = req.query;
       
@@ -958,7 +996,7 @@ export async function registerRoutes(
   });
 
   // BigCommerce customer search
-  app.get("/api/bigcommerce/customers/search", async (req, res) => {
+  app.get("/api/bigcommerce/customers/search", requireAuth, async (req, res) => {
     try {
       const { query } = req.query;
       if (!query) {
@@ -1018,7 +1056,7 @@ export async function registerRoutes(
   });
 
   // Get BigCommerce customer addresses
-  app.get("/api/bigcommerce/customers/:customerId/addresses", async (req, res) => {
+  app.get("/api/bigcommerce/customers/:customerId/addresses", requireAuth, async (req, res) => {
     try {
       const { customerId } = req.params;
 
@@ -1077,7 +1115,7 @@ export async function registerRoutes(
   });
 
   // ===== SETTINGS ROUTES =====
-  app.get("/api/settings/:key", async (req, res) => {
+  app.get("/api/settings/:key", requireAuth, async (req, res) => {
     try {
       const setting = await storage.getSetting(req.params.key);
       res.json(setting || { key: req.params.key, value: null });
@@ -1086,7 +1124,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/settings", async (req, res) => {
+  app.post("/api/settings", requireAdmin, async (req, res) => {
     try {
       const { key, value } = req.body;
       await storage.setSetting(key, value);

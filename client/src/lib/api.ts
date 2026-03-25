@@ -51,15 +51,40 @@ export interface Order {
 
 const API_BASE = '/api';
 
-// Products
+/**
+ * Returns auth headers derived from the session stored in localStorage.
+ * Every protected API call must include these headers so the backend can
+ * validate the caller without requiring a separate session cookie.
+ */
+function getAuthHeaders(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem('vansales_user');
+    if (!raw) return {};
+    const user = JSON.parse(raw);
+    if (!user?.id) return {};
+    return {
+      'x-user-id': String(user.id),
+      'x-user-role': user.role ?? ''
+    };
+  } catch {
+    return {};
+  }
+}
+
+// ─── Products ────────────────────────────────────────────────────────────────
+
 export async function getAllProducts(): Promise<Product[]> {
-  const res = await fetch(`${API_BASE}/products`);
+  const res = await fetch(`${API_BASE}/products`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error('Failed to fetch products');
   return res.json();
 }
 
 export async function getPinnedProducts(): Promise<Product[]> {
-  const res = await fetch(`${API_BASE}/products/pinned`);
+  const res = await fetch(`${API_BASE}/products/pinned`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error('Failed to fetch pinned products');
   return res.json();
 }
@@ -67,7 +92,7 @@ export async function getPinnedProducts(): Promise<Product[]> {
 export async function createProduct(product: Omit<Product, 'id'>): Promise<Product> {
   const res = await fetch(`${API_BASE}/products`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(product)
   });
   if (!res.ok) throw new Error('Failed to create product');
@@ -77,27 +102,43 @@ export async function createProduct(product: Omit<Product, 'id'>): Promise<Produ
 export async function toggleProductPin(id: number, is_pinned: boolean): Promise<void> {
   const res = await fetch(`${API_BASE}/products/${id}/pin`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ is_pinned })
   });
   if (!res.ok) throw new Error('Failed to update product pin');
 }
 
-// Users
+export async function resyncProducts(): Promise<{ updated: number; errors: number }> {
+  const res = await fetch(`${API_BASE}/products/resync`, {
+    method: 'POST',
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) throw new Error('Failed to resync products');
+  return res.json();
+}
+
+// ─── Users ────────────────────────────────────────────────────────────────────
+
 export async function getAllAgents(): Promise<User[]> {
-  const res = await fetch(`${API_BASE}/users/agents`);
+  const res = await fetch(`${API_BASE}/users/agents`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error('Failed to fetch agents');
   return res.json();
 }
 
 export async function getAllAdmins(): Promise<User[]> {
-  const res = await fetch(`${API_BASE}/users/admins`);
+  const res = await fetch(`${API_BASE}/users/admins`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error('Failed to fetch admins');
   return res.json();
 }
 
 export async function getAllUsers(): Promise<User[]> {
-  const res = await fetch(`${API_BASE}/users`);
+  const res = await fetch(`${API_BASE}/users`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error('Failed to fetch users');
   return res.json();
 }
@@ -105,7 +146,7 @@ export async function getAllUsers(): Promise<User[]> {
 export async function updateUserStatus(id: number, is_enabled: boolean): Promise<void> {
   const res = await fetch(`${API_BASE}/users/${id}/status`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ is_enabled })
   });
   if (!res.ok) throw new Error('Failed to update user status');
@@ -114,7 +155,7 @@ export async function updateUserStatus(id: number, is_enabled: boolean): Promise
 export async function updateUserPermission(id: number, allow_bigcommerce_search: boolean): Promise<void> {
   const res = await fetch(`${API_BASE}/users/${id}/permission`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ allow_bigcommerce_search })
   });
   if (!res.ok) throw new Error('Failed to update user permission');
@@ -134,7 +175,10 @@ export interface ProductListResult {
 export type AgentSearchResult = DirectVariantResult | ProductListResult;
 
 export async function agentBigCommerceSearch(query: string, userId: number): Promise<AgentSearchResult> {
-  const res = await fetch(`${API_BASE}/agent/bigcommerce/search?query=${encodeURIComponent(query)}&userId=${userId}`);
+  const res = await fetch(
+    `${API_BASE}/agent/bigcommerce/search?query=${encodeURIComponent(query)}&userId=${userId}`,
+    { headers: getAuthHeaders() }
+  );
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Search failed' }));
     throw new Error(error.error || 'BigCommerce search failed');
@@ -145,7 +189,7 @@ export async function agentBigCommerceSearch(query: string, userId: number): Pro
 export async function createUser(userData: any): Promise<User> {
   const res = await fetch(`${API_BASE}/users`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(userData)
   });
   if (!res.ok) {
@@ -154,6 +198,8 @@ export async function createUser(userData: any): Promise<User> {
   }
   return res.json();
 }
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export async function login(username: string, password: string): Promise<User> {
   const res = await fetch(`${API_BASE}/auth/login`, {
@@ -168,22 +214,16 @@ export async function login(username: string, password: string): Promise<User> {
   return res.json();
 }
 
-// Orders
+// ─── Orders ───────────────────────────────────────────────────────────────────
+
 export async function createOrder(order: Omit<Order, 'id' | 'date'>): Promise<{
   order: Order;
-  bigcommerce: {
-    success: boolean;
-    order_id?: number;
-    error?: string;
-  };
-  google_sheets: {
-    success: boolean;
-    error?: string;
-  };
+  bigcommerce: { success: boolean; order_id?: number; error?: string };
+  google_sheets: { success: boolean; error?: string };
 }> {
   const res = await fetch(`${API_BASE}/orders`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(order)
   });
   if (!res.ok) {
@@ -194,20 +234,25 @@ export async function createOrder(order: Omit<Order, 'id' | 'date'>): Promise<{
 }
 
 export async function getOrdersByUser(userId: number): Promise<Order[]> {
-  const res = await fetch(`${API_BASE}/orders/user/${userId}`);
+  const res = await fetch(`${API_BASE}/orders/user/${userId}`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error('Failed to fetch orders');
   return res.json();
 }
 
 export async function getPendingSyncOrders(): Promise<Order[]> {
-  const res = await fetch(`${API_BASE}/orders/pending`);
+  const res = await fetch(`${API_BASE}/orders/pending`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error('Failed to fetch pending orders');
   return res.json();
 }
 
 export async function syncOrder(id: number): Promise<{ success: boolean; bigcommerce_order_id: number }> {
   const res = await fetch(`${API_BASE}/orders/${id}/sync`, {
-    method: 'POST'
+    method: 'POST',
+    headers: getAuthHeaders()
   });
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({ error: 'Failed to sync order' }));
@@ -219,7 +264,7 @@ export async function syncOrder(id: number): Promise<{ success: boolean; bigcomm
 export async function createDraftOrder(order: Omit<Order, 'id' | 'date'>): Promise<Order> {
   const res = await fetch(`${API_BASE}/orders/draft`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(order)
   });
   if (!res.ok) {
@@ -239,7 +284,7 @@ export async function submitDraftOrder(orderId: number, customerData: {
 }> {
   const res = await fetch(`${API_BASE}/orders/${orderId}/submit-draft`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(customerData)
   });
   if (!res.ok) {
@@ -250,14 +295,20 @@ export async function submitDraftOrder(orderId: number, customerData: {
 }
 
 export async function getDraftOrders(): Promise<Order[]> {
-  const res = await fetch(`${API_BASE}/orders/drafts`);
+  const res = await fetch(`${API_BASE}/orders/drafts`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error('Failed to fetch draft orders');
   return res.json();
 }
 
-// BigCommerce
+// ─── BigCommerce Proxy ────────────────────────────────────────────────────────
+
 export async function searchBigCommerceProducts(query: string, token: string, storeHash: string): Promise<Product[]> {
-  const res = await fetch(`${API_BASE}/bigcommerce/products/search?query=${encodeURIComponent(query)}`);
+  const res = await fetch(
+    `${API_BASE}/bigcommerce/products/search?query=${encodeURIComponent(query)}`,
+    { headers: getAuthHeaders() }
+  );
   if (!res.ok) throw new Error('BigCommerce search failed');
   return res.json();
 }
@@ -287,19 +338,28 @@ export interface BigCommerceAddress {
 }
 
 export async function searchBigCommerceCustomers(query: string): Promise<BigCommerceCustomer[]> {
-  const res = await fetch(`${API_BASE}/bigcommerce/customers/search?query=${encodeURIComponent(query)}`);
+  const res = await fetch(
+    `${API_BASE}/bigcommerce/customers/search?query=${encodeURIComponent(query)}`,
+    { headers: getAuthHeaders() }
+  );
   if (!res.ok) throw new Error('Customer search failed');
   return res.json();
 }
 
 export async function getCustomerAddresses(customerId: number): Promise<BigCommerceAddress[]> {
-  const res = await fetch(`${API_BASE}/bigcommerce/customers/${customerId}/addresses`);
+  const res = await fetch(`${API_BASE}/bigcommerce/customers/${customerId}/addresses`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error('Failed to fetch addresses');
   return res.json();
 }
 
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
 export async function getSetting(key: string): Promise<{ key: string; value: any }> {
-  const res = await fetch(`${API_BASE}/settings/${key}`);
+  const res = await fetch(`${API_BASE}/settings/${key}`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error('Failed to fetch setting');
   return res.json();
 }
@@ -307,7 +367,7 @@ export async function getSetting(key: string): Promise<{ key: string; value: any
 export async function saveSetting(key: string, value: any): Promise<void> {
   const res = await fetch(`${API_BASE}/settings`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ key, value })
   });
   if (!res.ok) throw new Error('Failed to save setting');
