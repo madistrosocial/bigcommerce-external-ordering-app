@@ -275,7 +275,7 @@ export default function Cart() {
               </div>
               
               {showResults && searchResults.length > 0 && (
-                <Card className="absolute z-20 w-full mt-1 max-h-48 overflow-auto shadow-lg">
+                <Card className="absolute z-20 w-full mt-1 max-h-48 overflow-auto shadow-lg bg-white dark:bg-slate-950 border">
                   {searchResults.map(customer => (
                     <div 
                       key={customer.id}

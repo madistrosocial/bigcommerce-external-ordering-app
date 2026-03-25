@@ -269,7 +269,7 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
                 <ChevronDown className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-56 bg-white dark:bg-slate-950 shadow-lg border z-50">
               <DropdownMenuLabel>
                 <div className="flex flex-col">
                   <span>{currentUser.name}</span>
@@ -277,6 +277,19 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              {currentUser.role === 'agent' && (
+                <>
+                  <DropdownMenuItem onClick={() => setLocation('/catalog')} data-testid="menu-catalog">
+                    <Package className="mr-2 h-4 w-4" />
+                    Product Catalog
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocation('/orders')} data-testid="menu-orders">
+                    <ShoppingCart className="mr-2 h-4 w-4" />
+                    Order History
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem onClick={toggleOfflineMode} data-testid="menu-toggle-offline">
                 {isOfflineMode ? <WifiOff className="mr-2 h-4 w-4" /> : <Wifi className="mr-2 h-4 w-4" />}
                 Offline Mode: {isOfflineMode ? "ON" : "OFF"}
