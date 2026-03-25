@@ -1,0 +1,138 @@
+Enhance the product search system to support UPC/barcode search, improve SKU search behavior, and enforce admin-controlled search permissions.
+
+---
+
+CURRENT BEHAVIOR:
+
+- Product name search → returns product cards (correct)
+- SKU search → returns product card (needs improvement)
+- Agents can toggle between pinned products and BigCommerce search (needs change)
+
+---
+
+REQUIRED BEHAVIOR:
+
+========================================
+1. ADMIN PERMISSION CONTROL (CRITICAL)
+========================================
+
+- Each agent has a setting: allow_bigcommerce_search
+
+IF allow_bigcommerce_search = TRUE:
+- Agent search should ALWAYS query BigCommerce directly
+- Remove or disable any toggle/switch between pinned and BigCommerce
+- Do NOT show pinned-only mode
+
+IF allow_bigcommerce_search = FALSE:
+- Agent should ONLY see pinned products
+- Search should only filter within pinned products
+- Do NOT call BigCommerce search API
+- Do NOT show any toggle for BigCommerce search
+
+---
+
+========================================
+2. UPC / BARCODE SEARCH (NEW)
+========================================
+
+- When user inputs a UPC (barcode):
+  - Query BigCommerce using UPC filter
+  - Return ONLY the matching variant (NOT full product)
+
+- Display a direct variant card with:
+  - SKU
+  - Variant options (size, color, etc.)
+  - Stock
+  - Price
+  - Quantity controls
+  - Discount controls (FREE ITEM + % input)
+  - Add to Cart button
+
+- No product expansion required
+
+---
+
+========================================
+3. SKU SEARCH IMPROVEMENT
+========================================
+
+- When search matches a SKU:
+  - Return ONLY the matching variant
+  - Do NOT return parent product card
+  - Use same UI as UPC result (direct variant card)
+
+---
+
+========================================
+4. FALLBACK (UNCHANGED)
+========================================
+
+- If search is not SKU or UPC:
+  - Use keyword search
+  - Return product cards (expandable)
+
+---
+
+========================================
+5. SEARCH DETECTION LOGIC
+========================================
+
+- If query matches SKU → return direct variant
+- Else if query is numeric and matches UPC → return direct variant
+- Else → fallback to keyword search
+
+- Stop searching once a valid result is found
+
+---
+
+========================================
+6. UI REQUIREMENTS (IMPORTANT)
+========================================
+
+- Reuse existing variant row UI (do NOT rebuild new UI)
+- Ensure discount system works fully:
+  - FREE ITEM
+  - % discount
+  - Add to Cart
+
+---
+
+========================================
+7. DATA HANDLING
+========================================
+
+- Ensure variant includes:
+  - SKU
+  - UPC
+  - option_values
+  - inventory_level
+  - price
+
+- Keep response format consistent with existing product/variant structure
+
+---
+
+========================================
+8. DO NOT:
+========================================
+
+- Do not break existing pinned product functionality
+- Do not remove keyword search
+- Do not show toggle between pinned and BigCommerce
+- Do not duplicate components unnecessarily
+
+---
+
+GOAL:
+
+- Agents with permission:
+  → Always search BigCommerce directly
+  → Scan barcode → instant SKU result
+  → Type SKU → instant SKU result
+
+- Agents without permission:
+  → Only see pinned products
+  → No BigCommerce access
+
+- Product name search:
+  → Works as before (expandable cards)

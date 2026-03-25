@@ -120,7 +120,20 @@ export async function updateUserPermission(id: number, allow_bigcommerce_search:
   if (!res.ok) throw new Error('Failed to update user permission');
 }
 
-export async function agentBigCommerceSearch(query: string, userId: number): Promise<Product[]> {
+export interface DirectVariantResult {
+  resultType: 'variant';
+  product: Product;
+  variant: any;
+}
+
+export interface ProductListResult {
+  resultType: 'products';
+  products: Product[];
+}
+
+export type AgentSearchResult = DirectVariantResult | ProductListResult;
+
+export async function agentBigCommerceSearch(query: string, userId: number): Promise<AgentSearchResult> {
   const res = await fetch(`${API_BASE}/agent/bigcommerce/search?query=${encodeURIComponent(query)}&userId=${userId}`);
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Search failed' }));

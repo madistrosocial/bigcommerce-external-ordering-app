@@ -767,38 +767,102 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Missing required parameters" });
       }
 
-      // Call BigCommerce API for products
-      const response = await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(query as string)}&include=primary_image,variants`,
-        {
-          headers: {
-            'X-Auth-Token': String(token),
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          }
-        }
-      );
+      const q = (query as string).trim();
+      const bcHeaders = {
+        'X-Auth-Token': String(token),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      };
 
-      if (!response.ok) {
-        throw new Error(`BigCommerce API error: ${response.statusText}`);
+      // Helper: fetch parent product and return a DirectVariantResult
+      const buildVariantResult = async (variant: any, parentProductId: number) => {
+        const productRes = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${parentProductId}?include=primary_image`,
+          { headers: bcHeaders }
+        );
+        const productData = await productRes.json();
+        const p = productData.data;
+        const product = {
+          id: p.id,
+          bigcommerce_id: p.id,
+          name: p.name,
+          sku: p.sku,
+          price: p.price.toString(),
+          image: p.primary_image?.url_standard || '',
+          description: p.description ? p.description.replace(/<[^>]*>?/gm, '') : '',
+          stock_level: p.inventory_level || 0,
+          is_pinned: false,
+          variants: []
+        };
+        const v = {
+          id: variant.id,
+          sku: variant.sku,
+          upc: variant.upc || '',
+          price: variant.price?.toString() || p.price.toString(),
+          stock_level: variant.inventory_level || 0,
+          option_values: (variant.option_values || []).map((ov: any) => ({
+            id: ov.id,
+            option_id: ov.option_id,
+            label: ov.label,
+            option_display_name: ov.option_display_name
+          }))
+        };
+        return { resultType: 'variant', product, variant: v };
+      };
+
+      // ── Step 1: SKU variant search ──
+      const skuRes = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/variants?sku=${encodeURIComponent(q)}&include=option_values`,
+        { headers: bcHeaders }
+      );
+      if (skuRes.ok) {
+        const skuData = await skuRes.json();
+        if (skuData.data && skuData.data.length > 0) {
+          const result = await buildVariantResult(skuData.data[0], skuData.data[0].product_id);
+          return res.json(result);
+        }
       }
 
-      const data = await response.json();
-      
-      // Transform to our format (same as admin endpoint)
-      const products = data.data.map((p: any) => ({
+      // ── Step 2: UPC variant search (only for purely numeric queries) ──
+      if (/^\d+$/.test(q)) {
+        const upcRes = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/variants?upc=${encodeURIComponent(q)}&include=option_values`,
+          { headers: bcHeaders }
+        );
+        if (upcRes.ok) {
+          const upcData = await upcRes.json();
+          if (upcData.data && upcData.data.length > 0) {
+            const result = await buildVariantResult(upcData.data[0], upcData.data[0].product_id);
+            return res.json(result);
+          }
+        }
+      }
+
+      // ── Step 3: Keyword product search (fallback) ──
+      const kwRes = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(q)}&include=primary_image,variants`,
+        { headers: bcHeaders }
+      );
+
+      if (!kwRes.ok) {
+        throw new Error(`BigCommerce API error: ${kwRes.statusText}`);
+      }
+
+      const kwData = await kwRes.json();
+      const products = kwData.data.map((p: any) => ({
         id: p.id,
         bigcommerce_id: p.id,
         name: p.name,
         sku: p.sku,
         price: p.price.toString(),
         image: p.primary_image?.url_standard || '',
-        description: p.description.replace(/<[^>]*>?/gm, ''),
+        description: p.description ? p.description.replace(/<[^>]*>?/gm, '') : '',
         stock_level: p.inventory_level || 0,
         is_pinned: false,
         variants: (p.variants || []).map((v: any) => ({
           id: v.id,
           sku: v.sku,
+          upc: v.upc || '',
           price: v.price?.toString() || p.price.toString(),
           stock_level: v.inventory_level || 0,
           option_values: (v.option_values || []).map((ov: any) => ({
@@ -810,7 +874,7 @@ export async function registerRoutes(
         }))
       }));
 
-      res.json(products);
+      res.json({ resultType: 'products', products });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
