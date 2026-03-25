@@ -91,6 +91,15 @@ export default function Catalog() {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [search, canSearchBigCommerce, currentUser?.id]);
 
+  // When a direct variant result arrives, pre-fill quantity = 1 so Add to Cart is ready instantly
+  useEffect(() => {
+    if (bcResult?.resultType === 'variant') {
+      const r = bcResult as api.DirectVariantResult;
+      const qtyKey = `direct-${r.product.id}-${r.variant.id}`;
+      setQuantities(prev => ({ ...prev, [qtyKey]: prev[qtyKey] ?? 1 }));
+    }
+  }, [bcResult]);
+
   // ── Discount helpers ──
   const handleFreeItem = (key: string, originalPrice: number) => {
     setDiscounts(prev => {
@@ -273,29 +282,29 @@ export default function Catalog() {
           <div className="flex items-center gap-1 mt-2">
             <Button
               variant="outline" size="icon" className="h-8 w-8"
-              disabled={isOutOfStock}
-              onClick={() => handleQtyChange(qtyKey, String(Math.max(0, (quantities[qtyKey] || 0) - 1)), maxQty)}
+              disabled={isOutOfStock || (quantities[qtyKey] ?? 1) <= 1}
+              onClick={() => handleQtyChange(qtyKey, String(Math.max(1, (quantities[qtyKey] ?? 1) - 1)), maxQty)}
               data-testid={`button-minus-direct-${variant.id}`}
             ><Minus className="h-3 w-3" /></Button>
             <Input
-              type="number" min="0" max={maxQty} placeholder="0"
+              type="number" min="1" max={maxQty} placeholder="1"
               className="w-14 h-8 bg-white text-center"
-              value={quantities[qtyKey] || ""}
+              value={quantities[qtyKey] ?? 1}
               disabled={isOutOfStock}
               onChange={(e) => handleQtyChange(qtyKey, e.target.value, maxQty)}
               data-testid={`input-qty-direct-${variant.id}`}
             />
             <Button
               variant="outline" size="icon" className="h-8 w-8"
-              disabled={isOutOfStock || (quantities[qtyKey] || 0) >= maxQty}
-              onClick={() => handleQtyChange(qtyKey, String(Math.min((quantities[qtyKey] || 0) + 1, maxQty)), maxQty)}
+              disabled={isOutOfStock || (quantities[qtyKey] ?? 1) >= maxQty}
+              onClick={() => handleQtyChange(qtyKey, String(Math.min((quantities[qtyKey] ?? 1) + 1, maxQty)), maxQty)}
               data-testid={`button-plus-direct-${variant.id}`}
             ><Plus className="h-3 w-3" /></Button>
             <Button
               size="sm"
-              disabled={isOutOfStock || !(quantities[qtyKey] > 0)}
+              disabled={isOutOfStock}
               onClick={() => {
-                const qty = quantities[qtyKey] || 1;
+                const qty = quantities[qtyKey] ?? 1;
                 const discount = discounts[qtyKey];
                 const priceAtSale = discount ? discount.finalPrice : originalPrice;
                 if (stockCheck(variant.stock_level, qty, maxQty)) {

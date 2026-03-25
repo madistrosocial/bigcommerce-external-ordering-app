@@ -746,23 +746,19 @@ export async function registerRoutes(
         return res.status(401).json({ error: "User ID required" });
       }
       
-      // Check if user has permission
       const user = await storage.getUser(parseInt(userId as string));
       if (!user || !user.allow_bigcommerce_search) {
         return res.status(403).json({ error: "BigCommerce search not permitted for this user" });
       }
       
-      // Fetch setting from database
       const setting = await storage.getSetting("bigcommerce_config");
       let storeHash = process.env.BC_STORE_HASH;
       let token = process.env.BC_TOKEN;
-
       if (setting && setting.value) {
         const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
         storeHash = config.storeHash || storeHash;
         token = config.token || token;
       }
-
       if (!token || !storeHash || !query) {
         return res.status(400).json({ error: "Missing required parameters" });
       }
@@ -774,82 +770,23 @@ export async function registerRoutes(
         'Accept': 'application/json'
       };
 
-      // Helper: fetch parent product and return a DirectVariantResult
-      const buildVariantResult = async (variant: any, parentProductId: number) => {
-        const productRes = await fetch(
-          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${parentProductId}?include=primary_image`,
-          { headers: bcHeaders }
-        );
-        const productData = await productRes.json();
-        const p = productData.data;
-        const product = {
-          id: p.id,
-          bigcommerce_id: p.id,
-          name: p.name,
-          sku: p.sku,
-          price: p.price.toString(),
-          image: p.primary_image?.url_standard || '',
-          description: p.description ? p.description.replace(/<[^>]*>?/gm, '') : '',
-          stock_level: p.inventory_level || 0,
-          is_pinned: false,
-          variants: []
-        };
-        const v = {
-          id: variant.id,
-          sku: variant.sku,
-          upc: variant.upc || '',
-          price: variant.price?.toString() || p.price.toString(),
-          stock_level: variant.inventory_level || 0,
-          option_values: (variant.option_values || []).map((ov: any) => ({
-            id: ov.id,
-            option_id: ov.option_id,
-            label: ov.label,
-            option_display_name: ov.option_display_name
-          }))
-        };
-        return { resultType: 'variant', product, variant: v };
-      };
+      // ── Helpers ──
 
-      // ── Step 1: SKU variant search ──
-      const skuRes = await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/variants?sku=${encodeURIComponent(q)}&include=option_values`,
-        { headers: bcHeaders }
-      );
-      if (skuRes.ok) {
-        const skuData = await skuRes.json();
-        if (skuData.data && skuData.data.length > 0) {
-          const result = await buildVariantResult(skuData.data[0], skuData.data[0].product_id);
-          return res.json(result);
-        }
-      }
+      const shapeVariant = (v: any, fallbackPrice: string) => ({
+        id: v.id,
+        sku: v.sku,
+        upc: v.upc || '',
+        price: (v.price != null ? v.price : parseFloat(fallbackPrice)).toString(),
+        stock_level: v.inventory_level || 0,
+        option_values: (v.option_values || []).map((ov: any) => ({
+          id: ov.id,
+          option_id: ov.option_id,
+          label: ov.label,
+          option_display_name: ov.option_display_name
+        }))
+      });
 
-      // ── Step 2: UPC variant search (only for purely numeric queries) ──
-      if (/^\d+$/.test(q)) {
-        const upcRes = await fetch(
-          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/variants?upc=${encodeURIComponent(q)}&include=option_values`,
-          { headers: bcHeaders }
-        );
-        if (upcRes.ok) {
-          const upcData = await upcRes.json();
-          if (upcData.data && upcData.data.length > 0) {
-            const result = await buildVariantResult(upcData.data[0], upcData.data[0].product_id);
-            return res.json(result);
-          }
-        }
-      }
-
-      // ── Step 3: Keyword product search (fallback) ──
-      const kwRes = await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(q)}&include=primary_image,variants`,
-        { headers: bcHeaders }
-      );
-
-      if (!kwRes.ok) {
-        throw new Error(`BigCommerce API error: ${kwRes.statusText}`);
-      }
-
-      const kwData = await kwRes.json();
-      const products = kwData.data.map((p: any) => ({
+      const shapeProduct = (p: any) => ({
         id: p.id,
         bigcommerce_id: p.id,
         name: p.name,
@@ -859,19 +796,88 @@ export async function registerRoutes(
         description: p.description ? p.description.replace(/<[^>]*>?/gm, '') : '',
         stock_level: p.inventory_level || 0,
         is_pinned: false,
-        variants: (p.variants || []).map((v: any) => ({
-          id: v.id,
-          sku: v.sku,
-          upc: v.upc || '',
-          price: v.price?.toString() || p.price.toString(),
-          stock_level: v.inventory_level || 0,
-          option_values: (v.option_values || []).map((ov: any) => ({
-            id: ov.id,
-            option_id: ov.option_id,
-            label: ov.label,
-            option_display_name: ov.option_display_name
-          }))
-        }))
+        variants: [] as any[]
+      });
+
+      // Fetch parent product details for a variant that was found via variants endpoint
+      const buildVariantResultFromId = async (variant: any, parentProductId: number) => {
+        const productRes = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${parentProductId}?include=primary_image`,
+          { headers: bcHeaders }
+        );
+        if (!productRes.ok) throw new Error('Failed to fetch parent product');
+        const pd = (await productRes.json()).data;
+        return {
+          resultType: 'variant' as const,
+          product: shapeProduct(pd),
+          variant: shapeVariant(variant, pd.price.toString())
+        };
+      };
+
+      // Build a variant result directly from keyword-search product data (no extra API call)
+      const buildVariantResultFromProductData = (p: any, v: any) => ({
+        resultType: 'variant' as const,
+        product: shapeProduct(p),
+        variant: shapeVariant(v, p.price.toString())
+      });
+
+      // ── Step 1: Direct SKU lookup via variants endpoint ──
+      const skuRes = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/variants?sku=${encodeURIComponent(q)}`,
+        { headers: bcHeaders }
+      );
+      if (skuRes.ok) {
+        const skuData = await skuRes.json();
+        if (skuData.data && skuData.data.length > 0) {
+          // Exact SKU match — always return as direct variant, never as product card
+          const result = await buildVariantResultFromId(skuData.data[0], skuData.data[0].product_id);
+          return res.json(result);
+        }
+      }
+
+      // ── Step 2: UPC lookup (purely numeric queries only) ──
+      if (/^\d+$/.test(q)) {
+        const upcRes = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/variants?upc=${encodeURIComponent(q)}`,
+          { headers: bcHeaders }
+        );
+        if (upcRes.ok) {
+          const upcData = await upcRes.json();
+          if (upcData.data && upcData.data.length > 0) {
+            const result = await buildVariantResultFromId(upcData.data[0], upcData.data[0].product_id);
+            return res.json(result);
+          }
+        }
+      }
+
+      // ── Step 3: Keyword search — but rescue exact SKU/UPC hits before returning product cards ──
+      const kwRes = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(q)}&include=primary_image,variants`,
+        { headers: bcHeaders }
+      );
+      if (!kwRes.ok) throw new Error(`BigCommerce API error: ${kwRes.statusText}`);
+
+      const kwData = await kwRes.json();
+      const kwProducts: any[] = kwData.data || [];
+
+      // Secondary exact-match rescue: if any variant inside keyword results matches the query
+      // exactly by SKU or UPC, return it as a direct variant (not a product card)
+      const qLower = q.toLowerCase();
+      const isNumeric = /^\d+$/.test(q);
+      for (const p of kwProducts) {
+        for (const v of (p.variants || [])) {
+          const skuMatch = v.sku && v.sku.toLowerCase() === qLower;
+          const upcMatch = isNumeric && v.upc && v.upc === q;
+          if (skuMatch || upcMatch) {
+            return res.json(buildVariantResultFromProductData(p, v));
+          }
+        }
+      }
+
+      // ── No exact match found — return keyword product list ──
+      const products = kwProducts.map((p: any) => ({
+        ...shapeProduct(p),
+        variants: (p.variants || []).map((v: any) => shapeVariant(v, p.price.toString()))
       }));
 
       res.json({ resultType: 'products', products });
