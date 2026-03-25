@@ -143,7 +143,7 @@ export default function Cart() {
         variant_id: item.variant?.id,
         variant_option_values: item.variant?.option_values,
         quantity: item.quantity,
-        price_at_sale: item.variant?.price || item.product.price,
+        price_at_sale: String(item.price_at_sale),
         name: item.variant ? `${item.product.name} (${item.variant.sku})` : item.product.name,
         sku: item.variant?.sku || item.product.sku,
         image: item.product.image
@@ -205,7 +205,7 @@ export default function Cart() {
         variant_id: item.variant?.id,
         variant_option_values: item.variant?.option_values,
         quantity: item.quantity,
-        price_at_sale: item.variant?.price || item.product.price,
+        price_at_sale: String(item.price_at_sale),
         name: item.variant ? `${item.product.name} (${item.variant.sku})` : item.product.name,
         sku: item.variant?.sku || item.product.sku,
         image: item.product.image
@@ -413,7 +413,20 @@ export default function Cart() {
               <div className="flex-1 min-w-0">
                 <h4 className="font-semibold text-sm leading-tight line-clamp-2">{item.product.name}</h4>
                 {item.variant && <p className="text-xs text-slate-500">{item.variant.sku}</p>}
-                <p className="text-sm">${parseFloat(item.variant?.price || item.product.price).toFixed(2)}</p>
+                <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                  <span className={`text-sm font-medium ${item.discount_type ? 'text-red-600 font-bold' : ''}`}>
+                    ${item.price_at_sale.toFixed(2)}
+                  </span>
+                  {item.discount_type && (
+                    <span className="text-xs text-slate-400 line-through">${item.original_price.toFixed(2)}</span>
+                  )}
+                  {item.discount_type === 'free' && (
+                    <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1 rounded">FREE</span>
+                  )}
+                  {item.discount_type === 'percent' && (
+                    <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1 rounded">-{item.discount_value}%</span>
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-1">
                 <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantity(item.product.id, -1, item.variant?.id)}><Minus className="h-3 w-3"/></Button>

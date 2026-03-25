@@ -1,10 +1,14 @@
 import { create } from 'zustand';
 import type { User, Product } from './api';
 
-interface CartItem {
+export interface CartItem {
   product: Product;
   variant?: any;
   quantity: number;
+  price_at_sale: number;
+  original_price: number;
+  discount_type: 'free' | 'percent' | null;
+  discount_value: number | null;
 }
 
 interface AppState {
@@ -16,7 +20,15 @@ interface AppState {
   logout: () => void;
   setOfflineMode: (offline: boolean) => void;
   toggleOfflineMode: () => void;
-  addToCart: (product: Product, quantity: number, variant?: any) => void;
+  addToCart: (
+    product: Product,
+    quantity: number,
+    variant?: any,
+    priceAtSale?: number,
+    originalPrice?: number,
+    discountType?: 'free' | 'percent' | null,
+    discountValue?: number | null
+  ) => void;
   removeFromCart: (productId: number, variantId?: number) => void;
   updateCartQuantity: (productId: number, delta: number, variantId?: number) => void;
   clearCart: () => void;
@@ -41,21 +53,40 @@ export const useStore = create<AppState>((set, get) => ({
   setOfflineMode: (offline) => set({ isOfflineMode: offline }),
   toggleOfflineMode: () => set((state) => ({ isOfflineMode: !state.isOfflineMode })),
 
-  addToCart: (product, quantity, variant) => set((state) => {
-    const existing = state.cart.find(item => 
-      item.product.id === product.id && 
+  addToCart: (product, quantity, variant, priceAtSale, originalPrice, discountType, discountValue) => set((state) => {
+    const rawPrice = parseFloat(variant?.price || product.price);
+    const resolvedOriginal = originalPrice ?? rawPrice;
+    const resolvedPrice = priceAtSale ?? rawPrice;
+
+    const existing = state.cart.find(item =>
+      item.product.id === product.id &&
       (!variant || item.variant?.id === variant.id)
     );
+
     if (existing) {
       return {
-        cart: state.cart.map(item => 
+        cart: state.cart.map(item =>
           item.product.id === product.id && (!variant || item.variant?.id === variant.id)
             ? { ...item, quantity: item.quantity + quantity }
             : item
         )
       };
     }
-    return { cart: [...state.cart, { product, quantity, variant }] };
+
+    return {
+      cart: [
+        ...state.cart,
+        {
+          product,
+          quantity,
+          variant,
+          price_at_sale: resolvedPrice,
+          original_price: resolvedOriginal,
+          discount_type: discountType ?? null,
+          discount_value: discountValue ?? null,
+        }
+      ]
+    };
   }),
 
   updateCartQuantity: (productId, delta, variantId) => set((state) => ({
@@ -67,7 +98,7 @@ export const useStore = create<AppState>((set, get) => ({
   })),
 
   removeFromCart: (productId, variantId) => set((state) => ({
-    cart: state.cart.filter(item => 
+    cart: state.cart.filter(item =>
       !(item.product.id === productId && (!variantId || item.variant?.id === variantId))
     )
   })),
@@ -76,9 +107,6 @@ export const useStore = create<AppState>((set, get) => ({
 
   getCartTotal: () => {
     const { cart } = get();
-    return cart.reduce((total, item) => {
-      const price = item.variant?.price || item.product.price;
-      return total + (parseFloat(price) * item.quantity);
-    }, 0);
+    return cart.reduce((total, item) => total + (item.price_at_sale * item.quantity), 0);
   }
 }));

@@ -1,0 +1,150 @@
+Implement a discount override system for each product variant in the expanded product list (Catalog page), and ensure it carries through to cart and BigCommerce order submission.
+
+---
+
+CONTEXT:
+Each product expands into multiple variants (SKUs), each with:
+- SKU
+- Stock
+- Price
+- Quantity controls (+ / -)
+- Add to Cart button
+
+---
+
+1. UI CHANGES (PER VARIANT ROW)
+
+Next to the price, add:
+- Button: "FREE ITEM"
+- Input field: numeric input (placeholder: "%")
+
+Keep layout clean and inline.
+
+---
+
+2. BEHAVIOR (LAST ACTION WINS)
+
+A. FREE ITEM BUTTON
+
+- When clicked:
+  - If already active → revert to original price
+  - Else:
+    - Set final_price = 0 (IMPORTANT: must be 0, not null)
+    - Set discount_type = "free"
+    - Update UI (price turns red)
+
+---
+
+B. DISCOUNT INPUT (%)
+
+- Accept values 0–100 only
+- On blur (when user exits input):
+  - Apply:
+    final_price = original_price * (1 - discount/100)
+  - Set discount_type = "percent"
+  - Store discount_value
+  - Update UI (price turns red)
+
+- If input is cleared:
+  - Revert to original price
+  - Reset discount state
+
+---
+
+3. LAST ACTION LOGIC
+
+- FREE → price = 0
+- Then % input → overrides FREE
+- Then FREE again → overrides %
+- Always respect the last interaction
+
+---
+
+4. STATE MANAGEMENT (PER VARIANT)
+
+Store:
+
+- original_price
+- final_price
+- discount_type: "free" | "percent" | null
+- discount_value
+
+Displayed price:
+- If discounted → show final_price (red)
+- Else → original_price
+
+---
+
+5. ADD TO CART INTEGRATION (CRITICAL)
+
+When user clicks "Add to Cart":
+
+- If discount is applied:
+  - Use final_price
+- Else:
+  - Use original_price
+
+Ensure:
+
+- FREE ITEM → price = 0 (NOT null or undefined)
+- Discount % → use computed discounted price
+
+Cart item should store:
+
+- price_at_sale (final price used)
+- original_price (optional for reference)
+- discount_type
+- discount_value
+
+---
+
+6. CART DISPLAY
+
+- Show final price
+- Optional: show original price (strikethrough)
+- Highlight discounted items (e.g. red text or label)
+
+---
+
+7. ORDER SUBMISSION (BIGCOMMERCE)
+
+When sending order to BigCommerce:
+
+Use:
+
+price_inc_tax = price_at_sale  
+price_ex_tax = price_at_sale  
+
+This must reflect:
+- 0 for FREE ITEM
+- discounted value for %
+
+Apply this in ALL flows:
+- /api/orders
+- draft submit
+- sync
+
+---
+
+8. VALIDATION
+
+- Prevent % < 0 or > 100
+- Prevent negative price
+- Ensure price is always a valid number
+
+---
+
+9. DO NOT:
+
+- Do not disable UI controls
+- Do not affect other variants
+- Do not change BigCommerce API structure
+
+---
+
+GOAL:
+
+Sales reps can:
+- Set item as FREE → added to cart at $0
+- Apply discount % → added to cart with discounted price
+- Checkout → BigCommerce receives correct final pricing

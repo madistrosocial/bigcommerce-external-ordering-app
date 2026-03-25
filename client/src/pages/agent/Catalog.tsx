@@ -12,6 +12,12 @@ import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import { Card } from "@/components/ui/card";
 
+interface DiscountState {
+  type: 'free' | 'percent';
+  finalPrice: number;
+  value: number | null;
+}
+
 export default function Catalog() {
   const [search, setSearch] = useState("");
   const [expandedProduct, setExpandedProduct] = useState<number | null>(null);
@@ -19,6 +25,8 @@ export default function Catalog() {
   const [bcSearchQuery, setBcSearchQuery] = useState("");
   const [bcSearchResults, setBcSearchResults] = useState<api.Product[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [discounts, setDiscounts] = useState<Record<string, DiscountState>>({});
+  const [discountInputs, setDiscountInputs] = useState<Record<string, string>>({});
   
   const { currentUser, addToCart, cart } = useStore();
   const { toast } = useToast();
@@ -88,11 +96,59 @@ export default function Catalog() {
     setQuantities(prev => ({ ...prev, [key]: clampedQty }));
   };
 
+  const handleFreeItem = (key: string, originalPrice: number) => {
+    setDiscounts(prev => {
+      if (prev[key]?.type === 'free') {
+        const { [key]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [key]: { type: 'free', finalPrice: 0, value: null } };
+    });
+    setDiscountInputs(prev => ({ ...prev, [key]: '' }));
+  };
+
+  const handleDiscountInputChange = (key: string, val: string) => {
+    if (val === '') {
+      setDiscountInputs(prev => ({ ...prev, [key]: '' }));
+      return;
+    }
+    const n = parseFloat(val);
+    if (!isNaN(n) && n >= 0 && n <= 100) {
+      setDiscountInputs(prev => ({ ...prev, [key]: val }));
+    }
+  };
+
+  const handleDiscountBlur = (key: string, originalPrice: number) => {
+    const inputVal = discountInputs[key];
+    if (!inputVal || inputVal === '') {
+      setDiscounts(prev => {
+        if (prev[key]?.type === 'percent') {
+          const { [key]: _, ...rest } = prev;
+          return rest;
+        }
+        return prev;
+      });
+      return;
+    }
+    const pct = parseFloat(inputVal);
+    if (isNaN(pct) || pct < 0 || pct > 100) return;
+    const finalPrice = Math.max(0, originalPrice * (1 - pct / 100));
+    setDiscounts(prev => ({ ...prev, [key]: { type: 'percent', finalPrice, value: pct } }));
+  };
+
+  const clearDiscountForKey = (key: string) => {
+    setDiscounts(prev => { const { [key]: _, ...rest } = prev; return rest; });
+    setDiscountInputs(prev => { const { [key]: _, ...rest } = prev; return rest; });
+  };
+
   const handleAdd = (product: api.Product, variant?: any) => {
     const qtyKey = variant ? `${product.id}-${variant.id}` : `${product.id}`;
     const qty = quantities[qtyKey] || 1;
     const stockLevel = variant?.stock_level ?? product.stock_level;
     const maxQty = getMaxQuantity(stockLevel, product.id, variant?.id);
+    const originalPrice = parseFloat(variant?.price || product.price);
+    const discount = discounts[qtyKey];
+    const priceAtSale = discount ? discount.finalPrice : originalPrice;
     
     if (stockLevel <= 0) {
       toast({
@@ -112,7 +168,8 @@ export default function Catalog() {
       return;
     }
     
-    addToCart(product, qty, variant);
+    addToCart(product, qty, variant, priceAtSale, originalPrice, discount?.type ?? null, discount?.value ?? null);
+    clearDiscountForKey(qtyKey);
     setQuantities(prev => {
       const next = { ...prev };
       delete next[qtyKey];
@@ -132,13 +189,17 @@ export default function Catalog() {
     let hasError = false;
 
     if (variants && Array.isArray(variants) && variants.length > 0) {
-      variants.forEach(v => {
+      variants.forEach((v: any) => {
         const qtyKey = `${product.id}-${v.id}`;
         const qty = quantities[qtyKey];
         if (qty > 0) {
           const maxQty = getMaxQuantity(v.stock_level, product.id, v.id);
           if (qty <= maxQty && v.stock_level > 0) {
-            addToCart(product, qty, v);
+            const originalPrice = parseFloat(v.price);
+            const discount = discounts[qtyKey];
+            const priceAtSale = discount ? discount.finalPrice : originalPrice;
+            addToCart(product, qty, v, priceAtSale, originalPrice, discount?.type ?? null, discount?.value ?? null);
+            clearDiscountForKey(qtyKey);
             addedCount += qty;
           } else if (qty > 0) {
             hasError = true;
@@ -151,7 +212,11 @@ export default function Catalog() {
       if (qty > 0) {
         const maxQty = getMaxQuantity(product.stock_level, product.id);
         if (qty <= maxQty && product.stock_level > 0) {
-          addToCart(product, qty);
+          const originalPrice = parseFloat(product.price);
+          const discount = discounts[qtyKey];
+          const priceAtSale = discount ? discount.finalPrice : originalPrice;
+          addToCart(product, qty, undefined, priceAtSale, originalPrice, discount?.type ?? null, discount?.value ?? null);
+          clearDiscountForKey(qtyKey);
           addedCount += qty;
         } else {
           hasError = true;
@@ -184,6 +249,57 @@ export default function Catalog() {
         duration: 1000,
       });
     }
+  };
+
+  const renderDiscountControls = (qtyKey: string, originalPrice: number, isOutOfStock: boolean) => {
+    const discount = discounts[qtyKey];
+    const isFree = discount?.type === 'free';
+    const displayPrice = discount ? discount.finalPrice : originalPrice;
+    const isDiscounted = !!discount;
+
+    return (
+      <div className="mt-1 space-y-1">
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className={`font-bold text-sm ${isDiscounted ? 'text-red-600' : 'text-primary'}`}>
+            ${displayPrice.toFixed(2)}
+          </span>
+          {isDiscounted && (
+            <span className="text-xs text-slate-400 line-through">${originalPrice.toFixed(2)}</span>
+          )}
+          {isFree && (
+            <Badge variant="destructive" className="text-[10px] px-1 py-0 h-4">FREE</Badge>
+          )}
+          {discount?.type === 'percent' && (
+            <Badge variant="destructive" className="text-[10px] px-1 py-0 h-4">-{discount.value}%</Badge>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant={isFree ? 'destructive' : 'outline'}
+            size="sm"
+            className="h-6 px-2 text-[11px] font-bold"
+            disabled={isOutOfStock}
+            onClick={(e) => { e.stopPropagation(); handleFreeItem(qtyKey, originalPrice); }}
+            data-testid={`button-free-${qtyKey}`}
+          >
+            FREE ITEM
+          </Button>
+          <Input
+            type="number"
+            min="0"
+            max="100"
+            placeholder="%"
+            className="w-14 h-6 text-xs text-center bg-white"
+            value={discountInputs[qtyKey] || ''}
+            disabled={isOutOfStock}
+            onChange={(e) => handleDiscountInputChange(qtyKey, e.target.value)}
+            onBlur={() => handleDiscountBlur(qtyKey, originalPrice)}
+            onClick={(e) => e.stopPropagation()}
+            data-testid={`input-discount-${qtyKey}`}
+          />
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -303,57 +419,60 @@ export default function Catalog() {
                             const qtyKey = `${product.id}-${v.id}`;
                             const maxQty = getMaxQuantity(v.stock_level, product.id, v.id);
                             const isOutOfStock = v.stock_level <= 0;
+                            const originalPrice = parseFloat(v.price);
                             
                             return (
-                              <div key={v.id} className={`flex items-center justify-between gap-4 border-b border-slate-200 pb-3 last:border-0 last:pb-0 ${isOutOfStock ? 'opacity-50' : ''}`}>
-                                <div className="flex-1">
-                                  <div className="font-bold text-sm">
-                                    {v.option_values && v.option_values.length > 0 
-                                      ? v.option_values.map((ov: any) => ov.label).join(' / ') 
-                                      : (v.sku || `Variant ${v.id}`)}
+                              <div key={v.id} className={`border-b border-slate-200 pb-3 last:border-0 last:pb-0 ${isOutOfStock ? 'opacity-50' : ''}`}>
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-bold text-sm">
+                                      {v.option_values && v.option_values.length > 0 
+                                        ? v.option_values.map((ov: any) => ov.label).join(' / ') 
+                                        : (v.sku || `Variant ${v.id}`)}
+                                    </div>
+                                    <div className="text-xs text-slate-500">SKU: {v.sku} • {formatStock(v.stock_level)}</div>
+                                    {renderDiscountControls(qtyKey, originalPrice, isOutOfStock)}
                                   </div>
-                                  <div className="text-xs text-slate-500">SKU: {v.sku} • {formatStock(v.stock_level)}</div>
-                                  <div className="font-bold text-primary mt-1">${parseFloat(v.price).toFixed(2)}</div>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <Button 
-                                    variant="outline" 
-                                    size="icon" 
-                                    className="h-8 w-8"
-                                    disabled={isOutOfStock}
-                                    onClick={(e) => { 
-                                      e.stopPropagation(); 
-                                      handleQtyChange(qtyKey, String(Math.max(0, (quantities[qtyKey] || 0) - 1)), maxQty); 
-                                    }}
-                                    data-testid={`button-minus-${v.id}`}
-                                  >
-                                    <Minus className="h-3 w-3" />
-                                  </Button>
-                                  <Input 
-                                    type="number" 
-                                    min="0"
-                                    max={maxQty}
-                                    placeholder="0"
-                                    className="w-14 h-8 bg-white text-center"
-                                    value={quantities[qtyKey] || ""}
-                                    disabled={isOutOfStock}
-                                    onChange={(e) => handleQtyChange(qtyKey, e.target.value, maxQty)}
-                                    onClick={(e) => e.stopPropagation()}
-                                    data-testid={`input-qty-${v.id}`}
-                                  />
-                                  <Button 
-                                    variant="outline" 
-                                    size="icon" 
-                                    className="h-8 w-8"
-                                    disabled={isOutOfStock || (quantities[qtyKey] || 0) >= maxQty}
-                                    onClick={(e) => { 
-                                      e.stopPropagation(); 
-                                      handleQtyChange(qtyKey, String(Math.min((quantities[qtyKey] || 0) + 1, maxQty)), maxQty); 
-                                    }}
-                                    data-testid={`button-plus-${v.id}`}
-                                  >
-                                    <Plus className="h-3 w-3" />
-                                  </Button>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <Button 
+                                      variant="outline" 
+                                      size="icon" 
+                                      className="h-8 w-8"
+                                      disabled={isOutOfStock}
+                                      onClick={(e) => { 
+                                        e.stopPropagation(); 
+                                        handleQtyChange(qtyKey, String(Math.max(0, (quantities[qtyKey] || 0) - 1)), maxQty); 
+                                      }}
+                                      data-testid={`button-minus-${v.id}`}
+                                    >
+                                      <Minus className="h-3 w-3" />
+                                    </Button>
+                                    <Input 
+                                      type="number" 
+                                      min="0"
+                                      max={maxQty}
+                                      placeholder="0"
+                                      className="w-14 h-8 bg-white text-center"
+                                      value={quantities[qtyKey] || ""}
+                                      disabled={isOutOfStock}
+                                      onChange={(e) => handleQtyChange(qtyKey, e.target.value, maxQty)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      data-testid={`input-qty-${v.id}`}
+                                    />
+                                    <Button 
+                                      variant="outline" 
+                                      size="icon" 
+                                      className="h-8 w-8"
+                                      disabled={isOutOfStock || (quantities[qtyKey] || 0) >= maxQty}
+                                      onClick={(e) => { 
+                                        e.stopPropagation(); 
+                                        handleQtyChange(qtyKey, String(Math.min((quantities[qtyKey] || 0) + 1, maxQty)), maxQty); 
+                                      }}
+                                      data-testid={`button-plus-${v.id}`}
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                    </Button>
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -372,15 +491,16 @@ export default function Catalog() {
                       );
                     }
                     
+                    const qtyKey = `${product.id}`;
                     const maxQty = getMaxQuantity(product.stock_level, product.id);
                     const isOutOfStock = product.stock_level <= 0;
+                    const originalPrice = parseFloat(product.price);
                     
                     return (
-                      <div className={`flex items-center justify-between gap-4 ${isOutOfStock ? 'opacity-50' : ''}`}>
-                        <div className="flex-1">
-                          <div className="text-xs text-slate-500">SKU: {product.sku} • {formatStock(product.stock_level)}</div>
-                        </div>
-                        <div className="flex items-center gap-1">
+                      <div className={`${isOutOfStock ? 'opacity-50' : ''}`}>
+                        <div className="text-xs text-slate-500 mb-2">SKU: {product.sku} • {formatStock(product.stock_level)}</div>
+                        {renderDiscountControls(qtyKey, originalPrice, isOutOfStock)}
+                        <div className="flex items-center gap-1 mt-2">
                           <Button 
                             variant="outline" 
                             size="icon" 
@@ -388,7 +508,7 @@ export default function Catalog() {
                             disabled={isOutOfStock}
                             onClick={(e) => { 
                               e.stopPropagation(); 
-                              handleQtyChange(`${product.id}`, String(Math.max(0, (quantities[`${product.id}`] || 0) - 1)), maxQty); 
+                              handleQtyChange(qtyKey, String(Math.max(0, (quantities[qtyKey] || 0) - 1)), maxQty); 
                             }}
                             data-testid={`button-minus-${product.id}`}
                           >
@@ -400,9 +520,9 @@ export default function Catalog() {
                             max={maxQty}
                             placeholder="0"
                             className="w-14 h-8 bg-white text-center"
-                            value={quantities[`${product.id}`] || ""}
+                            value={quantities[qtyKey] || ""}
                             disabled={isOutOfStock}
-                            onChange={(e) => handleQtyChange(`${product.id}`, e.target.value, maxQty)}
+                            onChange={(e) => handleQtyChange(qtyKey, e.target.value, maxQty)}
                             onClick={(e) => e.stopPropagation()}
                             data-testid={`input-qty-${product.id}`}
                           />
@@ -410,10 +530,10 @@ export default function Catalog() {
                             variant="outline" 
                             size="icon" 
                             className="h-8 w-8"
-                            disabled={isOutOfStock || (quantities[`${product.id}`] || 0) >= maxQty}
+                            disabled={isOutOfStock || (quantities[qtyKey] || 0) >= maxQty}
                             onClick={(e) => { 
                               e.stopPropagation(); 
-                              handleQtyChange(`${product.id}`, String(Math.min((quantities[`${product.id}`] || 0) + 1, maxQty)), maxQty); 
+                              handleQtyChange(qtyKey, String(Math.min((quantities[qtyKey] || 0) + 1, maxQty)), maxQty); 
                             }}
                             data-testid={`button-plus-${product.id}`}
                           >
@@ -421,8 +541,8 @@ export default function Catalog() {
                           </Button>
                           <Button 
                             size="sm" 
-                            onClick={() => handleAddAll(product)}
-                            disabled={isOutOfStock || !(quantities[`${product.id}`] > 0)}
+                            onClick={() => handleAdd(product)}
+                            disabled={isOutOfStock || !(quantities[qtyKey] > 0)}
                             data-testid={`button-add-${product.id}`}
                           >
                             Add
