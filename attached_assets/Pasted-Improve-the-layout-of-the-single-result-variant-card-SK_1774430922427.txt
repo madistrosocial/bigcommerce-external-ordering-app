@@ -1,0 +1,106 @@
+Improve the layout of the single-result variant card (SKU / UPC search) to be optimized for POS usage on tablet and desktop, while maintaining a clean and controlled layout.
+
+---
+
+KEY REQUIREMENTS
+
+1. PRODUCT TITLE (IMPORTANT)
+
+- Must display FULL product title
+- Do NOT truncate
+- Do NOT use ellipsis (...)
+- Allow multi-line wrapping
+- Center aligned
+- Slightly larger font, bold
+
+---
+
+2. LAYOUT STRUCTURE (VERTICAL, CENTERED)
+
+Reorder and style the variant card as follows:
+
+1. Product Title (full, multi-line, centered)
+
+2. SKU + STOCK
+   - Center aligned
+   - Smaller font
+   - Format:
+     SKU: XXXXX • Stock: XX
+
+3. PRODUCT IMAGE
+   - Center aligned
+   - Larger than current thumbnail
+   - Maintain clean spacing
+   - Should feel visually balanced, not oversized
+
+4. PRICE
+   - Center aligned
+   - Prominent but not oversized
+   - Use theme color
+
+5. DISCOUNT SECTION
+   - Center aligned
+   - FREE ITEM button + % input
+   - Keep compact but well spaced
+
+6. QUANTITY CONTROLS
+   - Center aligned
+   - Slightly larger buttons (+ / -)
+   - Comfortable spacing for tablet tapping
+
+7. ADD TO CART BUTTON
+
+   - NOT full width
+   - Medium width button (centered)
+   - Clearly visible but not oversized
+   - Maintain clean UI balance
+
+---
+
+3. SPACING & VISUAL BALANCE
+
+- Add vertical spacing between each section
+- Avoid cramped layout
+- Keep proportions balanced (not too large, not too small)
+- Maintain professional POS look
+
+---
+
+4. RESPONSIVENESS
+
+- Desktop/Tablet:
+  → Apply full POS layout
+
+- Mobile:
+  → Slightly reduce spacing and font sizes
+  → Keep same structure
+  → Ensure readability and usability
+
+---
+
+5. STYLE RULES
+
+- Solid white card background
+- Rounded corners
+- Clean padding inside card
+- Consistent typography
+- No overflow or clipping of long titles
+
+---
+
+6. DO NOT:
+
+- Do not truncate product titles
+- Do not make Add to Cart full width
+- Do not affect product cards for keyword search
+- Do not change multi-variant expandable layout
+
+---
+
+GOAL:
+
+Create a POS-friendly variant display that is:
+- Clear and readable
+- Touch-friendly
+- Balanced in layout
+- Able to handle long product titles without breaking UI

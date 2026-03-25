@@ -255,68 +255,144 @@ export default function Catalog() {
     );
   };
 
-  // ── Direct variant card (SKU/UPC match) ──
+  // ── Direct variant card — POS layout (SKU/UPC match) ──
   const renderDirectVariantCard = (product: api.Product, variant: any) => {
     const qtyKey = `direct-${product.id}-${variant.id}`;
     const maxQty = getMaxQuantity(variant.stock_level, product.id, variant.id);
     const isOutOfStock = variant.stock_level <= 0;
     const originalPrice = parseFloat(variant.price);
+    const discount = discounts[qtyKey];
+    const isFree = discount?.type === 'free';
+    const displayPrice = discount ? discount.finalPrice : originalPrice;
+    const isDiscounted = !!discount;
+    const currentQty = quantities[qtyKey] ?? 1;
+
+    const doAddToCart = () => {
+      const qty = quantities[qtyKey] ?? 1;
+      const priceAtSale = discount ? discount.finalPrice : originalPrice;
+      if (stockCheck(variant.stock_level, qty, maxQty)) {
+        addToCart(product, qty, variant, priceAtSale, originalPrice, discount?.type ?? null, discount?.value ?? null);
+        clearDiscountForKey(qtyKey);
+        setQuantities(prev => { const next = { ...prev }; delete next[qtyKey]; return next; });
+        toast({ title: "Added to cart", description: `${qty}x ${variant.sku} added.`, duration: 1000 });
+      }
+    };
 
     return (
-      <Card key={qtyKey} className="overflow-hidden" data-testid={`card-direct-variant-${variant.id}`}>
-        <div className="flex p-4 gap-4">
-          <img src={product.image || undefined} className="h-16 w-16 object-cover rounded shrink-0" alt={product.name} />
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-sm leading-tight line-clamp-2">{product.name}</h3>
+      <Card
+        key={qtyKey}
+        className="bg-white rounded-2xl shadow-sm overflow-hidden"
+        data-testid={`card-direct-variant-${variant.id}`}
+      >
+        <div className={`flex flex-col items-center text-center gap-4 px-6 py-7 sm:px-10 sm:py-9 ${isOutOfStock ? 'opacity-50' : ''}`}>
+
+          {/* 1 · Product Title — full text, no truncation */}
+          <h2 className="font-bold text-lg sm:text-xl leading-snug text-slate-900 w-full">
+            {product.name}
+          </h2>
+
+          {/* 2 · Variant options + SKU + Stock */}
+          <div className="text-sm text-slate-500 space-y-0.5 leading-relaxed">
             {variant.option_values && variant.option_values.length > 0 && (
-              <p className="text-xs font-medium text-slate-700 mt-0.5">
+              <p className="font-semibold text-slate-700 text-base">
                 {variant.option_values.map((ov: any) => ov.label).join(' / ')}
               </p>
             )}
-            <p className="text-xs text-slate-500">SKU: {variant.sku} • {formatStock(variant.stock_level)}</p>
+            <p>SKU: {variant.sku} &bull; {formatStock(variant.stock_level)}</p>
             {variant.upc && <p className="text-xs text-slate-400">UPC: {variant.upc}</p>}
           </div>
-        </div>
-        <div className={`px-4 pb-4 ${isOutOfStock ? 'opacity-50' : ''}`}>
-          {renderDiscountControls(qtyKey, originalPrice, isOutOfStock)}
-          <div className="flex items-center gap-1 mt-2">
+
+          {/* 3 · Product Image */}
+          {product.image && (
+            <img
+              src={product.image}
+              alt={product.name}
+              className="h-28 w-28 sm:h-36 sm:w-36 object-cover rounded-xl shadow-sm"
+            />
+          )}
+
+          {/* 4 · Price */}
+          <div className="flex items-baseline gap-2 flex-wrap justify-center">
+            <span className={`font-bold text-3xl sm:text-4xl tabular-nums ${isDiscounted ? 'text-red-600' : 'text-primary'}`}>
+              ${displayPrice.toFixed(2)}
+            </span>
+            {isDiscounted && (
+              <span className="text-lg text-slate-400 line-through">${originalPrice.toFixed(2)}</span>
+            )}
+            {isFree && <Badge variant="destructive" className="text-sm px-2 py-0.5">FREE</Badge>}
+            {discount?.type === 'percent' && (
+              <Badge variant="destructive" className="text-sm px-2 py-0.5">-{discount.value}%</Badge>
+            )}
+          </div>
+
+          {/* 5 · Discount Controls */}
+          <div className="flex items-center gap-2 justify-center flex-wrap">
             <Button
-              variant="outline" size="icon" className="h-8 w-8"
-              disabled={isOutOfStock || (quantities[qtyKey] ?? 1) <= 1}
-              onClick={() => handleQtyChange(qtyKey, String(Math.max(1, (quantities[qtyKey] ?? 1) - 1)), maxQty)}
-              data-testid={`button-minus-direct-${variant.id}`}
-            ><Minus className="h-3 w-3" /></Button>
+              variant={isFree ? 'destructive' : 'outline'}
+              size="sm"
+              className="h-8 px-3 text-xs font-bold"
+              disabled={isOutOfStock}
+              onClick={(e) => { e.stopPropagation(); handleFreeItem(qtyKey, originalPrice); }}
+              data-testid={`button-free-${qtyKey}`}
+            >FREE ITEM</Button>
             <Input
-              type="number" min="1" max={maxQty} placeholder="1"
-              className="w-14 h-8 bg-white text-center"
-              value={quantities[qtyKey] ?? 1}
+              type="number" min="0" max="100" placeholder="% off"
+              className="w-20 h-8 text-sm text-center bg-white"
+              value={discountInputs[qtyKey] || ''}
+              disabled={isOutOfStock}
+              onChange={(e) => handleDiscountInputChange(qtyKey, e.target.value)}
+              onBlur={() => handleDiscountBlur(qtyKey, originalPrice)}
+              onClick={(e) => e.stopPropagation()}
+              data-testid={`input-discount-${qtyKey}`}
+            />
+            {isDiscounted && (
+              <Button
+                variant="ghost" size="sm"
+                className="h-8 px-2 text-xs text-slate-400 hover:text-slate-700"
+                onClick={() => clearDiscountForKey(qtyKey)}
+              >Clear</Button>
+            )}
+          </div>
+
+          {/* 6 · Quantity Controls */}
+          <div className="flex items-center gap-3 justify-center">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-11 w-11 sm:h-12 sm:w-12 rounded-xl"
+              disabled={isOutOfStock || currentQty <= 1}
+              onClick={() => handleQtyChange(qtyKey, String(Math.max(1, currentQty - 1)), maxQty)}
+              data-testid={`button-minus-direct-${variant.id}`}
+            ><Minus className="h-4 w-4" /></Button>
+            <Input
+              type="number" min="1" max={maxQty}
+              className="w-16 h-11 sm:h-12 bg-white text-center text-lg font-semibold rounded-xl"
+              value={currentQty}
               disabled={isOutOfStock}
               onChange={(e) => handleQtyChange(qtyKey, e.target.value, maxQty)}
               data-testid={`input-qty-direct-${variant.id}`}
             />
             <Button
-              variant="outline" size="icon" className="h-8 w-8"
-              disabled={isOutOfStock || (quantities[qtyKey] ?? 1) >= maxQty}
-              onClick={() => handleQtyChange(qtyKey, String(Math.min((quantities[qtyKey] ?? 1) + 1, maxQty)), maxQty)}
+              variant="outline"
+              size="icon"
+              className="h-11 w-11 sm:h-12 sm:w-12 rounded-xl"
+              disabled={isOutOfStock || currentQty >= maxQty}
+              onClick={() => handleQtyChange(qtyKey, String(Math.min(currentQty + 1, maxQty)), maxQty)}
               data-testid={`button-plus-direct-${variant.id}`}
-            ><Plus className="h-3 w-3" /></Button>
-            <Button
-              size="sm"
-              disabled={isOutOfStock}
-              onClick={() => {
-                const qty = quantities[qtyKey] ?? 1;
-                const discount = discounts[qtyKey];
-                const priceAtSale = discount ? discount.finalPrice : originalPrice;
-                if (stockCheck(variant.stock_level, qty, maxQty)) {
-                  addToCart(product, qty, variant, priceAtSale, originalPrice, discount?.type ?? null, discount?.value ?? null);
-                  clearDiscountForKey(qtyKey);
-                  setQuantities(prev => { const next = { ...prev }; delete next[qtyKey]; return next; });
-                  toast({ title: "Added to cart", description: `${qty}x ${variant.sku} added.`, duration: 1000 });
-                }
-              }}
-              data-testid={`button-add-direct-${variant.id}`}
-            >Add to Cart</Button>
+            ><Plus className="h-4 w-4" /></Button>
           </div>
+
+          {/* 7 · Add to Cart — medium width, centered */}
+          <Button
+            size="lg"
+            className="w-48 sm:w-56 rounded-xl text-base font-semibold"
+            disabled={isOutOfStock}
+            onClick={doAddToCart}
+            data-testid={`button-add-direct-${variant.id}`}
+          >
+            {isOutOfStock ? 'Out of Stock' : 'Add to Cart'}
+          </Button>
+
         </div>
       </Card>
     );
