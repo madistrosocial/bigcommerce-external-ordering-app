@@ -6,10 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Toaster } from "@/components/ui/toaster";
 import {
   Search, Loader2, X, Plus, Minus, Trash2, User,
-  ShoppingCart, LogOut, AlertCircle, CheckCircle2, CreditCard, Package,
+  ShoppingCart, AlertCircle, CheckCircle2, CreditCard, Package,
+  ChevronDown, Wifi, WifiOff, LogOut, Package as PackageIcon, Monitor,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
@@ -55,7 +65,7 @@ interface VariantPopupProps {
 
 function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
   const variants = getVariants(product);
-  const rows = variants.length > 0 ? variants : [null]; // null = product itself, no variants
+  const rows = variants.length > 0 ? variants : [null];
 
   const [qtys, setQtys] = useState<Record<string, number>>({});
   const [isFree, setIsFree] = useState<Record<string, boolean>>({});
@@ -63,10 +73,8 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
 
   const key = (v: any) => String(v?.id ?? "0");
-
   const getQty = (v: any) => qtys[key(v)] ?? 1;
   const setQty = (v: any, q: number) => setQtys((p) => ({ ...p, [key(v)]: Math.max(1, q) }));
-
   const getBasePrice = (v: any) => parseFloat(v?.price || product.price) || 0;
 
   const computePrice = (v: any): { finalPrice: number; discountType: "free" | "percent" | null; discountValue: number | null } => {
@@ -88,27 +96,30 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
     return { finalPrice: base, discountType: null, discountValue: null };
   };
 
+  // Add to cart but keep popup open
   const handleAdd = (v: any) => {
     const base = getBasePrice(v);
     const { finalPrice, discountType, discountValue } = computePrice(v);
     onAdd(product, v, getQty(v), base, finalPrice, discountType, discountValue);
+    // Reset just this variant's controls after adding
+    const k = key(v);
+    setQtys((p) => ({ ...p, [k]: 1 }));
+    setIsFree((p) => ({ ...p, [k]: false }));
+    setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+    setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
   };
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
-        className="max-w-xl max-h-[85vh] flex flex-col p-0 gap-0"
+        className="w-[65vw] max-w-[65vw] max-h-[85vh] flex flex-col p-0 gap-0"
         onInteractOutside={(e) => e.preventDefault()}
         data-testid="dialog-variant-picker"
       >
         <DialogHeader className="px-5 pt-5 pb-3 border-b shrink-0">
           <div className="flex items-start gap-3">
             {product.image && (
-              <img
-                src={product.image}
-                alt={product.name}
-                className="w-12 h-12 object-cover rounded border shrink-0"
-              />
+              <img src={product.image} alt={product.name} className="w-12 h-12 object-cover rounded border shrink-0" />
             )}
             <div className="flex-1 min-w-0">
               <DialogTitle className="text-base leading-snug">{product.name}</DialogTitle>
@@ -121,38 +132,30 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
           {rows.map((v) => {
             const k = key(v);
             const base = getBasePrice(v);
-            const { finalPrice, discountType } = computePrice(v);
+            const { finalPrice } = computePrice(v);
             const isDiscounted = finalPrice < base;
             const qty = getQty(v);
 
             return (
-              <div
-                key={k}
-                className="px-5 py-4 space-y-3"
-                data-testid={`popup-variant-row-${k}`}
-              >
-                {/* Variant info */}
-                <div className="flex items-start justify-between gap-2">
+              <div key={k} className="px-5 py-3" data-testid={`popup-variant-row-${k}`}>
+                {/* Variant name + price (header row) */}
+                <div className="flex items-center justify-between mb-2">
                   <div>
-                    {v && (
-                      <p className="text-sm font-semibold text-slate-900">{variantLabel(v) || v.sku}</p>
-                    )}
+                    {v && <p className="text-sm font-semibold text-slate-900">{variantLabel(v) || v.sku}</p>}
                     <p className="text-xs text-slate-500">SKU: {v?.sku || product.sku}</p>
                   </div>
                   <div className="text-right shrink-0">
                     <p className={`text-base font-bold ${isDiscounted ? "text-red-600" : "text-slate-900"}`}>
                       ${finalPrice.toFixed(2)}
                     </p>
-                    {isDiscounted && (
-                      <p className="text-xs text-slate-400 line-through">${base.toFixed(2)}</p>
-                    )}
+                    {isDiscounted && <p className="text-xs text-slate-400 line-through">${base.toFixed(2)}</p>}
                   </div>
                 </div>
 
-                {/* Quantity + discount controls */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {/* Qty */}
-                  <div className="flex items-center gap-1.5 border rounded-md px-1 py-0.5 bg-slate-50">
+                {/* Single inline control row: [- qty +] [FREE] [Disc (%)] [Price ($)]  [Add] */}
+                <div className="flex items-center gap-2 flex-nowrap">
+                  {/* Qty controls */}
+                  <div className="flex items-center gap-1 border rounded-md px-1 py-0.5 bg-slate-50 shrink-0">
                     <button
                       className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200 disabled:opacity-40"
                       onClick={() => setQty(v, qty - 1)}
@@ -171,11 +174,11 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
                     </button>
                   </div>
 
-                  {/* FREE toggle */}
+                  {/* FREE */}
                   <Button
                     variant={isFree[k] ? "destructive" : "outline"}
                     size="sm"
-                    className="h-8 px-3 text-xs font-bold"
+                    className="h-8 px-3 text-xs font-bold shrink-0"
                     onClick={() => {
                       setIsFree((p) => ({ ...p, [k]: !p[k] }));
                       if (!isFree[k]) {
@@ -188,13 +191,11 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
                     FREE
                   </Button>
 
-                  {/* % discount */}
+                  {/* Disc (%) */}
                   <Input
-                    type="number"
-                    min="0"
-                    max="100"
-                    placeholder="% discount"
-                    className="w-28 h-8 text-xs bg-white"
+                    type="number" min="0" max="100"
+                    placeholder="Disc (%)"
+                    className="w-24 h-8 text-xs bg-white"
                     value={pctInputs[k] ?? ""}
                     onChange={(e) => {
                       setPctInputs((p) => ({ ...p, [k]: e.target.value }));
@@ -204,13 +205,11 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
                     data-testid={`popup-pct-${k}`}
                   />
 
-                  {/* Manual price */}
+                  {/* Price ($) */}
                   <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="Override price"
-                    className="w-28 h-8 text-xs bg-white"
+                    type="number" min="0" step="0.01"
+                    placeholder="Price ($)"
+                    className="w-24 h-8 text-xs bg-white"
                     value={priceInputs[k] ?? ""}
                     onChange={(e) => {
                       setPriceInputs((p) => ({ ...p, [k]: e.target.value }));
@@ -220,37 +219,25 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
                     data-testid={`popup-price-${k}`}
                   />
 
-                  {(isFree[k] || pctInputs[k] || priceInputs[k]) && (
-                    <button
-                      className="text-xs text-slate-400 hover:text-slate-700 underline"
-                      onClick={() => {
-                        setIsFree((p) => ({ ...p, [k]: false }));
-                        setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
-                        setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
-                      }}
-                    >
-                      Clear
-                    </button>
-                  )}
+                  {/* Add button — far right, stays open */}
+                  <Button
+                    size="sm"
+                    className="h-8 px-4 ml-auto shrink-0 font-semibold"
+                    onClick={() => handleAdd(v)}
+                    data-testid={`popup-add-${k}`}
+                  >
+                    Add — ${(finalPrice * qty).toFixed(2)}
+                  </Button>
                 </div>
-
-                {/* Add to Cart button */}
-                <Button
-                  className="w-full h-9"
-                  onClick={() => handleAdd(v)}
-                  data-testid={`popup-add-${k}`}
-                >
-                  <Plus className="h-4 w-4 mr-1.5" />
-                  Add to Cart — ${(finalPrice * qty).toFixed(2)}
-                </Button>
               </div>
             );
           })}
         </div>
 
-        <div className="px-5 py-3 border-t shrink-0 flex justify-end">
-          <Button variant="outline" size="sm" onClick={onClose} data-testid="popup-cancel">
-            Cancel
+        {/* Done button — centered, closes popup only */}
+        <div className="px-5 py-3 border-t shrink-0 flex justify-center">
+          <Button variant="outline" className="w-32" onClick={onClose} data-testid="popup-done">
+            Done
           </Button>
         </div>
       </DialogContent>
@@ -297,7 +284,7 @@ export default function POSPage() {
   const {
     currentUser, cart, addToCart,
     removeFromCartAtIndex, updateCartQuantityAtIndex, updateCartItemAtIndex,
-    clearCart, getCartTotal, isOfflineMode, setOfflineMode,
+    clearCart, getCartTotal, isOfflineMode, setOfflineMode, toggleOfflineMode, logout,
   } = useStore();
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -340,6 +327,20 @@ export default function POSPage() {
 
   const [orderNote, setOrderNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [navTarget, setNavTarget] = useState<string | null>(null);
+
+  // Guarded navigation: prompts if cart has items
+  const guardedNavigate = useCallback((path: string) => {
+    if (cart.length > 0) { setNavTarget(path); } else { navigate(path); }
+  }, [cart.length, navigate]);
+
+  const confirmNavigation = () => {
+    if (navTarget) {
+      if (navTarget === "/logout") { logout(); navigate("/"); }
+      else { navigate(navTarget); }
+      setNavTarget(null);
+    }
+  };
 
   // ── Online/offline ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -408,9 +409,8 @@ export default function POSPage() {
       }
     }, 0);
     toast({ title: "Added to cart", description: `${variant?.sku || product.sku} × ${qty}`, duration: 1500 });
-    setPopupProduct(null);
-    focusSearch();
-  }, [addToCart, toast, focusSearch]);
+    // Popup stays open — user closes it with Done
+  }, [addToCart, toast]);
 
   // ── Build suggestions from BC products ──────────────────────────────────────
   const buildSuggestions = useCallback((products: api.Product[]): Suggestion[] => {
@@ -664,7 +664,7 @@ export default function POSPage() {
 
         {selectedCustomer && customerAddresses.length > 1 && (
           <select
-            className="h-8 text-xs border rounded px-2 bg-white max-w-[180px] shrink-0"
+            className="h-8 text-xs border rounded px-2 bg-white min-w-[220px] max-w-[280px] shrink-0"
             value={selectedAddress?.id ?? ""}
             onChange={(e) => { const a = customerAddresses.find((x) => String(x.id) === e.target.value); if (a) setSelectedAddress(a); }}
             onClick={(e) => e.stopPropagation()}
@@ -674,10 +674,52 @@ export default function POSPage() {
           </select>
         )}
 
+        {/* User dropdown — same as catalog view */}
         <div className="ml-auto shrink-0">
-          <Button variant="outline" size="sm" onClick={() => navigate("/catalog")} data-testid="button-exit-pos">
-            <LogOut className="h-4 w-4 mr-1.5" />Exit POS
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="flex items-center gap-2" data-testid="button-pos-user-menu">
+                <User className="h-5 w-5" />
+                <span className="text-sm font-medium max-w-[100px] truncate">{currentUser?.name}</span>
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 bg-white dark:bg-slate-950 shadow-lg border z-50">
+              <DropdownMenuLabel>
+                <div className="flex flex-col">
+                  <span>{currentUser?.name}</span>
+                  <span className="text-xs font-normal text-slate-500">{currentUser?.role}</span>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => guardedNavigate("/catalog")} data-testid="pos-menu-catalog">
+                <Package className="mr-2 h-4 w-4" />
+                Product Catalog
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => guardedNavigate("/orders")} data-testid="pos-menu-orders">
+                <ShoppingCart className="mr-2 h-4 w-4" />
+                Order History
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => guardedNavigate("/pos")} data-testid="pos-menu-pos">
+                <Monitor className="mr-2 h-4 w-4" />
+                POS Mode
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={toggleOfflineMode} data-testid="pos-menu-offline">
+                {isOfflineMode ? <WifiOff className="mr-2 h-4 w-4" /> : <Wifi className="mr-2 h-4 w-4" />}
+                Offline Mode: {isOfflineMode ? "ON" : "OFF"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-red-600"
+                onClick={() => guardedNavigate("/logout")}
+                data-testid="pos-menu-logout"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Sign Out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
@@ -1034,6 +1076,29 @@ export default function POSPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Navigation guard ── */}
+      <AlertDialog open={!!navTarget} onOpenChange={(open) => { if (!open) setNavTarget(null); }}>
+        <AlertDialogContent data-testid="dialog-nav-guard">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave POS Mode?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your cart has {cart.length} {cart.length === 1 ? "item" : "items"}.
+              If you leave now your cart will be cleared.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="nav-guard-stay">Stay</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={confirmNavigation}
+              data-testid="nav-guard-leave"
+            >
+              Leave
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Variant Popup Dialog ── */}
       {popupProduct && (

@@ -1,0 +1,195 @@
+IMPORTANT:
+
+* Modify existing logic only
+* Reuse existing user dropdown component
+* Do NOT recreate dropdown from scratch
+* Do NOT break navigation logic
+* Do NOT introduce database changes
+* Return only modified components/functions
+
+---
+
+TASK: Update POS popup behavior and integrate existing user dropdown into POS header with navigation safety
+
+---
+
+========================================
+
+1. POPUP ADD-TO-CART BEHAVIOR
+   ========================================
+
+* Clicking "Add" MUST:
+  → Add item to cart
+  → KEEP popup open
+
+DO NOT close popup on add
+
+---
+
+========================================
+2. POPUP ROW LAYOUT
+===================
+
+Update each variant row:
+
+* Move Add button INLINE (same row)
+* Position at FAR RIGHT
+
+Layout:
+
+[ - qty + ] [FREE] [Disc (%)] [Price ($)]        [Add]
+
+Keep all existing logic intact
+
+---
+
+========================================
+3. INPUT PLACEHOLDERS
+=====================
+
+Update text only:
+
+* "% discount" → "Disc (%)"
+* "Override price" → "Price ($)"
+
+---
+
+========================================
+4. POPUP WIDTH
+==============
+
+* Increase popup width to ~65% viewport
+
+Ensure:
+
+* No overflow
+* Responsive layout remains intact
+
+---
+
+========================================
+5. DONE BUTTON
+==============
+
+* Replace Cancel button with centered "Done"
+
+Behavior:
+
+* Closes popup only
+* Does NOT modify cart
+
+Popup closes ONLY on:
+
+* Done
+* Close (X)
+
+---
+
+========================================
+6. HEADER – ADDRESS WIDTH
+=========================
+
+* Increase width of address dropdown
+* Improve visibility
+* No logic changes
+
+---
+
+========================================
+7. HEADER – USE EXISTING USER DROPDOWN
+======================================
+
+REMOVE:
+
+* "Exit POS" button
+
+REPLACE WITH:
+
+* Existing user dropdown component (top-right)
+
+MUST:
+
+* Reuse SAME dropdown used in catalog view
+* Keep all existing items:
+
+  * Product Catalog
+  * Order History
+  * POS Mode
+  * Offline Mode toggle
+  * Sign Out
+
+DO NOT:
+
+* Rebuild menu
+* Change menu structure
+
+---
+
+========================================
+8. NAVIGATION WARNING (CRITICAL)
+================================
+
+Intercept navigation WHEN:
+
+* User selects any dropdown item
+* AND current route is POS
+* AND cart has items
+
+---
+
+SHOW CONFIRMATION:
+
+"You have an active order in progress. Leaving this page will discard all unsaved items."
+
+OPTIONS:
+
+* Cancel → stay in POS
+* Confirm → proceed
+
+---
+
+APPLIES TO:
+
+* Product Catalog
+* Order History
+* Any route change from POS
+
+---
+
+IF cart is empty:
+
+* Allow navigation immediately
+
+---
+
+IMPLEMENTATION NOTES:
+
+* Hook into existing dropdown click handler
+* Add guard BEFORE navigation executes
+
+---
+
+========================================
+9. DO NOT
+=========
+
+* Do NOT modify backend
+* Do NOT change cart structure
+* Do NOT alter pricing logic
+* Do NOT break popup logic
+* Do NOT duplicate dropdown component
+* Do NOT introduce new global state
+
+---
+
+========================================
+OUTPUT
+======
+
+Return ONLY:
+
+* Popup component updates
+* Header update (dropdown reuse)
+* Navigation guard logic
+
+Do NOT include explanations
