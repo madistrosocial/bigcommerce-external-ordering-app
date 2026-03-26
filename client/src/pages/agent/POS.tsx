@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { useStore } from "@/lib/store";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -9,21 +9,289 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Toaster } from "@/components/ui/toaster";
 import {
   Search, Loader2, X, Plus, Minus, Trash2, User,
-  ShoppingCart, LogOut, AlertCircle, CheckCircle2, CreditCard,
+  ShoppingCart, LogOut, AlertCircle, CheckCircle2, CreditCard, Package,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { CartItem } from "@/lib/store";
 
-type VariantPicker =
-  | { mode: "single"; product: api.Product; variants: any[] }
-  | { mode: "multi"; products: api.Product[] };
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getVariants(product: api.Product): any[] {
   if (!product.variants) return [];
   if (Array.isArray(product.variants)) return product.variants;
   try { return JSON.parse(product.variants as unknown as string); } catch { return []; }
 }
+
+function variantLabel(variant: any): string {
+  if (!variant) return "";
+  if (variant.option_values?.length > 0) {
+    return variant.option_values.map((ov: any) => ov.label).join(" / ");
+  }
+  return variant.sku || "";
+}
+
+// ─── Suggestion types ─────────────────────────────────────────────────────────
+
+type SuggestionVariant = { kind: "variant"; product: api.Product; variant: any };
+type SuggestionProduct = { kind: "product"; product: api.Product };
+type Suggestion = SuggestionVariant | SuggestionProduct;
+
+// ─── Variant Popup Dialog ─────────────────────────────────────────────────────
+
+interface VariantPopupProps {
+  product: api.Product;
+  onClose: () => void;
+  onAdd: (
+    product: api.Product,
+    variant: any,
+    qty: number,
+    originalPrice: number,
+    finalPrice: number,
+    discountType: "free" | "percent" | null,
+    discountValue: number | null,
+  ) => void;
+}
+
+function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
+  const variants = getVariants(product);
+  const rows = variants.length > 0 ? variants : [null]; // null = product itself, no variants
+
+  const [qtys, setQtys] = useState<Record<string, number>>({});
+  const [isFree, setIsFree] = useState<Record<string, boolean>>({});
+  const [pctInputs, setPctInputs] = useState<Record<string, string>>({});
+  const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
+
+  const key = (v: any) => String(v?.id ?? "0");
+
+  const getQty = (v: any) => qtys[key(v)] ?? 1;
+  const setQty = (v: any, q: number) => setQtys((p) => ({ ...p, [key(v)]: Math.max(1, q) }));
+
+  const getBasePrice = (v: any) => parseFloat(v?.price || product.price) || 0;
+
+  const computePrice = (v: any): { finalPrice: number; discountType: "free" | "percent" | null; discountValue: number | null } => {
+    const base = getBasePrice(v);
+    const k = key(v);
+    if (isFree[k]) return { finalPrice: 0, discountType: "free", discountValue: null };
+    const manualRaw = priceInputs[k];
+    if (manualRaw && manualRaw !== "") {
+      const p = parseFloat(manualRaw);
+      if (!isNaN(p) && p >= 0) return { finalPrice: p, discountType: null, discountValue: null };
+    }
+    const pctRaw = pctInputs[k];
+    if (pctRaw && pctRaw !== "") {
+      const pct = parseFloat(pctRaw);
+      if (!isNaN(pct) && pct >= 0 && pct <= 100) {
+        return { finalPrice: Math.max(0, base * (1 - pct / 100)), discountType: "percent", discountValue: pct };
+      }
+    }
+    return { finalPrice: base, discountType: null, discountValue: null };
+  };
+
+  const handleAdd = (v: any) => {
+    const base = getBasePrice(v);
+    const { finalPrice, discountType, discountValue } = computePrice(v);
+    onAdd(product, v, getQty(v), base, finalPrice, discountType, discountValue);
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent
+        className="max-w-xl max-h-[85vh] flex flex-col p-0 gap-0"
+        onInteractOutside={(e) => e.preventDefault()}
+        data-testid="dialog-variant-picker"
+      >
+        <DialogHeader className="px-5 pt-5 pb-3 border-b shrink-0">
+          <div className="flex items-start gap-3">
+            {product.image && (
+              <img
+                src={product.image}
+                alt={product.name}
+                className="w-12 h-12 object-cover rounded border shrink-0"
+              />
+            )}
+            <div className="flex-1 min-w-0">
+              <DialogTitle className="text-base leading-snug">{product.name}</DialogTitle>
+              {product.sku && <p className="text-xs text-slate-500 mt-0.5">SKU: {product.sku}</p>}
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto divide-y">
+          {rows.map((v) => {
+            const k = key(v);
+            const base = getBasePrice(v);
+            const { finalPrice, discountType } = computePrice(v);
+            const isDiscounted = finalPrice < base;
+            const qty = getQty(v);
+
+            return (
+              <div
+                key={k}
+                className="px-5 py-4 space-y-3"
+                data-testid={`popup-variant-row-${k}`}
+              >
+                {/* Variant info */}
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    {v && (
+                      <p className="text-sm font-semibold text-slate-900">{variantLabel(v) || v.sku}</p>
+                    )}
+                    <p className="text-xs text-slate-500">SKU: {v?.sku || product.sku}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className={`text-base font-bold ${isDiscounted ? "text-red-600" : "text-slate-900"}`}>
+                      ${finalPrice.toFixed(2)}
+                    </p>
+                    {isDiscounted && (
+                      <p className="text-xs text-slate-400 line-through">${base.toFixed(2)}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Quantity + discount controls */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Qty */}
+                  <div className="flex items-center gap-1.5 border rounded-md px-1 py-0.5 bg-slate-50">
+                    <button
+                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200 disabled:opacity-40"
+                      onClick={() => setQty(v, qty - 1)}
+                      disabled={qty <= 1}
+                      data-testid={`popup-minus-${k}`}
+                    >
+                      <Minus className="h-3 w-3" />
+                    </button>
+                    <span className="w-6 text-center text-sm font-bold" data-testid={`popup-qty-${k}`}>{qty}</span>
+                    <button
+                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200"
+                      onClick={() => setQty(v, qty + 1)}
+                      data-testid={`popup-plus-${k}`}
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </div>
+
+                  {/* FREE toggle */}
+                  <Button
+                    variant={isFree[k] ? "destructive" : "outline"}
+                    size="sm"
+                    className="h-8 px-3 text-xs font-bold"
+                    onClick={() => {
+                      setIsFree((p) => ({ ...p, [k]: !p[k] }));
+                      if (!isFree[k]) {
+                        setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                        setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                      }
+                    }}
+                    data-testid={`popup-free-${k}`}
+                  >
+                    FREE
+                  </Button>
+
+                  {/* % discount */}
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="% discount"
+                    className="w-28 h-8 text-xs bg-white"
+                    value={pctInputs[k] ?? ""}
+                    onChange={(e) => {
+                      setPctInputs((p) => ({ ...p, [k]: e.target.value }));
+                      setIsFree((p) => ({ ...p, [k]: false }));
+                      setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                    }}
+                    data-testid={`popup-pct-${k}`}
+                  />
+
+                  {/* Manual price */}
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Override price"
+                    className="w-28 h-8 text-xs bg-white"
+                    value={priceInputs[k] ?? ""}
+                    onChange={(e) => {
+                      setPriceInputs((p) => ({ ...p, [k]: e.target.value }));
+                      setIsFree((p) => ({ ...p, [k]: false }));
+                      setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                    }}
+                    data-testid={`popup-price-${k}`}
+                  />
+
+                  {(isFree[k] || pctInputs[k] || priceInputs[k]) && (
+                    <button
+                      className="text-xs text-slate-400 hover:text-slate-700 underline"
+                      onClick={() => {
+                        setIsFree((p) => ({ ...p, [k]: false }));
+                        setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                        setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                      }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                {/* Add to Cart button */}
+                <Button
+                  className="w-full h-9"
+                  onClick={() => handleAdd(v)}
+                  data-testid={`popup-add-${k}`}
+                >
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  Add to Cart — ${(finalPrice * qty).toFixed(2)}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="px-5 py-3 border-t shrink-0 flex justify-end">
+          <Button variant="outline" size="sm" onClick={onClose} data-testid="popup-cancel">
+            Cancel
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Pinned Product Row ───────────────────────────────────────────────────────
+
+const PinnedProductRow = memo(function PinnedProductRow({
+  product,
+  onClick,
+}: {
+  product: api.Product;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left border-b last:border-0"
+      onClick={onClick}
+      data-testid={`pinned-row-${product.id}`}
+    >
+      {product.image ? (
+        <img src={product.image} alt={product.name} className="w-9 h-9 object-cover rounded border shrink-0" />
+      ) : (
+        <div className="w-9 h-9 rounded border bg-slate-100 flex items-center justify-center shrink-0">
+          <Package className="h-4 w-4 text-slate-400" />
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-slate-800 leading-snug">{product.name}</p>
+        <p className="text-xs text-slate-500 mt-0.5">SKU: {product.sku} · ${parseFloat(product.price).toFixed(2)}</p>
+      </div>
+      <span className="text-xs text-slate-400 shrink-0 font-medium">
+        {getVariants(product).length > 1 ? `${getVariants(product).length} variants` : ""}
+      </span>
+    </button>
+  );
+});
+
+// ─── Main POS Page ────────────────────────────────────────────────────────────
 
 export default function POSPage() {
   const {
@@ -36,27 +304,31 @@ export default function POSPage() {
 
   const canSearchBC = currentUser?.allow_bigcommerce_search ?? false;
 
+  // Always load pinned products (shown as rows in left panel for all agents)
   const { data: pinnedProducts = [] } = useQuery({
     queryKey: ["products", "pinned"],
     queryFn: api.getPinnedProducts,
-    enabled: !canSearchBC,
   });
 
-  // ── Search ───────────────────────────────────────────────
+  // ── Search ────────────────────────────────────────────────────────────────
   const searchRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [variantPicker, setVariantPicker] = useState<VariantPicker | null>(null);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestionLimit, setSuggestionLimit] = useState(15);
+  const searchSeqRef = useRef(0); // for race condition prevention
+  const bcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Cart / active item ────────────────────────────────────
+  // ── Popup ────────────────────────────────────────────────────────────────
+  const [popupProduct, setPopupProduct] = useState<api.Product | null>(null);
+
+  // ── Cart / active item ────────────────────────────────────────────────────
   const [activeLineId, setActiveLineId] = useState<string | null>(null);
-
-  // Per-line UI state (discount inputs / manual price inputs — flushed to store on blur)
   const [discountInputs, setDiscountInputs] = useState<Record<string, string>>({});
   const [manualPriceInputs, setManualPriceInputs] = useState<Record<string, string>>({});
 
-  // ── Customer ─────────────────────────────────────────────
+  // ── Customer ──────────────────────────────────────────────────────────────
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerResults, setCustomerResults] = useState<api.BigCommerceCustomer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<api.BigCommerceCustomer | null>(null);
@@ -69,16 +341,16 @@ export default function POSPage() {
   const [orderNote, setOrderNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // ── Online/offline ────────────────────────────────────────
+  // ── Online/offline ────────────────────────────────────────────────────────
   useEffect(() => {
-    const onOnline = () => setOfflineMode(false);
-    const onOffline = () => setOfflineMode(true);
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-    return () => { window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
+    const on = () => setOfflineMode(false);
+    const off = () => setOfflineMode(true);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
   }, [setOfflineMode]);
 
-  // ── Focus helpers ─────────────────────────────────────────
+  // ── Focus ─────────────────────────────────────────────────────────────────
   const focusSearch = useCallback(() => {
     setTimeout(() => searchRef.current?.focus(), 60);
   }, []);
@@ -92,11 +364,11 @@ export default function POSPage() {
     }
   };
 
-  // ── Auto-add helper ───────────────────────────────────────
-  const autoAddVariant = useCallback((product: api.Product, variant: any) => {
+  // ── Auto-add helper ───────────────────────────────────────────────────────
+  const autoAddVariant = useCallback((product: api.Product, variant: any, qty = 1) => {
     const price = parseFloat(variant?.price || product.price);
     const beforeIds = new Set(useStore.getState().cart.map((i) => i.lineId));
-    addToCart(product, 1, variant ?? undefined, price, price, null, null);
+    addToCart(product, qty, variant ?? undefined, price, price, null, null);
     setTimeout(() => {
       const after = useStore.getState().cart;
       const newLine = after.find((i) => !beforeIds.has(i.lineId));
@@ -109,85 +381,136 @@ export default function POSPage() {
         if (merged) setActiveLineId(merged.lineId);
       }
     }, 0);
-    toast({
-      title: "Added to cart",
-      description: `${variant?.sku || product.sku} × 1`,
-      duration: 1500,
-    });
+    toast({ title: "Added to cart", description: `${variant?.sku || product.sku} × ${qty}`, duration: 1500 });
   }, [addToCart, toast]);
 
-  // ── Search logic ──────────────────────────────────────────
-  const doSearch = useCallback(async (q: string) => {
-    const trimmed = q.trim();
-    if (!trimmed) return;
-    setIsSearching(true);
-    try {
-      if (canSearchBC && currentUser) {
-        const result = await api.agentBigCommerceSearch(trimmed, currentUser.id);
-        if (result.resultType === "variant") {
-          autoAddVariant(result.product, result.variant);
-          setSearch("");
-          focusSearch();
-        } else {
-          const { products } = result;
-          if (products.length === 0) {
-            toast({ title: "No results", description: `Nothing found for "${trimmed}"` });
-            return;
-          }
-          if (products.length === 1) {
-            const p = products[0];
-            const variants = getVariants(p);
-            if (variants.length <= 1) {
-              autoAddVariant(p, variants[0] ?? null);
-              setSearch("");
-              focusSearch();
-              return;
-            }
-            setVariantPicker({ mode: "single", product: p, variants });
-          } else {
-            setVariantPicker({ mode: "multi", products });
-          }
-        }
-      } else {
-        const lower = trimmed.toLowerCase();
-        const matches = pinnedProducts.filter(
-          (p) =>
-            p.name.toLowerCase().includes(lower) ||
-            p.sku.toLowerCase().includes(lower)
+  // Popup "Add to Cart" with custom pricing
+  const handlePopupAdd = useCallback((
+    product: api.Product,
+    variant: any,
+    qty: number,
+    originalPrice: number,
+    finalPrice: number,
+    discountType: "free" | "percent" | null,
+    discountValue: number | null,
+  ) => {
+    const beforeIds = new Set(useStore.getState().cart.map((i) => i.lineId));
+    addToCart(product, qty, variant ?? undefined, finalPrice, originalPrice, discountType, discountValue);
+    setTimeout(() => {
+      const after = useStore.getState().cart;
+      const newLine = after.find((i) => !beforeIds.has(i.lineId));
+      if (newLine) setActiveLineId(newLine.lineId);
+      else {
+        const merged = after.find(
+          (i) => i.product.id === product.id && (!variant || i.variant?.id === variant?.id)
         );
-        if (matches.length === 0) {
-          toast({ title: "No results", description: `Nothing found for "${trimmed}"` });
-          return;
-        }
-        if (matches.length === 1) {
-          const p = matches[0];
-          const variants = getVariants(p);
-          if (variants.length <= 1) {
-            autoAddVariant(p, variants[0] ?? null);
-            setSearch("");
-            focusSearch();
-            return;
-          }
-          setVariantPicker({ mode: "single", product: p, variants });
-        } else {
-          setVariantPicker({ mode: "multi", products: matches });
+        if (merged) setActiveLineId(merged.lineId);
+      }
+    }, 0);
+    toast({ title: "Added to cart", description: `${variant?.sku || product.sku} × ${qty}`, duration: 1500 });
+    setPopupProduct(null);
+    focusSearch();
+  }, [addToCart, toast, focusSearch]);
+
+  // ── Build suggestions from BC products ──────────────────────────────────────
+  const buildSuggestions = useCallback((products: api.Product[]): Suggestion[] => {
+    const out: Suggestion[] = [];
+    // Variants first
+    for (const p of products) {
+      const variants = getVariants(p);
+      if (variants.length > 0) {
+        for (const v of variants) {
+          out.push({ kind: "variant", product: p, variant: v });
         }
       }
-    } catch (e: any) {
-      toast({ title: "Search error", description: e.message, variant: "destructive" });
-    } finally {
-      setIsSearching(false);
     }
-  }, [canSearchBC, currentUser, pinnedProducts, autoAddVariant, focusSearch, toast]);
+    // Then products (as "mother product" rows)
+    for (const p of products) {
+      out.push({ kind: "product", product: p });
+    }
+    return out;
+  }, []);
 
-  useEffect(() => {
-    if (!search.trim()) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => doSearch(search), 400);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [search, doSearch]);
+  // ── Search handler ────────────────────────────────────────────────────────
+  const handleSearchChange = useCallback((q: string) => {
+    setSearch(q);
+    setSuggestionLimit(15);
 
-  // ── Customer search ───────────────────────────────────────
+    if (!q.trim()) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setIsSearching(false);
+      if (bcDebounceRef.current) clearTimeout(bcDebounceRef.current);
+      return;
+    }
+
+    const lower = q.toLowerCase().trim();
+
+    // Instant local filtering of pinned products
+    const localMatches = pinnedProducts.filter(
+      (p) =>
+        p.name.toLowerCase().includes(lower) ||
+        p.sku.toLowerCase().includes(lower)
+    );
+    const localSuggestions = buildSuggestions(localMatches);
+
+    if (!canSearchBC) {
+      setSuggestions(localSuggestions);
+      setShowSuggestions(localSuggestions.length > 0);
+      return;
+    }
+
+    // For BC agents: show local results immediately, then enrich with BC results
+    setSuggestions(localSuggestions);
+    if (localSuggestions.length > 0) setShowSuggestions(true);
+
+    // BC API call with 150ms delay to avoid hammering
+    const seq = ++searchSeqRef.current;
+    if (bcDebounceRef.current) clearTimeout(bcDebounceRef.current);
+    setIsSearching(true);
+    bcDebounceRef.current = setTimeout(async () => {
+      if (seq !== searchSeqRef.current) return; // stale
+      try {
+        const result = await api.agentBigCommerceSearch(q.trim(), currentUser!.id);
+        if (seq !== searchSeqRef.current) return; // stale response
+
+        if (result.resultType === "variant") {
+          // Exact SKU/UPC match — auto-add immediately
+          autoAddVariant(result.product, result.variant);
+          setSearch("");
+          setSuggestions([]);
+          setShowSuggestions(false);
+          focusSearch();
+        } else {
+          const bcSuggestions = buildSuggestions(result.products);
+          setSuggestions(bcSuggestions);
+          setShowSuggestions(bcSuggestions.length > 0);
+        }
+      } catch {
+        // Keep showing local suggestions on BC error
+      } finally {
+        if (seq === searchSeqRef.current) setIsSearching(false);
+      }
+    }, 150);
+  }, [canSearchBC, currentUser, pinnedProducts, buildSuggestions, autoAddVariant, focusSearch]);
+
+  // Dismiss suggestions on Escape
+  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  // Suggestion dropdown infinite scroll
+  const handleDropdownScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight < 60) {
+      setSuggestionLimit((prev) => prev + 15);
+    }
+  };
+
+  // ── Customer search ───────────────────────────────────────────────────────
   useEffect(() => {
     if (isOfflineMode || !customerSearch || selectedCustomer) return;
     if (customerDebRef.current) clearTimeout(customerDebRef.current);
@@ -217,10 +540,9 @@ export default function POSPage() {
     focusSearch();
   };
 
-  // ── Pricing helpers ───────────────────────────────────────
+  // ── Cart pricing helpers ──────────────────────────────────────────────────
   const applyFree = (item: CartItem, index: number) => {
-    const isFree = item.discount_type === "free";
-    if (isFree) {
+    if (item.discount_type === "free") {
       updateCartItemAtIndex(index, { price_at_sale: item.original_price, discount_type: null, discount_value: null });
     } else {
       setManualPriceInputs((p) => { const n = { ...p }; delete n[item.lineId]; return n; });
@@ -248,31 +570,22 @@ export default function POSPage() {
     updateCartItemAtIndex(index, { price_at_sale: item.original_price, discount_type: null, discount_value: null });
   };
 
-  // ── Checkout ──────────────────────────────────────────────
+  // ── Checkout ──────────────────────────────────────────────────────────────
   const handleCheckout = async () => {
     if (!selectedCustomer || !selectedAddress) {
       toast({ title: "Customer required", description: "Search and select a customer before checkout.", variant: "destructive" });
       return;
     }
-    if (cart.length === 0) {
-      toast({ title: "Cart is empty", variant: "destructive" });
-      return;
-    }
+    if (cart.length === 0) { toast({ title: "Cart is empty", variant: "destructive" }); return; }
     setIsSubmitting(true);
     try {
       const billing = {
-        first_name: selectedAddress.first_name,
-        last_name: selectedAddress.last_name,
-        company: selectedAddress.company,
-        street_1: selectedAddress.street_1,
-        street_2: selectedAddress.street_2,
-        city: selectedAddress.city,
-        state: selectedAddress.state,
-        zip: selectedAddress.zip,
-        country: selectedAddress.country,
-        country_iso2: selectedAddress.country_iso2,
-        email: selectedCustomer.email,
-        phone: selectedAddress.phone || selectedCustomer.phone,
+        first_name: selectedAddress.first_name, last_name: selectedAddress.last_name,
+        company: selectedAddress.company, street_1: selectedAddress.street_1,
+        street_2: selectedAddress.street_2, city: selectedAddress.city,
+        state: selectedAddress.state, zip: selectedAddress.zip,
+        country: selectedAddress.country, country_iso2: selectedAddress.country_iso2,
+        email: selectedCustomer.email, phone: selectedAddress.phone || selectedCustomer.phone,
       };
       const response = await api.createOrder({
         customer_name: `${selectedCustomer.first_name} ${selectedCustomer.last_name}`,
@@ -295,85 +608,52 @@ export default function POSPage() {
         total: getCartTotal().toFixed(2),
         created_by_user_id: currentUser?.id || 0,
       });
-
       if (response.bigcommerce?.success) {
         toast({ title: "Order Created", description: `BigCommerce Order #${response.bigcommerce.order_id}` });
-        clearCart();
-        setActiveLineId(null);
-        setDiscountInputs({});
-        setManualPriceInputs({});
-        setSelectedCustomer(null);
-        setSelectedAddress(null);
-        setCustomerAddresses([]);
-        setCustomerSearch("");
-        setOrderNote("");
-        focusSearch();
+        clearCart(); setActiveLineId(null); setDiscountInputs({}); setManualPriceInputs({});
+        setSelectedCustomer(null); setSelectedAddress(null); setCustomerAddresses([]);
+        setCustomerSearch(""); setOrderNote(""); focusSearch();
       } else {
-        toast({
-          title: "Order Failed",
-          description: response.bigcommerce?.error || "BigCommerce sync failed",
-          variant: "destructive",
-        });
+        toast({ title: "Order Failed", description: response.bigcommerce?.error || "Sync failed", variant: "destructive" });
       }
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
-    } finally {
-      setIsSubmitting(false);
-    }
+    } finally { setIsSubmitting(false); }
   };
 
-  const total = getCartTotal();
+  // ── Totals ────────────────────────────────────────────────────────────────
+  const finalTotal = getCartTotal();
+  const originalTotal = cart.reduce((s, i) => s + i.original_price * i.quantity, 0);
+  const totalDiscount = Math.max(0, originalTotal - finalTotal);
   const totalQty = cart.reduce((s, i) => s + i.quantity, 0);
+  const visibleSuggestions = suggestions.slice(0, suggestionLimit);
 
-  // ── Render ────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div
-      className="h-screen overflow-hidden flex flex-col bg-slate-100 select-none"
-      onClick={handlePageClick}
-    >
+    <div className="h-screen overflow-hidden flex flex-col bg-slate-100" onClick={handlePageClick}>
+
       {/* ── Header ── */}
       <header className="flex items-center gap-3 px-4 h-14 bg-white border-b shadow-sm shrink-0 z-20">
-        <span className="font-bold text-base uppercase tracking-widest text-slate-800 shrink-0">
-          POS
-        </span>
-        {isOfflineMode && (
-          <Badge variant="destructive" className="text-[10px] shrink-0">Offline</Badge>
-        )}
+        <span className="font-bold text-base uppercase tracking-widest text-slate-800 shrink-0">POS</span>
+        {isOfflineMode && <Badge variant="destructive" className="text-[10px] shrink-0">Offline</Badge>}
 
-        {/* Customer selector */}
-        <div
-          className="flex-1 relative max-w-sm"
-          onClick={(e) => e.stopPropagation()}
-          data-nofocus
-        >
+        {/* Customer search */}
+        <div className="flex-1 relative max-w-sm" onClick={(e) => e.stopPropagation()} data-nofocus>
           <User className="absolute left-2.5 top-2 h-4 w-4 text-slate-400 pointer-events-none" />
-          {isCustomerSearching && (
-            <Loader2 className="absolute right-2.5 top-2 h-4 w-4 animate-spin text-slate-400 pointer-events-none" />
-          )}
+          {isCustomerSearching && <Loader2 className="absolute right-2.5 top-2 h-4 w-4 animate-spin text-slate-400 pointer-events-none" />}
+          {selectedCustomer && !isCustomerSearching && <CheckCircle2 className="absolute right-2.5 top-2 h-4 w-4 text-green-500 pointer-events-none" />}
           <Input
             placeholder="Search customer…"
             className="pl-8 h-8 text-sm bg-white pr-8"
             value={customerSearch}
-            onChange={(e) => {
-              setCustomerSearch(e.target.value);
-              setSelectedCustomer(null);
-              setSelectedAddress(null);
-            }}
+            onChange={(e) => { setCustomerSearch(e.target.value); setSelectedCustomer(null); setSelectedAddress(null); }}
             onFocus={() => { if (customerResults.length > 0) setShowCustomerDrop(true); }}
             data-testid="input-pos-customer"
           />
-          {selectedCustomer && (
-            <CheckCircle2 className="absolute right-2.5 top-2 h-4 w-4 text-green-500 pointer-events-none" />
-          )}
           {showCustomerDrop && customerResults.length > 0 && (
             <div className="absolute top-full left-0 right-0 bg-white border rounded-md shadow-xl z-50 max-h-52 overflow-y-auto mt-1">
               {customerResults.map((c) => (
-                <button
-                  key={c.id}
-                  className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b last:border-0"
-                  onClick={() => handleSelectCustomer(c)}
-                  data-testid={`option-customer-${c.id}`}
-                >
+                <button key={c.id} className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b last:border-0" onClick={() => handleSelectCustomer(c)} data-testid={`option-customer-${c.id}`}>
                   <p className="text-sm font-medium">{c.first_name} {c.last_name}</p>
                   <p className="text-xs text-slate-500">{c.email}</p>
                 </button>
@@ -382,111 +662,171 @@ export default function POSPage() {
           )}
         </div>
 
-        {/* Address selector (if customer has multiple addresses) */}
         {selectedCustomer && customerAddresses.length > 1 && (
           <select
             className="h-8 text-xs border rounded px-2 bg-white max-w-[180px] shrink-0"
             value={selectedAddress?.id ?? ""}
-            onChange={(e) => {
-              const addr = customerAddresses.find((a) => String(a.id) === e.target.value);
-              if (addr) setSelectedAddress(addr);
-            }}
+            onChange={(e) => { const a = customerAddresses.find((x) => String(x.id) === e.target.value); if (a) setSelectedAddress(a); }}
             onClick={(e) => e.stopPropagation()}
             data-testid="select-pos-address"
           >
-            {customerAddresses.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.street_1}, {a.city}
-              </option>
-            ))}
+            {customerAddresses.map((a) => <option key={a.id} value={a.id}>{a.street_1}, {a.city}</option>)}
           </select>
         )}
 
         <div className="ml-auto shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate("/catalog")}
-            data-testid="button-exit-pos"
-          >
-            <LogOut className="h-4 w-4 mr-1.5" />
-            Exit POS
+          <Button variant="outline" size="sm" onClick={() => navigate("/catalog")} data-testid="button-exit-pos">
+            <LogOut className="h-4 w-4 mr-1.5" />Exit POS
           </Button>
         </div>
       </header>
 
       {/* ── Body ── */}
       <div className="flex-1 flex overflow-hidden">
-        {/* ── LEFT: Search Panel ── */}
-        <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto min-w-0">
+
+        {/* ── LEFT: Search + Pinned Products ── */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* Search input */}
-          <div className="relative">
-            <Search className="absolute left-3 top-3.5 h-5 w-5 text-slate-400 pointer-events-none" />
-            <Input
-              ref={searchRef}
-              placeholder="Scan barcode, enter SKU, or type product name…"
-              className="pl-10 h-12 text-base bg-white shadow-sm font-medium"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && search.trim()) {
-                  if (debounceRef.current) clearTimeout(debounceRef.current);
-                  doSearch(search);
-                }
-              }}
-              data-testid="input-pos-search"
-            />
-            {isSearching && (
-              <Loader2 className="absolute right-3 top-3.5 h-5 w-5 animate-spin text-slate-400 pointer-events-none" />
-            )}
-            {search && !isSearching && (
-              <button
-                className="absolute right-3 top-3.5"
-                onClick={() => { setSearch(""); focusSearch(); }}
-                data-testid="button-pos-clear-search"
-              >
-                <X className="h-5 w-5 text-slate-400" />
-              </button>
-            )}
+          <div className="px-4 pt-4 pb-2 shrink-0">
+            <div className="relative">
+              <Search className="absolute left-3 top-3.5 h-5 w-5 text-slate-400 pointer-events-none" />
+              <Input
+                ref={searchRef}
+                placeholder="Scan barcode, SKU, UPC, or product name…"
+                className="pl-10 h-12 text-base bg-white shadow-sm font-medium"
+                value={search}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+                data-testid="input-pos-search"
+              />
+              {isSearching && <Loader2 className="absolute right-10 top-3.5 h-5 w-5 animate-spin text-slate-400 pointer-events-none" />}
+              {search && (
+                <button
+                  className="absolute right-3 top-3.5"
+                  onClick={() => { handleSearchChange(""); focusSearch(); }}
+                  data-testid="button-pos-clear-search"
+                >
+                  <X className="h-5 w-5 text-slate-400" />
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-slate-400 mt-1.5 ml-1">
+              {canSearchBC ? "BigCommerce search active — scan SKU/UPC or type name" : "Searching pinned products"}
+            </p>
           </div>
 
-          <p className="text-xs text-slate-400 -mt-2 ml-1">
-            {canSearchBC
-              ? "BigCommerce search active — scan or type SKU, UPC, or product name"
-              : "Searching pinned products only"}
-          </p>
-
-          {/* Empty prompt */}
-          {cart.length === 0 && !isSearching && (
-            <div className="flex flex-col items-center justify-center flex-1 text-slate-300 py-20 pointer-events-none">
-              <ShoppingCart className="h-20 w-20 mb-4 opacity-40" />
-              <p className="text-xl font-semibold text-slate-400">Ready to scan</p>
-              <p className="text-sm mt-1 text-slate-400">Scan a barcode or type a SKU / product name</p>
+          {/* Suggestion dropdown */}
+          {showSuggestions && visibleSuggestions.length > 0 && (
+            <div
+              className="mx-4 mb-2 bg-white border rounded-lg shadow-lg z-30 overflow-y-auto flex-1 divide-y"
+              onScroll={handleDropdownScroll}
+              onClick={(e) => e.stopPropagation()}
+              data-testid="pos-suggestions-dropdown"
+            >
+              {/* Variants section */}
+              {visibleSuggestions.some((s) => s.kind === "variant") && (
+                <>
+                  <div className="px-3 py-1.5 bg-slate-50 border-b">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Variants</p>
+                  </div>
+                  {visibleSuggestions.filter((s): s is SuggestionVariant => s.kind === "variant").map((s, i) => (
+                    <button
+                      key={`v-${s.product.id}-${s.variant?.id ?? i}`}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-blue-50 transition-colors text-left"
+                      onClick={() => {
+                        autoAddVariant(s.product, s.variant);
+                        setSearch("");
+                        setSuggestions([]);
+                        setShowSuggestions(false);
+                        focusSearch();
+                      }}
+                      data-testid={`suggestion-variant-${s.variant?.id ?? i}`}
+                    >
+                      {s.product.image && (
+                        <img src={s.product.image} alt="" className="w-8 h-8 object-cover rounded border shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-slate-500 truncate">{s.product.name}</p>
+                        <p className="text-sm font-semibold text-slate-900 truncate">{variantLabel(s.variant) || s.variant?.sku}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-bold text-slate-900">${parseFloat(s.variant?.price || s.product.price).toFixed(2)}</p>
+                        <p className="text-[10px] text-slate-400">{s.variant?.sku}</p>
+                      </div>
+                    </button>
+                  ))}
+                </>
+              )}
+              {/* Products section */}
+              {visibleSuggestions.some((s) => s.kind === "product") && (
+                <>
+                  <div className="px-3 py-1.5 bg-slate-50 border-b">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Products</p>
+                  </div>
+                  {visibleSuggestions.filter((s): s is SuggestionProduct => s.kind === "product").map((s) => (
+                    <button
+                      key={`p-${s.product.id}`}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left"
+                      onClick={() => {
+                        setPopupProduct(s.product);
+                        setSuggestions([]);
+                        setShowSuggestions(false);
+                      }}
+                      data-testid={`suggestion-product-${s.product.id}`}
+                    >
+                      {s.product.image && (
+                        <img src={s.product.image} alt="" className="w-8 h-8 object-cover rounded border shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-800 truncate">{s.product.name}</p>
+                        <p className="text-xs text-slate-500">SKU: {s.product.sku}</p>
+                      </div>
+                      <span className="text-xs text-slate-400 shrink-0">Select variant →</span>
+                    </button>
+                  ))}
+                </>
+              )}
+              {suggestions.length > suggestionLimit && (
+                <div className="px-4 py-2 text-center text-xs text-slate-400">Scroll for more results</div>
+              )}
             </div>
           )}
 
-          {/* Active item echo (left side preview when cart has items) */}
-          {cart.length > 0 && (
-            <div className="text-xs text-slate-500 mt-2 space-y-1">
-              <p className="font-semibold uppercase tracking-wide text-slate-400">{cart.length} line{cart.length !== 1 ? "s" : ""} in cart</p>
-              {cart.map((item) => (
-                <div key={item.lineId} className={`flex gap-2 items-center rounded px-2 py-1 ${item.lineId === activeLineId ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-500"}`}>
-                  <span className="truncate flex-1">{item.product.name} {item.variant?.sku ? `(${item.variant.sku})` : ""}</span>
-                  <span className="shrink-0">×{item.quantity}</span>
-                  <span className="shrink-0">${(item.price_at_sale * item.quantity).toFixed(2)}</span>
+          {/* No suggestions / default: Pinned products rows */}
+          {!showSuggestions && (
+            <div className="flex-1 overflow-y-auto">
+              {pinnedProducts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-slate-300 py-12 pointer-events-none">
+                  <ShoppingCart className="h-16 w-16 mb-3 opacity-30" />
+                  <p className="text-base font-medium text-slate-400">Ready to scan</p>
+                  <p className="text-sm mt-1 text-slate-400">Scan a barcode or type to search</p>
                 </div>
-              ))}
+              ) : (
+                <div className="bg-white mx-4 my-2 rounded-lg border shadow-sm overflow-hidden">
+                  <div className="px-4 py-2 border-b bg-slate-50">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Pinned Products</p>
+                  </div>
+                  {pinnedProducts.map((p) => (
+                    <PinnedProductRow
+                      key={p.id}
+                      product={p}
+                      onClick={() => setPopupProduct(p)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* ── RIGHT: Cart Panel ── */}
+        {/* ── RIGHT: Cart Panel (38%) ── */}
         <div
-          className="w-[400px] xl:w-[460px] shrink-0 flex flex-col bg-white border-l shadow-md"
+          className="flex-none w-[38%] min-w-[340px] max-w-[520px] flex flex-col bg-white border-l shadow-md"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Cart header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50">
+          <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50 shrink-0">
             <span className="font-bold text-sm text-slate-700 uppercase tracking-wide">Cart</span>
             {cart.length > 0 && (
               <button
@@ -502,20 +842,17 @@ export default function POSPage() {
           {/* Cart items */}
           <div className="flex-1 overflow-y-auto divide-y">
             {cart.length === 0 ? (
-              <div className="flex items-center justify-center h-24 text-slate-400 text-sm">
-                No items yet
-              </div>
+              <div className="flex items-center justify-center h-24 text-slate-400 text-sm">No items yet</div>
             ) : (
               cart.map((item, index) => {
                 const isActive = item.lineId === activeLineId;
                 const isFree = item.discount_type === "free";
-                const hasPctDiscount = item.discount_type === "percent";
+                const hasPct = item.discount_type === "percent";
                 const isDiscounted = item.price_at_sale < item.original_price;
-                const discountInput = discountInputs[item.lineId] ?? (hasPctDiscount ? String(item.discount_value ?? "") : "");
+                const discountInput = discountInputs[item.lineId] ?? (hasPct ? String(item.discount_value ?? "") : "");
                 const manualInput = manualPriceInputs[item.lineId] ?? "";
 
                 if (!isActive) {
-                  // ── Collapsed item ──
                   return (
                     <div
                       key={item.lineId}
@@ -535,8 +872,8 @@ export default function POSPage() {
                         <p className={`text-sm font-bold ${isDiscounted || isFree ? "text-red-600" : "text-slate-900"}`}>
                           ${(item.price_at_sale * item.quantity).toFixed(2)}
                         </p>
-                        {isFree && <span className="text-[9px] font-bold text-red-500 bg-red-50 px-1 rounded">FREE</span>}
-                        {hasPctDiscount && <span className="text-[9px] text-red-500">-{item.discount_value}%</span>}
+                        {isFree && <span className="text-[9px] font-bold text-red-500">FREE</span>}
+                        {hasPct && <span className="text-[9px] text-red-500">-{item.discount_value}%</span>}
                       </div>
                       <button
                         className="text-slate-300 hover:text-red-500 ml-1 shrink-0"
@@ -549,23 +886,16 @@ export default function POSPage() {
                   );
                 }
 
-                // ── Active item (expanded) ──
+                // ── Active item ──
                 return (
-                  <div
-                    key={item.lineId}
-                    className="bg-blue-50 border-l-4 border-blue-500 px-3 py-3 space-y-2.5"
-                    data-testid={`pos-item-active-${item.lineId}`}
-                  >
-                    {/* Name + remove */}
+                  <div key={item.lineId} className="bg-blue-50 border-l-4 border-blue-500 px-3 py-3 space-y-2.5" data-testid={`pos-item-active-${item.lineId}`}>
                     <div className="flex items-start gap-2">
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm text-slate-900 leading-snug">{item.product.name}</p>
                         <p className="text-xs text-slate-500 mt-0.5">
                           SKU: {item.variant?.sku || item.product.sku}
                           {item.variant?.option_values?.length > 0 && (
-                            <span className="ml-1 font-medium text-slate-600">
-                              · {item.variant.option_values.map((ov: any) => ov.label).join(" / ")}
-                            </span>
+                            <span className="ml-1 font-medium text-slate-600">· {item.variant.option_values.map((ov: any) => ov.label).join(" / ")}</span>
                           )}
                         </p>
                       </div>
@@ -578,28 +908,17 @@ export default function POSPage() {
                       </button>
                     </div>
 
-                    {/* Quantity */}
+                    {/* Qty */}
                     <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-9 w-9 shrink-0"
-                        disabled={item.quantity <= 1}
+                      <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" disabled={item.quantity <= 1}
                         onClick={() => { updateCartQuantityAtIndex(index, -1); focusSearch(); }}
-                        data-testid={`button-pos-minus-${item.lineId}`}
-                      >
+                        data-testid={`button-pos-minus-${item.lineId}`}>
                         <Minus className="h-3.5 w-3.5" />
                       </Button>
-                      <span className="w-10 text-center text-base font-bold text-slate-900" data-testid={`text-pos-qty-${item.lineId}`}>
-                        {item.quantity}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-9 w-9 shrink-0"
+                      <span className="w-10 text-center text-base font-bold text-slate-900" data-testid={`text-pos-qty-${item.lineId}`}>{item.quantity}</span>
+                      <Button variant="outline" size="icon" className="h-9 w-9 shrink-0"
                         onClick={() => { updateCartQuantityAtIndex(index, 1); focusSearch(); }}
-                        data-testid={`button-pos-plus-${item.lineId}`}
-                      >
+                        data-testid={`button-pos-plus-${item.lineId}`}>
                         <Plus className="h-3.5 w-3.5" />
                       </Button>
                       <span className="text-xs text-slate-500 ml-1">qty</span>
@@ -610,83 +929,53 @@ export default function POSPage() {
                       <span className={`text-xl font-bold ${isDiscounted || isFree ? "text-red-600" : "text-slate-900"}`}>
                         ${item.price_at_sale.toFixed(2)}
                       </span>
-                      {(isDiscounted || isFree) && (
-                        <span className="text-xs text-slate-400 line-through">${item.original_price.toFixed(2)}</span>
-                      )}
+                      {(isDiscounted || isFree) && <span className="text-xs text-slate-400 line-through">${item.original_price.toFixed(2)}</span>}
                       {isFree && <Badge variant="destructive" className="text-[10px] h-4 px-1">FREE</Badge>}
-                      {hasPctDiscount && <Badge variant="destructive" className="text-[10px] h-4 px-1">-{item.discount_value}%</Badge>}
+                      {hasPct && <Badge variant="destructive" className="text-[10px] h-4 px-1">-{item.discount_value}%</Badge>}
                     </div>
 
                     {/* Discount controls */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Button
                         variant={isFree ? "destructive" : "outline"}
-                        size="sm"
-                        className="h-8 px-2.5 text-xs font-bold"
+                        size="sm" className="h-8 px-3 text-xs font-bold"
                         onClick={() => { applyFree(item, index); focusSearch(); }}
                         data-testid={`button-pos-free-${item.lineId}`}
-                      >
-                        FREE
-                      </Button>
-
-                      <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
-                          min="0"
-                          max="100"
-                          placeholder="% off"
-                          className="w-16 h-8 text-xs text-center bg-white"
-                          value={discountInput}
-                          onChange={(e) => setDiscountInputs((p) => ({ ...p, [item.lineId]: e.target.value }))}
-                          onBlur={(e) => {
-                            const pct = parseFloat(e.target.value);
-                            if (!isNaN(pct) && pct >= 0 && pct <= 100) {
-                              applyPercent(item, index, pct);
-                            } else if (!e.target.value) {
-                              if (hasPctDiscount) clearLineDiscount(item, index);
-                            }
-                            focusSearch();
-                          }}
-                          data-testid={`input-pos-discount-${item.lineId}`}
-                        />
-                        <span className="text-xs text-slate-400">%</span>
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        <span className="text-xs text-slate-400">$</span>
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder="price"
-                          className="w-20 h-8 text-xs text-center bg-white"
-                          value={manualInput}
-                          onChange={(e) => setManualPriceInputs((p) => ({ ...p, [item.lineId]: e.target.value }))}
-                          onBlur={(e) => {
-                            if (e.target.value) applyManualPrice(item, index, e.target.value);
-                            focusSearch();
-                          }}
-                          data-testid={`input-pos-price-${item.lineId}`}
-                        />
-                      </div>
-
+                      >FREE</Button>
+                      <Input
+                        type="number" min="0" max="100"
+                        placeholder="% discount"
+                        className="w-28 h-8 text-xs bg-white"
+                        value={discountInput}
+                        onChange={(e) => setDiscountInputs((p) => ({ ...p, [item.lineId]: e.target.value }))}
+                        onBlur={(e) => {
+                          const pct = parseFloat(e.target.value);
+                          if (!isNaN(pct) && pct >= 0 && pct <= 100) applyPercent(item, index, pct);
+                          else if (!e.target.value && hasPct) clearLineDiscount(item, index);
+                          focusSearch();
+                        }}
+                        data-testid={`input-pos-discount-${item.lineId}`}
+                      />
+                      <Input
+                        type="number" min="0" step="0.01"
+                        placeholder="Override price"
+                        className="w-32 h-8 text-xs bg-white"
+                        value={manualInput}
+                        onChange={(e) => setManualPriceInputs((p) => ({ ...p, [item.lineId]: e.target.value }))}
+                        onBlur={(e) => { if (e.target.value) applyManualPrice(item, index, e.target.value); focusSearch(); }}
+                        data-testid={`input-pos-price-${item.lineId}`}
+                      />
                       {(isDiscounted || isFree || manualInput) && (
-                        <button
-                          className="text-xs text-slate-400 hover:text-slate-700 underline"
-                          onClick={() => { clearLineDiscount(item, index); focusSearch(); }}
-                          data-testid={`button-pos-clear-discount-${item.lineId}`}
-                        >
+                        <button className="text-xs text-slate-400 hover:text-slate-700 underline"
+                          onClick={() => { clearLineDiscount(item, index); focusSearch(); }}>
                           Clear
                         </button>
                       )}
                     </div>
 
-                    {/* Line total */}
-                    <div className="flex justify-between items-center text-xs text-slate-600 pt-0.5">
+                    <div className="flex justify-between text-xs text-slate-600 pt-0.5">
                       <span>Line total</span>
-                      <span className="font-bold text-slate-900 text-sm">
-                        ${(item.price_at_sale * item.quantity).toFixed(2)}
-                      </span>
+                      <span className="font-bold text-slate-900 text-sm">${(item.price_at_sale * item.quantity).toFixed(2)}</span>
                     </div>
                   </div>
                 );
@@ -696,149 +985,64 @@ export default function POSPage() {
 
           {/* Order note */}
           {cart.length > 0 && (
-            <div className="px-3 py-2 border-t">
-              <Input
-                placeholder="Order note (optional)…"
-                className="h-8 text-xs bg-slate-50"
-                value={orderNote}
-                onChange={(e) => setOrderNote(e.target.value)}
-                data-testid="input-pos-order-note"
-              />
+            <div className="px-3 py-2 border-t shrink-0">
+              <Input placeholder="Order note (optional)…" className="h-8 text-xs bg-slate-50"
+                value={orderNote} onChange={(e) => setOrderNote(e.target.value)}
+                data-testid="input-pos-order-note" />
             </div>
           )}
 
-          {/* Cart footer */}
-          <div className="border-t px-4 py-3 bg-slate-50 shrink-0">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-sm text-slate-500">
-                {totalQty} item{totalQty !== 1 ? "s" : ""}
-              </span>
-              <span className="text-xl font-bold text-slate-900" data-testid="text-pos-total">
-                ${total.toFixed(2)}
+          {/* Cart footer: totals + checkout */}
+          <div className="border-t px-4 py-3 bg-slate-50 shrink-0 space-y-1">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-slate-500">{totalQty} item{totalQty !== 1 ? "s" : ""}</span>
+              {totalDiscount > 0 && (
+                <span className="text-sm text-red-500 font-medium" data-testid="text-pos-discount">
+                  Discount: -${totalDiscount.toFixed(2)}
+                </span>
+              )}
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-base font-semibold text-slate-700">Total</span>
+              <span className="text-2xl font-bold text-slate-900" data-testid="text-pos-total">
+                ${finalTotal.toFixed(2)}
               </span>
             </div>
 
             {cart.length > 0 && !selectedCustomer && (
-              <div className="flex items-center gap-1.5 mb-2 text-amber-600 text-xs font-medium">
+              <div className="flex items-center gap-1.5 pt-1 text-amber-600 text-xs font-medium">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                 Select a customer to enable checkout
               </div>
             )}
             {cart.length > 0 && selectedCustomer && !selectedAddress && (
-              <div className="flex items-center gap-1.5 mb-2 text-amber-600 text-xs font-medium">
+              <div className="flex items-center gap-1.5 pt-1 text-amber-600 text-xs font-medium">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                No shipping address found for this customer
+                No address found for this customer
               </div>
             )}
-
             <Button
-              className="w-full"
+              className="w-full mt-2"
               size="lg"
               disabled={cart.length === 0 || !selectedCustomer || !selectedAddress || isSubmitting}
               onClick={handleCheckout}
               data-testid="button-pos-checkout"
             >
-              {isSubmitting
-                ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                : <CreditCard className="h-4 w-4 mr-2" />}
+              {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CreditCard className="h-4 w-4 mr-2" />}
               {isSubmitting ? "Processing…" : "Checkout"}
             </Button>
           </div>
         </div>
       </div>
 
-      {/* ── Variant Picker Modal ── */}
-      <Dialog
-        open={!!variantPicker}
-        onOpenChange={(open) => {
-          if (!open) { setVariantPicker(null); focusSearch(); }
-        }}
-      >
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-base">
-              {variantPicker?.mode === "single"
-                ? variantPicker.product.name
-                : "Select a product"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2 mt-2">
-            {variantPicker?.mode === "single" &&
-              variantPicker.variants.map((v: any) => (
-                <button
-                  key={v.id}
-                  className="w-full text-left flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 border transition-colors"
-                  onClick={() => {
-                    autoAddVariant(variantPicker.product, v);
-                    setVariantPicker(null);
-                    setSearch("");
-                    focusSearch();
-                  }}
-                  data-testid={`option-variant-${v.id}`}
-                >
-                  <div>
-                    <p className="text-sm font-semibold">
-                      {v.option_values?.map((ov: any) => ov.label).join(" / ") || v.sku}
-                    </p>
-                    <p className="text-xs text-slate-500">SKU: {v.sku} · Stock: {v.inventory_level ?? v.stock_level ?? "—"}</p>
-                  </div>
-                  <span className="text-sm font-bold shrink-0 ml-3">${parseFloat(v.price).toFixed(2)}</span>
-                </button>
-              ))}
-
-            {variantPicker?.mode === "multi" &&
-              variantPicker.products.map((p) => {
-                const variants = getVariants(p);
-                return (
-                  <div key={p.id} className="border rounded-lg overflow-hidden">
-                    <div className="bg-slate-50 px-3 py-2 border-b">
-                      <p className="font-semibold text-sm text-slate-800">{p.name}</p>
-                    </div>
-                    <div className="divide-y">
-                      {variants.length === 0 ? (
-                        <button
-                          className="w-full text-left flex items-center justify-between px-3 py-2.5 hover:bg-slate-50 transition-colors"
-                          onClick={() => {
-                            autoAddVariant(p, null);
-                            setVariantPicker(null);
-                            setSearch("");
-                            focusSearch();
-                          }}
-                          data-testid={`option-product-${p.id}`}
-                        >
-                          <span className="text-sm">SKU: {p.sku}</span>
-                          <span className="text-sm font-bold">${parseFloat(p.price).toFixed(2)}</span>
-                        </button>
-                      ) : (
-                        variants.map((v: any) => (
-                          <button
-                            key={v.id}
-                            className="w-full text-left flex items-center justify-between px-3 py-2.5 hover:bg-slate-50 transition-colors"
-                            onClick={() => {
-                              autoAddVariant(p, v);
-                              setVariantPicker(null);
-                              setSearch("");
-                              focusSearch();
-                            }}
-                            data-testid={`option-variant-${v.id}`}
-                          >
-                            <div>
-                              <p className="text-sm font-medium">
-                                {v.option_values?.map((ov: any) => ov.label).join(" / ") || v.sku}
-                              </p>
-                              <p className="text-xs text-slate-500">SKU: {v.sku}</p>
-                            </div>
-                            <span className="text-sm font-bold shrink-0 ml-3">${parseFloat(v.price).toFixed(2)}</span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* ── Variant Popup Dialog ── */}
+      {popupProduct && (
+        <VariantPopupDialog
+          product={popupProduct}
+          onClose={() => { setPopupProduct(null); focusSearch(); }}
+          onAdd={handlePopupAdd}
+        />
+      )}
 
       <Toaster />
     </div>

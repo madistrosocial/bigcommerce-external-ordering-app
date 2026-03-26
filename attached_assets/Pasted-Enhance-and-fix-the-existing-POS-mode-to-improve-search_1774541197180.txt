@@ -1,0 +1,283 @@
+Enhance and fix the existing POS mode to improve search behavior, suggestion handling, popup interaction, cart UI, and usability. Reuse all existing cart, pricing, and BigCommerce logic. Do NOT introduce database changes.
+
+---
+
+========================================
+1. SEARCH BEHAVIOR (CRITICAL FIX)
+========================================
+
+- While typing:
+  → DO NOT auto-add
+  → Show suggestion dropdown in real-time
+
+---
+
+AUTO-ADD RULE:
+
+Only auto-add when:
+- There is EXACTLY ONE result
+- AND it is an exact match by:
+    - SKU
+    - OR UPC
+
+---
+
+DO NOT auto-add if:
+- Multiple results exist
+- Even if one is exact match
+- Input is partial
+
+---
+
+========================================
+2. SUGGESTION DROPDOWN
+========================================
+
+Display suggestions under search input.
+
+Structure:
+
+1. VARIANTS (top)
+   - SKU
+   - Variant name
+   - Product name
+
+2. MOTHER PRODUCTS (bottom)
+   - Product title
+
+---
+
+RESULT HANDLING:
+
+- Load initial 15 results
+- If more exist:
+  → Enable scroll inside dropdown
+  → Load more results on scroll (infinite scroll)
+
+- No pagination UI
+
+---
+
+========================================
+3. SUGGESTION CLICK BEHAVIOR
+========================================
+
+If user clicks VARIANT:
+→ Add to cart immediately
+→ Set as ACTIVE item
+→ Refocus search
+
+---
+
+If user clicks MOTHER PRODUCT:
+→ Open popup dialog (ONLY ONE)
+
+---
+
+========================================
+4. REMOVE AUTO POPUP ISSUE
+========================================
+
+- Do NOT open popup automatically during search
+- Only open popup on explicit user click
+- Only ONE popup allowed at a time
+
+---
+
+========================================
+5. POPUP DIALOG (VARIANT CONTROL)
+========================================
+
+Popup must display:
+
+- Product title
+- All variants
+
+Each variant row includes:
+
+- SKU
+- Variant name
+- Price
+- Quantity selector (+ / -)
+- Discount controls:
+    - FREE ITEM
+    - % discount input
+- Manual price override input
+- Add to Cart button
+
+---
+
+========================================
+6. POPUP BEHAVIOR
+========================================
+
+DO NOT close popup when:
+- Clicking variant row
+- Editing inputs
+
+ONLY close popup when:
+- Add to Cart clicked
+- Close button clicked
+- Cancel button clicked
+
+---
+
+========================================
+7. PINNED PRODUCTS (ROW LAYOUT)
+========================================
+
+Below search bar:
+
+- Display admin-pinned products as ROWS (not tiles)
+
+Each row should show:
+- Product name (full, not truncated)
+- Optional: SKU or summary info
+- Optional: small thumbnail (left side)
+
+Rows should be:
+- Clean
+- Easy to scan visually
+- Clickable
+
+---
+
+ROW BEHAVIOR:
+
+When a row is clicked:
+→ Open same popup dialog (reuse logic)
+→ Do NOT create new behavior
+
+---
+
+========================================
+8. CART PANEL WIDTH
+========================================
+
+- Increase cart sidebar width to 35%–40%
+
+---
+
+========================================
+9. CART ITEM INPUT UI CLEANUP
+========================================
+
+For ACTIVE ITEM:
+
+- Remove % and $ symbols inside inputs
+
+Use wider inputs with placeholders:
+- "% discount"
+- "Override price"
+
+Ensure placeholders fully visible
+
+---
+
+========================================
+10. CART ITEM BEHAVIOR (KEEP EXISTING)
+========================================
+
+- Only ONE active item
+- Last added = active
+
+Active item:
+- full controls
+
+Inactive items:
+- compact
+- expand on click
+
+---
+
+========================================
+11. CART TOTAL SECTION
+========================================
+
+At bottom of cart:
+
+A. TOTAL
+- Large font
+- Bold
+- Primary visual focus
+
+---
+
+B. TOTAL DISCOUNT
+
+Display:
+
+Discount: -$XX.XX
+
+Where:
+
+total_discount = original_total - final_total
+
+Include:
+- % discounts
+- FREE items
+- manual price overrides
+
+---
+
+========================================
+12. AUTO-FOCUS SEARCH
+========================================
+
+Search input must refocus:
+
+- After add to cart
+- After clicking cart items
+- After quantity change
+- After discount
+- After removing item
+
+---
+
+EXCEPTION:
+Do NOT steal focus when typing in:
+- discount input
+- price input
+
+---
+
+========================================
+13. PERFORMANCE
+========================================
+
+- No debounce
+- Use efficient rendering
+- Avoid unnecessary re-renders
+
+---
+
+========================================
+14. DO NOT
+========================================
+
+- Do NOT break discount logic
+- Do NOT break cart separation by pricing
+- Do NOT create new cart system
+- Do NOT introduce database changes
+- Do NOT break BigCommerce sync
+
+---
+
+========================================
+GOAL
+========================================
+
+POS must support:
+
+SCAN FLOW:
+Scan → auto-add → continue
+
+SEARCH FLOW:
+Type → suggestions → select → add
+
+With:
+
+- clean UI
+- controlled popup behavior
+- accurate pricing control
+- fast operation
