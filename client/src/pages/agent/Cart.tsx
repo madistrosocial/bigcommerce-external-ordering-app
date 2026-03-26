@@ -30,6 +30,41 @@ export default function Cart() {
 
   const total = getCartTotal();
 
+  // ── Checkout note template ────────────────────────────────────────────────
+  const buildNoteTemplate = useCallback(() => {
+    const totalDiscount = cart.reduce((sum, item) => {
+      return sum + (item.original_price - item.price_at_sale) * item.quantity;
+    }, 0);
+    const groupId = (selectedCustomer as any)?.customer_group_id;
+    const tierLabel = !selectedCustomer ? "Default" : (groupId && groupId !== 0 ? `Group #${groupId}` : "Default");
+    return [
+      "Sales App Checkout",
+      `Checkout by : ${currentUser?.name || ""}`,
+      "Payment Type :",
+      "Amount :",
+      `Total Discount Applied : $${totalDiscount.toFixed(2)}`,
+      `Price Tier : ${tierLabel}`,
+    ].join("\n");
+  }, [cart, selectedCustomer, currentUser]);
+
+  useEffect(() => {
+    if (cart.length > 0 && orderNote === "") {
+      setOrderNote(buildNoteTemplate());
+    }
+  }, [cart.length]);
+
+  // ── Navigation guard (refresh / tab close) ────────────────────────────────
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (cart.length > 0) {
+        e.preventDefault();
+        e.returnValue = "You have an active order in progress. Leaving will discard unsaved items.";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [cart.length]);
+
   useEffect(() => {
     const handleOnline = () => setOfflineMode(false);
     const handleOffline = () => setOfflineMode(true);
@@ -304,6 +339,14 @@ export default function Cart() {
                     </div>
                     <div className="text-xs text-green-600 mt-1">
                       {selectedCustomer.email} {selectedCustomer.phone && `• ${selectedCustomer.phone}`}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1" data-testid="text-price-tier">
+                      Price Tier:{" "}
+                      <span className="font-medium text-slate-700">
+                        {(selectedCustomer as any).customer_group_id
+                          ? `Group #${(selectedCustomer as any).customer_group_id}`
+                          : "Default"}
+                      </span>
                     </div>
                   </div>
                   <Button 

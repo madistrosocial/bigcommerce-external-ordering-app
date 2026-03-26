@@ -46,10 +46,26 @@ function makeLineId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+// Load persisted cart from localStorage (safe parse)
+function loadPersistedCart(): CartItem[] {
+  try {
+    const raw = localStorage.getItem('vansales_cart');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Basic structure validation
+    return parsed.filter((item: any) =>
+      item && typeof item.lineId === 'string' && item.product && typeof item.quantity === 'number'
+    );
+  } catch {
+    return [];
+  }
+}
+
 export const useStore = create<AppState>((set, get) => ({
   currentUser: JSON.parse(localStorage.getItem('vansales_user') || 'null'),
   isOfflineMode: !navigator.onLine,
-  cart: [],
+  cart: loadPersistedCart(),
 
   login: (user) => {
     localStorage.setItem('vansales_user', JSON.stringify(user));
@@ -58,6 +74,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   logout: () => {
     localStorage.removeItem('vansales_user');
+    localStorage.removeItem('vansales_cart');
     set({ currentUser: null, cart: [] });
   },
 
@@ -136,10 +153,21 @@ export const useStore = create<AppState>((set, get) => ({
     )
   })),
 
-  clearCart: () => set({ cart: [] }),
+  clearCart: () => { localStorage.removeItem('vansales_cart'); set({ cart: [] }); },
 
   getCartTotal: () => {
     const { cart } = get();
     return cart.reduce((total, item) => total + (item.price_at_sale * item.quantity), 0);
   }
 }));
+
+// Auto-persist cart to localStorage on every change
+useStore.subscribe((state) => {
+  try {
+    if (state.cart.length === 0) {
+      localStorage.removeItem('vansales_cart');
+    } else {
+      localStorage.setItem('vansales_cart', JSON.stringify(state.cart));
+    }
+  } catch {}
+});

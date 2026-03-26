@@ -320,6 +320,8 @@ export interface BigCommerceCustomer {
   email: string;
   phone: string;
   company: string;
+  customer_group_id?: number;
+  customer_group_name?: string;
 }
 
 export interface BigCommerceAddress {

@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -342,6 +343,40 @@ export default function POSPage() {
     }
   };
 
+  // ── Checkout note template ────────────────────────────────────────────────
+  const buildNoteTemplate = useCallback(() => {
+    const discount = cart.reduce((sum, item) =>
+      sum + (item.original_price - item.price_at_sale) * item.quantity, 0);
+    const groupId = (selectedCustomer as any)?.customer_group_id;
+    const tierLabel = !selectedCustomer ? "Default" : (groupId && groupId !== 0 ? `Group #${groupId}` : "Default");
+    return [
+      "Sales App Checkout",
+      `Checkout by : ${currentUser?.name || ""}`,
+      "Payment Type :",
+      "Amount :",
+      `Total Discount Applied : $${discount.toFixed(2)}`,
+      `Price Tier : ${tierLabel}`,
+    ].join("\n");
+  }, [cart, selectedCustomer, currentUser]);
+
+  useEffect(() => {
+    if (cart.length > 0 && orderNote === "") {
+      setOrderNote(buildNoteTemplate());
+    }
+  }, [cart.length]);
+
+  // ── Navigation guard: refresh / tab close ─────────────────────────────────
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (cart.length > 0) {
+        e.preventDefault();
+        e.returnValue = "You have an active order in progress. Leaving will discard unsaved items.";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [cart.length]);
+
   // ── Online/offline ────────────────────────────────────────────────────────
   useEffect(() => {
     const on = () => setOfflineMode(false);
@@ -661,6 +696,18 @@ export default function POSPage() {
             </div>
           )}
         </div>
+
+        {/* Tier indicator */}
+        {selectedCustomer && (
+          <span className="text-xs text-slate-500 shrink-0 whitespace-nowrap" data-testid="text-price-tier">
+            Tier:{" "}
+            <span className="font-semibold text-slate-700">
+              {(selectedCustomer as any).customer_group_id
+                ? `Group #${(selectedCustomer as any).customer_group_id}`
+                : "Default"}
+            </span>
+          </span>
+        )}
 
         {selectedCustomer && customerAddresses.length > 1 && (
           <select
@@ -1028,9 +1075,13 @@ export default function POSPage() {
           {/* Order note */}
           {cart.length > 0 && (
             <div className="px-3 py-2 border-t shrink-0">
-              <Input placeholder="Order note (optional)…" className="h-8 text-xs bg-slate-50"
-                value={orderNote} onChange={(e) => setOrderNote(e.target.value)}
-                data-testid="input-pos-order-note" />
+              <Textarea
+                placeholder="Order note (optional)…"
+                className="text-xs bg-slate-50 min-h-[72px] resize-none"
+                value={orderNote}
+                onChange={(e) => setOrderNote(e.target.value)}
+                data-testid="input-pos-order-note"
+              />
             </div>
           )}
 

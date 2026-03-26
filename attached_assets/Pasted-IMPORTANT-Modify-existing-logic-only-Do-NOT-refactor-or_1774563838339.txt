@@ -1,0 +1,160 @@
+IMPORTANT:
+
+* Modify existing logic only
+* Do NOT refactor or rewrite components
+* Do NOT introduce database changes
+* Do NOT break cart, pricing, or BigCommerce order logic
+* Return only modified/new functions and components
+
+---
+
+TASK: Implement the following UI + client-side features:
+
+1. Checkout Note Template
+2. Cart Persistence (localStorage)
+3. Navigation Guard (refresh / close tab)
+4. Tier Pricing UI Indicator (display only)
+
+---
+
+========================================
+
+1. CHECKOUT NOTE TEMPLATE
+   ========================================
+
+In checkout page (POS + Sales):
+
+If note field is EMPTY:
+→ Prefill with:
+
+Sales App Checkout
+Checkout by : [current logged-in user name]
+Payment Type :
+Amount :
+Total Discount Applied : [computed total discount]
+Price Tier : [customer group name if available]
+
+---
+
+RULES:
+
+* Do NOT include extra blank lines between entries
+* Do NOT overwrite if user has already typed anything
+* Keep field fully editable
+* Reuse existing note field
+* Template is only a starting structure for user input
+
+---
+
+========================================
+2. CART PERSISTENCE (localStorage)
+==================================
+
+Persist cart state in localStorage:
+
+Save:
+
+* cart items
+* pricing (base + final)
+* discount
+* override
+* selected customer (if exists)
+
+---
+
+BEHAVIOR:
+
+On cart update:
+→ Save to localStorage
+
+On app load:
+→ Restore cart from localStorage
+
+---
+
+EDGE CASES:
+
+* If cart is cleared → clear localStorage
+* If structure mismatch → ignore safely
+* Do NOT break existing cart logic
+
+---
+
+========================================
+3. NAVIGATION GUARD (REFRESH / CLOSE TAB)
+=========================================
+
+If cart has items:
+
+Trigger browser warning on:
+
+* page refresh
+* tab close
+* browser navigation
+
+Use:
+
+window.beforeunload
+
+---
+
+MESSAGE:
+
+"You have an active order in progress. Leaving will discard unsaved items."
+
+---
+
+RULES:
+
+* Only trigger if cart is NOT empty
+* Do NOT trigger if cart is empty
+
+---
+
+========================================
+4. TIER PRICING UI INDICATOR (DISPLAY ONLY)
+===========================================
+
+Display current customer tier (group name) in UI:
+
+Locations:
+
+* Cart header OR near customer name
+
+Example:
+
+"Price Tier: VIP"
+
+---
+
+RULES:
+
+* Display only (no pricing logic)
+* If no customer selected → hide or show "Default"
+
+---
+
+========================================
+DO NOT
+======
+
+* Do NOT implement tier pricing logic
+* Do NOT create API endpoints
+* Do NOT modify backend
+* Do NOT change database
+* Do NOT refactor existing components
+
+---
+
+========================================
+OUTPUT
+======
+
+Return ONLY:
+
+* Checkout note update logic
+* Cart persistence logic
+* Navigation guard implementation
+* Tier indicator UI addition
+
+No explanations
