@@ -449,21 +449,26 @@ export default function POSPage() {
 
   // ── Build suggestions from BC products ──────────────────────────────────────
   const buildSuggestions = useCallback((products: api.Product[]): Suggestion[] => {
-    const out: Suggestion[] = [];
-    // Variants first
+    const variantItems: SuggestionVariant[] = [];
+    const productItems: SuggestionProduct[] = [];
+
     for (const p of products) {
       const variants = getVariants(p);
       if (variants.length > 0) {
         for (const v of variants) {
-          out.push({ kind: "variant", product: p, variant: v });
+          variantItems.push({ kind: "variant", product: p, variant: v });
         }
       }
     }
-    // Then products (as "mother product" rows)
     for (const p of products) {
-      out.push({ kind: "product", product: p });
+      productItems.push({ kind: "product", product: p });
     }
-    return out;
+
+    // >50 total results → mother products first (easier to pick); ≤50 → variants first
+    const totalResults = variantItems.length + productItems.length;
+    return totalResults > 50
+      ? [...productItems, ...variantItems]
+      : [...variantItems, ...productItems];
   }, []);
 
   // ── Search handler ────────────────────────────────────────────────────────
@@ -806,81 +811,95 @@ export default function POSPage() {
           </div>
 
           {/* Suggestion dropdown */}
-          {showSuggestions && visibleSuggestions.length > 0 && (
-            <div
-              className="mx-4 mb-2 bg-white border rounded-lg shadow-lg z-30 overflow-y-auto flex-1 divide-y"
-              onScroll={handleDropdownScroll}
-              onClick={(e) => e.stopPropagation()}
-              data-testid="pos-suggestions-dropdown"
-            >
-              {/* Variants section */}
-              {visibleSuggestions.some((s) => s.kind === "variant") && (
-                <>
-                  <div className="px-3 py-1.5 bg-slate-50 border-b">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Variants</p>
-                  </div>
-                  {visibleSuggestions.filter((s): s is SuggestionVariant => s.kind === "variant").map((s, i) => (
-                    <button
-                      key={`v-${s.product.id}-${s.variant?.id ?? i}`}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-blue-50 transition-colors text-left"
-                      onClick={() => {
-                        autoAddVariant(s.product, s.variant);
-                        setSearch("");
-                        setSuggestions([]);
-                        setShowSuggestions(false);
-                        focusSearch();
-                      }}
-                      data-testid={`suggestion-variant-${s.variant?.id ?? i}`}
-                    >
-                      {s.product.image && (
-                        <img src={s.product.image} alt="" className="w-8 h-8 object-cover rounded border shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-slate-500 truncate">{s.product.name}</p>
-                        <p className="text-sm font-semibold text-slate-900 truncate">{variantLabel(s.variant) || s.variant?.sku}</p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-sm font-bold text-slate-900">${parseFloat(s.variant?.price || s.product.price).toFixed(2)}</p>
-                        <p className="text-[10px] text-slate-400">{s.variant?.sku}</p>
-                      </div>
-                    </button>
-                  ))}
-                </>
-              )}
-              {/* Products section */}
-              {visibleSuggestions.some((s) => s.kind === "product") && (
-                <>
-                  <div className="px-3 py-1.5 bg-slate-50 border-b">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Products</p>
-                  </div>
-                  {visibleSuggestions.filter((s): s is SuggestionProduct => s.kind === "product").map((s) => (
-                    <button
-                      key={`p-${s.product.id}`}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left"
-                      onClick={() => {
-                        setPopupProduct(s.product);
-                        setSuggestions([]);
-                        setShowSuggestions(false);
-                      }}
-                      data-testid={`suggestion-product-${s.product.id}`}
-                    >
-                      {s.product.image && (
-                        <img src={s.product.image} alt="" className="w-8 h-8 object-cover rounded border shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-slate-800 truncate">{s.product.name}</p>
-                        <p className="text-xs text-slate-500">SKU: {s.product.sku}</p>
-                      </div>
-                      <span className="text-xs text-slate-400 shrink-0">Select variant →</span>
-                    </button>
-                  ))}
-                </>
-              )}
-              {suggestions.length > suggestionLimit && (
-                <div className="px-4 py-2 text-center text-xs text-slate-400">Scroll for more results</div>
-              )}
-            </div>
-          )}
+          {showSuggestions && visibleSuggestions.length > 0 && (() => {
+            // Derive rendering order from the sorted suggestions array:
+            // if first item is a product → large result set → products section first
+            const productsFirst = suggestions.length > 0 && suggestions[0].kind === "product";
+
+            const variantRows = visibleSuggestions.filter((s): s is SuggestionVariant => s.kind === "variant");
+            const productRows = visibleSuggestions.filter((s): s is SuggestionProduct => s.kind === "product");
+
+            const variantsSection = variantRows.length > 0 && (
+              <>
+                <div className="px-3 py-1.5 bg-slate-50 border-b">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Variants</p>
+                </div>
+                {variantRows.map((s, i) => (
+                  <button
+                    key={`v-${s.product.id}-${s.variant?.id ?? i}`}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-blue-50 transition-colors text-left"
+                    onClick={() => {
+                      autoAddVariant(s.product, s.variant);
+                      setSearch("");
+                      setSuggestions([]);
+                      setShowSuggestions(false);
+                      focusSearch();
+                    }}
+                    data-testid={`suggestion-variant-${s.variant?.id ?? i}`}
+                  >
+                    {s.product.image && (
+                      <img src={s.product.image} alt="" className="w-8 h-8 object-cover rounded border shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-slate-500 truncate">{s.product.name}</p>
+                      <p className="text-sm font-semibold text-slate-900 truncate">{variantLabel(s.variant) || s.variant?.sku}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-bold text-slate-900">${parseFloat(s.variant?.price || s.product.price).toFixed(2)}</p>
+                      <p className="text-[10px] text-slate-400">{s.variant?.sku}</p>
+                    </div>
+                  </button>
+                ))}
+              </>
+            );
+
+            const productsSection = productRows.length > 0 && (
+              <>
+                <div className="px-3 py-1.5 bg-slate-50 border-b">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Products</p>
+                </div>
+                {productRows.map((s) => (
+                  <button
+                    key={`p-${s.product.id}`}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left"
+                    onClick={() => {
+                      setPopupProduct(s.product);
+                      setSuggestions([]);
+                      setShowSuggestions(false);
+                    }}
+                    data-testid={`suggestion-product-${s.product.id}`}
+                  >
+                    {s.product.image && (
+                      <img src={s.product.image} alt="" className="w-8 h-8 object-cover rounded border shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{s.product.name}</p>
+                      <p className="text-xs text-slate-500">SKU: {s.product.sku}</p>
+                    </div>
+                    <span className="text-xs text-slate-400 shrink-0">Select variant →</span>
+                  </button>
+                ))}
+              </>
+            );
+
+            return (
+              <div
+                className="mx-4 mb-2 bg-white border rounded-lg shadow-lg z-30 overflow-y-auto flex-1 divide-y"
+                onScroll={handleDropdownScroll}
+                onClick={(e) => e.stopPropagation()}
+                data-testid="pos-suggestions-dropdown"
+              >
+                {productsFirst ? (
+                  <>{productsSection}{variantsSection}</>
+                ) : (
+                  <>{variantsSection}{productsSection}</>
+                )}
+                {suggestions.length > suggestionLimit && (
+                  <div className="px-4 py-2 text-center text-xs text-slate-400">Scroll for more results</div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* No suggestions / default: Pinned products rows */}
           {!showSuggestions && (
