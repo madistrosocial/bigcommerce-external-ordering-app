@@ -11,7 +11,8 @@ import {
   WifiOff, 
   RefreshCw,
   User,
-  ChevronDown
+  ChevronDown,
+  Monitor
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -286,6 +287,10 @@ export function MobileShell({ children, title = "VanSales Pro", showBack = false
                   <DropdownMenuItem onClick={() => setLocation('/orders')} data-testid="menu-orders">
                     <ShoppingCart className="mr-2 h-4 w-4" />
                     Order History
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocation('/pos')} data-testid="menu-pos">
+                    <Monitor className="mr-2 h-4 w-4" />
+                    POS Mode
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                 </>

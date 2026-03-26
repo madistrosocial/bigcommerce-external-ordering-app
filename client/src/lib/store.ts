@@ -32,6 +32,10 @@ interface AppState {
   ) => void;
   removeFromCartAtIndex: (index: number) => void;
   updateCartQuantityAtIndex: (index: number, delta: number) => void;
+  updateCartItemAtIndex: (
+    index: number,
+    updates: Partial<Pick<CartItem, 'price_at_sale' | 'original_price' | 'discount_type' | 'discount_value' | 'quantity'>>
+  ) => void;
   removeFromCart: (productId: number, variantId?: number) => void;
   updateCartQuantity: (productId: number, delta: number, variantId?: number) => void;
   clearCart: () => void;
@@ -101,6 +105,12 @@ export const useStore = create<AppState>((set, get) => ({
 
   removeFromCartAtIndex: (index) => set((state) => ({
     cart: state.cart.filter((_, i) => i !== index)
+  })),
+
+  updateCartItemAtIndex: (index, updates) => set((state) => ({
+    cart: state.cart.map((item, i) =>
+      i === index ? { ...item, ...updates } : item
+    )
   })),
 
   updateCartQuantityAtIndex: (index, delta) => set((state) => ({

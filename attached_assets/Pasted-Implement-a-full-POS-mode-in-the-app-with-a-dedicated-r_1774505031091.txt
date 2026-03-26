@@ -1,0 +1,293 @@
+Implement a full POS mode in the app with a dedicated route and optimized scan-first workflow. This must reuse existing cart, pricing, and discount logic without breaking current functionality.
+
+---
+
+========================================
+1. NEW ROUTE
+========================================
+
+Create a new route:
+
+/pos
+
+- New page: POSPage
+- Do not modify existing catalog/cart pages
+- POS is a separate experience
+
+---
+
+========================================
+2. NAVIGATION (IMPORTANT)
+========================================
+
+DESKTOP / TABLET:
+
+- In the username dropdown menu (same menu that shows "Offline Mode" and "Sign Out"):
+  → Add a new menu item: "POS Mode"
+  → This links to /pos
+
+---
+
+INSIDE POS MODE:
+
+- Add a visible button:
+  → "Exit POS Mode"
+  → Redirects user back to main app (catalog or home)
+
+- Place this button in a clear location (top bar or header)
+
+---
+
+========================================
+3. LAYOUT (DESKTOP/TABLET PRIORITY)
+========================================
+
+Split layout:
+
+LEFT SIDE (60–70%)
+- Large search input at top (auto-focused)
+- Minimal or no catalog grid
+- Optional product preview
+
+RIGHT SIDE (30–40%)
+- Cart panel (fixed or sticky)
+- Always visible
+
+---
+
+========================================
+4. SEARCH SYSTEM (DUAL MODE)
+========================================
+
+INPUT supports:
+- SKU
+- UPC / barcode
+- Product title
+
+---
+
+STEP 1: EXACT MATCH
+
+If input matches:
+- SKU OR UPC
+
+→ Immediately:
+- Fetch exact variant
+- Auto-add to cart
+- Set as ACTIVE ITEM
+
+---
+
+STEP 2: TITLE SEARCH
+
+If no exact match:
+
+→ Search BigCommerce by product title
+
+IF multiple variants:
+- Show popup/modal with:
+  - Product title
+  - Variant list
+
+Each variant shows:
+- SKU
+- Variant name
+- Price
+- (optional) stock
+
+User selects variant:
+→ Add to cart
+→ Set as ACTIVE ITEM
+
+IF only one variant:
+→ Auto-add (skip popup)
+
+---
+
+========================================
+5. AUTO ADD TO CART (POS FLOW)
+========================================
+
+- No "Add to Cart" button needed for scan
+- Scan or enter → auto-add
+
+After add:
+- Keep user on POS page
+- Refocus search input
+
+---
+
+========================================
+6. CART BEHAVIOR (CORE UX)
+========================================
+
+- Only ONE active item at a time
+- Last added item becomes ACTIVE
+
+---
+
+ACTIVE ITEM (expanded view):
+
+Show:
+- Full product name (no truncation)
+- SKU
+- Quantity controls (+ / -)
+- Discount controls:
+    - FREE ITEM button
+    - % discount input
+- FULL PRICE EDIT input (manual override)
+- Final price display
+
+---
+
+NON-ACTIVE ITEMS (collapsed):
+
+Show:
+- Product name
+- Quantity
+- Final price
+- Remove button
+
+When clicked:
+→ Expand as ACTIVE
+→ Previous ACTIVE collapses
+
+---
+
+========================================
+7. PRICING LOGIC (IMPORTANT)
+========================================
+
+Maintain existing pricing system.
+
+For ACTIVE ITEM:
+
+User can:
+1. Apply FREE ITEM → price = 0
+2. Apply % discount → reduce price
+3. Manually edit price → override everything
+
+RULE:
+- Only ONE pricing mode active
+- Last action wins
+
+If manual price is entered:
+→ Do NOT apply discount
+
+---
+
+========================================
+8. CART LINE SEPARATION
+========================================
+
+If same SKU added with different pricing:
+
+→ Must create separate cart lines
+
+DO NOT merge items if:
+- price differs
+- discount differs
+
+---
+
+========================================
+9. AUTO-FOCUS SEARCH (CRITICAL)
+========================================
+
+Search input must ALWAYS regain focus:
+
+- On page load
+- After adding item
+- After clicking cart items
+- After quantity change
+- After discount
+- After removing item
+
+---
+
+EXCEPTION:
+Do NOT steal focus if user is typing in:
+- discount input
+- price input
+
+After interaction completes:
+→ Refocus search
+
+---
+
+========================================
+10. CLICK ANYWHERE BEHAVIOR
+========================================
+
+Clicking anywhere on POS page:
+→ Refocus search input
+
+(except active text inputs)
+
+---
+
+========================================
+11. CUSTOMER ENFORCEMENT
+========================================
+
+Before checkout:
+
+- Customer MUST be selected
+- If not:
+  → block checkout
+  → show "Customer required"
+
+Display active customer clearly on screen
+
+---
+
+========================================
+12. CART STATE
+========================================
+
+Each cart item must include:
+
+- sku / variant_id
+- quantity
+- final_price
+- discount (if any)
+- manual_override_price (if used)
+
+Reuse existing cart system
+
+---
+
+========================================
+13. PERFORMANCE / UX
+========================================
+
+- Keep search input always ready for scanning
+- Avoid unnecessary re-renders
+- Ensure fast response for barcode scans
+
+---
+
+========================================
+14. DO NOT
+========================================
+
+- Do NOT create new cart system
+- Do NOT duplicate pricing logic
+- Do NOT modify existing catalog flow
+- Do NOT introduce database changes
+- Do NOT break BigCommerce order sync
+
+---
+
+========================================
+GOAL
+========================================
+
+Create a POS experience where:
+
+Scan → auto-add → adjust (optional) → scan next
+
+- Fast
+- Minimal clicks
+- Clean cart UI
+- Supports real-world pricing flexibility
