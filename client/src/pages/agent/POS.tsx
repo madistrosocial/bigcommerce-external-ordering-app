@@ -304,7 +304,7 @@ export default function POSPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [suggestionLimit, setSuggestionLimit] = useState(15);
+  const [suggestionLimit, setSuggestionLimit] = useState(50);
   const searchSeqRef = useRef(0); // for race condition prevention
   const bcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
