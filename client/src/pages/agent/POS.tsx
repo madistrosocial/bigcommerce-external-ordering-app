@@ -474,7 +474,7 @@ export default function POSPage() {
   // ── Search handler ────────────────────────────────────────────────────────
   const handleSearchChange = useCallback((q: string) => {
     setSearch(q);
-    setSuggestionLimit(15);
+    setSuggestionLimit(50);
 
     if (!q.trim()) {
       setSuggestions([]);
