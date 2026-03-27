@@ -53,6 +53,7 @@ type Suggestion = SuggestionVariant | SuggestionProduct;
 interface VariantPopupProps {
   product: api.Product;
   onClose: () => void;
+  allowOverselling: boolean;
   onAdd: (
     product: api.Product,
     variant: any,
@@ -64,7 +65,8 @@ interface VariantPopupProps {
   ) => void;
 }
 
-function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
+function VariantPopupDialog({ product, onClose, onAdd, allowOverselling }: VariantPopupProps) {
+  const { toast } = useToast();
   const variants = getVariants(product);
   const rows = variants.length > 0 ? variants : [null];
 
@@ -75,7 +77,12 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
 
   const key = (v: any) => String(v?.id ?? "0");
   const getQty = (v: any) => qtys[key(v)] ?? 1;
-  const setQty = (v: any, q: number) => setQtys((p) => ({ ...p, [key(v)]: Math.max(1, q) }));
+  const getStock = (v: any): number => v?.stock_level ?? (product as any).stock_level ?? 0;
+  const setQty = (v: any, q: number) => {
+    const max = allowOverselling ? Infinity : getStock(v);
+    const clamped = max > 0 ? Math.min(q, max) : q;
+    setQtys((p) => ({ ...p, [key(v)]: Math.max(1, clamped) }));
+  };
   const getBasePrice = (v: any) => parseFloat(v?.price || product.price) || 0;
 
   const computePrice = (v: any): { finalPrice: number; discountType: "free" | "percent" | null; discountValue: number | null } => {
@@ -99,6 +106,18 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
 
   // Add to cart but keep popup open
   const handleAdd = (v: any) => {
+    if (!allowOverselling) {
+      const stock = getStock(v);
+      if (stock <= 0) {
+        toast({ title: "Out of stock", description: `${v?.sku || product.sku} has no available inventory.`, variant: "destructive" });
+        return;
+      }
+      const qty = getQty(v);
+      if (qty > stock) {
+        toast({ title: "Exceeds inventory", description: `Only ${stock} available.`, variant: "destructive" });
+        return;
+      }
+    }
     const base = getBasePrice(v);
     const { finalPrice, discountType, discountValue } = computePrice(v);
     onAdd(product, v, getQty(v), base, finalPrice, discountType, discountValue);
@@ -143,7 +162,12 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     {v && <p className="text-sm font-semibold text-slate-900">{variantLabel(v) || v.sku}</p>}
-                    <p className="text-xs text-slate-500">SKU: {v?.sku || product.sku}</p>
+                    <p className="text-xs text-slate-500">
+                      SKU: {v?.sku || product.sku}
+                      <span className={`ml-2 font-medium ${getStock(v) <= 0 ? "text-red-500" : "text-slate-400"}`}>
+                        · Stock: {getStock(v)}
+                      </span>
+                    </p>
                   </div>
                   <div className="text-right shrink-0">
                     <p className={`text-base font-bold ${isDiscounted ? "text-red-600" : "text-slate-900"}`}>
@@ -177,8 +201,9 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
                       data-testid={`popup-qty-${k}`}
                     />
                     <button
-                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200"
+                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200 disabled:opacity-40"
                       onClick={() => setQty(v, qty + 1)}
+                      disabled={!allowOverselling && qty >= getStock(v)}
                       data-testid={`popup-plus-${k}`}
                     >
                       <Plus className="h-3 w-3" />
@@ -302,6 +327,16 @@ export default function POSPage() {
 
   const canSearchBC = currentUser?.allow_bigcommerce_search ?? false;
 
+  // ── Allow Overselling ─────────────────────────────────────────────────────
+  const [allowOverselling, setAllowOverselling] = useState<boolean>(
+    () => localStorage.getItem("pos_allow_overselling") === "true"
+  );
+  const toggleAllowOverselling = () => setAllowOverselling((v) => {
+    const next = !v;
+    localStorage.setItem("pos_allow_overselling", String(next));
+    return next;
+  });
+
   // Always load pinned products (shown as rows in left panel for all agents)
   const { data: pinnedProducts = [] } = useQuery({
     queryKey: ["products", "pinned"],
@@ -412,6 +447,13 @@ export default function POSPage() {
 
   // ── Auto-add helper ───────────────────────────────────────────────────────
   const autoAddVariant = useCallback((product: api.Product, variant: any, qty = 1) => {
+    if (!allowOverselling) {
+      const stock: number = variant?.stock_level ?? product.stock_level ?? 0;
+      if (stock <= 0) {
+        toast({ title: "Out of stock", description: `${variant?.sku || product.sku} has no available inventory.`, variant: "destructive" });
+        return;
+      }
+    }
     const price = parseFloat(variant?.price || product.price);
     const beforeIds = new Set(useStore.getState().cart.map((i) => i.lineId));
     addToCart(product, qty, variant ?? undefined, price, price, null, null);
@@ -428,7 +470,7 @@ export default function POSPage() {
       }
     }, 0);
     toast({ title: "Added to cart", description: `${variant?.sku || product.sku} × ${qty}`, duration: 1500 });
-  }, [addToCart, toast]);
+  }, [addToCart, toast, allowOverselling]);
 
   // Popup "Add to Cart" with custom pricing
   const handlePopupAdd = useCallback((
@@ -771,6 +813,10 @@ export default function POSPage() {
                 {isOfflineMode ? <WifiOff className="mr-2 h-4 w-4" /> : <Wifi className="mr-2 h-4 w-4" />}
                 Offline Mode: {isOfflineMode ? "ON" : "OFF"}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={toggleAllowOverselling} data-testid="pos-menu-oversell">
+                <AlertCircle className="mr-2 h-4 w-4" />
+                Allow Overselling: {allowOverselling ? "ON" : "OFF"}
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-red-600"
@@ -818,6 +864,12 @@ export default function POSPage() {
             <p className="text-xs text-slate-400 mt-1.5 ml-1">
               {canSearchBC ? "BigCommerce search active — scan SKU/UPC or type name" : "Searching pinned products"}
             </p>
+            {allowOverselling && (
+              <div className="mt-2 flex items-center gap-1.5 px-2 py-1.5 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700" data-testid="pos-oversell-warning">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                Overselling enabled — inventory limits are not enforced
+              </div>
+            )}
           </div>
 
           {/* Suggestion dropdown */}
@@ -856,7 +908,9 @@ export default function POSPage() {
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-sm font-bold text-slate-900">${parseFloat(s.variant?.price || s.product.price).toFixed(2)}</p>
-                      <p className="text-[10px] text-slate-400">{s.variant?.sku}</p>
+                      <p className={`text-[10px] ${(s.variant?.stock_level ?? s.product.stock_level) <= 0 ? "text-red-500 font-medium" : "text-slate-400"}`}>
+                        Stock: {s.variant?.stock_level ?? s.product.stock_level ?? 0}
+                      </p>
                     </div>
                   </button>
                 ))}
@@ -1015,6 +1069,14 @@ export default function POSPage() {
                           {item.variant?.option_values?.length > 0 && (
                             <span className="ml-1 font-medium text-slate-600">· {item.variant.option_values.map((ov: any) => ov.label).join(" / ")}</span>
                           )}
+                          {(() => {
+                            const stock = item.variant?.stock_level ?? item.product.stock_level ?? 0;
+                            return (
+                              <span className={`ml-2 font-medium ${stock <= 0 ? "text-red-500" : "text-slate-400"}`}>
+                                · Stock: {stock}
+                              </span>
+                            );
+                          })()}
                         </p>
                       </div>
                       <button
@@ -1027,34 +1089,42 @@ export default function POSPage() {
                     </div>
 
                     {/* Qty */}
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" disabled={item.quantity <= 1}
-                        onClick={() => { updateCartQuantityAtIndex(index, -1); focusSearch(); }}
-                        data-testid={`button-pos-minus-${item.lineId}`}>
-                        <Minus className="h-3.5 w-3.5" />
-                      </Button>
-                      <Input
-                        type="number" min="1"
-                        className="w-16 h-9 text-center text-base font-bold text-slate-900 bg-white px-1"
-                        defaultValue={item.quantity}
-                        key={`qty-${item.lineId}-${item.quantity}`}
-                        onBlur={(e) => {
-                          const newQty = parseInt(e.target.value, 10);
-                          if (!isNaN(newQty) && newQty >= 1) {
-                            const delta = newQty - item.quantity;
-                            if (delta !== 0) updateCartQuantityAtIndex(index, delta);
-                          }
-                          focusSearch();
-                        }}
-                        data-testid={`input-pos-qty-${item.lineId}`}
-                      />
-                      <Button variant="outline" size="icon" className="h-9 w-9 shrink-0"
-                        onClick={() => { updateCartQuantityAtIndex(index, 1); focusSearch(); }}
-                        data-testid={`button-pos-plus-${item.lineId}`}>
-                        <Plus className="h-3.5 w-3.5" />
-                      </Button>
-                      <span className="text-xs text-slate-500 ml-1">qty</span>
-                    </div>
+                    {(() => {
+                      const itemStock = item.variant?.stock_level ?? item.product.stock_level ?? 0;
+                      const atMax = !allowOverselling && item.quantity >= itemStock;
+                      return (
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" disabled={item.quantity <= 1}
+                            onClick={() => { updateCartQuantityAtIndex(index, -1); focusSearch(); }}
+                            data-testid={`button-pos-minus-${item.lineId}`}>
+                            <Minus className="h-3.5 w-3.5" />
+                          </Button>
+                          <Input
+                            type="number" min="1"
+                            className="w-16 h-9 text-center text-base font-bold text-slate-900 bg-white px-1"
+                            defaultValue={item.quantity}
+                            key={`qty-${item.lineId}-${item.quantity}`}
+                            onBlur={(e) => {
+                              let newQty = parseInt(e.target.value, 10);
+                              if (!isNaN(newQty) && newQty >= 1) {
+                                if (!allowOverselling && itemStock > 0) newQty = Math.min(newQty, itemStock);
+                                const delta = newQty - item.quantity;
+                                if (delta !== 0) updateCartQuantityAtIndex(index, delta);
+                              }
+                              focusSearch();
+                            }}
+                            data-testid={`input-pos-qty-${item.lineId}`}
+                          />
+                          <Button variant="outline" size="icon" className="h-9 w-9 shrink-0"
+                            disabled={atMax}
+                            onClick={() => { updateCartQuantityAtIndex(index, 1); focusSearch(); }}
+                            data-testid={`button-pos-plus-${item.lineId}`}>
+                            <Plus className="h-3.5 w-3.5" />
+                          </Button>
+                          <span className="text-xs text-slate-500 ml-1">qty</span>
+                        </div>
+                      );
+                    })()}
 
                     {/* Price display */}
                     <div className="flex items-baseline gap-1.5">
@@ -1200,6 +1270,7 @@ export default function POSPage() {
           product={popupProduct}
           onClose={() => { setPopupProduct(null); focusSearch(); }}
           onAdd={handlePopupAdd}
+          allowOverselling={allowOverselling}
         />
       )}
 
