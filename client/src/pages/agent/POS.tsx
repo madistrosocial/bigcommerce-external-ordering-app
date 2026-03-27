@@ -165,7 +165,17 @@ function VariantPopupDialog({ product, onClose, onAdd }: VariantPopupProps) {
                     >
                       <Minus className="h-3 w-3" />
                     </button>
-                    <span className="w-6 text-center text-sm font-bold" data-testid={`popup-qty-${k}`}>{qty}</span>
+                    <Input
+                      type="number" min="1"
+                      className="w-12 h-7 text-center text-sm font-bold bg-white px-0.5"
+                      defaultValue={qty}
+                      key={`popup-qty-${k}-${qty}`}
+                      onBlur={(e) => {
+                        const newQty = parseInt(e.target.value, 10);
+                        if (!isNaN(newQty) && newQty >= 1) setQty(v, newQty);
+                      }}
+                      data-testid={`popup-qty-${k}`}
+                    />
                     <button
                       className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200"
                       onClick={() => setQty(v, qty + 1)}
@@ -1023,7 +1033,21 @@ export default function POSPage() {
                         data-testid={`button-pos-minus-${item.lineId}`}>
                         <Minus className="h-3.5 w-3.5" />
                       </Button>
-                      <span className="w-10 text-center text-base font-bold text-slate-900" data-testid={`text-pos-qty-${item.lineId}`}>{item.quantity}</span>
+                      <Input
+                        type="number" min="1"
+                        className="w-16 h-9 text-center text-base font-bold text-slate-900 bg-white px-1"
+                        defaultValue={item.quantity}
+                        key={`qty-${item.lineId}-${item.quantity}`}
+                        onBlur={(e) => {
+                          const newQty = parseInt(e.target.value, 10);
+                          if (!isNaN(newQty) && newQty >= 1) {
+                            const delta = newQty - item.quantity;
+                            if (delta !== 0) updateCartQuantityAtIndex(index, delta);
+                          }
+                          focusSearch();
+                        }}
+                        data-testid={`input-pos-qty-${item.lineId}`}
+                      />
                       <Button variant="outline" size="icon" className="h-9 w-9 shrink-0"
                         onClick={() => { updateCartQuantityAtIndex(index, 1); focusSearch(); }}
                         data-testid={`button-pos-plus-${item.lineId}`}>
@@ -1052,7 +1076,7 @@ export default function POSPage() {
                       >FREE</Button>
                       <Input
                         type="number" min="0" max="100"
-                        placeholder="% discount"
+                        placeholder="Disc (%)"
                         className="w-28 h-8 text-xs bg-white"
                         value={discountInput}
                         onChange={(e) => setDiscountInputs((p) => ({ ...p, [item.lineId]: e.target.value }))}
@@ -1066,7 +1090,7 @@ export default function POSPage() {
                       />
                       <Input
                         type="number" min="0" step="0.01"
-                        placeholder="Override price"
+                        placeholder="Price ($)"
                         className="w-32 h-8 text-xs bg-white"
                         value={manualInput}
                         onChange={(e) => setManualPriceInputs((p) => ({ ...p, [item.lineId]: e.target.value }))}
