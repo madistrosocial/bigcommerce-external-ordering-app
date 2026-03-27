@@ -884,7 +884,7 @@ export default function POSPage() {
 
             return (
               <div
-                className="mx-4 mb-2 bg-white border rounded-lg shadow-lg z-30 overflow-y-auto flex-1 divide-y"
+                className="mx-4 mb-2 bg-white border rounded-lg shadow-lg z-30 overflow-y-auto max-h-[calc(100vh-200px)] divide-y"
                 onScroll={handleDropdownScroll}
                 onClick={(e) => e.stopPropagation()}
                 data-testid="pos-suggestions-dropdown"
