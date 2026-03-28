@@ -1,0 +1,146 @@
+Fix POS inventory handling, highlighting, and draft behavior. Do not modify regular checkout (already working).
+
+---
+
+========================================
+
+1. HIGHLIGHT ONLY AFFECTED ITEMS (POS)
+   ========================================
+
+Current issue:
+
+* All cart items are highlighted on inventory error
+
+Fix:
+
+* From checkout error response, extract affected variant_id(s)
+* Only highlight items whose variant_id matches the error
+
+Do NOT apply highlight globally
+Do NOT use global error flags
+
+---
+
+========================================
+2. REFRESH INVENTORY AFTER ERROR (POS)
+======================================
+
+Current issue:
+
+* Inventory remains outdated after failed checkout
+
+Fix:
+
+* After inventory error (409 / out of stock):
+
+  * Re-fetch latest inventory for affected items (or full cart if simpler)
+  * Update cart state with latest inventory_level
+
+Ensure inventory displayed is always current
+
+---
+
+========================================
+3. REFRESH INVENTORY ON PAGE LOAD / NAVIGATION (POS)
+====================================================
+
+Current issue:
+
+* Inventory remains stale after refresh or navigation
+
+Fix:
+
+* When POS cart page loads:
+  → Re-fetch inventory for all cart items
+
+* When returning to cart page:
+  → Re-fetch inventory again
+
+Do NOT use persisted inventory values
+
+---
+
+========================================
+4. FIX DRAFT EDIT INVENTORY (POS)
+=================================
+
+Current issue:
+
+* Draft items show inventory as 0 or outdated
+
+Fix:
+
+* When loading draft into POS:
+  → Re-fetch inventory for all variants
+  → Replace any stored inventory values
+
+Always use live inventory
+
+---
+
+========================================
+5. FIX DRAFT CUSTOMER (POS)
+===========================
+
+Current issue:
+
+* Customer missing when editing draft
+
+Fix:
+
+* Ensure draft saves customer (id + name)
+* Restore customer selection when loading draft
+
+---
+
+========================================
+6. REPLACE SYNC BUTTON → RELOAD INVENTORY
+=========================================
+
+Current:
+
+* Existing sync/reload button
+
+Fix:
+
+* Replace with "Reload Inventory" button
+
+Behavior:
+
+* On click:
+  → Re-fetch inventory for all cart items
+  → Update UI immediately
+
+---
+
+========================================
+7. FORCE UI UPDATE
+==================
+
+* Ensure cart re-renders after inventory update
+* Do NOT rely on cached values
+
+---
+
+========================================
+IMPORTANT
+=========
+
+* Apply fixes ONLY to POS
+* Do NOT modify regular checkout
+* Do NOT modify cart logic or pricing
+* Do NOT refactor components
+* Do NOT introduce database changes
+
+---
+
+========================================
+OUTPUT
+======
+
+Return only:
+
+* corrected POS highlight logic
+* inventory fetch + update logic
+* draft load fixes
+* reload button update

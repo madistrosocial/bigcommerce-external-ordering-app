@@ -20,7 +20,7 @@ import { Toaster } from "@/components/ui/toaster";
 import {
   Search, Loader2, X, Plus, Minus, Trash2, User,
   ShoppingCart, AlertCircle, CheckCircle2, CreditCard, Package,
-  ChevronDown, Wifi, WifiOff, LogOut, Package as PackageIcon, Monitor, FileText,
+  ChevronDown, Wifi, WifiOff, LogOut, Package as PackageIcon, Monitor, FileText, RotateCw,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
@@ -377,11 +377,75 @@ export default function POSPage() {
 
   // ── Error / inventory dialogs ─────────────────────────────────────────────
   const [inventoryErrorIds, setInventoryErrorIds] = useState<Set<string>>(new Set());
+  const [freshStockByLineId, setFreshStockByLineId] = useState<Map<string, number>>(new Map());
+  const [isRefreshingInventory, setIsRefreshingInventory] = useState(false);
   const [showInventoryDialog, setShowInventoryDialog] = useState(false);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [errorDialogMsg, setErrorDialogMsg] = useState("");
 
   const isInventoryErr = (msg: string) => /409|stock|inventory|quantity|available/i.test(msg);
+
+  // ── Refresh live stock from BigCommerce ───────────────────────────────────
+  const refreshStockAndHighlight = useCallback(async (highlightAfter = false) => {
+    if (cart.length === 0) return;
+    setIsRefreshingInventory(true);
+    try {
+      const bcIds = [...new Set(cart.map(i => i.product.bigcommerce_id).filter(Boolean))];
+      if (bcIds.length === 0) {
+        if (highlightAfter) setInventoryErrorIds(new Set(cart.map(i => i.lineId)));
+        return;
+      }
+      const stockData = await api.refreshProductStock(bcIds);
+      const stockMap = new Map<number, api.StockInfo>(stockData.map(s => [s.bigcommerce_id, s]));
+
+      const newFresh = new Map<string, number>();
+      const affected = new Set<string>();
+
+      cart.forEach(item => {
+        const info = stockMap.get(item.product.bigcommerce_id);
+        if (!info) return;
+        const stock = item.variant?.id
+          ? (info.variants.find(v => v.id === item.variant.id)?.stock_level ?? info.stock_level)
+          : info.stock_level;
+        newFresh.set(item.lineId, stock);
+        if (highlightAfter && stock < item.quantity) affected.add(item.lineId);
+      });
+
+      setFreshStockByLineId(newFresh);
+      if (highlightAfter) {
+        setInventoryErrorIds(affected.size > 0 ? affected : new Set(cart.map(i => i.lineId)));
+      }
+    } catch {
+      if (highlightAfter) setInventoryErrorIds(new Set(cart.map(i => i.lineId)));
+    } finally {
+      setIsRefreshingInventory(false);
+    }
+  }, [cart]);
+
+  // Auto-refresh inventory when POS loads or cart items change
+  useEffect(() => {
+    if (cart.length > 0) refreshStockAndHighlight(false);
+  }, [cart.length]);
+
+  // Restore draft customer on mount
+  useEffect(() => {
+    const raw = localStorage.getItem('vansales_restore_customer');
+    if (!raw) return;
+    localStorage.removeItem('vansales_restore_customer');
+    try {
+      const { bcId } = JSON.parse(raw) as { bcId: number };
+      if (!bcId) return;
+      api.getCustomerByBcId(bcId).then(async (customer) => {
+        setSelectedCustomer(customer);
+        setCustomerSearch(`${customer.first_name} ${customer.last_name}`);
+        try {
+          const addresses = await api.getCustomerAddresses(customer.id);
+          setCustomerAddresses(addresses);
+          if (addresses.length > 0) setSelectedAddress(addresses[0]);
+        } catch {}
+      }).catch(() => {});
+    } catch {}
+  }, []);
 
   // Guarded navigation: prompts if cart has items
   const guardedNavigate = useCallback((path: string) => {
@@ -711,13 +775,13 @@ export default function POSPage() {
       if (response.bigcommerce?.success) {
         toast({ title: "Order Created", description: `BigCommerce Order #${response.bigcommerce.order_id}` });
         clearCart(); setActiveLineId(null); setDiscountInputs({}); setManualPriceInputs({});
-        setInventoryErrorIds(new Set());
+        setInventoryErrorIds(new Set()); setFreshStockByLineId(new Map());
         setSelectedCustomer(null); setSelectedAddress(null); setCustomerAddresses([]);
         setCustomerSearch(""); setOrderNote(""); focusSearch();
       } else {
         const errMsg = response.bigcommerce?.error || "Sync failed";
         if (isInventoryErr(errMsg)) {
-          setInventoryErrorIds(new Set(cart.map((i) => i.lineId)));
+          await refreshStockAndHighlight(true);
           setShowInventoryDialog(true);
         } else {
           setErrorDialogMsg(errMsg);
@@ -727,7 +791,7 @@ export default function POSPage() {
     } catch (e: any) {
       const msg = e.message || "";
       if (isInventoryErr(msg)) {
-        setInventoryErrorIds(new Set(cart.map((i) => i.lineId)));
+        await refreshStockAndHighlight(true);
         setShowInventoryDialog(true);
       } else {
         setErrorDialogMsg(msg);
@@ -746,6 +810,7 @@ export default function POSPage() {
           ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}`
           : "Unknown",
         customer_email: selectedCustomer?.email,
+        bigcommerce_customer_id: selectedCustomer?.id,
         status: "draft",
         order_note: orderNote || undefined,
         items: cart.map((item) => ({
@@ -1059,15 +1124,28 @@ export default function POSPage() {
           {/* Cart header */}
           <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50 shrink-0">
             <span className="font-bold text-sm text-slate-700 uppercase tracking-wide">Cart</span>
-            {cart.length > 0 && (
-              <button
-                className="text-xs text-red-400 hover:text-red-600 font-medium"
-                onClick={() => { clearCart(); setActiveLineId(null); setDiscountInputs({}); setManualPriceInputs({}); focusSearch(); }}
-                data-testid="button-pos-clear-cart"
-              >
-                Clear all
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {cart.length > 0 && (
+                <button
+                  className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 font-medium disabled:opacity-40"
+                  onClick={() => refreshStockAndHighlight(false)}
+                  disabled={isRefreshingInventory}
+                  data-testid="button-pos-reload-inventory"
+                >
+                  <RotateCw className={`h-3.5 w-3.5 ${isRefreshingInventory ? "animate-spin" : ""}`} />
+                  Reload Inventory
+                </button>
+              )}
+              {cart.length > 0 && (
+                <button
+                  className="text-xs text-red-400 hover:text-red-600 font-medium"
+                  onClick={() => { clearCart(); setActiveLineId(null); setDiscountInputs({}); setManualPriceInputs({}); setFreshStockByLineId(new Map()); setInventoryErrorIds(new Set()); focusSearch(); }}
+                  data-testid="button-pos-clear-cart"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Cart items */}
@@ -1129,7 +1207,9 @@ export default function POSPage() {
                             <span className="ml-1 font-medium text-slate-600">· {item.variant.option_values.map((ov: any) => ov.label).join(" / ")}</span>
                           )}
                           {(() => {
-                            const stock = item.variant?.stock_level ?? item.product.stock_level ?? 0;
+                            const stock = freshStockByLineId.has(item.lineId)
+                              ? freshStockByLineId.get(item.lineId)!
+                              : (item.variant?.stock_level ?? item.product.stock_level ?? 0);
                             return (
                               <span className={`ml-2 font-medium ${stock <= 0 ? "text-red-500" : "text-slate-400"}`}>
                                 · Stock: {stock}
@@ -1149,7 +1229,9 @@ export default function POSPage() {
 
                     {/* Qty */}
                     {(() => {
-                      const itemStock = item.variant?.stock_level ?? item.product.stock_level ?? 0;
+                      const itemStock = freshStockByLineId.has(item.lineId)
+                        ? freshStockByLineId.get(item.lineId)!
+                        : (item.variant?.stock_level ?? item.product.stock_level ?? 0);
                       const atMax = !allowOverselling && item.quantity >= itemStock;
                       return (
                         <div className="flex items-center gap-2">
