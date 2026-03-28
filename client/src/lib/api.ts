@@ -26,6 +26,7 @@ export interface OrderItem {
   product_id: number;
   bigcommerce_product_id?: number;
   variant_id?: number;
+  variant_option_values?: any[];
   quantity: number;
   price_at_sale: string;
   name: string;

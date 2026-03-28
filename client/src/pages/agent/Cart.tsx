@@ -7,7 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Plus, Minus, CreditCard, Search, MapPin, User, Loader2, WifiOff } from "lucide-react";
+import { Trash2, Plus, Minus, CreditCard, Search, MapPin, User, Loader2, WifiOff, FileText } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 
@@ -25,8 +29,14 @@ export default function Cart() {
   const [manualCustomerEmail, setManualCustomerEmail] = useState("");
   const [manualCustomerNote, setManualCustomerNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [inventoryErrorIds, setInventoryErrorIds] = useState<Set<string>>(new Set());
+  const [showInventoryDialog, setShowInventoryDialog] = useState(false);
+  const [showErrorDialog, setShowErrorDialog] = useState(false);
+  const [errorDialogMsg, setErrorDialogMsg] = useState("");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+
+  const isInventoryErr = (msg: string) => /409|stock|inventory|quantity|available/i.test(msg);
 
   const total = getCartTotal();
 
@@ -189,33 +199,80 @@ export default function Cart() {
 
     try {
       const response = await api.createOrder(orderData);
-      
+
       const bcSuccess = response.bigcommerce?.success || false;
       const sheetsSuccess = response.google_sheets?.success || false;
-      
+
       if (bcSuccess) {
         toast({
           title: "Order Created Successfully",
           description: `BigCommerce Order #${response.bigcommerce.order_id}${sheetsSuccess ? ' (Logged to Sheets)' : ''}`,
         });
+        setInventoryErrorIds(new Set());
+        clearCart();
+        setLocation('/orders');
       } else {
-        const errorMsg = response.bigcommerce?.error || "BigCommerce sync failed";
-        toast({
-          title: "Order Failed",
-          description: errorMsg,
-          variant: "destructive"
-        });
+        const errMsg = response.bigcommerce?.error || "BigCommerce sync failed";
+        if (isInventoryErr(errMsg)) {
+          setInventoryErrorIds(new Set(cart.map((i) => i.lineId)));
+          setShowInventoryDialog(true);
+        } else {
+          setErrorDialogMsg(errMsg);
+          setShowErrorDialog(true);
+        }
       }
-      
+    } catch (e: any) {
+      const msg = e.message || "";
+      if (msg.includes('fetch') || msg.includes('network')) {
+        setOfflineMode(true);
+        toast({ title: "Connection lost", description: "Please try again or save as draft", variant: "destructive" });
+      } else if (isInventoryErr(msg)) {
+        setInventoryErrorIds(new Set(cart.map((i) => i.lineId)));
+        setShowInventoryDialog(true);
+      } else {
+        setErrorDialogMsg(msg);
+        setShowErrorDialog(true);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // ── Save as Draft (always available) ──────────────────────────────────────
+  const handleSaveDraft = async () => {
+    const name = isOfflineMode ? manualCustomerName.trim() : (selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : "");
+    if (!name) {
+      toast({ title: isOfflineMode ? "Please enter customer name" : "Please select a customer", variant: "destructive" });
+      return;
+    }
+    setIsSubmitting(true);
+    const draftData = {
+      customer_name: name,
+      customer_email: isOfflineMode ? manualCustomerEmail.trim() || undefined : selectedCustomer?.email,
+      status: 'draft' as const,
+      order_note: [orderNote, isOfflineMode ? manualCustomerNote : ""].filter(Boolean).join(' | ') || undefined,
+      items: cart.map(item => ({
+        product_id: item.product.id,
+        bigcommerce_product_id: item.product.bigcommerce_id,
+        variant_id: item.variant?.id,
+        variant_option_values: item.variant?.option_values,
+        quantity: item.quantity,
+        price_at_sale: String(item.price_at_sale),
+        name: item.variant ? `${item.product.name} (${item.variant.sku})` : item.product.name,
+        sku: item.variant?.sku || item.product.sku,
+        image: item.product.image,
+      })),
+      total: total.toFixed(2),
+      created_by_user_id: currentUser?.id || 0,
+    };
+    try {
+      await api.createDraftOrder(draftData);
+      toast({ title: "Draft Order Saved", description: "Order saved. Submit it from Order History." });
+      setInventoryErrorIds(new Set());
       clearCart();
       setLocation('/orders');
     } catch (e: any) {
-      if (e.message?.includes('fetch') || e.message?.includes('network')) {
-        setOfflineMode(true);
-        toast({ title: "Connection lost", description: "Please try again or save as draft", variant: "destructive" });
-      } else {
-        toast({ title: "Error creating order", description: e.message, variant: "destructive" });
-      }
+      toast({ title: "Error saving draft", description: e.message, variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }
@@ -450,60 +507,101 @@ export default function Cart() {
         </div>
         
         <div className="space-y-3">
-          {cart.map((item, idx) => (
-            <Card key={item.lineId} className="p-3 flex gap-3 items-center">
-              <img src={item.product.image} className="h-12 w-12 object-cover rounded" alt="" />
-              <div className="flex-1 min-w-0">
-                <h4 className="font-semibold text-sm leading-tight line-clamp-2">{item.product.name}</h4>
-                {item.variant && <p className="text-xs text-slate-500">{item.variant.sku}</p>}
-                <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                  <span className={`text-sm font-medium ${item.discount_type ? 'text-red-600 font-bold' : ''}`}>
-                    ${item.price_at_sale.toFixed(2)}
-                  </span>
-                  {item.discount_type && (
-                    <span className="text-xs text-slate-400 line-through">${item.original_price.toFixed(2)}</span>
-                  )}
-                  {item.discount_type === 'free' && (
-                    <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1 rounded">FREE</span>
-                  )}
-                  {item.discount_type === 'percent' && (
-                    <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1 rounded">-{item.discount_value}%</span>
-                  )}
+          {cart.map((item, idx) => {
+            const stock = item.variant?.stock_level ?? item.product.stock_level ?? 0;
+            const hasInvErr = inventoryErrorIds.has(item.lineId);
+            return (
+              <Card key={item.lineId} className={`p-3 flex gap-3 items-center ${hasInvErr ? "border-red-300 bg-red-50" : ""}`}>
+                <img src={item.product.image} className="h-12 w-12 object-cover rounded" alt="" />
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-semibold text-sm leading-tight line-clamp-2">{item.product.name}</h4>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {item.variant && <p className="text-xs text-slate-500">{item.variant.sku}</p>}
+                    <p className={`text-xs font-medium ${stock <= 0 ? "text-red-500" : "text-slate-400"}`}>
+                      Stock: {stock}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                    <span className={`text-sm font-medium ${item.discount_type ? 'text-red-600 font-bold' : ''}`}>
+                      ${item.price_at_sale.toFixed(2)}
+                    </span>
+                    {item.discount_type && (
+                      <span className="text-xs text-slate-400 line-through">${item.original_price.toFixed(2)}</span>
+                    )}
+                    {item.discount_type === 'free' && (
+                      <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1 rounded">FREE</span>
+                    )}
+                    {item.discount_type === 'percent' && (
+                      <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1 rounded">-{item.discount_value}%</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-1">
-                <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantityAtIndex(idx, -1)}><Minus className="h-3 w-3"/></Button>
-                <span className="text-sm w-6 text-center">{item.quantity}</span>
-                <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantityAtIndex(idx, 1)}><Plus className="h-3 w-3"/></Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => removeFromCartAtIndex(idx)}><Trash2 className="h-4 w-4"/></Button>
-              </div>
-            </Card>
-          ))}
+                <div className="flex items-center gap-1">
+                  <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantityAtIndex(idx, -1)}><Minus className="h-3 w-3"/></Button>
+                  <span className="text-sm w-6 text-center">{item.quantity}</span>
+                  <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantityAtIndex(idx, 1)}><Plus className="h-3 w-3"/></Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => removeFromCartAtIndex(idx)}><Trash2 className="h-4 w-4"/></Button>
+                </div>
+              </Card>
+            );
+          })}
         </div>
 
-        <div className="fixed bottom-0 left-0 right-0 bg-white p-4 border-t flex justify-between items-center">
-          <span className="font-bold text-xl">${total.toFixed(2)}</span>
-          {isOfflineMode ? (
-            <Button 
-              onClick={handleOfflineCheckout} 
-              disabled={!manualCustomerName.trim() || isSubmitting}
+        <div className="fixed bottom-0 left-0 right-0 bg-white p-4 border-t">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-bold text-xl">${total.toFixed(2)}</span>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={handleSaveDraft}
+              disabled={isSubmitting}
               data-testid="button-save-draft"
             >
-              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
               Save Draft
             </Button>
-          ) : (
-            <Button 
-              onClick={handleOnlineCheckout} 
-              disabled={!selectedCustomer || !selectedAddress || isSubmitting}
+            <Button
+              className="flex-1"
+              onClick={handleOnlineCheckout}
+              disabled={isOfflineMode || !selectedCustomer || !selectedAddress || isSubmitting}
               data-testid="button-submit-order"
             >
-              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CreditCard className="h-4 w-4 mr-2" />}
               Submit Order
             </Button>
-          )}
+          </div>
         </div>
       </div>
+
+      <AlertDialog open={showInventoryDialog} onOpenChange={setShowInventoryDialog}>
+        <AlertDialogContent data-testid="dialog-cart-inventory-error">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Inventory Updated</AlertDialogTitle>
+            <AlertDialogDescription>
+              The inventory has been updated. Modify your cart before checkout.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setShowInventoryDialog(false)}>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
+        <AlertDialogContent data-testid="dialog-cart-checkout-error">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Something went wrong</AlertDialogTitle>
+            <AlertDialogDescription>
+              {errorDialogMsg || "An unexpected error occurred."} Contact IT support if the issue persists.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setShowErrorDialog(false)}>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MobileShell>
   );
 }

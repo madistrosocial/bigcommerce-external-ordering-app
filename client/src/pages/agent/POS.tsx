@@ -20,7 +20,7 @@ import { Toaster } from "@/components/ui/toaster";
 import {
   Search, Loader2, X, Plus, Minus, Trash2, User,
   ShoppingCart, AlertCircle, CheckCircle2, CreditCard, Package,
-  ChevronDown, Wifi, WifiOff, LogOut, Package as PackageIcon, Monitor,
+  ChevronDown, Wifi, WifiOff, LogOut, Package as PackageIcon, Monitor, FileText,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
@@ -375,6 +375,14 @@ export default function POSPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [navTarget, setNavTarget] = useState<string | null>(null);
 
+  // ── Error / inventory dialogs ─────────────────────────────────────────────
+  const [inventoryErrorIds, setInventoryErrorIds] = useState<Set<string>>(new Set());
+  const [showInventoryDialog, setShowInventoryDialog] = useState(false);
+  const [showErrorDialog, setShowErrorDialog] = useState(false);
+  const [errorDialogMsg, setErrorDialogMsg] = useState("");
+
+  const isInventoryErr = (msg: string) => /409|stock|inventory|quantity|available/i.test(msg);
+
   // Guarded navigation: prompts if cart has items
   const guardedNavigate = useCallback((path: string) => {
     if (cart.length > 0) { setNavTarget(path); } else { navigate(path); }
@@ -703,13 +711,64 @@ export default function POSPage() {
       if (response.bigcommerce?.success) {
         toast({ title: "Order Created", description: `BigCommerce Order #${response.bigcommerce.order_id}` });
         clearCart(); setActiveLineId(null); setDiscountInputs({}); setManualPriceInputs({});
+        setInventoryErrorIds(new Set());
         setSelectedCustomer(null); setSelectedAddress(null); setCustomerAddresses([]);
         setCustomerSearch(""); setOrderNote(""); focusSearch();
       } else {
-        toast({ title: "Order Failed", description: response.bigcommerce?.error || "Sync failed", variant: "destructive" });
+        const errMsg = response.bigcommerce?.error || "Sync failed";
+        if (isInventoryErr(errMsg)) {
+          setInventoryErrorIds(new Set(cart.map((i) => i.lineId)));
+          setShowInventoryDialog(true);
+        } else {
+          setErrorDialogMsg(errMsg);
+          setShowErrorDialog(true);
+        }
       }
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+      const msg = e.message || "";
+      if (isInventoryErr(msg)) {
+        setInventoryErrorIds(new Set(cart.map((i) => i.lineId)));
+        setShowInventoryDialog(true);
+      } else {
+        setErrorDialogMsg(msg);
+        setShowErrorDialog(true);
+      }
+    } finally { setIsSubmitting(false); }
+  };
+
+  // ── Save as Draft (POS) ───────────────────────────────────────────────────
+  const handleSaveDraft = async () => {
+    if (cart.length === 0) { toast({ title: "Cart is empty", variant: "destructive" }); return; }
+    setIsSubmitting(true);
+    try {
+      await api.createDraftOrder({
+        customer_name: selectedCustomer
+          ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}`
+          : "Unknown",
+        customer_email: selectedCustomer?.email,
+        status: "draft",
+        order_note: orderNote || undefined,
+        items: cart.map((item) => ({
+          product_id: item.product.id,
+          bigcommerce_product_id: item.product.bigcommerce_id,
+          variant_id: item.variant?.id,
+          variant_option_values: item.variant?.option_values,
+          quantity: item.quantity,
+          price_at_sale: String(item.price_at_sale),
+          name: item.variant ? `${item.product.name} (${item.variant.sku})` : item.product.name,
+          sku: item.variant?.sku || item.product.sku,
+          image: item.product.image,
+        })),
+        total: getCartTotal().toFixed(2),
+        created_by_user_id: currentUser?.id || 0,
+      });
+      toast({ title: "Draft Saved", duration: 1500 });
+      clearCart(); setActiveLineId(null); setDiscountInputs({}); setManualPriceInputs({});
+      setInventoryErrorIds(new Set());
+      setSelectedCustomer(null); setSelectedAddress(null); setCustomerAddresses([]);
+      setCustomerSearch(""); setOrderNote(""); focusSearch();
+    } catch (e: any) {
+      toast({ title: "Failed to save draft", description: e.message, variant: "destructive" });
     } finally { setIsSubmitting(false); }
   };
 
@@ -1028,7 +1087,7 @@ export default function POSPage() {
                   return (
                     <div
                       key={item.lineId}
-                      className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-50 cursor-pointer transition-colors"
+                      className={`flex items-center gap-2 px-3 py-2.5 hover:bg-slate-50 cursor-pointer transition-colors ${inventoryErrorIds.has(item.lineId) ? "bg-red-50" : ""}`}
                       onClick={() => setActiveLineId(item.lineId)}
                       data-testid={`pos-item-collapsed-${item.lineId}`}
                     >
@@ -1060,7 +1119,7 @@ export default function POSPage() {
 
                 // ── Active item ──
                 return (
-                  <div key={item.lineId} className="bg-blue-50 border-l-4 border-blue-500 px-3 py-3 space-y-2.5" data-testid={`pos-item-active-${item.lineId}`}>
+                  <div key={item.lineId} className={`${inventoryErrorIds.has(item.lineId) ? "bg-red-50 border-l-4 border-red-400" : "bg-blue-50 border-l-4 border-blue-500"} px-3 py-3 space-y-2.5`} data-testid={`pos-item-active-${item.lineId}`}>
                     <div className="flex items-start gap-2">
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm text-slate-900 leading-snug">{item.product.name}</p>
@@ -1227,19 +1286,62 @@ export default function POSPage() {
                 No address found for this customer
               </div>
             )}
-            <Button
-              className="w-full mt-2"
-              size="lg"
-              disabled={cart.length === 0 || !selectedCustomer || !selectedAddress || isSubmitting}
-              onClick={handleCheckout}
-              data-testid="button-pos-checkout"
-            >
-              {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CreditCard className="h-4 w-4 mr-2" />}
-              {isSubmitting ? "Processing…" : "Checkout"}
-            </Button>
+            <div className="flex gap-2 mt-2">
+              <Button
+                variant="outline"
+                size="lg"
+                className="flex-1"
+                disabled={cart.length === 0 || isSubmitting}
+                onClick={handleSaveDraft}
+                data-testid="button-pos-save-draft"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Save Draft
+              </Button>
+              <Button
+                className="flex-1"
+                size="lg"
+                disabled={cart.length === 0 || !selectedCustomer || !selectedAddress || isSubmitting}
+                onClick={handleCheckout}
+                data-testid="button-pos-checkout"
+              >
+                {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CreditCard className="h-4 w-4 mr-2" />}
+                {isSubmitting ? "Processing…" : "Checkout"}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* ── Inventory error dialog ── */}
+      <AlertDialog open={showInventoryDialog} onOpenChange={setShowInventoryDialog}>
+        <AlertDialogContent data-testid="dialog-inventory-error">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Inventory Updated</AlertDialogTitle>
+            <AlertDialogDescription>
+              The inventory has been updated. Modify your cart before checkout.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setShowInventoryDialog(false)}>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Generic error dialog ── */}
+      <AlertDialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
+        <AlertDialogContent data-testid="dialog-checkout-error">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Something went wrong</AlertDialogTitle>
+            <AlertDialogDescription>
+              {errorDialogMsg || "An unexpected error occurred."} Contact IT support if the issue persists.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setShowErrorDialog(false)}>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Navigation guard ── */}
       <AlertDialog open={!!navTarget} onOpenChange={(open) => { if (!open) setNavTarget(null); }}>

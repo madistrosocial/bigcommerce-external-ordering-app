@@ -1,0 +1,104 @@
+Unify inventory error handling and draft order behavior across POS and regular checkout.
+
+---
+
+INVENTORY ERROR HANDLING
+
+The POS already correctly prevents checkout when there is an inventory issue (e.g. 409 or item quantity exceeds available stock). Keep this behavior.
+
+Enhance it with clear user feedback:
+
+* When checkout is attempted and there are inventory issues:
+
+  * Show popup:
+
+    "The inventory has been updated. Modify your cart before checkout."
+
+* Highlight affected cart items:
+
+  * Apply light red background to the item card
+
+* Allow user to modify cart and retry checkout
+
+(Note: POS already displays inventory count in cart items, no additional message needed)
+
+---
+
+REGULAR CHECKOUT (MATCH POS BEHAVIOR)
+
+Update regular checkout to behave similarly:
+
+* When checkout fails due to inventory issue (409 / out of stock):
+
+  * Do NOT clear cart
+  * Do NOT redirect away
+  * Stay on cart/checkout page
+
+* Show the same popup:
+
+  "The inventory has been updated. Modify your cart before checkout."
+
+* Highlight affected items (light red)
+
+* Add inventory count display in cart item cards (same as POS)
+
+* Allow user to modify cart and retry checkout
+
+---
+
+OTHER ERRORS
+
+If checkout fails for reasons other than inventory:
+
+* Show popup:
+
+  "Something went wrong. Contact IT support."
+
+* Include error message string
+
+---
+
+DRAFT ORDER (POS + REGULAR)
+
+* Always display "Save as Draft" button next to Checkout button
+  (not only in offline mode)
+
+* When "Save as Draft" is clicked:
+
+  * Save full cart state:
+
+    * items
+    * quantities
+    * pricing
+    * customer
+    * note
+
+* When opening a draft:
+
+  * Load all items back into cart
+  * Allow full editing (add/remove/update)
+
+* Saving again updates the same draft (no duplicates)
+
+* Apply same draft behavior in POS checkout
+
+---
+
+RULES
+
+* Do NOT modify cart logic
+* Do NOT modify pricing logic
+* Do NOT add database changes
+* Do NOT refactor existing structure
+* Only enhance UI feedback, error handling, and draft usability
+
+---
+
+OUTPUT
+
+Return only modified:
+
+* error handling logic
+* cart item UI updates
+* popup logic
+* draft load/save logic

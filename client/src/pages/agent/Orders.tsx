@@ -1,13 +1,14 @@
 import { MobileShell } from "@/components/layout/MobileShell";
 import { useStore } from "@/lib/store";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { format } from "date-fns";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Clock, CheckCircle2, CloudOff, AlertCircle, FileText, Send, Loader2, Search, Edit, User } from "lucide-react";
+import { Clock, CheckCircle2, CloudOff, AlertCircle, FileText, Send, Loader2, Search, Edit, User, ShoppingCart } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import {
   Dialog,
@@ -57,9 +58,10 @@ function getStatusBadge(order: api.Order) {
 }
 
 export default function Orders() {
-  const { currentUser, isOfflineMode } = useStore();
+  const { currentUser, isOfflineMode, addToCart, clearCart } = useStore();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
   
   const [editingDraft, setEditingDraft] = useState<api.Order | null>(null);
   const [customerName, setCustomerName] = useState("");
@@ -181,6 +183,37 @@ export default function Orders() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const loadDraftToCart = (order: api.Order) => {
+    clearCart();
+    order.items.forEach((item) => {
+      const product: any = {
+        id: item.product_id ?? 0,
+        name: item.name,
+        sku: item.sku,
+        price: parseFloat(item.price_at_sale),
+        image: item.image || "",
+        description: "",
+        stock_level: 0,
+        is_pinned: false,
+        bigcommerce_id: item.bigcommerce_product_id ?? 0,
+        variants: [],
+      };
+      const variant = item.variant_id
+        ? {
+            id: item.variant_id,
+            sku: item.sku,
+            price: parseFloat(item.price_at_sale),
+            option_values: item.variant_option_values || [],
+            stock_level: 0,
+          }
+        : undefined;
+      const price = parseFloat(item.price_at_sale) || 0;
+      addToCart(product, item.quantity, variant, price, price, null, null);
+    });
+    toast({ title: "Draft loaded to cart", description: "Review and submit from the Cart page." });
+    setLocation("/cart");
   };
 
   const tryAutoSubmit = async (order: api.Order) => {
@@ -348,6 +381,15 @@ export default function Orders() {
                             <Send className="h-4 w-4 mr-2" />
                           )}
                           Submit to BigCommerce
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => loadDraftToCart(order)}
+                          data-testid={`button-load-to-cart-${order.id}`}
+                        >
+                          <ShoppingCart className="h-4 w-4 mr-2" />
+                          Load to Cart
                         </Button>
                         <Button
                           variant="outline"
