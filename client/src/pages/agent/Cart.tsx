@@ -30,6 +30,7 @@ export default function Cart() {
   const [manualCustomerNote, setManualCustomerNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [inventoryErrorIds, setInventoryErrorIds] = useState<Set<string>>(new Set());
+  const [freshStockByLineId, setFreshStockByLineId] = useState<Map<string, number>>(new Map());
   const [showInventoryDialog, setShowInventoryDialog] = useState(false);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [errorDialogMsg, setErrorDialogMsg] = useState("");
@@ -37,6 +38,62 @@ export default function Cart() {
   const { toast } = useToast();
 
   const isInventoryErr = (msg: string) => /409|stock|inventory|quantity|available/i.test(msg);
+
+  // ── Refresh stock and compute affected line IDs ────────────────────────────
+  const refreshStockAndHighlight = async () => {
+    try {
+      const bcIds = [...new Set(cart.map(i => i.product.bigcommerce_id).filter(Boolean))];
+      if (bcIds.length === 0) {
+        setInventoryErrorIds(new Set(cart.map(i => i.lineId)));
+        return;
+      }
+      const stockData = await api.refreshProductStock(bcIds);
+      const stockMap = new Map<number, api.StockInfo>(stockData.map(s => [s.bigcommerce_id, s]));
+
+      const newFresh = new Map<string, number>();
+      const affected = new Set<string>();
+
+      cart.forEach(item => {
+        const info = stockMap.get(item.product.bigcommerce_id);
+        if (!info) return;
+        let stock: number;
+        if (item.variant?.id) {
+          const v = info.variants.find(v => v.id === item.variant.id);
+          stock = v?.stock_level ?? info.stock_level;
+        } else {
+          stock = info.stock_level;
+        }
+        newFresh.set(item.lineId, stock);
+        if (stock < item.quantity) affected.add(item.lineId);
+      });
+
+      setFreshStockByLineId(newFresh);
+      // If we could pinpoint affected items, use those; otherwise fall back to all
+      setInventoryErrorIds(affected.size > 0 ? affected : new Set(cart.map(i => i.lineId)));
+    } catch {
+      setInventoryErrorIds(new Set(cart.map(i => i.lineId)));
+    }
+  };
+
+  // ── Restore customer from draft load ──────────────────────────────────────
+  useEffect(() => {
+    const raw = localStorage.getItem('vansales_restore_customer');
+    if (!raw) return;
+    localStorage.removeItem('vansales_restore_customer');
+    try {
+      const { bcId } = JSON.parse(raw) as { bcId: number };
+      if (!bcId) return;
+      api.getCustomerByBcId(bcId).then(async (customer) => {
+        setSelectedCustomer(customer);
+        setCustomerSearch(`${customer.first_name} ${customer.last_name}`);
+        try {
+          const addresses = await api.getCustomerAddresses(customer.id);
+          setCustomerAddresses(addresses);
+          if (addresses.length > 0) setSelectedAddress(addresses[0]);
+        } catch {}
+      }).catch(() => {});
+    } catch {}
+  }, []);
 
   const total = getCartTotal();
 
@@ -209,12 +266,13 @@ export default function Cart() {
           description: `BigCommerce Order #${response.bigcommerce.order_id}${sheetsSuccess ? ' (Logged to Sheets)' : ''}`,
         });
         setInventoryErrorIds(new Set());
+        setFreshStockByLineId(new Map());
         clearCart();
         setLocation('/orders');
       } else {
         const errMsg = response.bigcommerce?.error || "BigCommerce sync failed";
         if (isInventoryErr(errMsg)) {
-          setInventoryErrorIds(new Set(cart.map((i) => i.lineId)));
+          await refreshStockAndHighlight();
           setShowInventoryDialog(true);
         } else {
           setErrorDialogMsg(errMsg);
@@ -227,7 +285,7 @@ export default function Cart() {
         setOfflineMode(true);
         toast({ title: "Connection lost", description: "Please try again or save as draft", variant: "destructive" });
       } else if (isInventoryErr(msg)) {
-        setInventoryErrorIds(new Set(cart.map((i) => i.lineId)));
+        await refreshStockAndHighlight();
         setShowInventoryDialog(true);
       } else {
         setErrorDialogMsg(msg);
@@ -249,6 +307,7 @@ export default function Cart() {
     const draftData = {
       customer_name: name,
       customer_email: isOfflineMode ? manualCustomerEmail.trim() || undefined : selectedCustomer?.email,
+      bigcommerce_customer_id: isOfflineMode ? undefined : selectedCustomer?.id,
       status: 'draft' as const,
       order_note: [orderNote, isOfflineMode ? manualCustomerNote : ""].filter(Boolean).join(' | ') || undefined,
       items: cart.map(item => ({
@@ -508,7 +567,9 @@ export default function Cart() {
         
         <div className="space-y-3">
           {cart.map((item, idx) => {
-            const stock = item.variant?.stock_level ?? item.product.stock_level ?? 0;
+            const stock = freshStockByLineId.has(item.lineId)
+              ? freshStockByLineId.get(item.lineId)!
+              : (item.variant?.stock_level ?? item.product.stock_level ?? 0);
             const hasInvErr = inventoryErrorIds.has(item.lineId);
             return (
               <Card key={item.lineId} className={`p-3 flex gap-3 items-center ${hasInvErr ? "border-red-300 bg-red-50" : ""}`}>
@@ -551,10 +612,10 @@ export default function Cart() {
           <div className="flex items-center justify-between mb-2">
             <span className="font-bold text-xl">${total.toFixed(2)}</span>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 sm:justify-end">
             <Button
               variant="outline"
-              className="flex-1"
+              className="flex-1 sm:flex-none sm:min-w-[140px]"
               onClick={handleSaveDraft}
               disabled={isSubmitting}
               data-testid="button-save-draft"
@@ -563,7 +624,7 @@ export default function Cart() {
               Save Draft
             </Button>
             <Button
-              className="flex-1"
+              className="flex-1 sm:flex-none sm:min-w-[160px]"
               onClick={handleOnlineCheckout}
               disabled={isOfflineMode || !selectedCustomer || !selectedAddress || isSubmitting}
               data-testid="button-submit-order"

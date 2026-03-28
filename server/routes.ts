@@ -1114,6 +1114,71 @@ export async function registerRoutes(
     }
   });
 
+  // Look up a single BigCommerce customer by their BC ID
+  app.get("/api/bigcommerce/customers/by-bc-id/:bcId", requireAuth, async (req, res) => {
+    try {
+      const { bcId } = req.params;
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+      if (setting?.value) {
+        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        storeHash = config.storeHash || storeHash;
+        token = config.token || token;
+      }
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      const response = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?id:in=${bcId}`,
+        { headers: { 'X-Auth-Token': String(token), 'Content-Type': 'application/json', 'Accept': 'application/json' } }
+      );
+      if (!response.ok) throw new Error(`BigCommerce API error: ${response.statusText}`);
+      const data = await response.json();
+      if (!data.data || data.data.length === 0) return res.status(404).json({ error: "Customer not found" });
+      const c = data.data[0];
+      res.json({ id: c.id, first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone || '', company: c.company || '', customer_group_id: c.customer_group_id });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Refresh stock levels for given BigCommerce product IDs
+  app.post("/api/products/refresh-stock", requireAuth, async (req, res) => {
+    try {
+      const { bigcommerce_ids } = req.body as { bigcommerce_ids: number[] };
+      if (!Array.isArray(bigcommerce_ids) || bigcommerce_ids.length === 0) return res.json([]);
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+      if (setting?.value) {
+        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        storeHash = config.storeHash || storeHash;
+        token = config.token || token;
+      }
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      const results = await Promise.all(bigcommerce_ids.map(async (bcId: number) => {
+        try {
+          const r = await fetch(
+            `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${bcId}?include=variants`,
+            { headers: { 'X-Auth-Token': String(token), 'Content-Type': 'application/json', 'Accept': 'application/json' } }
+          );
+          if (!r.ok) return { bigcommerce_id: bcId, stock_level: 0, variants: [] };
+          const d = await r.json();
+          const p = d.data;
+          return {
+            bigcommerce_id: bcId,
+            stock_level: p.inventory_level ?? 0,
+            variants: (p.variants || []).map((v: any) => ({ id: v.id, stock_level: v.inventory_level ?? 0 }))
+          };
+        } catch {
+          return { bigcommerce_id: bcId, stock_level: 0, variants: [] };
+        }
+      }));
+      res.json(results);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ===== SETTINGS ROUTES =====
   app.get("/api/settings/:key", requireAuth, async (req, res) => {
     try {

@@ -212,6 +212,13 @@ export default function Orders() {
       const price = parseFloat(item.price_at_sale) || 0;
       addToCart(product, item.quantity, variant, price, price, null, null);
     });
+    if (order.bigcommerce_customer_id) {
+      localStorage.setItem('vansales_restore_customer', JSON.stringify({
+        bcId: order.bigcommerce_customer_id,
+        name: order.customer_name,
+        email: order.customer_email,
+      }));
+    }
     toast({ title: "Draft loaded to cart", description: "Review and submit from the Cart page." });
     setLocation("/cart");
   };

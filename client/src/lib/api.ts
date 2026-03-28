@@ -357,6 +357,30 @@ export async function getCustomerAddresses(customerId: number): Promise<BigComme
   return res.json();
 }
 
+export async function getCustomerByBcId(bcId: number): Promise<BigCommerceCustomer> {
+  const res = await fetch(`${API_BASE}/bigcommerce/customers/by-bc-id/${bcId}`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) throw new Error('Customer not found');
+  return res.json();
+}
+
+export interface StockInfo {
+  bigcommerce_id: number;
+  stock_level: number;
+  variants: { id: number; stock_level: number }[];
+}
+
+export async function refreshProductStock(bigcommerceIds: number[]): Promise<StockInfo[]> {
+  const res = await fetch(`${API_BASE}/products/refresh-stock`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ bigcommerce_ids: bigcommerceIds })
+  });
+  if (!res.ok) throw new Error('Failed to refresh stock');
+  return res.json();
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 export async function getSetting(key: string): Promise<{ key: string; value: any }> {
