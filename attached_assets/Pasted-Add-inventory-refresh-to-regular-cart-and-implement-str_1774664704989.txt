@@ -1,0 +1,94 @@
+Add inventory refresh to regular cart and implement structured checkout note system for BOTH POS and regular checkout.
+
+---
+
+========================================
+
+1. REGULAR CART INVENTORY REFRESH
+   ========================================
+
+Current issue:
+
+* Inventory shows as 0 or outdated when loading draft or returning to cart
+
+Fix:
+
+* When regular cart page loads:
+  → Re-fetch latest inventory for all cart items
+  → Update inventory_level in cart state
+
+* When loading a draft into regular cart:
+  → Re-fetch inventory for all variants
+  → Replace any stored inventory values
+
+* Do NOT use persisted or draft-stored inventory values
+
+Ensure cart always reflects current inventory
+
+---
+
+========================================
+2. CHECKOUT NOTE SYSTEM (POS + REGULAR)
+=======================================
+
+Replace existing note prefill behavior.
+
+---
+
+A. CHECKOUT UI (APPLIES TO BOTH POS AND REGULAR)
+
+* Add "Payment Type" dropdown with options:
+
+  * Cash
+  * Check
+  * Card on File
+  * Via Bigcommerce
+
+* Keep note textarea empty (no auto-prefill)
+
+---
+
+B. ON CHECKOUT SUBMIT (APPLIES TO BOTH POS AND REGULAR)
+
+Construct note dynamically using:
+
+Sales App Checkout
+Checkout by : [User Name]
+Payment Type : [Selected Payment]
+Total Discount Applied : [AUTO]
+Price Tier : [AUTO]
+Notes:
+[User Input]
+
+---
+
+C. RULES
+
+* Do NOT prefill note on page load
+* Generate note only on submit
+* Preserve user-entered notes exactly
+* Apply identical behavior in POS and regular checkout
+
+---
+
+========================================
+IMPORTANT
+=========
+
+* Do NOT modify cart logic
+* Do NOT modify pricing logic
+* Do NOT introduce database changes
+* Reuse existing inventory fetch logic from POS if available
+* Keep implementation simple and minimal
+
+---
+
+========================================
+OUTPUT
+======
+
+Return only:
+
+* inventory refresh logic for regular cart
+* checkout note generation logic (POS + regular)
+* payment dropdown UI (POS + regular)

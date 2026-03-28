@@ -25,6 +25,7 @@ export default function Cart() {
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [orderNote, setOrderNote] = useState("");
+  const [paymentType, setPaymentType] = useState("Cash");
   const [manualCustomerName, setManualCustomerName] = useState("");
   const [manualCustomerEmail, setManualCustomerEmail] = useState("");
   const [manualCustomerNote, setManualCustomerNote] = useState("");
@@ -39,12 +40,12 @@ export default function Cart() {
 
   const isInventoryErr = (msg: string) => /409|stock|inventory|quantity|available/i.test(msg);
 
-  // ── Refresh stock and compute affected line IDs ────────────────────────────
-  const refreshStockAndHighlight = async () => {
+  // ── Refresh stock and optionally highlight over-sold items ────────────────
+  const refreshStockAndHighlight = async (highlightAfter = false) => {
     try {
       const bcIds = [...new Set(cart.map(i => i.product.bigcommerce_id).filter(Boolean))];
       if (bcIds.length === 0) {
-        setInventoryErrorIds(new Set(cart.map(i => i.lineId)));
+        if (highlightAfter) setInventoryErrorIds(new Set(cart.map(i => i.lineId)));
         return;
       }
       const stockData = await api.refreshProductStock(bcIds);
@@ -68,12 +69,18 @@ export default function Cart() {
       });
 
       setFreshStockByLineId(newFresh);
-      // If we could pinpoint affected items, use those; otherwise fall back to all
-      setInventoryErrorIds(affected.size > 0 ? affected : new Set(cart.map(i => i.lineId)));
+      if (highlightAfter) {
+        setInventoryErrorIds(affected.size > 0 ? affected : new Set(cart.map(i => i.lineId)));
+      }
     } catch {
-      setInventoryErrorIds(new Set(cart.map(i => i.lineId)));
+      if (highlightAfter) setInventoryErrorIds(new Set(cart.map(i => i.lineId)));
     }
   };
+
+  // Auto-refresh inventory on mount and when item count changes
+  useEffect(() => {
+    if (cart.length > 0) refreshStockAndHighlight(false);
+  }, [cart.length]);
 
   // ── Restore customer from draft load ──────────────────────────────────────
   useEffect(() => {
@@ -97,28 +104,22 @@ export default function Cart() {
 
   const total = getCartTotal();
 
-  // ── Checkout note template ────────────────────────────────────────────────
-  const buildNoteTemplate = useCallback(() => {
-    const totalDiscount = cart.reduce((sum, item) => {
-      return sum + (item.original_price - item.price_at_sale) * item.quantity;
-    }, 0);
+  // ── Build structured checkout note at submit time ─────────────────────────
+  const buildCheckoutNote = (userNote: string) => {
+    const totalDiscount = cart.reduce((sum, item) =>
+      sum + (item.original_price - item.price_at_sale) * item.quantity, 0);
     const groupId = (selectedCustomer as any)?.customer_group_id;
     const tierLabel = !selectedCustomer ? "Default" : (groupId && groupId !== 0 ? `Group #${groupId}` : "Default");
     return [
       "Sales App Checkout",
       `Checkout by : ${currentUser?.name || ""}`,
-      "Payment Type :",
-      "Amount :",
+      `Payment Type : ${paymentType}`,
       `Total Discount Applied : $${totalDiscount.toFixed(2)}`,
       `Price Tier : ${tierLabel}`,
+      "Notes:",
+      userNote,
     ].join("\n");
-  }, [cart, selectedCustomer, currentUser]);
-
-  useEffect(() => {
-    if (cart.length > 0 && orderNote === "") {
-      setOrderNote(buildNoteTemplate());
-    }
-  }, [cart.length]);
+  };
 
   // ── Navigation guard (refresh / tab close) ────────────────────────────────
   useEffect(() => {
@@ -238,7 +239,7 @@ export default function Cart() {
       status: 'pending_sync' as const,
       bigcommerce_customer_id: selectedCustomer.id,
       billing_address: billingAddress,
-      order_note: orderNote || undefined,
+      order_note: buildCheckoutNote(orderNote),
       items: cart.map(item => ({
         product_id: item.product.id,
         bigcommerce_product_id: item.product.bigcommerce_id,
@@ -309,7 +310,7 @@ export default function Cart() {
       customer_email: isOfflineMode ? manualCustomerEmail.trim() || undefined : selectedCustomer?.email,
       bigcommerce_customer_id: isOfflineMode ? undefined : selectedCustomer?.id,
       status: 'draft' as const,
-      order_note: [orderNote, isOfflineMode ? manualCustomerNote : ""].filter(Boolean).join(' | ') || undefined,
+      order_note: buildCheckoutNote([orderNote, isOfflineMode ? manualCustomerNote : ""].filter(Boolean).join("\n")),
       items: cart.map(item => ({
         product_id: item.product.id,
         bigcommerce_product_id: item.product.bigcommerce_id,
@@ -349,7 +350,7 @@ export default function Cart() {
       customer_name: manualCustomerName.trim(),
       customer_email: manualCustomerEmail.trim() || undefined,
       status: 'draft' as const,
-      order_note: [orderNote, manualCustomerNote].filter(Boolean).join(' | ') || undefined,
+      order_note: buildCheckoutNote([orderNote, manualCustomerNote].filter(Boolean).join("\n")),
       items: cart.map(item => ({
         product_id: item.product.id,
         bigcommerce_product_id: item.product.bigcommerce_id,
@@ -554,15 +555,31 @@ export default function Cart() {
           </div>
         )}
 
-        <div>
-          <Label className="text-xs font-medium text-slate-500 mb-1 block">Order Note</Label>
-          <Textarea 
-            placeholder="Add notes for this order (optional)" 
-            value={orderNote}
-            onChange={e => setOrderNote(e.target.value)}
-            className="min-h-[80px]"
-            data-testid="input-order-note"
-          />
+        <div className="flex flex-col gap-3">
+          <div>
+            <Label className="text-xs font-medium text-slate-500 mb-1 block">Payment Type</Label>
+            <select
+              className="w-full h-9 border rounded-md px-3 text-sm bg-white"
+              value={paymentType}
+              onChange={e => setPaymentType(e.target.value)}
+              data-testid="select-payment-type"
+            >
+              <option>Cash</option>
+              <option>Check</option>
+              <option>Card on File</option>
+              <option>Via Bigcommerce</option>
+            </select>
+          </div>
+          <div>
+            <Label className="text-xs font-medium text-slate-500 mb-1 block">Order Note</Label>
+            <Textarea
+              placeholder="Add notes for this order (optional)"
+              value={orderNote}
+              onChange={e => setOrderNote(e.target.value)}
+              className="min-h-[80px]"
+              data-testid="input-order-note"
+            />
+          </div>
         </div>
         
         <div className="space-y-3">

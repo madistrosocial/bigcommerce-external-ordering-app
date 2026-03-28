@@ -372,6 +372,7 @@ export default function POSPage() {
   const customerDebRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [orderNote, setOrderNote] = useState("");
+  const [paymentType, setPaymentType] = useState("Cash");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [navTarget, setNavTarget] = useState<string | null>(null);
 
@@ -460,8 +461,8 @@ export default function POSPage() {
     }
   };
 
-  // ── Checkout note template ────────────────────────────────────────────────
-  const buildNoteTemplate = useCallback(() => {
+  // ── Build structured checkout note at submit time ─────────────────────────
+  const buildCheckoutNote = (userNote: string) => {
     const discount = cart.reduce((sum, item) =>
       sum + (item.original_price - item.price_at_sale) * item.quantity, 0);
     const groupId = (selectedCustomer as any)?.customer_group_id;
@@ -469,18 +470,13 @@ export default function POSPage() {
     return [
       "Sales App Checkout",
       `Checkout by : ${currentUser?.name || ""}`,
-      "Payment Type :",
-      "Amount :",
+      `Payment Type : ${paymentType}`,
       `Total Discount Applied : $${discount.toFixed(2)}`,
       `Price Tier : ${tierLabel}`,
+      "Notes:",
+      userNote,
     ].join("\n");
-  }, [cart, selectedCustomer, currentUser]);
-
-  useEffect(() => {
-    if (cart.length > 0 && orderNote === "") {
-      setOrderNote(buildNoteTemplate());
-    }
-  }, [cart.length]);
+  };
 
   // ── Navigation guard: refresh / tab close ─────────────────────────────────
   useEffect(() => {
@@ -757,7 +753,7 @@ export default function POSPage() {
         status: "pending_sync",
         bigcommerce_customer_id: selectedCustomer.id,
         billing_address: billing,
-        order_note: orderNote || undefined,
+        order_note: buildCheckoutNote(orderNote),
         items: cart.map((item) => ({
           product_id: item.product.id,
           bigcommerce_product_id: item.product.bigcommerce_id,
@@ -812,7 +808,7 @@ export default function POSPage() {
         customer_email: selectedCustomer?.email,
         bigcommerce_customer_id: selectedCustomer?.id,
         status: "draft",
-        order_note: orderNote || undefined,
+        order_note: buildCheckoutNote(orderNote),
         items: cart.map((item) => ({
           product_id: item.product.id,
           bigcommerce_product_id: item.product.bigcommerce_id,
@@ -1326,12 +1322,23 @@ export default function POSPage() {
             )}
           </div>
 
-          {/* Order note */}
+          {/* Payment type + Order note */}
           {cart.length > 0 && (
-            <div className="px-3 py-2 border-t shrink-0">
+            <div className="px-3 py-2 border-t shrink-0 space-y-2">
+              <select
+                className="w-full h-8 border rounded px-2 text-xs bg-slate-50"
+                value={paymentType}
+                onChange={(e) => setPaymentType(e.target.value)}
+                data-testid="select-pos-payment-type"
+              >
+                <option>Cash</option>
+                <option>Check</option>
+                <option>Card on File</option>
+                <option>Via Bigcommerce</option>
+              </select>
               <Textarea
                 placeholder="Order note (optional)…"
-                className="text-xs bg-slate-50 min-h-[72px] resize-none"
+                className="text-xs bg-slate-50 min-h-[60px] resize-none"
                 value={orderNote}
                 onChange={(e) => setOrderNote(e.target.value)}
                 data-testid="input-pos-order-note"
