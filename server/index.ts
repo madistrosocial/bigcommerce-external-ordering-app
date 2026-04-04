@@ -20,7 +20,15 @@ app.use(
   }),
 );
 
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ limit: "10mb", extended: false }));
+
+//ADD THIS HERE
+app.use((req, _res, next) => {
+  if (req.path === "/api/orders") {
+    console.log("Payload size:", Buffer.byteLength(JSON.stringify(req.body)));
+  }
+  next();
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
