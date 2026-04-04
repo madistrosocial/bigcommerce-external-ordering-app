@@ -12,15 +12,19 @@ declare module "http" {
   }
 }
 
+const BODY_LIMIT = "10mb";
+console.log("JSON limit set to:", BODY_LIMIT);
+
 app.use(
   express.json({
+    limit: BODY_LIMIT,
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ limit: "10mb", extended: false }));
+app.use(express.urlencoded({ limit: BODY_LIMIT, extended: false }));
 
 //ADD THIS HERE
 app.use((req, _res, next) => {
