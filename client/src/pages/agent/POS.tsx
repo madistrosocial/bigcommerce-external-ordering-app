@@ -375,6 +375,12 @@ export default function POSPage() {
   const [paymentType, setPaymentType] = useState("Cash");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [navTarget, setNavTarget] = useState<string | null>(null);
+  const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
+
+  // ── Price history ─────────────────────────────────────────────────────────
+  const [priceHistoryCache, setPriceHistoryCache] = useState<Map<string, api.PriceHistoryEntry[]>>(new Map());
+  const [openHistoryLineId, setOpenHistoryLineId] = useState<string | null>(null);
+  const [loadingHistoryLineId, setLoadingHistoryLineId] = useState<string | null>(null);
 
   // ── Error / inventory dialogs ─────────────────────────────────────────────
   const [inventoryErrorIds, setInventoryErrorIds] = useState<Set<string>>(new Set());
@@ -461,6 +467,24 @@ export default function POSPage() {
     }
   };
 
+  // ── Price history helpers ─────────────────────────────────────────────────
+  const historyKey = (item: CartItem) =>
+    `${selectedCustomer?.id ?? 0}-${item.product.bigcommerce_id}-${item.variant?.id ?? 0}`;
+
+  const fetchPriceHistory = useCallback(async (item: CartItem): Promise<api.PriceHistoryEntry[]> => {
+    if (!selectedCustomer) return [];
+    const key = `${selectedCustomer.id}-${item.product.bigcommerce_id}-${item.variant?.id ?? 0}`;
+    if (priceHistoryCache.has(key)) return priceHistoryCache.get(key)!;
+    const history = await api.getCustomerPriceHistory(
+      selectedCustomer.id, item.product.bigcommerce_id, item.variant?.id
+    );
+    setPriceHistoryCache(prev => new Map(prev).set(key, history));
+    return history;
+  }, [selectedCustomer, priceHistoryCache]);
+
+  // Clear history cache when customer changes
+  useEffect(() => { setPriceHistoryCache(new Map()); setOpenHistoryLineId(null); }, [selectedCustomer?.id]);
+
   // ── Build structured checkout note at submit time ─────────────────────────
   const buildCheckoutNote = (userNote: string) => {
     const discount = cart.reduce((sum, item) =>
@@ -515,6 +539,10 @@ export default function POSPage() {
 
   // ── Auto-add helper ───────────────────────────────────────────────────────
   const autoAddVariant = useCallback((product: api.Product, variant: any, qty = 1) => {
+    if (!selectedCustomer) {
+      toast({ title: "Select customer first", variant: "destructive", duration: 2000 });
+      return;
+    }
     if (!allowOverselling) {
       const stock: number = variant?.stock_level ?? product.stock_level ?? 0;
       if (stock <= 0) {
@@ -538,7 +566,7 @@ export default function POSPage() {
       }
     }, 0);
     toast({ title: "Added to cart", description: `${variant?.sku || product.sku} × ${qty}`, duration: 1500 });
-  }, [addToCart, toast, allowOverselling]);
+  }, [addToCart, toast, allowOverselling, selectedCustomer]);
 
   // Popup "Add to Cart" with custom pricing
   const handlePopupAdd = useCallback((
@@ -550,6 +578,10 @@ export default function POSPage() {
     discountType: "free" | "percent" | null,
     discountValue: number | null,
   ) => {
+    if (!selectedCustomer) {
+      toast({ title: "Select customer first", variant: "destructive", duration: 2000 });
+      return;
+    }
     const beforeIds = new Set(useStore.getState().cart.map((i) => i.lineId));
     addToCart(product, qty, variant ?? undefined, finalPrice, originalPrice, discountType, discountValue);
     setTimeout(() => {
@@ -801,7 +833,7 @@ export default function POSPage() {
     if (cart.length === 0) { toast({ title: "Cart is empty", variant: "destructive" }); return; }
     setIsSubmitting(true);
     try {
-      await api.createDraftOrder({
+      const saved = await api.createDraftOrder({
         customer_name: selectedCustomer
           ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}`
           : "Unknown",
@@ -823,6 +855,13 @@ export default function POSPage() {
         total: getCartTotal().toFixed(2),
         created_by_user_id: currentUser?.id || 0,
       });
+      // Mark this draft as originating from POS
+      if (saved?.id) {
+        try {
+          const existing = JSON.parse(localStorage.getItem('vansales_pos_draft_ids') || '[]') as number[];
+          localStorage.setItem('vansales_pos_draft_ids', JSON.stringify([...existing, saved.id]));
+        } catch {}
+      }
       toast({ title: "Draft Saved", duration: 1500 });
       clearCart(); setActiveLineId(null); setDiscountInputs({}); setManualPriceInputs({});
       setInventoryErrorIds(new Set());
@@ -866,7 +905,10 @@ export default function POSPage() {
             <div className="absolute top-full left-0 right-0 bg-white border rounded-md shadow-xl z-50 max-h-52 overflow-y-auto mt-1">
               {customerResults.map((c) => (
                 <button key={c.id} className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b last:border-0" onClick={() => handleSelectCustomer(c)} data-testid={`option-customer-${c.id}`}>
-                  <p className="text-sm font-medium">{c.first_name} {c.last_name}</p>
+                  <p className="text-sm font-medium">
+                    {c.first_name} {c.last_name}
+                    {c.company ? <span className="text-slate-500 font-normal"> | {c.company}</span> : null}
+                  </p>
                   <p className="text-xs text-slate-500">{c.email}</p>
                 </button>
               ))}
@@ -1304,6 +1346,72 @@ export default function POSPage() {
                         onBlur={(e) => { if (e.target.value) applyManualPrice(item, index, e.target.value); focusSearch(); }}
                         data-testid={`input-pos-price-${item.lineId}`}
                       />
+                      {/* Last $ button */}
+                      {selectedCustomer && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-2.5 text-xs"
+                          disabled={loadingHistoryLineId === item.lineId}
+                          onClick={async () => {
+                            setLoadingHistoryLineId(item.lineId);
+                            try {
+                              const hist = await fetchPriceHistory(item);
+                              if (hist.length === 0) { toast({ title: "No price history", variant: "destructive", duration: 2000 }); return; }
+                              applyManualPrice(item, index, hist[0].price);
+                            } finally { setLoadingHistoryLineId(null); focusSearch(); }
+                          }}
+                          data-testid={`button-pos-last-price-${item.lineId}`}
+                        >
+                          {loadingHistoryLineId === item.lineId ? <Loader2 className="h-3 w-3 animate-spin" /> : "Last $"}
+                        </Button>
+                      )}
+                      {/* History dropdown */}
+                      {selectedCustomer && (() => {
+                        const hkey = historyKey(item);
+                        const hist = priceHistoryCache.get(hkey) ?? [];
+                        const isOpen = openHistoryLineId === item.lineId;
+                        return (
+                          <div className="relative">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2.5 text-xs"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (isOpen) { setOpenHistoryLineId(null); return; }
+                                setLoadingHistoryLineId(item.lineId);
+                                try { await fetchPriceHistory(item); } finally { setLoadingHistoryLineId(null); }
+                                setOpenHistoryLineId(item.lineId);
+                                focusSearch();
+                              }}
+                              data-testid={`button-pos-history-${item.lineId}`}
+                            >
+                              History ▾
+                            </Button>
+                            {isOpen && (
+                              <div
+                                className="absolute left-0 top-full mt-1 w-44 bg-white border rounded-md shadow-lg z-50 py-1"
+                                onMouseDown={(e) => e.preventDefault()}
+                              >
+                                {hist.length === 0 ? (
+                                  <p className="px-3 py-2 text-xs text-slate-500">No history</p>
+                                ) : hist.map((h, hi) => (
+                                  <button
+                                    key={hi}
+                                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 flex justify-between"
+                                    onClick={() => { applyManualPrice(item, index, h.price); setOpenHistoryLineId(null); focusSearch(); }}
+                                    data-testid={`option-history-${item.lineId}-${hi}`}
+                                  >
+                                    <span className="font-medium">${parseFloat(h.price).toFixed(2)}</span>
+                                    <span className="text-slate-400">{h.date ? new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : ""}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                       {(isDiscounted || isFree || manualInput) && (
                         <button className="text-xs text-slate-400 hover:text-slate-700 underline"
                           onClick={() => { clearLineDiscount(item, index); focusSearch(); }}>
@@ -1391,7 +1499,7 @@ export default function POSPage() {
                 className="flex-1"
                 size="lg"
                 disabled={cart.length === 0 || !selectedCustomer || !selectedAddress || isSubmitting}
-                onClick={handleCheckout}
+                onClick={() => setShowCheckoutConfirm(true)}
                 data-testid="button-pos-checkout"
               >
                 {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CreditCard className="h-4 w-4 mr-2" />}
@@ -1401,6 +1509,29 @@ export default function POSPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Checkout confirmation ── */}
+      <AlertDialog open={showCheckoutConfirm} onOpenChange={setShowCheckoutConfirm}>
+        <AlertDialogContent data-testid="dialog-checkout-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Checkout</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedCustomer
+                ? `Submit order for ${selectedCustomer.first_name} ${selectedCustomer.last_name}?`
+                : "Submit this order?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-confirm-cancel">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="button-confirm-checkout"
+              onClick={() => { setShowCheckoutConfirm(false); handleCheckout(); }}
+            >
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Inventory error dialog ── */}
       <AlertDialog open={showInventoryDialog} onOpenChange={setShowInventoryDialog}>

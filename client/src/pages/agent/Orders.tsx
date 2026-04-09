@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Clock, CheckCircle2, CloudOff, AlertCircle, FileText, Send, Loader2, Search, Edit, User, ShoppingCart } from "lucide-react";
+import { Clock, CheckCircle2, CloudOff, AlertCircle, FileText, Send, Loader2, Search, Edit, User, ShoppingCart, Trash2 } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import {
   Dialog,
@@ -185,6 +185,21 @@ export default function Orders() {
     }
   };
 
+  const deleteDraft = async (order: api.Order) => {
+    try {
+      await api.deleteOrder(order.id!);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // Clean up POS draft tracking
+      try {
+        const existing = JSON.parse(localStorage.getItem('vansales_pos_draft_ids') || '[]') as number[];
+        localStorage.setItem('vansales_pos_draft_ids', JSON.stringify(existing.filter((id) => id !== order.id)));
+      } catch {}
+      toast({ title: "Draft deleted" });
+    } catch (e: any) {
+      toast({ title: "Failed to delete draft", description: e.message, variant: "destructive" });
+    }
+  };
+
   const loadDraftToCart = (order: api.Order) => {
     clearCart();
     order.items.forEach((item) => {
@@ -219,6 +234,15 @@ export default function Orders() {
         email: order.customer_email,
       }));
     }
+    // Route to POS if this draft was originally created there
+    try {
+      const posDraftIds = JSON.parse(localStorage.getItem('vansales_pos_draft_ids') || '[]') as number[];
+      if (order.id && posDraftIds.includes(order.id)) {
+        toast({ title: "Draft loaded", description: "Review and submit from POS." });
+        setLocation("/pos");
+        return;
+      }
+    } catch {}
     toast({ title: "Draft loaded to cart", description: "Review and submit from the Cart page." });
     setLocation("/cart");
   };
@@ -407,6 +431,15 @@ export default function Orders() {
                           <Edit className="h-4 w-4 mr-2" />
                           Edit Customer Details
                         </Button>
+                        <Button
+                          variant="outline"
+                          className="w-full text-red-500 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => deleteDraft(order)}
+                          data-testid={`button-delete-draft-${order.id}`}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete Draft
+                        </Button>
                       </div>
                     )}
 
@@ -497,6 +530,7 @@ export default function Orders() {
                         <div>
                           <div className="font-medium text-sm">
                             {customer.first_name} {customer.last_name}
+                            {customer.company ? <span className="text-slate-500 font-normal"> | {customer.company}</span> : null}
                           </div>
                           <div className="text-xs text-slate-500">{customer.email}</div>
                         </div>

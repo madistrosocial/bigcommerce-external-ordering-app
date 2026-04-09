@@ -1,0 +1,158 @@
+Update POS behavior, customer display, checkout flow, and pricing controls with the following changes. Keep implementation minimal, consistent with existing architecture, and safe for production.
+
+---
+
+1. POS Mode – Require Customer Selection
+
+* In POS mode, prevent adding items to cart if no customer is selected
+* On add-to-cart attempt:
+
+  * Block the action
+  * Show message: “Select customer first”
+* Do not affect regular (non-POS) mode
+
+---
+
+2. Customer Search Result Enhancement
+
+* In the customer search dropdown:
+
+  * Display customer name with company name beside it
+  * Format:
+    Jay Patel | Megha Investment 4 LLC (dba Quick Mart)
+  * Show email on the next line (existing behavior)
+
+* If no company name exists:
+
+  * Display only customer name (no trailing separator)
+
+* Keep layout clean and readable (no UI break)
+
+---
+
+3. Checkout Confirmation (POS and Regular Cart)
+
+* When user clicks “Checkout”:
+
+  * Show a confirmation dialog before proceeding
+
+* Dialog should:
+
+  * Ask user to confirm checkout
+  * Provide two options:
+
+    * Confirm (proceeds with checkout)
+    * Cancel (closes dialog and returns to cart)
+
+* Apply this behavior to:
+
+  * POS cart
+  * Regular cart
+
+* Do not alter existing checkout logic beyond adding confirmation
+
+---
+
+4. Pricing Fix (discounted price priority)
+
+* Ensure pricing always prioritizes any available discounted/sale price over default/base price
+* Fallback to base price if no discounted price exists
+* Apply consistently:
+
+  * Product display
+  * Cart
+  * Final checkout payload
+* Always prioritize variant-level pricing over product-level pricing
+
+---
+
+5. Customer Price History (Backend Support)
+
+* Provide a way to retrieve recent prices used by a customer for a specific product/variant
+* Use completed/successful orders only
+* Results must:
+
+  * Be sorted newest → oldest
+  * Be limited to a small number of recent entries (around 5–6)
+  * Include price and order date
+
+---
+
+6. Pricing Controls UI Update
+
+Extend pricing controls:
+
+[ FREE ] [ Disc (%) ] [ Price ($) ] [ Last $ ] [ History ▼ ]
+
+---
+
+7. Last $ Button
+
+* Add “Last $” button
+* On click:
+
+  * Apply most recent price used by the customer for that item
+* Disable if no history exists
+* Overrides any existing pricing
+
+---
+
+8. Price History Dropdown
+
+* Add dropdown showing recent prices
+
+* Format:
+  $7.00 — Mar 5, 2026
+  $7.25 — Feb 20, 2026
+
+* On select:
+
+  * Apply selected price immediately
+
+* Do not deduplicate prices
+
+---
+
+9. Pricing Interaction Rule
+
+* Follow “last action wins”
+* Any pricing action overrides previous ones:
+
+  * FREE
+  * Disc (%)
+  * Price ($)
+  * Last $
+  * Dropdown selection
+* Do not combine pricing logic
+
+---
+
+10. Draft Order Improvements
+
+* Add delete function for drafts
+
+* Remove draft and update UI immediately
+
+* Ensure drafts retain mode (POS vs regular)
+
+  * Restore into correct context when loaded
+  * Default older drafts to regular mode
+
+---
+
+Constraints:
+
+* Do NOT modify checkout API structure
+* Do NOT refactor cart system
+* Do NOT introduce unnecessary complexity
+* Keep changes localized and production-safe
+
+---
+
+Output:
+
+* Updated customer search display
+* Checkout confirmation dialog
+* Pricing improvements (logic + UI)
+* Price history support
+* Draft handling improvements

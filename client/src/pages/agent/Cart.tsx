@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Trash2, Plus, Minus, CreditCard, Search, MapPin, User, Loader2, WifiOff, FileText } from "lucide-react";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogContent,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
@@ -30,6 +30,7 @@ export default function Cart() {
   const [manualCustomerEmail, setManualCustomerEmail] = useState("");
   const [manualCustomerNote, setManualCustomerNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
   const [inventoryErrorIds, setInventoryErrorIds] = useState<Set<string>>(new Set());
   const [freshStockByLineId, setFreshStockByLineId] = useState<Map<string, number>>(new Map());
   const [showInventoryDialog, setShowInventoryDialog] = useState(false);
@@ -437,7 +438,10 @@ export default function Cart() {
                     >
                       <div className="flex items-center gap-2">
                         <User className="h-4 w-4 text-slate-400" />
-                        <span className="font-medium">{customer.first_name} {customer.last_name}</span>
+                        <span className="font-medium">
+                          {customer.first_name} {customer.last_name}
+                          {customer.company ? <span className="text-slate-500 font-normal"> | {customer.company}</span> : null}
+                        </span>
                       </div>
                       <div className="text-xs text-slate-500 ml-6">{customer.email}</div>
                     </div>
@@ -642,7 +646,7 @@ export default function Cart() {
             </Button>
             <Button
               className="flex-1 sm:flex-none sm:min-w-[160px]"
-              onClick={handleOnlineCheckout}
+              onClick={() => setShowCheckoutConfirm(true)}
               disabled={isOfflineMode || !selectedCustomer || !selectedAddress || isSubmitting}
               data-testid="button-submit-order"
             >
@@ -652,6 +656,29 @@ export default function Cart() {
           </div>
         </div>
       </div>
+
+      {/* Checkout confirmation */}
+      <AlertDialog open={showCheckoutConfirm} onOpenChange={setShowCheckoutConfirm}>
+        <AlertDialogContent data-testid="dialog-cart-checkout-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Checkout</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedCustomer
+                ? `Submit order for ${selectedCustomer.first_name} ${selectedCustomer.last_name}?`
+                : "Submit this order?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cart-confirm-cancel">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="button-cart-confirm-checkout"
+              onClick={() => { setShowCheckoutConfirm(false); handleOnlineCheckout(); }}
+            >
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={showInventoryDialog} onOpenChange={setShowInventoryDialog}>
         <AlertDialogContent data-testid="dialog-cart-inventory-error">

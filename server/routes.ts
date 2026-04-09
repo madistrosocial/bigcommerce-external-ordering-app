@@ -502,6 +502,45 @@ export async function registerRoutes(
     }
   });
 
+  // Delete order (draft only)
+  app.delete("/api/orders/:id", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const order = await storage.getOrder(id);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      await storage.deleteOrder(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Price history: recent prices a BC customer paid for a specific product/variant
+  app.get("/api/orders/customer/:bcCustomerId/price-history", requireAuth, async (req, res) => {
+    try {
+      const bcCustomerId = parseInt(req.params.bcCustomerId);
+      const bcProductId = req.query.bcProductId ? parseInt(req.query.bcProductId as string) : null;
+      const variantId = req.query.variantId ? parseInt(req.query.variantId as string) : null;
+      const orders = await storage.getOrdersByBcCustomerId(bcCustomerId, ['synced']);
+      const history: { price: string; date: string }[] = [];
+      for (const o of orders) {
+        const items = Array.isArray(o.items) ? o.items : [];
+        for (const item of items as any[]) {
+          const productMatch = bcProductId ? item.bigcommerce_product_id === bcProductId : true;
+          const variantMatch = variantId ? item.variant_id === variantId : !item.variant_id;
+          if (productMatch && variantMatch) {
+            history.push({ price: item.price_at_sale, date: o.date ? String(o.date) : "" });
+            break;
+          }
+        }
+        if (history.length >= 6) break;
+      }
+      res.json(history);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Create draft order (for offline mode)
   app.post("/api/orders/draft", requireAuth, async (req, res) => {
     try {
@@ -810,26 +849,35 @@ export async function registerRoutes(
 
       // ── Helpers ──
 
-      const shapeVariant = (v: any, fallbackPrice: string) => ({
-        id: v.id,
-        sku: v.sku,
-        upc: v.upc || '',
-        price: (v.price != null ? v.price : parseFloat(fallbackPrice)).toString(),
-        stock_level: v.inventory_level || 0,
-        option_values: (v.option_values || []).map((ov: any) => ({
-          id: ov.id,
-          option_id: ov.option_id,
-          label: ov.label,
-          option_display_name: ov.option_display_name
-        }))
-      });
+      const effectivePrice = (basePrice: number | null, salePrice: number | null, fallback: number): number => {
+        const base = basePrice != null ? basePrice : fallback;
+        if (salePrice != null && salePrice > 0 && salePrice < base) return salePrice;
+        return base;
+      };
+
+      const shapeVariant = (v: any, fallbackPrice: string) => {
+        const base = v.price != null ? v.price : parseFloat(fallbackPrice);
+        return {
+          id: v.id,
+          sku: v.sku,
+          upc: v.upc || '',
+          price: effectivePrice(base, v.sale_price ?? null, parseFloat(fallbackPrice)).toString(),
+          stock_level: v.inventory_level || 0,
+          option_values: (v.option_values || []).map((ov: any) => ({
+            id: ov.id,
+            option_id: ov.option_id,
+            label: ov.label,
+            option_display_name: ov.option_display_name
+          }))
+        };
+      };
 
       const shapeProduct = (p: any) => ({
         id: p.id,
         bigcommerce_id: p.id,
         name: p.name,
         sku: p.sku,
-        price: p.price.toString(),
+        price: effectivePrice(p.price, p.sale_price ?? null, p.price).toString(),
         image: p.primary_image?.url_standard || '',
         description: p.description ? p.description.replace(/<[^>]*>?/gm, '') : '',
         stock_level: p.inventory_level || 0,

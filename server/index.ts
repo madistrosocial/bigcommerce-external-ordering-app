@@ -12,15 +12,27 @@ declare module "http" {
   }
 }
 
+const BODY_LIMIT = "10mb";
+console.log("JSON limit set to:", BODY_LIMIT);
+
 app.use(
   express.json({
+    limit: BODY_LIMIT,
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ limit: BODY_LIMIT, extended: false }));
+
+//ADD THIS HERE
+app.use((req, _res, next) => {
+  if (req.path === "/api/orders") {
+    console.log("Payload size:", Buffer.byteLength(JSON.stringify(req.body)));
+  }
+  next();
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

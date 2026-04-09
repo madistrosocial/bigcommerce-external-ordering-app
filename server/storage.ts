@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, users, products, orders, settings } from "@shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -31,6 +31,8 @@ export interface IStorage {
   updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void>;
   updateOrderSyncError(id: number, error: string): Promise<void>;
   updateOrderForSubmission(id: number, updates: { bigcommerce_customer_id: number; billing_address: any; status: string }): Promise<void>;
+  deleteOrder(id: number): Promise<void>;
+  getOrdersByBcCustomerId(bcCustomerId: number, statuses: string[]): Promise<Order[]>;
 
   // Setting operations
   getSetting(key: string): Promise<any>;
@@ -148,6 +150,16 @@ export class DatabaseStorage implements IStorage {
       billing_address: updates.billing_address,
       status: updates.status
     }).where(eq(orders.id, id));
+  }
+
+  async deleteOrder(id: number): Promise<void> {
+    await db.delete(orders).where(eq(orders.id, id));
+  }
+
+  async getOrdersByBcCustomerId(bcCustomerId: number, statuses: string[]): Promise<Order[]> {
+    return db.select().from(orders)
+      .where(and(eq(orders.bigcommerce_customer_id, bcCustomerId), inArray(orders.status, statuses)))
+      .orderBy(desc(orders.date));
   }
 
   // Setting operations

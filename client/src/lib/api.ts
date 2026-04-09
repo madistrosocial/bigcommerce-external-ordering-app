@@ -303,6 +303,34 @@ export async function getDraftOrders(): Promise<Order[]> {
   return res.json();
 }
 
+export async function deleteOrder(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/orders/${id}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) throw new Error('Failed to delete order');
+}
+
+export interface PriceHistoryEntry {
+  price: string;
+  date: string;
+}
+
+export async function getCustomerPriceHistory(
+  bcCustomerId: number,
+  bcProductId: number,
+  variantId?: number
+): Promise<PriceHistoryEntry[]> {
+  const params = new URLSearchParams({ bcProductId: String(bcProductId) });
+  if (variantId) params.set('variantId', String(variantId));
+  const res = await fetch(
+    `${API_BASE}/orders/customer/${bcCustomerId}/price-history?${params}`,
+    { headers: getAuthHeaders() }
+  );
+  if (!res.ok) throw new Error('Failed to fetch price history');
+  return res.json();
+}
+
 // ─── BigCommerce Proxy ────────────────────────────────────────────────────────
 
 export async function searchBigCommerceProducts(query: string, token: string, storeHash: string): Promise<Product[]> {
