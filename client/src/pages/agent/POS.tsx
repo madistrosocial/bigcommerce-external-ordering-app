@@ -189,7 +189,7 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
                   </div>
                 </div>
 
-                {/* Single inline control row: [- qty +] [FREE] [Disc (%)] [Price ($)]  [Add] */}
+                {/* Single inline control row: [- qty +] [Last $] [History ▼] [Disc (%)] [Price ($)] [Add] */}
                 <div className="flex items-center gap-2 flex-nowrap">
                   {/* Qty controls */}
                   <div className="flex items-center gap-1 border rounded-md px-1 py-0.5 bg-slate-50 shrink-0">
@@ -221,51 +221,6 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
                       <Plus className="h-3 w-3" />
                     </button>
                   </div>
-
-                  {/* FREE */}
-                  <Button
-                    variant={isFree[k] ? "destructive" : "outline"}
-                    size="sm"
-                    className="h-8 px-3 text-xs font-bold shrink-0"
-                    onClick={() => {
-                      setIsFree((p) => ({ ...p, [k]: !p[k] }));
-                      if (!isFree[k]) {
-                        setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
-                        setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
-                      }
-                    }}
-                    data-testid={`popup-free-${k}`}
-                  >
-                    FREE
-                  </Button>
-
-                  {/* Disc (%) */}
-                  <Input
-                    type="number" min="0" max="100"
-                    placeholder="Disc (%)"
-                    className="w-24 h-8 text-xs bg-white"
-                    value={pctInputs[k] ?? ""}
-                    onChange={(e) => {
-                      setPctInputs((p) => ({ ...p, [k]: e.target.value }));
-                      setIsFree((p) => ({ ...p, [k]: false }));
-                      setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
-                    }}
-                    data-testid={`popup-pct-${k}`}
-                  />
-
-                  {/* Price ($) */}
-                  <Input
-                    type="number" min="0" step="0.01"
-                    placeholder="Price ($)"
-                    className="w-24 h-8 text-xs bg-white"
-                    value={priceInputs[k] ?? ""}
-                    onChange={(e) => {
-                      setPriceInputs((p) => ({ ...p, [k]: e.target.value }));
-                      setIsFree((p) => ({ ...p, [k]: false }));
-                      setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
-                    }}
-                    data-testid={`popup-price-${k}`}
-                  />
 
                   {/* Last $ button */}
                   {selectedCustomer && (
@@ -345,6 +300,34 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
                       )}
                     </div>
                   )}
+
+                  {/* Disc (%) */}
+                  <Input
+                    type="number" min="0" max="100"
+                    placeholder="Disc (%)"
+                    className="w-24 h-8 text-xs bg-white"
+                    value={pctInputs[k] ?? ""}
+                    onChange={(e) => {
+                      setPctInputs((p) => ({ ...p, [k]: e.target.value }));
+                      setIsFree((p) => ({ ...p, [k]: false }));
+                      setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                    }}
+                    data-testid={`popup-pct-${k}`}
+                  />
+
+                  {/* Price ($) */}
+                  <Input
+                    type="number" min="0" step="0.01"
+                    placeholder="Price ($)"
+                    className="w-24 h-8 text-xs bg-white"
+                    value={priceInputs[k] ?? ""}
+                    onChange={(e) => {
+                      setPriceInputs((p) => ({ ...p, [k]: e.target.value }));
+                      setIsFree((p) => ({ ...p, [k]: false }));
+                      setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                    }}
+                    data-testid={`popup-price-${k}`}
+                  />
 
                   {/* Add button — far right, stays open */}
                   <Button
@@ -1013,13 +996,22 @@ export default function POSPage() {
         <div className="flex-1 relative max-w-sm" onClick={(e) => e.stopPropagation()} data-nofocus>
           <User className="absolute left-2.5 top-2 h-4 w-4 text-slate-400 pointer-events-none" />
           {isCustomerSearching && <Loader2 className="absolute right-2.5 top-2 h-4 w-4 animate-spin text-slate-400 pointer-events-none" />}
-          {selectedCustomer && !isCustomerSearching && <CheckCircle2 className="absolute right-2.5 top-2 h-4 w-4 text-green-500 pointer-events-none" />}
+          {selectedCustomer && !isCustomerSearching && (
+            <button
+              className="absolute right-2 top-1.5 h-5 w-5 flex items-center justify-center text-slate-400 hover:text-red-500 rounded"
+              onClick={() => { setSelectedCustomer(null); setSelectedAddress(null); setCustomerAddresses([]); setCustomerSearch(""); setCustomerResults([]); setShowCustomerDrop(false); }}
+              data-testid="button-pos-clear-customer"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
           <Input
             placeholder="Search customer…"
             className="pl-8 h-8 text-sm bg-white pr-8"
             value={customerSearch}
-            onChange={(e) => { setCustomerSearch(e.target.value); setSelectedCustomer(null); setSelectedAddress(null); }}
-            onFocus={() => { if (customerResults.length > 0) setShowCustomerDrop(true); }}
+            readOnly={!!selectedCustomer}
+            onChange={(e) => { if (!selectedCustomer) { setCustomerSearch(e.target.value); } }}
+            onFocus={() => { if (customerResults.length > 0 && !selectedCustomer) setShowCustomerDrop(true); }}
             data-testid="input-pos-customer"
           />
           {showCustomerDrop && customerResults.length > 0 && (
@@ -1438,35 +1430,6 @@ export default function POSPage() {
 
                     {/* Discount controls */}
                     <div className="flex items-center gap-2 flex-wrap">
-                      <Button
-                        variant={isFree ? "destructive" : "outline"}
-                        size="sm" className="h-8 px-3 text-xs font-bold"
-                        onClick={() => { applyFree(item, index); focusSearch(); }}
-                        data-testid={`button-pos-free-${item.lineId}`}
-                      >FREE</Button>
-                      <Input
-                        type="number" min="0" max="100"
-                        placeholder="Disc (%)"
-                        className="w-28 h-8 text-xs bg-white"
-                        value={discountInput}
-                        onChange={(e) => setDiscountInputs((p) => ({ ...p, [item.lineId]: e.target.value }))}
-                        onBlur={(e) => {
-                          const pct = parseFloat(e.target.value);
-                          if (!isNaN(pct) && pct >= 0 && pct <= 100) applyPercent(item, index, pct);
-                          else if (!e.target.value && hasPct) clearLineDiscount(item, index);
-                          focusSearch();
-                        }}
-                        data-testid={`input-pos-discount-${item.lineId}`}
-                      />
-                      <Input
-                        type="number" min="0" step="0.01"
-                        placeholder="Price ($)"
-                        className="w-32 h-8 text-xs bg-white"
-                        value={manualInput}
-                        onChange={(e) => setManualPriceInputs((p) => ({ ...p, [item.lineId]: e.target.value }))}
-                        onBlur={(e) => { if (e.target.value) applyManualPrice(item, index, e.target.value); focusSearch(); }}
-                        data-testid={`input-pos-price-${item.lineId}`}
-                      />
                       {/* Last $ button */}
                       {selectedCustomer && (
                         <Button
@@ -1533,6 +1496,29 @@ export default function POSPage() {
                           </div>
                         );
                       })()}
+                      <Input
+                        type="number" min="0" max="100"
+                        placeholder="Disc (%)"
+                        className="w-28 h-8 text-xs bg-white"
+                        value={discountInput}
+                        onChange={(e) => setDiscountInputs((p) => ({ ...p, [item.lineId]: e.target.value }))}
+                        onBlur={(e) => {
+                          const pct = parseFloat(e.target.value);
+                          if (!isNaN(pct) && pct >= 0 && pct <= 100) applyPercent(item, index, pct);
+                          else if (!e.target.value && hasPct) clearLineDiscount(item, index);
+                          focusSearch();
+                        }}
+                        data-testid={`input-pos-discount-${item.lineId}`}
+                      />
+                      <Input
+                        type="number" min="0" step="0.01"
+                        placeholder="Price ($)"
+                        className="w-32 h-8 text-xs bg-white"
+                        value={manualInput}
+                        onChange={(e) => setManualPriceInputs((p) => ({ ...p, [item.lineId]: e.target.value }))}
+                        onBlur={(e) => { if (e.target.value) applyManualPrice(item, index, e.target.value); focusSearch(); }}
+                        data-testid={`input-pos-price-${item.lineId}`}
+                      />
                       {(isDiscounted || isFree || manualInput) && (
                         <button className="text-xs text-slate-400 hover:text-slate-700 underline"
                           onClick={() => { clearLineDiscount(item, index); focusSearch(); }}>

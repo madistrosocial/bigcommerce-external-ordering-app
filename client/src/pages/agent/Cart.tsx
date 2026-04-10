@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Plus, Minus, CreditCard, Search, MapPin, User, Loader2, WifiOff, FileText } from "lucide-react";
+import { Trash2, Plus, Minus, CreditCard, Search, MapPin, User, Loader2, WifiOff, FileText, X } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -414,17 +414,23 @@ export default function Cart() {
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                 <Input 
                   placeholder="Search customer by name or email..." 
-                  className="pl-9"
+                  className="pl-9 pr-9"
                   value={customerSearch}
-                  onChange={e => setCustomerSearch(e.target.value)}
-                  onFocus={() => {
-                    if (selectedCustomer) {
-                      setShowResults(false);
-                    }
-                  }}
+                  readOnly={!!selectedCustomer}
+                  onChange={e => { if (!selectedCustomer) setCustomerSearch(e.target.value); }}
+                  onFocus={() => { if (selectedCustomer) setShowResults(false); }}
                   data-testid="input-customer-search"
                 />
-                {isSearching && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-slate-400" />}
+                {isSearching && !selectedCustomer && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-slate-400" />}
+                {selectedCustomer && (
+                  <button
+                    className="absolute right-3 top-2 h-5 w-5 flex items-center justify-center text-slate-400 hover:text-red-500 rounded"
+                    onClick={() => { setSelectedCustomer(null); setCustomerAddresses([]); setSelectedAddress(null); setCustomerSearch(""); }}
+                    data-testid="button-cart-clear-customer"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
               
               {showResults && searchResults.length > 0 && (
