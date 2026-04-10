@@ -522,9 +522,10 @@ export async function registerRoutes(
       const bcProductId = req.query.bcProductId ? parseInt(req.query.bcProductId as string) : null;
       const variantId = req.query.variantId ? parseInt(req.query.variantId as string) : null;
 
+      const GOAL = 5;
       const history: { price: string; date: string }[] = [];
 
-      // ── Primary: fetch from BigCommerce order history ──────────────────────
+      // ── Primary: paginated scan of BigCommerce order history ──────────────
       if (bcProductId) {
         const bcCfg = await storage.getSetting("bigcommerce_config");
         if (bcCfg && bcCfg.value) {
@@ -538,49 +539,54 @@ export async function registerRoutes(
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
               };
-              // Fetch recent orders for this customer (all statuses, newest first)
-              const ordersRes = await fetch(
-                `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?customer_id=${bcCustomerId}&sort=date_created:desc&limit=10`,
-                { headers: bcHeaders }
-              );
-              if (ordersRes.ok) {
+              const PAGE_SIZE = 25;
+              let page = 1;
+              let morePages = true;
+              while (morePages && history.length < GOAL) {
+                const ordersRes = await fetch(
+                  `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?customer_id=${bcCustomerId}&sort=date_created:desc&limit=${PAGE_SIZE}&page=${page}`,
+                  { headers: bcHeaders }
+                );
+                if (!ordersRes.ok) break;
                 const bcOrders: any[] = await ordersRes.json();
-                if (Array.isArray(bcOrders)) {
-                  for (const bcOrder of bcOrders) {
-                    if (history.length >= 6) break;
-                    try {
-                      const itemsRes = await fetch(
-                        `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrder.id}/products?limit=250`,
-                        { headers: bcHeaders }
-                      );
-                      if (!itemsRes.ok) continue;
-                      const bcItems: any[] = await itemsRes.json();
-                      for (const item of bcItems) {
-                        const productMatch = item.product_id === bcProductId;
-                        const itemVariantId = item.variant_id || 0;
-                        const variantMatch = variantId
-                          ? itemVariantId === variantId
-                          : itemVariantId === 0;
-                        if (productMatch && variantMatch) {
-                          const price = item.price_inc_tax ?? item.price_ex_tax ?? item.base_price ?? 0;
-                          history.push({ price: String(price), date: bcOrder.date_created || '' });
-                          break;
-                        }
+                if (!Array.isArray(bcOrders) || bcOrders.length === 0) break;
+                if (bcOrders.length < PAGE_SIZE) morePages = false;
+                for (const bcOrder of bcOrders) {
+                  if (history.length >= GOAL) break;
+                  try {
+                    const itemsRes = await fetch(
+                      `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrder.id}/products?limit=250`,
+                      { headers: bcHeaders }
+                    );
+                    if (!itemsRes.ok) continue;
+                    const bcItems: any[] = await itemsRes.json();
+                    for (const item of bcItems) {
+                      const productMatch = item.product_id === bcProductId;
+                      const itemVariantId = item.variant_id || 0;
+                      const variantMatch = variantId
+                        ? itemVariantId === variantId
+                        : itemVariantId === 0;
+                      if (productMatch && variantMatch) {
+                        // Use tax-exclusive price only
+                        const price = item.price_ex_tax ?? item.base_price ?? 0;
+                        history.push({ price: String(price), date: bcOrder.date_created || '' });
+                        break;
                       }
-                    } catch {}
-                  }
+                    }
+                  } catch {}
                 }
+                page++;
               }
             } catch {}
           }
         }
       }
 
-      // ── Fallback: fill remaining slots from app-stored orders ──────────────
-      if (history.length < 6) {
+      // ── Fallback: fill remaining slots from app-stored synced orders ───────
+      if (history.length < GOAL) {
         const appOrders = await storage.getOrdersByBcCustomerId(bcCustomerId, ['synced']);
         for (const o of appOrders) {
-          if (history.length >= 6) break;
+          if (history.length >= GOAL) break;
           const items = Array.isArray(o.items) ? o.items : [];
           for (const item of items as any[]) {
             const productMatch = bcProductId ? item.bigcommerce_product_id === bcProductId : true;

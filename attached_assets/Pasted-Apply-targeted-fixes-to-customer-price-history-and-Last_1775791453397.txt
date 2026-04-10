@@ -1,0 +1,105 @@
+Apply targeted fixes to customer price history and “Last $” functionality. Keep changes minimal and localized. Do not refactor unrelated systems.
+
+---
+
+1. Price History – Use Tax-Exclusive Pricing (Critical Fix)
+
+* Update price history logic to use tax-exclusive transaction price
+
+* Required behavior:
+
+  * Use tax-exclusive price (e.g. `price_ex_tax` or equivalent)
+  * Do NOT use tax-inclusive values (e.g. `price_inc_tax`, totals with tax)
+  * Do NOT use catalog/base product price
+
+---
+
+2. Last $ Button – Correct Price Source
+
+* Ensure “Last $” uses the same corrected tax-exclusive price source
+
+* Behavior:
+
+  * Must match the most recent valid price history entry
+  * Must align with cart pricing (pre-tax)
+
+---
+
+3. Price History Fetch Logic (Dynamic Scan)
+
+* Replace fixed “last N orders” limitation with goal-based scanning
+
+* New behavior:
+
+  * Continue scanning customer’s order history until:
+
+    * At least 5 valid price history entries are found
+    * OR no more orders remain
+
+* Requirements:
+
+  * Scan orders in descending order (newest → oldest)
+  * Only include valid entries where:
+
+    * Matching product/variant is found
+    * Order is completed/successful
+  * Stop scanning immediately once 5 entries are collected
+
+---
+
+4. Performance Handling
+
+* Ensure scanning is efficient:
+
+  * Fetch orders in batches/pages
+  * Stop early once required entries are found
+* Do NOT scan entire history unnecessarily if already satisfied
+
+---
+
+5. Consistency Requirement
+
+* Ensure alignment across:
+
+  * Price history dropdown
+  * Last $ button
+  * Cart pricing logic
+
+* Selected price must:
+
+  * Match actual historical transaction price (excluding tax)
+  * Apply directly without further adjustment
+
+---
+
+6. Validation
+
+* Example:
+
+  * If:
+
+    * price_ex_tax = 48.75
+    * price_inc_tax = 53.25
+  * System must display and apply: **48.75**
+
+* Ensure:
+
+  * No inflated pricing due to tax
+  * At least 5 history entries shown when available
+  * Fewer entries only if insufficient order history exists
+
+---
+
+Constraints:
+
+* Do NOT modify UI layout
+* Do NOT change pricing logic outside of history sourcing
+* Keep all fixes localized to history retrieval and Last $ behavior
+
+---
+
+Output:
+
+* Correct tax-exclusive price history
+* Last $ uses correct values
+* Dynamic scanning ensures at least 5 entries when available
