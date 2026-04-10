@@ -521,20 +521,78 @@ export async function registerRoutes(
       const bcCustomerId = parseInt(req.params.bcCustomerId);
       const bcProductId = req.query.bcProductId ? parseInt(req.query.bcProductId as string) : null;
       const variantId = req.query.variantId ? parseInt(req.query.variantId as string) : null;
-      const orders = await storage.getOrdersByBcCustomerId(bcCustomerId, ['synced']);
+
       const history: { price: string; date: string }[] = [];
-      for (const o of orders) {
-        const items = Array.isArray(o.items) ? o.items : [];
-        for (const item of items as any[]) {
-          const productMatch = bcProductId ? item.bigcommerce_product_id === bcProductId : true;
-          const variantMatch = variantId ? item.variant_id === variantId : !item.variant_id;
-          if (productMatch && variantMatch) {
-            history.push({ price: item.price_at_sale, date: o.date ? String(o.date) : "" });
-            break;
+
+      // ── Primary: fetch from BigCommerce order history ──────────────────────
+      if (bcProductId) {
+        const bcCfg = await storage.getSetting("bigcommerce_config");
+        if (bcCfg && bcCfg.value) {
+          const cfg = typeof bcCfg.value === 'string' ? JSON.parse(bcCfg.value) : bcCfg.value;
+          const storeHash = cfg.storeHash;
+          const token = cfg.token;
+          if (storeHash && token) {
+            try {
+              const bcHeaders = {
+                'X-Auth-Token': String(token),
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+              };
+              // Fetch recent orders for this customer (all statuses, newest first)
+              const ordersRes = await fetch(
+                `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?customer_id=${bcCustomerId}&sort=date_created:desc&limit=10`,
+                { headers: bcHeaders }
+              );
+              if (ordersRes.ok) {
+                const bcOrders: any[] = await ordersRes.json();
+                if (Array.isArray(bcOrders)) {
+                  for (const bcOrder of bcOrders) {
+                    if (history.length >= 6) break;
+                    try {
+                      const itemsRes = await fetch(
+                        `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrder.id}/products?limit=250`,
+                        { headers: bcHeaders }
+                      );
+                      if (!itemsRes.ok) continue;
+                      const bcItems: any[] = await itemsRes.json();
+                      for (const item of bcItems) {
+                        const productMatch = item.product_id === bcProductId;
+                        const itemVariantId = item.variant_id || 0;
+                        const variantMatch = variantId
+                          ? itemVariantId === variantId
+                          : itemVariantId === 0;
+                        if (productMatch && variantMatch) {
+                          const price = item.price_inc_tax ?? item.price_ex_tax ?? item.base_price ?? 0;
+                          history.push({ price: String(price), date: bcOrder.date_created || '' });
+                          break;
+                        }
+                      }
+                    } catch {}
+                  }
+                }
+              }
+            } catch {}
           }
         }
-        if (history.length >= 6) break;
       }
+
+      // ── Fallback: fill remaining slots from app-stored orders ──────────────
+      if (history.length < 6) {
+        const appOrders = await storage.getOrdersByBcCustomerId(bcCustomerId, ['synced']);
+        for (const o of appOrders) {
+          if (history.length >= 6) break;
+          const items = Array.isArray(o.items) ? o.items : [];
+          for (const item of items as any[]) {
+            const productMatch = bcProductId ? item.bigcommerce_product_id === bcProductId : true;
+            const variantMatch = variantId ? item.variant_id === variantId : !item.variant_id;
+            if (productMatch && variantMatch) {
+              history.push({ price: item.price_at_sale, date: o.date ? String(o.date) : "" });
+              break;
+            }
+          }
+        }
+      }
+
       res.json(history);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -855,13 +913,23 @@ export async function registerRoutes(
         return base;
       };
 
-      const shapeVariant = (v: any, fallbackPrice: string) => {
+      const shapeVariant = (v: any, fallbackPrice: string, productSalePrice?: number | null) => {
         const base = v.price != null ? v.price : parseFloat(fallbackPrice);
+        let price: number;
+        if (v.sale_price != null && v.sale_price > 0) {
+          // Variant has its own sale price — use it
+          price = v.sale_price;
+        } else if (productSalePrice != null && productSalePrice > 0 && productSalePrice < base) {
+          // No variant-level sale price — inherit from parent product
+          price = productSalePrice;
+        } else {
+          price = base;
+        }
         return {
           id: v.id,
           sku: v.sku,
           upc: v.upc || '',
-          price: effectivePrice(base, v.sale_price ?? null, parseFloat(fallbackPrice)).toString(),
+          price: price.toString(),
           stock_level: v.inventory_level || 0,
           option_values: (v.option_values || []).map((ov: any) => ({
             id: ov.id,
@@ -896,7 +964,7 @@ export async function registerRoutes(
         return {
           resultType: 'variant' as const,
           product: shapeProduct(pd),
-          variant: shapeVariant(variant, pd.price.toString())
+          variant: shapeVariant(variant, pd.price.toString(), pd.sale_price)
         };
       };
 
@@ -904,7 +972,7 @@ export async function registerRoutes(
       const buildVariantResultFromProductData = (p: any, v: any) => ({
         resultType: 'variant' as const,
         product: shapeProduct(p),
-        variant: shapeVariant(v, p.price.toString())
+        variant: shapeVariant(v, p.price.toString(), p.sale_price)
       });
 
       // ── Step 1: Direct SKU lookup via variants endpoint ──
@@ -963,7 +1031,7 @@ export async function registerRoutes(
       // ── No exact match found — return keyword product list ──
       const products = kwProducts.map((p: any) => ({
         ...shapeProduct(p),
-        variants: (p.variants || []).map((v: any) => shapeVariant(v, p.price.toString()))
+        variants: (p.variants || []).map((v: any) => shapeVariant(v, p.price.toString(), p.sale_price))
       }));
 
       res.json({ resultType: 'products', products });

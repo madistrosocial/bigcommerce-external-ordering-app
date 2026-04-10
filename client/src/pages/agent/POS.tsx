@@ -54,6 +54,9 @@ interface VariantPopupProps {
   product: api.Product;
   onClose: () => void;
   allowOverselling: boolean;
+  selectedCustomer: api.BigCommerceCustomer | null;
+  onFetchPriceHistory: (variantId?: number) => Promise<api.PriceHistoryEntry[]>;
+  freshVariantStock?: Map<number, number>;
   onAdd: (
     product: api.Product,
     variant: any,
@@ -65,7 +68,7 @@ interface VariantPopupProps {
   ) => void;
 }
 
-function VariantPopupDialog({ product, onClose, onAdd, allowOverselling }: VariantPopupProps) {
+function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selectedCustomer, onFetchPriceHistory, freshVariantStock }: VariantPopupProps) {
   const { toast } = useToast();
   const variants = getVariants(product);
   const rows = variants.length > 0 ? variants : [null];
@@ -74,10 +77,19 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling }: Varia
   const [isFree, setIsFree] = useState<Record<string, boolean>>({});
   const [pctInputs, setPctInputs] = useState<Record<string, string>>({});
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
+  const [loadingHistoryKey, setLoadingHistoryKey] = useState<string | null>(null);
+  const [historyData, setHistoryData] = useState<Record<string, api.PriceHistoryEntry[]>>({});
+  const [openHistoryKey, setOpenHistoryKey] = useState<string | null>(null);
 
   const key = (v: any) => String(v?.id ?? "0");
   const getQty = (v: any) => qtys[key(v)] ?? 1;
-  const getStock = (v: any): number => v?.stock_level ?? (product as any).stock_level ?? 0;
+  const getStock = (v: any): number => {
+    if (freshVariantStock) {
+      const id = v?.id ?? 0;
+      if (freshVariantStock.has(id)) return freshVariantStock.get(id)!;
+    }
+    return v?.stock_level ?? (product as any).stock_level ?? 0;
+  };
   const setQty = (v: any, q: number) => {
     const max = allowOverselling ? Infinity : getStock(v);
     const clamped = max > 0 ? Math.min(q, max) : q;
@@ -255,6 +267,85 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling }: Varia
                     data-testid={`popup-price-${k}`}
                   />
 
+                  {/* Last $ button */}
+                  {selectedCustomer && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-2.5 text-xs shrink-0"
+                      disabled={loadingHistoryKey === k}
+                      onClick={async () => {
+                        setLoadingHistoryKey(k);
+                        try {
+                          const hist = await onFetchPriceHistory(v?.id);
+                          if (hist.length === 0) {
+                            toast({ title: "No price history", variant: "destructive", duration: 2000 });
+                            return;
+                          }
+                          setHistoryData((prev) => ({ ...prev, [k]: hist }));
+                          setPriceInputs((p) => ({ ...p, [k]: hist[0].price }));
+                          setIsFree((p) => ({ ...p, [k]: false }));
+                          setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                        } finally {
+                          setLoadingHistoryKey(null);
+                        }
+                      }}
+                      data-testid={`popup-last-price-${k}`}
+                    >
+                      {loadingHistoryKey === k ? <Loader2 className="h-3 w-3 animate-spin" /> : "Last $"}
+                    </Button>
+                  )}
+
+                  {/* History dropdown */}
+                  {selectedCustomer && (
+                    <div className="relative shrink-0">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-2.5 text-xs"
+                        disabled={loadingHistoryKey === k}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (openHistoryKey === k) { setOpenHistoryKey(null); return; }
+                          setLoadingHistoryKey(k);
+                          try {
+                            const hist = await onFetchPriceHistory(v?.id);
+                            setHistoryData((prev) => ({ ...prev, [k]: hist }));
+                          } finally { setLoadingHistoryKey(null); }
+                          setOpenHistoryKey(k);
+                        }}
+                        data-testid={`popup-history-${k}`}
+                      >
+                        History ▾
+                      </Button>
+                      {openHistoryKey === k && (
+                        <div
+                          className="absolute left-0 top-full mt-1 w-44 bg-white border rounded-md shadow-lg z-50 py-1"
+                          onMouseDown={(e) => e.preventDefault()}
+                        >
+                          {(historyData[k] ?? []).length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">No history</p>
+                          ) : (historyData[k] ?? []).map((h, hi) => (
+                            <button
+                              key={hi}
+                              className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 flex justify-between"
+                              onClick={() => {
+                                setPriceInputs((p) => ({ ...p, [k]: h.price }));
+                                setIsFree((p) => ({ ...p, [k]: false }));
+                                setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                                setOpenHistoryKey(null);
+                              }}
+                              data-testid={`popup-history-option-${k}-${hi}`}
+                            >
+                              <span className="font-medium">${parseFloat(h.price).toFixed(2)}</span>
+                              <span className="text-slate-400">{h.date ? new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : ""}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Add button — far right, stays open */}
                   <Button
                     size="sm"
@@ -355,6 +446,7 @@ export default function POSPage() {
 
   // ── Popup ────────────────────────────────────────────────────────────────
   const [popupProduct, setPopupProduct] = useState<api.Product | null>(null);
+  const [popupFreshVariantStock, setPopupFreshVariantStock] = useState<Map<number, number>>(new Map());
 
   // ── Cart / active item ────────────────────────────────────────────────────
   const [activeLineId, setActiveLineId] = useState<string | null>(null);
@@ -485,6 +577,35 @@ export default function POSPage() {
   // Clear history cache when customer changes
   useEffect(() => { setPriceHistoryCache(new Map()); setOpenHistoryLineId(null); }, [selectedCustomer?.id]);
 
+  // ── Popup price history callback (scoped to current product) ─────────────
+  const fetchPopupPriceHistory = useCallback(async (variantId?: number): Promise<api.PriceHistoryEntry[]> => {
+    if (!selectedCustomer || !popupProduct) return [];
+    const cacheKey = `${selectedCustomer.id}-${popupProduct.bigcommerce_id ?? 0}-${variantId ?? 0}`;
+    if (priceHistoryCache.has(cacheKey)) return priceHistoryCache.get(cacheKey)!;
+    const history = await api.getCustomerPriceHistory(
+      selectedCustomer.id, popupProduct.bigcommerce_id ?? 0, variantId
+    );
+    setPriceHistoryCache(prev => new Map(prev).set(cacheKey, history));
+    return history;
+  }, [selectedCustomer, popupProduct, priceHistoryCache]);
+
+  // ── Open popup with live inventory refresh ────────────────────────────────
+  const openPopupWithFreshStock = useCallback(async (product: api.Product) => {
+    setPopupFreshVariantStock(new Map());
+    setPopupProduct(product);
+    if (!product.bigcommerce_id) return;
+    try {
+      const stockData = await api.refreshProductStock([product.bigcommerce_id]);
+      if (stockData.length > 0) {
+        const info = stockData[0];
+        const map = new Map<number, number>();
+        info.variants.forEach(v => map.set(v.id, v.stock_level));
+        if (info.variants.length === 0) map.set(0, info.stock_level);
+        setPopupFreshVariantStock(map);
+      }
+    } catch {}
+  }, []);
+
   // ── Build structured checkout note at submit time ─────────────────────────
   const buildCheckoutNote = (userNote: string) => {
     const discount = cart.reduce((sum, item) =>
@@ -597,7 +718,7 @@ export default function POSPage() {
     }, 0);
     toast({ title: "Added to cart", description: `${variant?.sku || product.sku} × ${qty}`, duration: 1500 });
     // Popup stays open — user closes it with Done
-  }, [addToCart, toast]);
+  }, [addToCart, toast, selectedCustomer]);
 
   // ── Build suggestions from BC products ──────────────────────────────────────
   const buildSuggestions = useCallback((products: api.Product[]): Suggestion[] => {
@@ -1089,7 +1210,7 @@ export default function POSPage() {
                     key={`p-${s.product.id}`}
                     className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left"
                     onClick={() => {
-                      setPopupProduct(s.product);
+                      openPopupWithFreshStock(s.product);
                       setSuggestions([]);
                       setShowSuggestions(false);
                     }}
@@ -1145,7 +1266,7 @@ export default function POSPage() {
                     <PinnedProductRow
                       key={p.id}
                       product={p}
-                      onClick={() => setPopupProduct(p)}
+                      onClick={() => openPopupWithFreshStock(p)}
                     />
                   ))}
                 </div>
@@ -1590,9 +1711,12 @@ export default function POSPage() {
       {popupProduct && (
         <VariantPopupDialog
           product={popupProduct}
-          onClose={() => { setPopupProduct(null); focusSearch(); }}
+          onClose={() => { setPopupProduct(null); setPopupFreshVariantStock(new Map()); focusSearch(); }}
           onAdd={handlePopupAdd}
           allowOverselling={allowOverselling}
+          selectedCustomer={selectedCustomer}
+          onFetchPriceHistory={fetchPopupPriceHistory}
+          freshVariantStock={popupFreshVariantStock}
         />
       )}
 

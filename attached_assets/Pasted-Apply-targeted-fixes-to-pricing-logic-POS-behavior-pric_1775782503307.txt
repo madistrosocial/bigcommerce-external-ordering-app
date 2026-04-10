@@ -1,0 +1,86 @@
+Apply targeted fixes to pricing logic, POS behavior, price history source, and inventory refresh. Keep changes minimal and do not refactor unrelated systems.
+
+---
+
+1. Pricing Fix – Sale Price Inheritance (Critical)
+
+* Update pricing logic to properly handle sale price at both product and variant levels
+
+* New behavior:
+
+  * If a variant has its own sale price > 0 → use variant sale price
+  * Else if the parent product has a sale price > 0 → use product-level sale price for all variants
+  * Else → fallback to variant/base price
+
+* This overrides previous strict “variant-only priority” logic for sale pricing
+
+* Apply consistently across:
+
+  * Product listing
+  * Add to cart
+  * Cart display
+  * Final checkout price
+
+---
+
+2. Price History – Use Full BigCommerce Order Data
+
+* Update price history source to include full customer order history from BigCommerce
+* Do not limit to orders created within the app only
+* Ensure:
+
+  * Uses completed/valid orders
+  * Matches by customer and product/variant
+  * Returns recent entries (same behavior as current UI)
+
+---
+
+3. POS Variant Popup Fixes
+
+* Ensure POS variant popup (mother product modal):
+
+  a. Add missing controls:
+
+  * Include “Last $” button
+  * Include price history dropdown
+  * Match same behavior as cart item controls
+
+  b. Fix customer detection:
+
+  * Ensure selected customer context is properly passed into popup
+  * Prevent false “Select customer first” error when customer is already selected
+
+---
+
+4. Inventory Refresh – Pinned Products
+
+* Fix inventory not updating for pinned products
+
+* Regular cart:
+
+  * Refresh inventory when product card is expanded or clicked
+
+* POS:
+
+  * Refresh inventory when pinned product (mother title) is clicked
+  * Ensure inventory updates when variant popup opens
+
+* Keep behavior consistent with existing inventory refresh logic elsewhere
+
+---
+
+Constraints:
+
+* Do NOT change pricing structure beyond specified logic
+* Do NOT refactor cart or checkout systems
+* Keep all fixes localized to affected areas
+* Maintain current UI layout and behavior
+
+---
+
+Output:
+
+* Corrected sale price logic with product-level fallback
+* Price history using BigCommerce data
+* Fixed POS variant popup (controls + customer detection)
+* Inventory refresh working for pinned products
