@@ -508,6 +508,11 @@ export default function Cart() {
                       <div className="flex items-start gap-2">
                         <MapPin className={`h-4 w-4 mt-0.5 ${selectedAddress?.id === addr.id ? 'text-primary' : 'text-slate-400'}`} />
                         <div className="text-sm">
+                          {(addr.first_name || addr.last_name) && (
+                            <div className="font-bold text-slate-800">
+                              {`${addr.first_name || ""} ${addr.last_name || ""}`.trim()}
+                            </div>
+                          )}
                           <div className="font-medium">{addr.street_1}</div>
                           {addr.street_2 && <div>{addr.street_2}</div>}
                           <div className="text-slate-500">{addr.city}, {addr.state} {addr.zip}</div>

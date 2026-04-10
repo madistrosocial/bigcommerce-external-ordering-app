@@ -314,6 +314,7 @@ export async function deleteOrder(id: number): Promise<void> {
 export interface PriceHistoryEntry {
   price: string;
   date: string;
+  orderId?: number;
 }
 
 export async function getCustomerPriceHistory(

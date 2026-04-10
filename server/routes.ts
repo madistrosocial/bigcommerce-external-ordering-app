@@ -523,7 +523,7 @@ export async function registerRoutes(
       const variantId = req.query.variantId ? parseInt(req.query.variantId as string) : null;
 
       const GOAL = 5;
-      const history: { price: string; date: string }[] = [];
+      const history: { price: string; date: string; orderId?: number }[] = [];
 
       // ── Primary: paginated scan of BigCommerce order history ──────────────
       if (bcProductId) {
@@ -560,16 +560,25 @@ export async function registerRoutes(
                     );
                     if (!itemsRes.ok) continue;
                     const bcItems: any[] = await itemsRes.json();
+                    // Pass 1: exact variant match (preferred)
+                    let matched = false;
                     for (const item of bcItems) {
-                      const productMatch = item.product_id === bcProductId;
+                      if (item.product_id !== bcProductId) continue;
                       const itemVariantId = item.variant_id || 0;
-                      const variantMatch = variantId
-                        ? itemVariantId === variantId
-                        : itemVariantId === 0;
-                      if (productMatch && variantMatch) {
-                        // Use tax-exclusive price only
+                      const isExact = variantId ? itemVariantId === variantId : true;
+                      if (isExact) {
                         const price = item.price_ex_tax ?? item.base_price ?? 0;
-                        history.push({ price: String(price), date: bcOrder.date_created || '' });
+                        history.push({ price: String(price), date: bcOrder.date_created || '', orderId: bcOrder.id });
+                        matched = true;
+                        break;
+                      }
+                    }
+                    // Pass 2: product-level fallback (any variant of same product)
+                    if (!matched && variantId) {
+                      for (const item of bcItems) {
+                        if (item.product_id !== bcProductId) continue;
+                        const price = item.price_ex_tax ?? item.base_price ?? 0;
+                        history.push({ price: String(price), date: bcOrder.date_created || '', orderId: bcOrder.id });
                         break;
                       }
                     }
@@ -588,12 +597,24 @@ export async function registerRoutes(
         for (const o of appOrders) {
           if (history.length >= GOAL) break;
           const items = Array.isArray(o.items) ? o.items : [];
+          // Pass 1: exact variant match
+          let matched = false;
           for (const item of items as any[]) {
             const productMatch = bcProductId ? item.bigcommerce_product_id === bcProductId : true;
-            const variantMatch = variantId ? item.variant_id === variantId : !item.variant_id;
+            const variantMatch = variantId ? item.variant_id === variantId : true;
             if (productMatch && variantMatch) {
-              history.push({ price: item.price_at_sale, date: o.date ? String(o.date) : "" });
+              history.push({ price: item.price_at_sale, date: o.date ? String(o.date) : "", orderId: o.bigcommerce_order_id ?? o.id });
+              matched = true;
               break;
+            }
+          }
+          // Pass 2: product-level fallback
+          if (!matched && variantId && bcProductId) {
+            for (const item of items as any[]) {
+              if (item.bigcommerce_product_id === bcProductId) {
+                history.push({ price: item.price_at_sale, date: o.date ? String(o.date) : "", orderId: o.bigcommerce_order_id ?? o.id });
+                break;
+              }
             }
           }
         }

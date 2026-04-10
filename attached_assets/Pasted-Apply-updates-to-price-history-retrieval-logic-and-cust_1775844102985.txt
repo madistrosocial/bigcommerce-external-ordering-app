@@ -1,0 +1,145 @@
+Apply updates to price history retrieval logic and customer address display. Keep changes minimal, production-safe, and do not refactor unrelated systems.
+
+---
+
+1. Price History Matching Logic (Variant + Conditional Product-Level)
+
+* Default behavior:
+
+  * Match price history using exact variant (SKU/variant-level)
+
+* Conditional fallback:
+
+  * If variants under the same product share the same pricing:
+
+    * Allow product-level (mother title) matching
+    * Include all variants under that product when scanning history
+
+* If variants have different pricing:
+
+  * Do NOT use product-level matching
+  * Continue using strict variant-only matching
+
+---
+
+2. One Entry Per Order
+
+* When scanning an order:
+
+  * If multiple matching items (same product variants) exist:
+
+    * Return ONLY one entry for that order
+
+* Do NOT return duplicate entries from the same order
+
+---
+
+3. Early Exit Optimization (Per Order)
+
+* While scanning items inside a single order:
+
+  * As soon as the first valid matching item is found:
+
+    * Capture the price history entry
+    * STOP scanning remaining items in that order
+    * Move to the next order immediately
+
+---
+
+4. History Retrieval Rules
+
+* Only include:
+
+  * Completed/successful orders
+  * Matching customer
+
+* Maintain:
+
+  * Tax-exclusive pricing (already implemented)
+  * Newest → oldest sorting
+  * Existing limit logic (stop when required number of entries is reached)
+
+---
+
+5. Price History – Include Order ID (Updated Display Format)
+
+* Extend history data to include order identifier
+
+* Use:
+
+  * BigCommerce order number (display ID), not internal database ID
+
+* Update display format:
+
+Line 1:
+
+* $X.XX
+* Bold
+* Slightly larger font
+* Green color
+
+Line 2:
+
+* Month Day, Year | #OrderID
+
+* Example:
+
+$48.75
+Mar 5, 2026 | #12345
+
+* Order ID is for display/reference only
+* Do NOT change pricing behavior when selecting
+
+---
+
+6. Customer Address Dropdown – Name + Address
+
+* Update address selection dropdown to display recipient name above address
+
+* Format:
+
+Line 1:
+
+* Full name (first name + last name)
+* Bold and slightly larger text
+
+Line 2:
+
+* Address (existing format)
+
+---
+
+7. Name Handling
+
+* Use name associated with each address entry
+* If address has no name:
+
+  * Fallback to customer name
+  * If still unavailable, display address only
+
+---
+
+8. Layout and Behavior
+
+* Maintain clean multi-line dropdown layout
+* Ensure no UI break or overflow
+* Selection behavior remains unchanged
+* Selected address should still populate correctly
+
+---
+
+Constraints:
+
+* Do NOT modify pricing calculations
+* Do NOT change checkout logic
+* Do NOT refactor cart or customer systems
+* Keep changes localized to history retrieval and UI display
+
+---
+
+Output:
+
+* Price history intelligently uses variant or product-level matching
+* Only one entry per order with early exit optimization
+* Price history dropdown shows styled price + date + order ID
+* Address dropdown shows full name above address

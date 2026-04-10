@@ -275,7 +275,7 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
                       </Button>
                       {openHistoryKey === k && (
                         <div
-                          className="absolute left-0 top-full mt-1 w-44 bg-white border rounded-md shadow-lg z-50 py-1"
+                          className="absolute left-0 top-full mt-1 w-56 bg-white border rounded-md shadow-lg z-50 py-1"
                           onMouseDown={(e) => e.preventDefault()}
                         >
                           {(historyData[k] ?? []).length === 0 ? (
@@ -283,7 +283,7 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
                           ) : (historyData[k] ?? []).map((h, hi) => (
                             <button
                               key={hi}
-                              className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 flex justify-between"
+                              className="w-full text-left px-3 py-1.5 hover:bg-slate-50 border-b last:border-0"
                               onClick={() => {
                                 setPriceInputs((p) => ({ ...p, [k]: h.price }));
                                 setIsFree((p) => ({ ...p, [k]: false }));
@@ -292,8 +292,11 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
                               }}
                               data-testid={`popup-history-option-${k}-${hi}`}
                             >
-                              <span className="font-medium">${parseFloat(h.price).toFixed(2)}</span>
-                              <span className="text-slate-400">{h.date ? new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : ""}</span>
+                              <p className="text-sm font-bold text-green-600">${parseFloat(h.price).toFixed(2)}</p>
+                              <p className="text-xs text-slate-400">
+                                {h.date ? new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ""}
+                                {h.orderId ? ` | #${h.orderId}` : ""}
+                              </p>
                             </button>
                           ))}
                         </div>
@@ -443,6 +446,7 @@ export default function POSPage() {
   const [customerAddresses, setCustomerAddresses] = useState<api.BigCommerceAddress[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<api.BigCommerceAddress | null>(null);
   const [showCustomerDrop, setShowCustomerDrop] = useState(false);
+  const [showAddressDrop, setShowAddressDrop] = useState(false);
   const [isCustomerSearching, setIsCustomerSearching] = useState(false);
   const customerDebRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -636,6 +640,7 @@ export default function POSPage() {
 
   const handlePageClick = (e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
+    if (!t.closest("[data-nofocus]")) setShowAddressDrop(false);
     if (!t.closest("input, textarea, button, [role='dialog'], select, [data-nofocus]")) {
       focusSearch();
     }
@@ -1042,15 +1047,39 @@ export default function POSPage() {
         )}
 
         {selectedCustomer && customerAddresses.length > 1 && (
-          <select
-            className="h-8 text-xs border rounded px-2 bg-white min-w-[220px] max-w-[280px] shrink-0"
-            value={selectedAddress?.id ?? ""}
-            onChange={(e) => { const a = customerAddresses.find((x) => String(x.id) === e.target.value); if (a) setSelectedAddress(a); }}
-            onClick={(e) => e.stopPropagation()}
-            data-testid="select-pos-address"
-          >
-            {customerAddresses.map((a) => <option key={a.id} value={a.id}>{a.street_1}, {a.city}</option>)}
-          </select>
+          <div className="relative shrink-0" onClick={(e) => e.stopPropagation()} data-nofocus>
+            <button
+              className="h-8 text-xs border rounded px-2 bg-white min-w-[200px] max-w-[260px] flex items-center justify-between gap-1"
+              onClick={() => setShowAddressDrop((p) => !p)}
+              data-testid="select-pos-address"
+            >
+              <span className="truncate text-left">
+                {selectedAddress
+                  ? `${selectedAddress.first_name || ""} ${selectedAddress.last_name || ""}`.trim() || `${selectedAddress.street_1}, ${selectedAddress.city}`
+                  : "Select address"}
+              </span>
+              <ChevronDown className="h-3 w-3 shrink-0 text-slate-400" />
+            </button>
+            {showAddressDrop && (
+              <div className="absolute top-full left-0 mt-1 bg-white border rounded-md shadow-xl z-50 min-w-[240px] max-h-52 overflow-y-auto">
+                {customerAddresses.map((a) => (
+                  <button
+                    key={a.id}
+                    className={`w-full text-left px-3 py-2 hover:bg-slate-50 border-b last:border-0 ${selectedAddress?.id === a.id ? "bg-primary/5" : ""}`}
+                    onClick={() => { setSelectedAddress(a); setShowAddressDrop(false); }}
+                    data-testid={`option-pos-address-${a.id}`}
+                  >
+                    {(a.first_name || a.last_name) && (
+                      <p className="text-sm font-bold text-slate-800">
+                        {`${a.first_name || ""} ${a.last_name || ""}`.trim()}
+                      </p>
+                    )}
+                    <p className="text-xs text-slate-500">{a.street_1}{a.street_2 ? `, ${a.street_2}` : ""}, {a.city}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {/* User dropdown — same as catalog view */}
@@ -1475,7 +1504,7 @@ export default function POSPage() {
                             </Button>
                             {isOpen && (
                               <div
-                                className="absolute left-0 top-full mt-1 w-44 bg-white border rounded-md shadow-lg z-50 py-1"
+                                className="absolute left-0 top-full mt-1 w-56 bg-white border rounded-md shadow-lg z-50 py-1"
                                 onMouseDown={(e) => e.preventDefault()}
                               >
                                 {hist.length === 0 ? (
@@ -1483,12 +1512,15 @@ export default function POSPage() {
                                 ) : hist.map((h, hi) => (
                                   <button
                                     key={hi}
-                                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 flex justify-between"
+                                    className="w-full text-left px-3 py-1.5 hover:bg-slate-50 border-b last:border-0"
                                     onClick={() => { applyManualPrice(item, index, h.price); setOpenHistoryLineId(null); focusSearch(); }}
                                     data-testid={`option-history-${item.lineId}-${hi}`}
                                   >
-                                    <span className="font-medium">${parseFloat(h.price).toFixed(2)}</span>
-                                    <span className="text-slate-400">{h.date ? new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : ""}</span>
+                                    <p className="text-sm font-bold text-green-600">${parseFloat(h.price).toFixed(2)}</p>
+                                    <p className="text-xs text-slate-400">
+                                      {h.date ? new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ""}
+                                      {h.orderId ? ` | #${h.orderId}` : ""}
+                                    </p>
                                   </button>
                                 ))}
                               </div>
