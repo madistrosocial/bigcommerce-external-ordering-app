@@ -25,6 +25,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { CartItem } from "@/lib/store";
+import { getPriceListCacheBatch, setPriceListCacheBatch } from "@/lib/db";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,8 @@ interface VariantPopupProps {
   selectedCustomer: api.BigCommerceCustomer | null;
   onFetchPriceHistory: (variantId?: number) => Promise<api.PriceHistoryEntry[]>;
   freshVariantStock?: Map<number, number>;
+  priceListPrices: Record<number, string>;
+  matchedTier: api.PriceTier | null;
   onAdd: (
     product: api.Product,
     variant: any,
@@ -65,10 +68,13 @@ interface VariantPopupProps {
     finalPrice: number,
     discountType: "free" | "percent" | null,
     discountValue: number | null,
+    priceSource: CartItem['price_source'],
+    tierLabel?: string,
+    tierColor?: string,
   ) => void;
 }
 
-function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selectedCustomer, onFetchPriceHistory, freshVariantStock }: VariantPopupProps) {
+function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selectedCustomer, onFetchPriceHistory, freshVariantStock, priceListPrices, matchedTier }: VariantPopupProps) {
   const { toast } = useToast();
   const variants = getVariants(product);
   const rows = variants.length > 0 ? variants : [null];
@@ -80,6 +86,7 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
   const [loadingHistoryKey, setLoadingHistoryKey] = useState<string | null>(null);
   const [historyData, setHistoryData] = useState<Record<string, api.PriceHistoryEntry[]>>({});
   const [openHistoryKey, setOpenHistoryKey] = useState<string | null>(null);
+  const [historicalKeys, setHistoricalKeys] = useState<Set<string>>(new Set());
 
   const key = (v: any) => String(v?.id ?? "0");
   const getQty = (v: any) => qtys[key(v)] ?? 1;
@@ -95,7 +102,11 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
     const clamped = max > 0 ? Math.min(q, max) : q;
     setQtys((p) => ({ ...p, [key(v)]: Math.max(1, clamped) }));
   };
-  const getBasePrice = (v: any) => parseFloat(v?.price || product.price) || 0;
+  const getBasePrice = (v: any) => {
+    const plPrice = v?.id !== undefined ? priceListPrices[v.id] : undefined;
+    if (plPrice !== undefined) return parseFloat(plPrice) || 0;
+    return parseFloat(v?.price || product.price) || 0;
+  };
 
   const computePrice = (v: any): { finalPrice: number; discountType: "free" | "percent" | null; discountValue: number | null } => {
     const base = getBasePrice(v);
@@ -130,15 +141,39 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
         return;
       }
     }
+    const k = key(v);
     const base = getBasePrice(v);
     const { finalPrice, discountType, discountValue } = computePrice(v);
-    onAdd(product, v, getQty(v), base, finalPrice, discountType, discountValue);
+
+    // Determine price source
+    const hasPL = v?.id !== undefined && priceListPrices[v.id] !== undefined;
+    const hasManualPrice = !!(priceInputs[k] && priceInputs[k] !== '');
+    const hasPct = !!(pctInputs[k] && pctInputs[k] !== '');
+    const isHistorical = historicalKeys.has(k);
+
+    let priceSource: CartItem['price_source'] = 'default';
+    if (isFree[k]) {
+      priceSource = 'custom';
+    } else if (hasManualPrice || hasPct) {
+      priceSource = isHistorical ? 'historical' : 'custom';
+    } else if (hasPL) {
+      priceSource = 'price_list';
+    } else {
+      const varSale = parseFloat(v?.sale_price ?? '0');
+      const varDefault = parseFloat(v?.price || product.price);
+      if (varSale > 0 && varSale < varDefault) priceSource = 'sale';
+    }
+
+    const tierLabel = priceSource === 'price_list' ? (matchedTier?.label || 'TIER') : undefined;
+    const tierColor = priceSource === 'price_list' ? (matchedTier?.color || '#6366f1') : undefined;
+
+    onAdd(product, v, getQty(v), base, finalPrice, discountType, discountValue, priceSource, tierLabel, tierColor);
     // Reset just this variant's controls after adding
-    const k = key(v);
     setQtys((p) => ({ ...p, [k]: 1 }));
     setIsFree((p) => ({ ...p, [k]: false }));
     setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
     setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+    setHistoricalKeys(prev => { const n = new Set(prev); n.delete(k); return n; });
   };
 
   return (
@@ -182,9 +217,20 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
                     </p>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className={`text-base font-bold ${isDiscounted ? "text-red-600" : "text-slate-900"}`}>
-                      ${finalPrice.toFixed(2)}
-                    </p>
+                    <div className="flex items-center gap-1.5 justify-end">
+                      {v?.id !== undefined && priceListPrices[v.id] !== undefined && matchedTier && (
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded font-bold text-white leading-none"
+                          style={{ backgroundColor: matchedTier.color }}
+                          data-testid={`badge-tier-popup-${k}`}
+                        >
+                          {matchedTier.label || 'TIER'}
+                        </span>
+                      )}
+                      <p className={`text-base font-bold ${isDiscounted ? "text-red-600" : "text-slate-900"}`}>
+                        ${finalPrice.toFixed(2)}
+                      </p>
+                    </div>
                     {isDiscounted && <p className="text-xs text-slate-400 line-through">${base.toFixed(2)}</p>}
                   </div>
                 </div>
@@ -241,6 +287,7 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
                           setPriceInputs((p) => ({ ...p, [k]: hist[0].price }));
                           setIsFree((p) => ({ ...p, [k]: false }));
                           setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                          setHistoricalKeys(prev => new Set(prev).add(k));
                         } finally {
                           setLoadingHistoryKey(null);
                         }
@@ -288,6 +335,7 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
                                 setPriceInputs((p) => ({ ...p, [k]: h.price }));
                                 setIsFree((p) => ({ ...p, [k]: false }));
                                 setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                                setHistoricalKeys(prev => new Set(prev).add(k));
                                 setOpenHistoryKey(null);
                               }}
                               data-testid={`popup-history-option-${k}-${hi}`}
@@ -314,6 +362,7 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
                       setPctInputs((p) => ({ ...p, [k]: e.target.value }));
                       setIsFree((p) => ({ ...p, [k]: false }));
                       setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                      setHistoricalKeys(prev => { const n = new Set(prev); n.delete(k); return n; });
                     }}
                     data-testid={`popup-pct-${k}`}
                   />
@@ -328,6 +377,7 @@ function VariantPopupDialog({ product, onClose, onAdd, allowOverselling, selecte
                       setPriceInputs((p) => ({ ...p, [k]: e.target.value }));
                       setIsFree((p) => ({ ...p, [k]: false }));
                       setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                      setHistoricalKeys(prev => { const n = new Set(prev); n.delete(k); return n; });
                     }}
                     data-testid={`popup-price-${k}`}
                   />
@@ -430,6 +480,11 @@ export default function POSPage() {
   const searchSeqRef = useRef(0); // for race condition prevention
   const bcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Price Tier System ─────────────────────────────────────────────────────
+  const [tierConfig, setTierConfigState] = useState<api.PriceTierConfig>(api.DEFAULT_TIER_CONFIG);
+  const [matchedTier, setMatchedTier] = useState<api.PriceTier | null>(null);
+  const [popupPriceListPrices, setPopupPriceListPrices] = useState<Record<number, string>>({});
+
   // ── Popup ────────────────────────────────────────────────────────────────
   const [popupProduct, setPopupProduct] = useState<api.Product | null>(null);
   const [popupFreshVariantStock, setPopupFreshVariantStock] = useState<Map<number, number>>(new Map());
@@ -513,6 +568,26 @@ export default function POSPage() {
     if (cart.length > 0) refreshStockAndHighlight(false);
   }, [cart.length]);
 
+  // Load tier config on mount
+  useEffect(() => {
+    api.getSetting('price_tier_config').then(s => {
+      if (s?.value) setTierConfigState(s.value as api.PriceTierConfig);
+    }).catch(() => {});
+  }, []);
+
+  // Derive matched tier when customer or tier config changes
+  useEffect(() => {
+    if (!tierConfig.enabled || !selectedCustomer) {
+      setMatchedTier(null);
+      return;
+    }
+    const groupId = (selectedCustomer as any).customer_group_id;
+    if (!groupId) { setMatchedTier(null); return; }
+    const tier = tierConfig.tiers.find(t => t.enabled && t.customerGroupId === groupId) ?? null;
+    setMatchedTier(tier);
+    setPopupPriceListPrices({});
+  }, [selectedCustomer, tierConfig]);
+
   // Restore draft customer on mount
   useEffect(() => {
     const raw = localStorage.getItem('vansales_restore_customer');
@@ -577,20 +652,42 @@ export default function POSPage() {
   }, [selectedCustomer, popupProduct, priceHistoryCache]);
 
   // ── Open popup with live inventory refresh ────────────────────────────────
-  const openPopupWithFreshStock = useCallback(async (product: api.Product) => {
+  const openPopupWithFreshStock = useCallback(async (product: api.Product, tier: api.PriceTier | null = null) => {
     setPopupFreshVariantStock(new Map());
+    setPopupPriceListPrices({});
     setPopupProduct(product);
-    if (!product.bigcommerce_id) return;
-    try {
-      const stockData = await api.refreshProductStock([product.bigcommerce_id]);
-      if (stockData.length > 0) {
-        const info = stockData[0];
-        const map = new Map<number, number>();
-        info.variants.forEach(v => map.set(v.id, v.stock_level));
-        if (info.variants.length === 0) map.set(0, info.stock_level);
-        setPopupFreshVariantStock(map);
-      }
-    } catch {}
+    // Fetch fresh stock
+    if (product.bigcommerce_id) {
+      try {
+        const stockData = await api.refreshProductStock([product.bigcommerce_id]);
+        if (stockData.length > 0) {
+          const info = stockData[0];
+          const map = new Map<number, number>();
+          info.variants.forEach(v => map.set(v.id, v.stock_level));
+          if (info.variants.length === 0) map.set(0, info.stock_level);
+          setPopupFreshVariantStock(map);
+          // Fetch price list prices from matched tier (with Dexie cache)
+          if (tier && tier.priceListId) {
+            const variantIds = info.variants.map(v => v.id).filter(Boolean) as number[];
+            if (variantIds.length > 0) {
+              try {
+                const cached = await getPriceListCacheBatch(tier.priceListId, variantIds);
+                const result: Record<number, string> = { ...cached };
+                const uncached = variantIds.filter(id => !(id in cached));
+                if (uncached.length > 0) {
+                  const fetched = await api.getPriceListRecords(tier.priceListId, uncached);
+                  Object.assign(result, fetched);
+                  await setPriceListCacheBatch(tier.priceListId, fetched);
+                }
+                setPopupPriceListPrices(result);
+              } catch {
+                setPopupPriceListPrices({});
+              }
+            }
+          }
+        }
+      } catch {}
+    }
   }, []);
 
   // ── Build structured checkout note at submit time ─────────────────────────
@@ -686,13 +783,16 @@ export default function POSPage() {
     finalPrice: number,
     discountType: "free" | "percent" | null,
     discountValue: number | null,
+    priceSource: CartItem['price_source'] = 'default',
+    tierLabel?: string,
+    tierColor?: string,
   ) => {
     if (!selectedCustomer) {
       toast({ title: "Select customer first", variant: "destructive", duration: 2000 });
       return;
     }
     const beforeIds = new Set(useStore.getState().cart.map((i) => i.lineId));
-    addToCart(product, qty, variant ?? undefined, finalPrice, originalPrice, discountType, discountValue);
+    addToCart(product, qty, variant ?? undefined, finalPrice, originalPrice, discountType, discountValue, priceSource, tierLabel, tierColor);
     setTimeout(() => {
       const after = useStore.getState().cart;
       const newLine = after.find((i) => !beforeIds.has(i.lineId));
@@ -855,20 +955,20 @@ export default function POSPage() {
   const applyPercent = (item: CartItem, index: number, pct: number) => {
     const final = Math.max(0, item.original_price * (1 - pct / 100));
     setManualPriceInputs((p) => { const n = { ...p }; delete n[item.lineId]; return n; });
-    updateCartItemAtIndex(index, { price_at_sale: final, discount_type: "percent", discount_value: pct });
+    updateCartItemAtIndex(index, { price_at_sale: final, discount_type: "percent", discount_value: pct, price_source: 'custom', price_tier_label: undefined, price_tier_color: undefined });
   };
 
-  const applyManualPrice = (item: CartItem, index: number, raw: string) => {
+  const applyManualPrice = (item: CartItem, index: number, raw: string, priceSource: CartItem['price_source'] = 'custom') => {
     const price = parseFloat(raw);
     if (isNaN(price) || price < 0) return;
     setDiscountInputs((p) => { const n = { ...p }; delete n[item.lineId]; return n; });
-    updateCartItemAtIndex(index, { price_at_sale: price, discount_type: null, discount_value: null });
+    updateCartItemAtIndex(index, { price_at_sale: price, discount_type: null, discount_value: null, price_source: priceSource, price_tier_label: undefined, price_tier_color: undefined });
   };
 
   const clearLineDiscount = (item: CartItem, index: number) => {
     setDiscountInputs((p) => { const n = { ...p }; delete n[item.lineId]; return n; });
     setManualPriceInputs((p) => { const n = { ...p }; delete n[item.lineId]; return n; });
-    updateCartItemAtIndex(index, { price_at_sale: item.original_price, discount_type: null, discount_value: null });
+    updateCartItemAtIndex(index, { price_at_sale: item.original_price, discount_type: null, discount_value: null, price_source: item.price_source === 'price_list' ? 'price_list' : 'default', price_tier_label: item.price_source === 'price_list' ? item.price_tier_label : undefined, price_tier_color: item.price_source === 'price_list' ? item.price_tier_color : undefined });
   };
 
   // ── Checkout ──────────────────────────────────────────────────────────────
@@ -1035,14 +1135,18 @@ export default function POSPage() {
         </div>
 
         {/* Tier indicator */}
-        {selectedCustomer && (
-          <span className="text-xs text-slate-500 shrink-0 whitespace-nowrap" data-testid="text-price-tier">
-            Tier:{" "}
-            <span className="font-semibold text-slate-700">
-              {(selectedCustomer as any).customer_group_id
-                ? `Group #${(selectedCustomer as any).customer_group_id}`
-                : "Default"}
-            </span>
+        {selectedCustomer && matchedTier && (
+          <span
+            className="text-[10px] px-2 py-1 rounded font-bold text-white shrink-0 whitespace-nowrap leading-none"
+            style={{ backgroundColor: matchedTier.color }}
+            data-testid="text-price-tier"
+          >
+            {matchedTier.label}
+          </span>
+        )}
+        {selectedCustomer && !matchedTier && (selectedCustomer as any).customer_group_id && tierConfig.enabled && (
+          <span className="text-xs text-slate-400 shrink-0 whitespace-nowrap" data-testid="text-price-tier">
+            Group #{(selectedCustomer as any).customer_group_id}
           </span>
         )}
 
@@ -1231,7 +1335,7 @@ export default function POSPage() {
                     key={`p-${s.product.id}`}
                     className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left"
                     onClick={() => {
-                      openPopupWithFreshStock(s.product);
+                      openPopupWithFreshStock(s.product, matchedTier);
                       setSuggestions([]);
                       setShowSuggestions(false);
                     }}
@@ -1287,7 +1391,7 @@ export default function POSPage() {
                     <PinnedProductRow
                       key={p.id}
                       product={p}
-                      onClick={() => openPopupWithFreshStock(p)}
+                      onClick={() => openPopupWithFreshStock(p, matchedTier)}
                     />
                   ))}
                 </div>
@@ -1363,6 +1467,18 @@ export default function POSPage() {
                         </p>
                         {isFree && <span className="text-[9px] font-bold text-red-500">FREE</span>}
                         {hasPct && <span className="text-[9px] text-red-500">-{item.discount_value}%</span>}
+                        {item.price_source === 'price_list' && item.price_tier_label && (
+                          <span
+                            className="text-[9px] px-1 py-0.5 rounded font-bold text-white leading-none"
+                            style={{ backgroundColor: item.price_tier_color || '#6366f1' }}
+                            data-testid={`badge-tier-compact-${item.lineId}`}
+                          >
+                            {item.price_tier_label}
+                          </span>
+                        )}
+                        {item.price_source === 'historical' && (
+                          <span className="text-[9px] text-purple-500 font-bold">HIST</span>
+                        )}
                       </div>
                       <button
                         className="text-slate-300 hover:text-red-500 ml-1 shrink-0"
@@ -1448,13 +1564,28 @@ export default function POSPage() {
                     })()}
 
                     {/* Price display */}
-                    <div className="flex items-baseline gap-1.5">
+                    <div className="flex items-baseline gap-1.5 flex-wrap">
                       <span className={`text-xl font-bold ${isDiscounted || isFree ? "text-red-600" : "text-slate-900"}`}>
                         ${item.price_at_sale.toFixed(2)}
                       </span>
                       {(isDiscounted || isFree) && <span className="text-xs text-slate-400 line-through">${item.original_price.toFixed(2)}</span>}
                       {isFree && <Badge variant="destructive" className="text-[10px] h-4 px-1">FREE</Badge>}
                       {hasPct && <Badge variant="destructive" className="text-[10px] h-4 px-1">-{item.discount_value}%</Badge>}
+                      {item.price_source === 'price_list' && item.price_tier_label && (
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded font-bold text-white leading-none self-center"
+                          style={{ backgroundColor: item.price_tier_color || '#6366f1' }}
+                          data-testid={`badge-tier-active-${item.lineId}`}
+                        >
+                          {item.price_tier_label}
+                        </span>
+                      )}
+                      {item.price_source === 'historical' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-bold text-purple-600 bg-purple-50 leading-none self-center" data-testid={`badge-hist-active-${item.lineId}`}>HIST</span>
+                      )}
+                      {item.price_source === 'custom' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-bold text-amber-700 bg-amber-50 leading-none self-center" data-testid={`badge-custom-active-${item.lineId}`}>CUSTOM</span>
+                      )}
                     </div>
 
                     {/* Discount controls */}
@@ -1471,7 +1602,7 @@ export default function POSPage() {
                             try {
                               const hist = await fetchPriceHistory(item);
                               if (hist.length === 0) { toast({ title: "No price history", variant: "destructive", duration: 2000 }); return; }
-                              applyManualPrice(item, index, hist[0].price);
+                              applyManualPrice(item, index, hist[0].price, 'historical');
                             } finally { setLoadingHistoryLineId(null); focusSearch(); }
                           }}
                           data-testid={`button-pos-last-price-${item.lineId}`}
@@ -1513,7 +1644,7 @@ export default function POSPage() {
                                   <button
                                     key={hi}
                                     className="w-full text-left px-3 py-1.5 hover:bg-slate-50 border-b last:border-0"
-                                    onClick={() => { applyManualPrice(item, index, h.price); setOpenHistoryLineId(null); focusSearch(); }}
+                                    onClick={() => { applyManualPrice(item, index, h.price, 'historical'); setOpenHistoryLineId(null); focusSearch(); }}
                                     data-testid={`option-history-${item.lineId}-${hi}`}
                                   >
                                     <p className="text-sm font-bold text-green-600">${parseFloat(h.price).toFixed(2)}</p>
@@ -1729,12 +1860,14 @@ export default function POSPage() {
       {popupProduct && (
         <VariantPopupDialog
           product={popupProduct}
-          onClose={() => { setPopupProduct(null); setPopupFreshVariantStock(new Map()); focusSearch(); }}
+          onClose={() => { setPopupProduct(null); setPopupFreshVariantStock(new Map()); setPopupPriceListPrices({}); focusSearch(); }}
           onAdd={handlePopupAdd}
           allowOverselling={allowOverselling}
           selectedCustomer={selectedCustomer}
           onFetchPriceHistory={fetchPopupPriceHistory}
           freshVariantStock={popupFreshVariantStock}
+          priceListPrices={popupPriceListPrices}
+          matchedTier={matchedTier}
         />
       )}
 

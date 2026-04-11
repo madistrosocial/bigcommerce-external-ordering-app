@@ -410,6 +410,46 @@ export async function refreshProductStock(bigcommerceIds: number[]): Promise<Sto
   return res.json();
 }
 
+// ─── Price Tier Configuration ─────────────────────────────────────────────────
+
+export interface PriceTier {
+  id: string;
+  label: string;
+  customerGroupId: number;
+  priceListId: number;
+  color: string;
+  enabled: boolean;
+}
+
+export interface PriceTierConfig {
+  enabled: boolean;
+  scopeMode: 'app' | 'all';
+  tiers: PriceTier[];
+}
+
+export const DEFAULT_TIER_CONFIG: PriceTierConfig = {
+  enabled: false,
+  scopeMode: 'app',
+  tiers: [],
+};
+
+export async function getPriceListRecords(
+  priceListId: number,
+  variantIds: number[]
+): Promise<Record<number, string>> {
+  if (!variantIds.length) return {};
+  try {
+    const res = await fetch(
+      `${API_BASE}/bigcommerce/price-list/${priceListId}/records?variantIds=${variantIds.join(',')}`,
+      { headers: getAuthHeaders() }
+    );
+    if (!res.ok) return {};
+    return res.json();
+  } catch {
+    return {};
+  }
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 export async function getSetting(key: string): Promise<{ key: string; value: any }> {

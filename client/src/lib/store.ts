@@ -10,6 +10,9 @@ export interface CartItem {
   original_price: number;
   discount_type: 'free' | 'percent' | null;
   discount_value: number | null;
+  price_source?: 'custom' | 'historical' | 'price_list' | 'sale' | 'default';
+  price_tier_label?: string;
+  price_tier_color?: string;
 }
 
 interface AppState {
@@ -28,13 +31,16 @@ interface AppState {
     priceAtSale?: number,
     originalPrice?: number,
     discountType?: 'free' | 'percent' | null,
-    discountValue?: number | null
+    discountValue?: number | null,
+    priceSource?: CartItem['price_source'],
+    priceTierLabel?: string,
+    priceTierColor?: string,
   ) => void;
   removeFromCartAtIndex: (index: number) => void;
   updateCartQuantityAtIndex: (index: number, delta: number) => void;
   updateCartItemAtIndex: (
     index: number,
-    updates: Partial<Pick<CartItem, 'price_at_sale' | 'original_price' | 'discount_type' | 'discount_value' | 'quantity'>>
+    updates: Partial<Pick<CartItem, 'price_at_sale' | 'original_price' | 'discount_type' | 'discount_value' | 'quantity' | 'price_source' | 'price_tier_label' | 'price_tier_color'>>
   ) => void;
   removeFromCart: (productId: number, variantId?: number) => void;
   updateCartQuantity: (productId: number, delta: number, variantId?: number) => void;
@@ -81,7 +87,7 @@ export const useStore = create<AppState>((set, get) => ({
   setOfflineMode: (offline) => set({ isOfflineMode: offline }),
   toggleOfflineMode: () => set((state) => ({ isOfflineMode: !state.isOfflineMode })),
 
-  addToCart: (product, quantity, variant, priceAtSale, originalPrice, discountType, discountValue) => set((state) => {
+  addToCart: (product, quantity, variant, priceAtSale, originalPrice, discountType, discountValue, priceSource, priceTierLabel, priceTierColor) => set((state) => {
     const rawPrice = parseFloat(variant?.price || product.price);
     const resolvedOriginal = originalPrice ?? rawPrice;
     const resolvedPrice = priceAtSale ?? rawPrice;
@@ -115,6 +121,9 @@ export const useStore = create<AppState>((set, get) => ({
           original_price: resolvedOriginal,
           discount_type: discountType ?? null,
           discount_value: discountValue ?? null,
+          price_source: priceSource ?? 'default',
+          price_tier_label: priceTierLabel,
+          price_tier_color: priceTierColor,
         }
       ]
     };

@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus, Shield, UserCog, Globe } from "lucide-react";
+import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus, Shield, UserCog, Globe, Layers, Trash2 } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -17,7 +17,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Product, User } from "@/lib/api";
+import type { Product, User, PriceTierConfig, PriceTier } from "@/lib/api";
+import { DEFAULT_TIER_CONFIG } from "@/lib/api";
 import * as api from "@/lib/api";
 import {
   Dialog,
@@ -58,6 +59,7 @@ export default function AdminDashboard() {
   const [googleSheetsWebhook, setGoogleSheetsWebhook] = useState('');
   const [showInventoryCounts, setShowInventoryCounts] = useState(true);
   const [showConfig, setShowConfig] = useState(false);
+  const [tierConfig, setTierConfig] = useState<PriceTierConfig>(DEFAULT_TIER_CONFIG);
 
   const togglePinMutation = useMutation({
     mutationFn: ({ id, is_pinned }: { id: number; is_pinned: boolean }) => 
@@ -200,6 +202,9 @@ export default function AdminDashboard() {
         setShowInventoryCounts(setting.value === true || setting.value === 'true');
       }
     }).catch(() => {});
+    api.getSetting("price_tier_config").then(setting => {
+      if (setting?.value) setTierConfig(setting.value as PriceTierConfig);
+    }).catch(() => {});
   }, []);
 
   const saveConfig = async () => {
@@ -207,11 +212,41 @@ export default function AdminDashboard() {
       await api.saveSetting("bigcommerce_config", bcConfig);
       await api.saveSetting("google_sheets_webhook", googleSheetsWebhook);
       await api.saveSetting("show_inventory_counts", showInventoryCounts);
+      await api.saveSetting("price_tier_config", tierConfig);
       setShowConfig(false);
       toast({ title: "Settings Saved", description: "Configuration updated on server." });
     } catch (e) {
       toast({ title: "Error", description: "Failed to save configuration.", variant: "destructive" });
     }
+  };
+
+  const addTier = () => {
+    if (tierConfig.tiers.length >= 10) return;
+    setTierConfig(prev => ({
+      ...prev,
+      tiers: [...prev.tiers, {
+        id: `tier-${Date.now()}`,
+        label: '',
+        customerGroupId: 0,
+        priceListId: 0,
+        color: '#6366f1',
+        enabled: true,
+      }]
+    }));
+  };
+
+  const updateTier = (index: number, updates: Partial<PriceTier>) => {
+    setTierConfig(prev => ({
+      ...prev,
+      tiers: prev.tiers.map((t, i) => i === index ? { ...t, ...updates } : t)
+    }));
+  };
+
+  const removeTier = (index: number) => {
+    setTierConfig(prev => ({
+      ...prev,
+      tiers: prev.tiers.filter((_, i) => i !== index)
+    }));
   };
 
   const pinnedProducts = products.filter(p => p.is_pinned);
@@ -286,6 +321,118 @@ export default function AdminDashboard() {
                     data-testid="switch-inventory-visibility"
                   />
                 </div>
+              </div>
+
+              {/* ── Price Tier System ── */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-sm flex items-center gap-2">
+                    <Layers className="h-4 w-4 text-indigo-500" />
+                    Price Tier System
+                  </h3>
+                  <Switch
+                    checked={tierConfig.enabled}
+                    onCheckedChange={v => setTierConfig(p => ({ ...p, enabled: v }))}
+                    data-testid="switch-tier-enabled"
+                  />
+                </div>
+
+                {tierConfig.enabled && (
+                  <div className="space-y-3 pl-1">
+                    {/* Scope mode */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Scope Mode</Label>
+                      <Select
+                        value={tierConfig.scopeMode}
+                        onValueChange={v => setTierConfig(p => ({ ...p, scopeMode: v as 'app' | 'all' }))}
+                      >
+                        <SelectTrigger className="h-8 text-xs" data-testid="select-tier-scope">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="app">Use Only App-Defined Tiers</SelectItem>
+                          <SelectItem value="all">Allow All BigCommerce Price Lists</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Tier list */}
+                    <div className="space-y-2">
+                      <Label className="text-xs">Configured Tiers ({tierConfig.tiers.length}/10)</Label>
+                      {tierConfig.tiers.length === 0 && (
+                        <p className="text-xs text-slate-400 italic">No tiers configured. Add one below.</p>
+                      )}
+                      {tierConfig.tiers.map((tier, idx) => (
+                        <div key={tier.id} className="border rounded-md p-2 space-y-2" data-testid={`tier-row-${idx}`}>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={tier.color}
+                              onChange={e => updateTier(idx, { color: e.target.value })}
+                              className="w-7 h-7 rounded cursor-pointer border"
+                              title="Tier color"
+                            />
+                            <Input
+                              placeholder="Label (e.g. VIP)"
+                              value={tier.label}
+                              onChange={e => updateTier(idx, { label: e.target.value })}
+                              className="h-7 text-xs flex-1"
+                              data-testid={`input-tier-label-${idx}`}
+                            />
+                            <Switch
+                              checked={tier.enabled}
+                              onCheckedChange={v => updateTier(idx, { enabled: v })}
+                              data-testid={`switch-tier-enabled-${idx}`}
+                            />
+                            <button
+                              onClick={() => removeTier(idx)}
+                              className="text-slate-400 hover:text-red-500"
+                              data-testid={`button-remove-tier-${idx}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <Label className="text-[10px] text-slate-500">Customer Group ID</Label>
+                              <Input
+                                type="number"
+                                placeholder="0"
+                                value={tier.customerGroupId || ''}
+                                onChange={e => updateTier(idx, { customerGroupId: parseInt(e.target.value) || 0 })}
+                                className="h-7 text-xs"
+                                data-testid={`input-tier-group-${idx}`}
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-[10px] text-slate-500">Price List ID</Label>
+                              <Input
+                                type="number"
+                                placeholder="0"
+                                value={tier.priceListId || ''}
+                                onChange={e => updateTier(idx, { priceListId: parseInt(e.target.value) || 0 })}
+                                className="h-7 text-xs"
+                                data-testid={`input-tier-pricelist-${idx}`}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {tierConfig.tiers.length < 10 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full h-8 text-xs gap-1"
+                        onClick={addTier}
+                        data-testid="button-add-tier"
+                      >
+                        <Plus className="h-3 w-3" /> Add Price Tier
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <DialogFooter>

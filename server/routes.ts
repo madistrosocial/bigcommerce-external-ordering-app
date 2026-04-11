@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertOrderSchema, type InsertProduct, type InsertOrder } from "@shared/schema";
+import { insertProductSchema, insertOrderSchema, type InsertProduct, type InsertOrder, type InsertPriceHistoryCache } from "@shared/schema";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 
@@ -525,14 +525,31 @@ export async function registerRoutes(
       const GOAL = 5;
       const history: { price: string; date: string; orderId?: number }[] = [];
 
-      // ── Primary: paginated scan of BigCommerce order history ──────────────
+      // ── Layer 1: Check Postgres cache first ──────────────────────────────
       if (bcProductId) {
+        const cached = await storage.getCachedPriceHistory(bcCustomerId, bcProductId);
+        if (cached.length >= GOAL) {
+          return res.json(cached.slice(0, GOAL).map(e => ({
+            price: e.price,
+            date: e.order_date || '',
+            orderId: e.order_id,
+          })));
+        }
+        // Pre-fill from cache, track already-seen order IDs
+        const seenOrderIds = new Set<number>();
+        for (const e of cached) {
+          history.push({ price: e.price, date: e.order_date || '', orderId: e.order_id });
+          seenOrderIds.add(e.order_id);
+        }
+
+        // ── Layer 2: BigCommerce scan for remaining slots ──────────────────
         const bcCfg = await storage.getSetting("bigcommerce_config");
         if (bcCfg && bcCfg.value) {
           const cfg = typeof bcCfg.value === 'string' ? JSON.parse(bcCfg.value) : bcCfg.value;
           const storeHash = cfg.storeHash;
           const token = cfg.token;
           if (storeHash && token) {
+            const newCacheEntries: InsertPriceHistoryCache[] = [];
             try {
               const bcHeaders = {
                 'X-Auth-Token': String(token),
@@ -553,6 +570,7 @@ export async function registerRoutes(
                 if (bcOrders.length < PAGE_SIZE) morePages = false;
                 for (const bcOrder of bcOrders) {
                   if (history.length >= GOAL) break;
+                  if (seenOrderIds.has(bcOrder.id)) continue;
                   try {
                     const itemsRes = await fetch(
                       `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrder.id}/products?limit=250`,
@@ -560,7 +578,6 @@ export async function registerRoutes(
                     );
                     if (!itemsRes.ok) continue;
                     const bcItems: any[] = await itemsRes.json();
-                    // Pass 1: exact variant match (preferred)
                     let matched = false;
                     for (const item of bcItems) {
                       if (item.product_id !== bcProductId) continue;
@@ -568,17 +585,35 @@ export async function registerRoutes(
                       const isExact = variantId ? itemVariantId === variantId : true;
                       if (isExact) {
                         const price = item.price_ex_tax ?? item.base_price ?? 0;
-                        history.push({ price: String(price), date: bcOrder.date_created || '', orderId: bcOrder.id });
+                        const entry = { price: String(price), date: bcOrder.date_created || '', orderId: bcOrder.id };
+                        history.push(entry);
+                        seenOrderIds.add(bcOrder.id);
+                        newCacheEntries.push({
+                          customer_id: bcCustomerId,
+                          product_id: bcProductId,
+                          variant_id: itemVariantId || null,
+                          price: String(price),
+                          order_id: bcOrder.id,
+                          order_date: bcOrder.date_created || null,
+                        });
                         matched = true;
                         break;
                       }
                     }
-                    // Pass 2: product-level fallback (any variant of same product)
                     if (!matched && variantId) {
                       for (const item of bcItems) {
                         if (item.product_id !== bcProductId) continue;
                         const price = item.price_ex_tax ?? item.base_price ?? 0;
                         history.push({ price: String(price), date: bcOrder.date_created || '', orderId: bcOrder.id });
+                        seenOrderIds.add(bcOrder.id);
+                        newCacheEntries.push({
+                          customer_id: bcCustomerId,
+                          product_id: bcProductId,
+                          variant_id: item.variant_id || null,
+                          price: String(price),
+                          order_id: bcOrder.id,
+                          order_date: bcOrder.date_created || null,
+                        });
                         break;
                       }
                     }
@@ -587,17 +622,20 @@ export async function registerRoutes(
                 page++;
               }
             } catch {}
+            // Save new entries to Postgres cache (non-blocking)
+            if (newCacheEntries.length > 0) {
+              storage.savePriceHistoryCacheEntries(newCacheEntries).catch(() => {});
+            }
           }
         }
       }
 
-      // ── Fallback: fill remaining slots from app-stored synced orders ───────
+      // ── Fallback: app-stored synced orders ────────────────────────────────
       if (history.length < GOAL) {
         const appOrders = await storage.getOrdersByBcCustomerId(bcCustomerId, ['synced']);
         for (const o of appOrders) {
           if (history.length >= GOAL) break;
           const items = Array.isArray(o.items) ? o.items : [];
-          // Pass 1: exact variant match
           let matched = false;
           for (const item of items as any[]) {
             const productMatch = bcProductId ? item.bigcommerce_product_id === bcProductId : true;
@@ -608,7 +646,6 @@ export async function registerRoutes(
               break;
             }
           }
-          // Pass 2: product-level fallback
           if (!matched && variantId && bcProductId) {
             for (const item of items as any[]) {
               if (item.bigcommerce_product_id === bcProductId) {
@@ -623,6 +660,45 @@ export async function registerRoutes(
       res.json(history);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ── BigCommerce Price List Records ─────────────────────────────────────────
+  app.get("/api/bigcommerce/price-list/:priceListId/records", requireAuth, async (req, res) => {
+    try {
+      const priceListId = parseInt(req.params.priceListId);
+      const variantIdsStr = req.query.variantIds as string;
+      if (!variantIdsStr) return res.json({});
+      const variantIds = variantIdsStr.split(',').map(Number).filter(n => !isNaN(n) && n > 0);
+      if (variantIds.length === 0) return res.json({});
+
+      const bcCfg = await storage.getSetting("bigcommerce_config");
+      if (!bcCfg?.value) return res.json({});
+      const cfg = typeof bcCfg.value === 'string' ? JSON.parse(bcCfg.value) : bcCfg.value;
+      if (!cfg.storeHash || !cfg.token) return res.json({});
+
+      const params = new URLSearchParams();
+      params.set('variant_id:in', variantIds.join(','));
+      params.set('limit', '50');
+
+      const bcRes = await fetch(
+        `https://api.bigcommerce.com/stores/${cfg.storeHash}/v3/pricelists/${priceListId}/records?${params}`,
+        { headers: { 'X-Auth-Token': String(cfg.token), 'Accept': 'application/json' } }
+      );
+      if (!bcRes.ok) return res.json({});
+
+      const data = await bcRes.json();
+      const result: Record<number, string> = {};
+      for (const record of (data.data ?? [])) {
+        if (!record.variant_id) continue;
+        const price = record.calculated_price ?? record.price ?? null;
+        if (price != null) {
+          result[record.variant_id] = String(price);
+        }
+      }
+      res.json(result);
+    } catch {
+      res.json({});
     }
   });
 

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, users, products, orders, settings } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, users, products, orders, settings, priceHistoryCache } from "@shared/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
 
 export interface IStorage {
@@ -37,6 +37,10 @@ export interface IStorage {
   // Setting operations
   getSetting(key: string): Promise<any>;
   setSetting(key: string, value: any): Promise<void>;
+
+  // Price history cache operations
+  getCachedPriceHistory(customerId: number, bcProductId: number): Promise<PriceHistoryCacheEntry[]>;
+  savePriceHistoryCacheEntries(entries: InsertPriceHistoryCache[]): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -174,6 +178,32 @@ export class DatabaseStorage implements IStorage {
       await db.update(settings).set({ value }).where(eq(settings.key, key));
     } else {
       await db.insert(settings).values({ key, value });
+    }
+  }
+
+  async getCachedPriceHistory(customerId: number, bcProductId: number): Promise<PriceHistoryCacheEntry[]> {
+    return db.select().from(priceHistoryCache)
+      .where(and(
+        eq(priceHistoryCache.customer_id, customerId),
+        eq(priceHistoryCache.product_id, bcProductId)
+      ))
+      .orderBy(desc(priceHistoryCache.created_at))
+      .limit(20);
+  }
+
+  async savePriceHistoryCacheEntries(entries: InsertPriceHistoryCache[]): Promise<void> {
+    for (const entry of entries) {
+      const exists = await db.select({ id: priceHistoryCache.id })
+        .from(priceHistoryCache)
+        .where(and(
+          eq(priceHistoryCache.customer_id, entry.customer_id),
+          eq(priceHistoryCache.product_id, entry.product_id),
+          eq(priceHistoryCache.order_id, entry.order_id)
+        ))
+        .limit(1);
+      if (exists.length === 0) {
+        await db.insert(priceHistoryCache).values(entry);
+      }
     }
   }
 }

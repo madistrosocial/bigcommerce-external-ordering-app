@@ -1,5 +1,4 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, decimal, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, boolean, decimal, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -49,10 +48,22 @@ export const settings = pgTable("settings", {
   value: jsonb("value").notNull(),
 });
 
+export const priceHistoryCache = pgTable("price_history_cache", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  customer_id: integer("customer_id").notNull(),
+  product_id: integer("product_id").notNull(),
+  variant_id: integer("variant_id"),
+  price: text("price").notNull(),
+  order_id: integer("order_id").notNull(),
+  order_date: text("order_date"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertProductSchema = createInsertSchema(products).omit({ id: true });
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, date: true });
+export const insertPriceHistoryCacheSchema = createInsertSchema(priceHistoryCache).omit({ id: true, created_at: true });
 
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -63,3 +74,6 @@ export type Product = typeof products.$inferSelect;
 
 export type InsertOrder = z.infer<typeof insertOrderSchema>;
 export type Order = typeof orders.$inferSelect;
+
+export type InsertPriceHistoryCache = z.infer<typeof insertPriceHistoryCacheSchema>;
+export type PriceHistoryCacheEntry = typeof priceHistoryCache.$inferSelect;
