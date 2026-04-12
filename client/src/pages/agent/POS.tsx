@@ -1143,21 +1143,32 @@ export default function POSPage() {
           )}
         </div>
 
-        {/* Tier indicator */}
-        {selectedCustomer && matchedTier && (
-          <span
-            className="text-[10px] px-2 py-1 rounded font-bold text-white shrink-0 whitespace-nowrap leading-none"
-            style={{ backgroundColor: matchedTier.color }}
-            data-testid="text-price-tier"
-          >
-            {matchedTier.label}
-          </span>
-        )}
-        {selectedCustomer && !matchedTier && (selectedCustomer as any).customer_group_id && tierConfig.enabled && (
-          <span className="text-xs text-slate-400 shrink-0 whitespace-nowrap" data-testid="text-price-tier">
-            Group #{(selectedCustomer as any).customer_group_id}
-          </span>
-        )}
+        {/* Tier / wholesale badge */}
+        {selectedCustomer && (() => {
+          if (matchedTier) {
+            return (
+              <span
+                className="text-[10px] px-2 py-1 rounded font-bold text-white shrink-0 whitespace-nowrap leading-none"
+                style={{ backgroundColor: matchedTier.color }}
+                data-testid="text-price-tier"
+              >
+                {matchedTier.label}
+              </span>
+            );
+          }
+          const groupId = (selectedCustomer as any).customer_group_id;
+          if (groupId) {
+            return (
+              <span
+                className="text-[10px] px-2 py-1 rounded font-bold text-white shrink-0 whitespace-nowrap leading-none bg-slate-700"
+                data-testid="text-price-tier"
+              >
+                WHOLESALE
+              </span>
+            );
+          }
+          return null;
+        })()}
 
         {selectedCustomer && customerAddresses.length > 1 && (
           <div className="relative shrink-0" onClick={(e) => e.stopPropagation()} data-nofocus>

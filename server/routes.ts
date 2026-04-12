@@ -1467,6 +1467,7 @@ export async function registerRoutes(
           email: c.email,
           phone: c.phone || "",
           company: c.company || "",
+          customer_group_id: c.customer_group_id ?? null,
         }));
 
         res.json(customers);
