@@ -583,9 +583,44 @@ export default function POSPage() {
     }
     const groupId = (selectedCustomer as any).customer_group_id;
     if (!groupId) { setMatchedTier(null); return; }
-    const tier = tierConfig.tiers.find(t => t.enabled && t.customerGroupId === groupId) ?? null;
-    setMatchedTier(tier);
-    setPopupPriceListPrices({});
+
+    // "app" mode: match by app-defined tier config
+    if (tierConfig.scopeMode !== 'all') {
+      const tier = tierConfig.tiers.find(t => t.enabled && t.customerGroupId === groupId) ?? null;
+      setMatchedTier(tier);
+      setPopupPriceListPrices({});
+      return;
+    }
+
+    // "all" mode: first try app-defined tiers, then fall back to BC price list assignment
+    const appTier = tierConfig.tiers.find(t => t.enabled && t.customerGroupId === groupId) ?? null;
+    if (appTier) {
+      setMatchedTier(appTier);
+      setPopupPriceListPrices({});
+      return;
+    }
+    // Fetch full BC customer to get price_list_id assigned to their group
+    api.getCustomerByBcId(selectedCustomer.id).then(fullCustomer => {
+      const bcPriceListId = fullCustomer?.price_list_id;
+      console.log("BC CUSTOMER price_list_id for all mode:", bcPriceListId);
+      if (bcPriceListId) {
+        // Synthetic tier from BC price list assignment
+        setMatchedTier({
+          id: `bc-${groupId}`,
+          label: 'WHOLESALE',
+          customerGroupId: groupId,
+          priceListId: bcPriceListId,
+          color: '#374151',
+          enabled: true,
+        });
+      } else {
+        setMatchedTier(null);
+      }
+      setPopupPriceListPrices({});
+    }).catch(() => {
+      setMatchedTier(null);
+      setPopupPriceListPrices({});
+    });
   }, [selectedCustomer, tierConfig]);
 
   // Restore draft customer on mount
@@ -610,13 +645,23 @@ export default function POSPage() {
 
   // Guarded navigation: prompts if cart has items
   const guardedNavigate = useCallback((path: string) => {
+    if (path === "/logout") {
+      if (cart.length > 0) { setNavTarget(path); return; }
+      logout();
+      window.location.href = window.location.origin;
+      return;
+    }
     if (cart.length > 0) { setNavTarget(path); } else { navigate(path); }
   }, [cart.length, navigate]);
 
   const confirmNavigation = () => {
     if (navTarget) {
-      if (navTarget === "/logout") { logout(); navigate("/"); }
-      else { navigate(navTarget); }
+      if (navTarget === "/logout") {
+        logout();
+        window.location.href = window.location.origin;
+      } else {
+        navigate(navTarget);
+      }
       setNavTarget(null);
     }
   };
@@ -1143,33 +1188,6 @@ export default function POSPage() {
           )}
         </div>
 
-        {/* Tier / wholesale badge */}
-        {selectedCustomer && (() => {
-          if (matchedTier) {
-            return (
-              <span
-                className="text-[10px] px-2 py-1 rounded font-bold text-white shrink-0 whitespace-nowrap leading-none"
-                style={{ backgroundColor: matchedTier.color }}
-                data-testid="text-price-tier"
-              >
-                {matchedTier.label}
-              </span>
-            );
-          }
-          const groupId = (selectedCustomer as any).customer_group_id;
-          if (groupId) {
-            return (
-              <span
-                className="text-[10px] px-2 py-1 rounded font-bold text-white shrink-0 whitespace-nowrap leading-none bg-slate-700"
-                data-testid="text-price-tier"
-              >
-                WHOLESALE
-              </span>
-            );
-          }
-          return null;
-        })()}
-
         {selectedCustomer && customerAddresses.length > 1 && (
           <div className="relative shrink-0" onClick={(e) => e.stopPropagation()} data-nofocus>
             <button
@@ -1205,6 +1223,37 @@ export default function POSPage() {
             )}
           </div>
         )}
+
+        {/* Tier / wholesale badge — after address dropdown */}
+        {selectedCustomer && (() => {
+          const badgeLabel =
+            matchedTier?.label ||
+            (selectedCustomer as any).price_list_name ||
+            "WHOLESALE";
+          if (matchedTier) {
+            return (
+              <span
+                className="text-[10px] px-2 py-1 rounded font-bold text-white shrink-0 whitespace-nowrap leading-none"
+                style={{ backgroundColor: matchedTier.color }}
+                data-testid="text-price-tier"
+              >
+                {badgeLabel}
+              </span>
+            );
+          }
+          const groupId = (selectedCustomer as any).customer_group_id;
+          if (groupId) {
+            return (
+              <span
+                className="text-[10px] px-2 py-1 rounded font-bold text-white shrink-0 whitespace-nowrap leading-none bg-slate-700"
+                data-testid="text-price-tier"
+              >
+                {badgeLabel}
+              </span>
+            );
+          }
+          return null;
+        })()}
 
         {/* User dropdown — same as catalog view */}
         <div className="ml-auto shrink-0">

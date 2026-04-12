@@ -352,6 +352,7 @@ export interface BigCommerceCustomer {
   company: string;
   customer_group_id?: number;
   customer_group_name?: string;
+  price_list_id?: number | null;
 }
 
 export interface BigCommerceAddress {

@@ -1582,6 +1582,20 @@ export async function registerRoutes(
         if (!data.data || data.data.length === 0)
           return res.status(404).json({ error: "Customer not found" });
         const c = data.data[0];
+        // For scopeMode "all": also fetch the BC price list assignment for this customer's group
+        let price_list_id: number | null = null;
+        if (c.customer_group_id) {
+          try {
+            const plRes = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v3/pricelists/assignments?customer_group_id:in=${c.customer_group_id}&limit=1`,
+              { headers: { 'X-Auth-Token': String(token), 'Accept': 'application/json' } }
+            );
+            if (plRes.ok) {
+              const plData = await plRes.json();
+              price_list_id = plData.data?.[0]?.price_list_id ?? null;
+            }
+          } catch {}
+        }
         res.json({
           id: c.id,
           first_name: c.first_name,
@@ -1590,6 +1604,7 @@ export async function registerRoutes(
           phone: c.phone || "",
           company: c.company || "",
           customer_group_id: c.customer_group_id,
+          price_list_id,
         });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
