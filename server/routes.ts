@@ -293,11 +293,9 @@ export async function registerRoutes(
       const validRoles = ["admin", "agent"];
       const normalizedRole = (role || "agent").toLowerCase();
       if (!validRoles.includes(normalizedRole)) {
-        return res
-          .status(400)
-          .json({
-            error: `Invalid role. Must be one of: ${validRoles.join(", ")}`,
-          });
+        return res.status(400).json({
+          error: `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+        });
       }
 
       const existing = await storage.getUserByUsername(username);
@@ -671,13 +669,21 @@ export async function registerRoutes(
                       for (const item of bcItems) {
                         const itemProductId: number = item.product_id;
                         const itemVariantId: number = item.variant_id || 0;
-                        const price = String(item.price_ex_tax ?? item.base_price ?? 0);
+                        const price = String(
+                          item.price_ex_tax ?? item.base_price ?? 0,
+                        );
                         // Track target product match for results
                         if (itemProductId === bcProductId) {
-                          const isExact = variantId ? itemVariantId === variantId : true;
+                          const isExact = variantId
+                            ? itemVariantId === variantId
+                            : true;
                           if (isExact && !exactTargetItem) {
                             exactTargetItem = item;
-                          } else if (!isExact && variantId && !fallbackTargetItem) {
+                          } else if (
+                            !isExact &&
+                            variantId &&
+                            !fallbackTargetItem
+                          ) {
                             fallbackTargetItem = item;
                           }
                         }
@@ -699,7 +705,11 @@ export async function registerRoutes(
                       const resultItem = exactTargetItem ?? fallbackTargetItem;
                       if (resultItem) {
                         history.push({
-                          price: String(resultItem.price_ex_tax ?? resultItem.base_price ?? 0),
+                          price: String(
+                            resultItem.price_ex_tax ??
+                              resultItem.base_price ??
+                              0,
+                          ),
                           date: bcOrder.date_created || "",
                           orderId: bcOrder.id,
                         });
@@ -775,8 +785,13 @@ export async function registerRoutes(
   // ── Price history sync endpoint (for client-side IndexedDB cache) ──────────
   app.get("/api/price-history/sync", requireAuth, async (req, res) => {
     try {
-      const afterMs = req.query.after ? parseInt(req.query.after as string) : null;
-      const limit = Math.min(parseInt((req.query.limit as string) || "10000"), 10000);
+      const afterMs = req.query.after
+        ? parseInt(req.query.after as string)
+        : null;
+      const limit = Math.min(
+        parseInt((req.query.limit as string) || "10000"),
+        10000,
+      );
       const records = await storage.getPriceHistoryForSync(afterMs, limit);
       res.json(records);
     } catch (error: any) {
@@ -785,46 +800,64 @@ export async function registerRoutes(
   });
 
   // ── BigCommerce Price List Records ─────────────────────────────────────────
-  app.get("/api/bigcommerce/price-list/:priceListId/records", requireAuth, async (req, res) => {
-    try {
-      const priceListId = parseInt(req.params.priceListId);
-      const variantIdsStr = req.query.variantIds as string;
-      if (!variantIdsStr) {
-        console.warn("Missing variantIds in price list request for priceListId:", priceListId);
-        return res.json({});
-      }
-      const variantIds = variantIdsStr.split(',').map(Number).filter(n => !isNaN(n) && n > 0);
-      if (variantIds.length === 0) return res.json({});
-
-      const bcCfg = await storage.getSetting("bigcommerce_config");
-      if (!bcCfg?.value) return res.json({});
-      const cfg = typeof bcCfg.value === 'string' ? JSON.parse(bcCfg.value) : bcCfg.value;
-      if (!cfg.storeHash || !cfg.token) return res.json({});
-
-      const params = new URLSearchParams();
-      params.set('variant_id:in', variantIds.join(','));
-      params.set('limit', '50');
-
-      const bcRes = await fetch(
-        `https://api.bigcommerce.com/stores/${cfg.storeHash}/v3/pricelists/${priceListId}/records?${params}`,
-        { headers: { 'X-Auth-Token': String(cfg.token), 'Accept': 'application/json' } }
-      );
-      if (!bcRes.ok) return res.json({});
-
-      const data = await bcRes.json();
-      const result: Record<number, string> = {};
-      for (const record of (data.data ?? [])) {
-        if (!record.variant_id) continue;
-        const price = record.calculated_price ?? record.price ?? null;
-        if (price != null) {
-          result[record.variant_id] = String(price);
+  app.get(
+    "/api/bigcommerce/price-list/:priceListId/records",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const priceListId = parseInt(req.params.priceListId);
+        const variantIdsStr = req.query.variantIds as string;
+        if (!variantIdsStr) {
+          console.warn(
+            "Missing variantIds in price list request for priceListId:",
+            priceListId,
+          );
+          return res.json({});
         }
+        const variantIds = variantIdsStr
+          .split(",")
+          .map(Number)
+          .filter((n) => !isNaN(n) && n > 0);
+        if (variantIds.length === 0) return res.json({});
+
+        const bcCfg = await storage.getSetting("bigcommerce_config");
+        if (!bcCfg?.value) return res.json({});
+        const cfg =
+          typeof bcCfg.value === "string"
+            ? JSON.parse(bcCfg.value)
+            : bcCfg.value;
+        if (!cfg.storeHash || !cfg.token) return res.json({});
+
+        const params = new URLSearchParams();
+        params.set("variant_id:in", variantIds.join(","));
+        params.set("limit", "50");
+
+        const bcRes = await fetch(
+          `https://api.bigcommerce.com/stores/${cfg.storeHash}/v3/pricelists/${priceListId}/records?${params}`,
+          {
+            headers: {
+              "X-Auth-Token": String(cfg.token),
+              Accept: "application/json",
+            },
+          },
+        );
+        if (!bcRes.ok) return res.json({});
+
+        const data = await bcRes.json();
+        const result: Record<number, string> = {};
+        for (const record of data.data ?? []) {
+          if (!record.variant_id) continue;
+          const price = record.calculated_price ?? record.price ?? null;
+          if (price != null) {
+            result[record.variant_id] = String(price);
+          }
+        }
+        res.json(result);
+      } catch {
+        res.json({});
       }
-      res.json(result);
-    } catch {
-      res.json({});
-    }
-  });
+    },
+  );
 
   // Create draft order (for offline mode)
   app.post("/api/orders/draft", requireAuth, async (req, res) => {
@@ -1073,10 +1106,10 @@ export async function registerRoutes(
         }),
       };
 
-      console.log(
-        "Creating BigCommerce order:",
-        JSON.stringify(bcOrderData, null, 2),
-      );
+      //console.log(
+      //  "Creating BigCommerce order:",
+      //  JSON.stringify(bcOrderData, null, 2),
+      //);
 
       // Use v2 Orders API for creation
       const response = await fetch(
@@ -1093,12 +1126,12 @@ export async function registerRoutes(
       );
 
       const responseText = await response.text();
-      console.log("BigCommerce API response:", response.status, responseText);
+      //console.log("BigCommerce API response:", response.status, responseText);
 
       if (response.ok) {
         const data = JSON.parse(responseText);
         const bcOrderId = data.id;
-        console.log("✅ BigCommerce order created successfully:", bcOrderId);
+        //console.log("✅ BigCommerce order created successfully:", bcOrderId);
         await storage.updateOrderStatus(id, "synced", bcOrderId);
         return res.json({ success: true, bigcommerce_order_id: bcOrderId });
       } else {
@@ -1353,12 +1386,9 @@ export async function registerRoutes(
         }
 
         if (!token || !storeHash || !query) {
-          return res
-            .status(400)
-            .json({
-              error:
-                "Missing required parameters (search query or credentials)",
-            });
+          return res.status(400).json({
+            error: "Missing required parameters (search query or credentials)",
+          });
         }
 
         // Call BigCommerce API for products
@@ -1592,7 +1622,12 @@ export async function registerRoutes(
           try {
             const plRes = await fetch(
               `https://api.bigcommerce.com/stores/${storeHash}/v3/pricelists/assignments?customer_group_id:in=${c.customer_group_id}&limit=1`,
-              { headers: { 'X-Auth-Token': String(token), 'Accept': 'application/json' } }
+              {
+                headers: {
+                  "X-Auth-Token": String(token),
+                  Accept: "application/json",
+                },
+              },
             );
             if (plRes.ok) {
               const plData = await plRes.json();
