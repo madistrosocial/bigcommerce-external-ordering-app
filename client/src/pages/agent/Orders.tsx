@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Clock, CheckCircle2, CloudOff, AlertCircle, FileText, Send, Loader2, Search, Edit, User, ShoppingCart, Trash2, Printer, X } from "lucide-react";
+import { Clock, CheckCircle2, CloudOff, AlertCircle, FileText, Send, Loader2, Search, Edit, User, ShoppingCart, Trash2, Printer } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import {
   Dialog,
@@ -74,25 +74,19 @@ export default function Orders() {
   const [isSearching, setIsSearching] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // ── Invoice overlay ────────────────────────────────────────────────────────
-  const [showInvoice, setShowInvoice] = useState(false);
-  const [invoiceUrl, setInvoiceUrl] = useState("");
-  const [invoiceOrderId, setInvoiceOrderId] = useState<number | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  // ── Invoice ────────────────────────────────────────────────────────────────
   const storeHashRef = useRef<string>("");
   useEffect(() => {
     api.getSetting('bigcommerce_config').then(s => {
       if (s?.value?.storeHash) storeHashRef.current = s.value.storeHash;
     }).catch(() => {});
   }, []);
-  const openInvoice = (bcOrderId: number) => {
-    setInvoiceOrderId(bcOrderId);
-    setInvoiceUrl(`https://store-${storeHashRef.current}.mybigcommerce.com/manage/orders/${bcOrderId}/invoice`);
-    setShowInvoice(true);
-  };
-  const handleInvoicePrint = () => {
-    try { iframeRef.current?.contentWindow?.print(); }
-    catch { window.open(invoiceUrl, "_blank"); }
+  const buildInvoiceUrl = (orderId: number) =>
+    `https://store-${storeHashRef.current}.mybigcommerce.com/admin/index.php?ToDo=printOrderInvoice&orderId=${orderId}`;
+  const handlePrintInvoice = (order: api.Order) => {
+    const orderId = order.bigcommerce_order_id || order.id;
+    if (!orderId) return;
+    window.open(buildInvoiceUrl(orderId), "_blank");
   };
 
   const { data: orders = [] } = useQuery({ 
@@ -420,7 +414,7 @@ export default function Orders() {
                           size="sm"
                           variant="outline"
                           className="h-7 text-xs gap-1.5"
-                          onClick={() => openInvoice(order.bigcommerce_order_id!)}
+                          onClick={() => handlePrintInvoice(order)}
                           data-testid={`button-print-invoice-${order.id}`}
                         >
                           <Printer className="h-3 w-3" /> Print Invoice
@@ -619,37 +613,6 @@ export default function Orders() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Invoice Overlay ── */}
-      {showInvoice && (
-        <div className="fixed inset-0 z-[9999] flex flex-col bg-white" data-testid="invoice-overlay-orders">
-          <div className="flex items-center justify-between px-4 py-3 bg-slate-800 text-white shrink-0">
-            <button
-              className="flex items-center gap-1.5 text-sm font-medium hover:text-slate-300"
-              onClick={() => setShowInvoice(false)}
-              data-testid="button-invoice-close-orders"
-            >
-              <X className="h-4 w-4" /> Close
-            </button>
-            <span className="text-sm font-semibold" data-testid="text-invoice-order-id-orders">
-              Invoice — Order #{invoiceOrderId}
-            </span>
-            <button
-              className="flex items-center gap-1.5 text-sm font-medium hover:text-slate-300"
-              onClick={handleInvoicePrint}
-              data-testid="button-invoice-print-orders"
-            >
-              <Printer className="h-4 w-4" /> Print
-            </button>
-          </div>
-          <iframe
-            ref={iframeRef}
-            src={invoiceUrl}
-            className="flex-1 w-full border-0"
-            title="Invoice"
-            data-testid="iframe-invoice-orders"
-          />
-        </div>
-      )}
     </MobileShell>
   );
 }

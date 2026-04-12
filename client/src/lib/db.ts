@@ -179,23 +179,18 @@ export async function getLocalPriceHistory(
   }
 }
 
+export async function clearLocalPriceHistory(): Promise<void> {
+  try {
+    await db.localPriceHistory.clear();
+  } catch {}
+}
+
 export async function saveLocalPriceHistoryBatch(
   entries: Omit<LocalPriceHistoryEntry, 'id'>[]
 ): Promise<number> {
-  let saved = 0;
   try {
-    const toInsert: Omit<LocalPriceHistoryEntry, 'id'>[] = [];
-    for (const entry of entries) {
-      const existing = await db.localPriceHistory
-        .where('[customer_id+product_id+order_id]')
-        .equals([entry.customer_id, entry.product_id, entry.order_id])
-        .count();
-      if (existing === 0) toInsert.push(entry);
-    }
-    if (toInsert.length > 0) {
-      await db.localPriceHistory.bulkAdd(toInsert as LocalPriceHistoryEntry[]);
-      saved = toInsert.length;
-    }
+    await db.localPriceHistory.bulkAdd(entries as LocalPriceHistoryEntry[]);
+    return entries.length;
   } catch {}
-  return saved;
+  return 0;
 }

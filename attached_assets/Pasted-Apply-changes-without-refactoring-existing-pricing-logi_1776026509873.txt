@@ -1,0 +1,161 @@
+Apply changes without refactoring existing pricing logic, checkout flow, Postgres write logic, or UI structure.
+
+---
+
+Implement: Local Price History Sync (Login + Manual Only) + Invoice Print via New Tab
+
+---
+
+1. LOCAL DB SYNC ARCHITECTURE
+
+- Postgres = source of truth
+- Local DB (state / IndexedDB) = read-only mirror
+- NO automatic sync after initial load
+
+---
+
+2. REMOVE AUTO LOCAL SYNC
+
+Remove/disable any logic that updates local price history automatically from:
+
+- product scan
+- price lookup
+- BigCommerce fetch
+- background intervals
+
+DO NOT remove:
+- saving to Postgres
+- backend sync logic
+
+---
+
+3. KEEP POSTGRES WRITE FLOW (UNCHANGED)
+
+Scan / lookup → fetch (if needed) → save to Postgres
+
+---
+
+4. SYNC ON LOGIN (ONLY AUTO SYNC)
+
+useEffect(() => {
+  if (currentUser) {
+    syncPriceHistory();
+  }
+}, [currentUser]);
+
+---
+
+5. SYNC FUNCTION (POSTGRES → LOCAL ONLY)
+
+const syncPriceHistory = async () => {
+  try {
+    setIsSyncing(true);
+
+    const res = await fetch("/api/price-history/sync", {
+      headers: {
+        "x-user-id": currentUser.id
+      }
+    });
+
+    const data = await res.json();
+
+    // overwrite local cache completely
+    setLocalPriceHistory(data);
+
+    console.log("SYNC COMPLETE", data.length);
+
+  } catch (err) {
+    console.error("SYNC FAILED", err);
+  } finally {
+    setIsSyncing(false);
+    setLastSyncTime(Date.now());
+  }
+};
+
+---
+
+6. MANUAL SYNC BUTTON (BOTTOM UI)
+
+Replace existing sync indicator with:
+
+<button onClick={syncPriceHistory} disabled={isSyncing}>
+  {isSyncing ? "Syncing..." : "Sync Prices"}
+</button>
+
+Optional:
+
+<span>
+  Last Sync: {lastSyncTime ? new Date(lastSyncTime).toLocaleTimeString() : "Never"}
+</span>
+
+---
+
+7. LOCAL DATA RULES
+
+- Local DB is READ-ONLY
+- NEVER write local changes back to Postgres
+- Local is only updated by:
+  - login sync
+  - manual sync button
+
+---
+
+8. LOOKUP PRIORITY (DO NOT CHANGE)
+
+Local → Postgres → BigCommerce
+
+---
+
+9. INVOICE PRINT (SIMPLIFY)
+
+REMOVE completely:
+
+- iframe
+- invoice modal
+- invoice state (showInvoice, invoiceUrl)
+- iframe print logic
+
+---
+
+10. BUILD INVOICE URL
+
+const buildInvoiceUrl = (orderId) => {
+  return `https://store-${storeHash}.mybigcommerce.com/admin/index.php?ToDo=printOrderInvoice&orderId=${orderId}`;
+};
+
+---
+
+11. AFTER CHECKOUT
+
+if (bcSuccess && bcOrderId) {
+  const url = buildInvoiceUrl(bcOrderId);
+  window.open(url, "_blank");
+}
+
+---
+
+12. ORDER HISTORY BUTTON (EXISTING BUTTON)
+
+Modify existing button handler ONLY:
+
+const handlePrintInvoice = (order) => {
+  const orderId = order.bigcommerce_order_id || order.id;
+
+  if (!orderId) return;
+
+  const url = buildInvoiceUrl(orderId);
+  window.open(url, "_blank");
+};
+
+DO NOT add new button.
+DO NOT add modal.
+
+---
+
+OUTPUT:
+
+- Local price history syncs once on login and manually thereafter
+- No automatic local updates during usage
+- Postgres remains source of truth
+- Invoice opens in new tab after checkout and from order history
+- Clean, predictable POS behavior

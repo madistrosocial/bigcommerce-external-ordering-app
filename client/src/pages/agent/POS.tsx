@@ -20,7 +20,7 @@ import { Toaster } from "@/components/ui/toaster";
 import {
   Search, Loader2, X, Plus, Minus, Trash2, User,
   ShoppingCart, AlertCircle, CheckCircle2, CreditCard, Package,
-  ChevronDown, Wifi, WifiOff, LogOut, Package as PackageIcon, Monitor, FileText, RotateCw, Printer,
+  ChevronDown, Wifi, WifiOff, LogOut, Package as PackageIcon, Monitor, FileText, RotateCw,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
@@ -455,8 +455,12 @@ export default function POSPage() {
 
   const canSearchBC = currentUser?.allow_bigcommerce_search ?? false;
 
-  // ── Price history background sync ─────────────────────────────────────────
-  const { isSyncing, showTabletPrompt, acceptTabletSync, dismissTabletSync } = usePriceHistorySync();
+  // ── Price history sync (login + manual only) ──────────────────────────────
+  const { isSyncing, lastSyncTime, syncPriceHistory } = usePriceHistorySync();
+  useEffect(() => {
+    if (currentUser) syncPriceHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
 
   // ── Allow Overselling ─────────────────────────────────────────────────────
   const [allowOverselling, setAllowOverselling] = useState<boolean>(
@@ -515,28 +519,15 @@ export default function POSPage() {
   const [navTarget, setNavTarget] = useState<string | null>(null);
   const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
 
-  // ── Invoice overlay ───────────────────────────────────────────────────────
-  const [showInvoice, setShowInvoice] = useState(false);
-  const [invoiceUrl, setInvoiceUrl] = useState("");
-  const [invoiceOrderId, setInvoiceOrderId] = useState<number | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  // ── Invoice ───────────────────────────────────────────────────────────────
   const storeHashRef = useRef<string>("");
-  // Fetch storeHash once on mount for invoice URL building
   useEffect(() => {
     api.getSetting('bigcommerce_config').then(s => {
-      const cfg = s?.value;
-      if (cfg?.storeHash) storeHashRef.current = cfg.storeHash;
+      if (s?.value?.storeHash) storeHashRef.current = s.value.storeHash;
     }).catch(() => {});
   }, []);
   const buildInvoiceUrl = (orderId: number) =>
-    `https://store-${storeHashRef.current}.mybigcommerce.com/manage/orders/${orderId}/invoice`;
-  const handleInvoicePrint = () => {
-    try {
-      iframeRef.current?.contentWindow?.print();
-    } catch {
-      window.open(invoiceUrl, "_blank");
-    }
-  };
+    `https://store-${storeHashRef.current}.mybigcommerce.com/admin/index.php?ToDo=printOrderInvoice&orderId=${orderId}`;
 
   // ── Price history ─────────────────────────────────────────────────────────
   const [priceHistoryCache, setPriceHistoryCache] = useState<Map<string, api.PriceHistoryEntry[]>>(new Map());
@@ -1124,10 +1115,7 @@ export default function POSPage() {
         setSelectedCustomer(null); setSelectedAddress(null); setCustomerAddresses([]);
         setCustomerSearch(""); setOrderNote(""); focusSearch();
         if (response.bigcommerce.order_id) {
-          const bcOrderId = response.bigcommerce.order_id;
-          setInvoiceOrderId(bcOrderId);
-          setInvoiceUrl(buildInvoiceUrl(bcOrderId));
-          setShowInvoice(true);
+          window.open(buildInvoiceUrl(response.bigcommerce.order_id), "_blank");
         }
       } else {
         const errMsg = response.bigcommerce?.error || "Sync failed";
@@ -2007,68 +1995,20 @@ export default function POSPage() {
         />
       )}
 
-      {/* ── Tablet prompt: download pricing history ── */}
-      {showTabletPrompt && (
-        <div className="fixed bottom-4 left-4 z-50 bg-white border rounded-lg shadow-lg px-4 py-3 max-w-xs">
-          <p className="text-xs font-medium text-slate-700 mb-2">Download pricing history for faster lookup?</p>
-          <div className="flex gap-2">
-            <button
-              className="text-xs px-3 py-1 bg-primary text-white rounded hover:bg-primary/90"
-              onClick={acceptTabletSync}
-              data-testid="button-sync-accept"
-            >Yes, download</button>
-            <button
-              className="text-xs px-3 py-1 text-slate-500 hover:text-slate-700"
-              onClick={dismissTabletSync}
-              data-testid="button-sync-dismiss"
-            >Not now</button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Sync indicator ── */}
-      {isSyncing && (
-        <div className="fixed bottom-4 left-4 z-40 flex items-center gap-1.5 text-[10px] text-slate-400 pointer-events-none" data-testid="pos-sync-indicator">
-          <span className="inline-flex gap-0.5">
-            <span className="animate-bounce" style={{ animationDelay: '0ms' }}>•</span>
-            <span className="animate-bounce" style={{ animationDelay: '150ms' }}>•</span>
-            <span className="animate-bounce" style={{ animationDelay: '300ms' }}>•</span>
-          </span>
-          Syncing pricing history...
-        </div>
-      )}
-
-      {/* ── Invoice Overlay ── */}
-      {showInvoice && (
-        <div className="fixed inset-0 z-[9999] flex flex-col bg-white" data-testid="invoice-overlay">
-          <div className="flex items-center justify-between px-4 py-3 bg-slate-800 text-white shrink-0">
-            <button
-              className="flex items-center gap-1.5 text-sm font-medium hover:text-slate-300"
-              onClick={() => setShowInvoice(false)}
-              data-testid="button-invoice-close"
-            >
-              <X className="h-4 w-4" /> Close
-            </button>
-            <span className="text-sm font-semibold" data-testid="text-invoice-order-id">
-              Invoice — Order #{invoiceOrderId}
-            </span>
-            <button
-              className="flex items-center gap-1.5 text-sm font-medium hover:text-slate-300"
-              onClick={handleInvoicePrint}
-              data-testid="button-invoice-print"
-            >
-              <Printer className="h-4 w-4" /> Print
-            </button>
-          </div>
-          <iframe
-            ref={iframeRef}
-            src={invoiceUrl}
-            className="flex-1 w-full border-0"
-            title="Invoice"
-            data-testid="iframe-invoice"
-          />
-        </div>
-      )}
+      {/* ── Manual sync button ── */}
+      <div className="fixed bottom-4 left-4 z-40 flex flex-col items-start gap-0.5" data-testid="pos-sync-controls">
+        <button
+          className="text-[11px] px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 disabled:opacity-50 border border-slate-200"
+          onClick={syncPriceHistory}
+          disabled={isSyncing}
+          data-testid="button-sync-prices"
+        >
+          {isSyncing ? "Syncing..." : "Sync Prices"}
+        </button>
+        <span className="text-[10px] text-slate-400 pl-0.5" data-testid="text-last-sync-time">
+          {lastSyncTime ? `Last sync: ${new Date(lastSyncTime).toLocaleTimeString()}` : "Never synced"}
+        </span>
+      </div>
 
       <Toaster />
     </div>

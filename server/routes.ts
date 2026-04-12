@@ -776,7 +776,7 @@ export async function registerRoutes(
   app.get("/api/price-history/sync", requireAuth, async (req, res) => {
     try {
       const afterMs = req.query.after ? parseInt(req.query.after as string) : null;
-      const limit = Math.min(parseInt((req.query.limit as string) || "200"), 500);
+      const limit = Math.min(parseInt((req.query.limit as string) || "10000"), 10000);
       const records = await storage.getPriceHistoryForSync(afterMs, limit);
       res.json(records);
     } catch (error: any) {
