@@ -55,7 +55,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 p-4">
+    <div className="login-page bg-slate-100 dark:bg-slate-900 p-4">
       <Card className="w-full max-w-md shadow-lg border-t-4 border-t-primary">
         <CardHeader className="text-center pb-2">
           <div className="mx-auto bg-slate-900 text-white p-3 rounded-full w-fit mb-4">
