@@ -772,6 +772,18 @@ export async function registerRoutes(
     },
   );
 
+  // ── Price history sync endpoint (for client-side IndexedDB cache) ──────────
+  app.get("/api/price-history/sync", requireAuth, async (req, res) => {
+    try {
+      const afterMs = req.query.after ? parseInt(req.query.after as string) : null;
+      const limit = Math.min(parseInt((req.query.limit as string) || "200"), 500);
+      const records = await storage.getPriceHistoryForSync(afterMs, limit);
+      res.json(records);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ── BigCommerce Price List Records ─────────────────────────────────────────
   app.get("/api/bigcommerce/price-list/:priceListId/records", requireAuth, async (req, res) => {
     try {

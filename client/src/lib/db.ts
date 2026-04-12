@@ -47,11 +47,23 @@ export interface PriceListCacheEntry {
   cachedAt: number;
 }
 
+export interface LocalPriceHistoryEntry {
+  id?: number;
+  customer_id: number;
+  product_id: number;
+  variant_id: number | null;
+  price: string;
+  order_id: number;
+  order_date: string | null;
+  created_at: string;
+}
+
 export class VanSalesDB extends Dexie {
   products!: Table<Product>;
   orders!: Table<Order>;
   users!: Table<User>;
   priceListCache!: Table<PriceListCacheEntry>;
+  localPriceHistory!: Table<LocalPriceHistoryEntry>;
 
   constructor() {
     super('VanSalesDB');
@@ -65,6 +77,13 @@ export class VanSalesDB extends Dexie {
       orders: '++id, status, date, created_by_user_id',
       users: '++id, username, role',
       priceListCache: 'key, cachedAt'
+    });
+    this.version(3).stores({
+      products: '++id, sku, is_pinned, bigcommerce_id',
+      orders: '++id, status, date, created_by_user_id',
+      users: '++id, username, role',
+      priceListCache: 'key, cachedAt',
+      localPriceHistory: '++id, [customer_id+product_id], [customer_id+product_id+order_id], created_at'
     });
   }
 }
@@ -124,4 +143,59 @@ export async function getPriceListCacheBatch(priceListId: number, variantIds: nu
   } catch {
     return {};
   }
+}
+
+// ── Local price history cache (mirrors Postgres price_history_cache) ──────────
+
+const SYNC_TS_KEY = 'vansales_price_history_last_sync';
+
+export function getLastSyncTimestamp(): number | null {
+  const raw = localStorage.getItem(SYNC_TS_KEY);
+  return raw ? parseInt(raw) : null;
+}
+
+export function setLastSyncTimestamp(ms: number): void {
+  localStorage.setItem(SYNC_TS_KEY, String(ms));
+}
+
+export async function getLocalPriceHistory(
+  customerId: number,
+  bcProductId: number,
+  limit = 10
+): Promise<LocalPriceHistoryEntry[]> {
+  try {
+    const entries = await db.localPriceHistory
+      .where('[customer_id+product_id]')
+      .equals([customerId, bcProductId])
+      .toArray();
+    entries.sort((a, b) => {
+      const aDate = a.order_date ? new Date(a.order_date).getTime() : 0;
+      const bDate = b.order_date ? new Date(b.order_date).getTime() : 0;
+      return bDate - aDate;
+    });
+    return entries.slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+export async function saveLocalPriceHistoryBatch(
+  entries: Omit<LocalPriceHistoryEntry, 'id'>[]
+): Promise<number> {
+  let saved = 0;
+  try {
+    const toInsert: Omit<LocalPriceHistoryEntry, 'id'>[] = [];
+    for (const entry of entries) {
+      const existing = await db.localPriceHistory
+        .where('[customer_id+product_id+order_id]')
+        .equals([entry.customer_id, entry.product_id, entry.order_id])
+        .count();
+      if (existing === 0) toInsert.push(entry);
+    }
+    if (toInsert.length > 0) {
+      await db.localPriceHistory.bulkAdd(toInsert as LocalPriceHistoryEntry[]);
+      saved = toInsert.length;
+    }
+  } catch {}
+  return saved;
 }

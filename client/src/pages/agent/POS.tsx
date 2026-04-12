@@ -25,7 +25,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { CartItem } from "@/lib/store";
-import { getPriceListCacheBatch, setPriceListCacheBatch } from "@/lib/db";
+import { getPriceListCacheBatch, setPriceListCacheBatch, getLocalPriceHistory } from "@/lib/db";
+import { usePriceHistorySync } from "@/lib/usePriceHistorySync";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -454,6 +455,9 @@ export default function POSPage() {
 
   const canSearchBC = currentUser?.allow_bigcommerce_search ?? false;
 
+  // ── Price history background sync ─────────────────────────────────────────
+  const { isSyncing, showTabletPrompt, acceptTabletSync, dismissTabletSync } = usePriceHistorySync();
+
   // ── Allow Overselling ─────────────────────────────────────────────────────
   const [allowOverselling, setAllowOverselling] = useState<boolean>(
     () => localStorage.getItem("pos_allow_overselling") === "true"
@@ -674,6 +678,15 @@ export default function POSPage() {
     if (!selectedCustomer) return [];
     const key = `${selectedCustomer.id}-${item.product.bigcommerce_id}-${item.variant?.id ?? 0}`;
     if (priceHistoryCache.has(key)) return priceHistoryCache.get(key)!;
+    // Check local IndexedDB cache first
+    const local = await getLocalPriceHistory(selectedCustomer.id, item.product.bigcommerce_id, 10);
+    if (local.length > 0) {
+      const mapped: api.PriceHistoryEntry[] = local.map(e => ({
+        price: e.price, date: e.order_date || '', orderId: e.order_id
+      }));
+      setPriceHistoryCache(prev => new Map(prev).set(key, mapped));
+      return mapped;
+    }
     const history = await api.getCustomerPriceHistory(
       selectedCustomer.id, item.product.bigcommerce_id, item.variant?.id
     );
@@ -689,6 +702,15 @@ export default function POSPage() {
     if (!selectedCustomer || !popupProduct) return [];
     const cacheKey = `${selectedCustomer.id}-${popupProduct.bigcommerce_id ?? 0}-${variantId ?? 0}`;
     if (priceHistoryCache.has(cacheKey)) return priceHistoryCache.get(cacheKey)!;
+    // Check local IndexedDB cache first
+    const local = await getLocalPriceHistory(selectedCustomer.id, popupProduct.bigcommerce_id ?? 0, 10);
+    if (local.length > 0) {
+      const mapped: api.PriceHistoryEntry[] = local.map(e => ({
+        price: e.price, date: e.order_date || '', orderId: e.order_id
+      }));
+      setPriceHistoryCache(prev => new Map(prev).set(cacheKey, mapped));
+      return mapped;
+    }
     const history = await api.getCustomerPriceHistory(
       selectedCustomer.id, popupProduct.bigcommerce_id ?? 0, variantId
     );
@@ -878,6 +900,15 @@ export default function POSPage() {
     for (const p of products) {
       productItems.push({ kind: "product", product: p });
     }
+
+    // Sort product items: zero-inventory products go to the bottom
+    productItems.sort((a, b) => {
+      const aStock = getVariants(a.product).reduce((sum: number, v: any) => sum + (v.stock_level ?? 0), 0) || a.product.stock_level || 0;
+      const bStock = getVariants(b.product).reduce((sum: number, v: any) => sum + (v.stock_level ?? 0), 0) || b.product.stock_level || 0;
+      if (aStock <= 0 && bStock > 0) return 1;
+      if (bStock <= 0 && aStock > 0) return -1;
+      return 0;
+    });
 
     // >50 total results → mother products first (easier to pick); ≤50 → variants first
     const totalResults = variantItems.length + productItems.length;
@@ -1369,8 +1400,6 @@ export default function POSPage() {
                     className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-blue-50 transition-colors text-left"
                     onClick={() => {
                       autoAddVariant(s.product, s.variant);
-                      setSearch("");
-                      setSuggestions([]);
                       setShowSuggestions(false);
                       focusSearch();
                     }}
@@ -1405,7 +1434,6 @@ export default function POSPage() {
                     className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left"
                     onClick={() => {
                       openPopupWithFreshStock(s.product, matchedTier);
-                      setSuggestions([]);
                       setShowSuggestions(false);
                     }}
                     data-testid={`suggestion-product-${s.product.id}`}
@@ -1417,7 +1445,17 @@ export default function POSPage() {
                       <p className="text-sm font-medium text-slate-800 truncate">{s.product.name}</p>
                       <p className="text-xs text-slate-500">SKU: {s.product.sku}</p>
                     </div>
-                    <span className="text-xs text-slate-400 shrink-0">Select variant →</span>
+                    <div className="text-right shrink-0">
+                      {(() => {
+                        const totalStock = getVariants(s.product).reduce((sum: number, v: any) => sum + (v.stock_level ?? 0), 0) || s.product.stock_level || 0;
+                        return (
+                          <p className={`text-[10px] font-medium ${totalStock <= 0 ? "text-red-500" : "text-slate-400"}`}>
+                            Stock: {totalStock}
+                          </p>
+                        );
+                      })()}
+                      <span className="text-xs text-slate-400">Select variant →</span>
+                    </div>
                   </button>
                 ))}
               </>
@@ -1929,7 +1967,7 @@ export default function POSPage() {
       {popupProduct && (
         <VariantPopupDialog
           product={popupProduct}
-          onClose={() => { setPopupProduct(null); setPopupFreshVariantStock(new Map()); setPopupPriceListPrices({}); focusSearch(); }}
+          onClose={() => { setPopupProduct(null); setPopupFreshVariantStock(new Map()); setPopupPriceListPrices({}); focusSearch(); if (suggestions.length > 0) setShowSuggestions(true); }}
           onAdd={handlePopupAdd}
           allowOverselling={allowOverselling}
           selectedCustomer={selectedCustomer}
@@ -1938,6 +1976,37 @@ export default function POSPage() {
           priceListPrices={popupPriceListPrices}
           matchedTier={matchedTier}
         />
+      )}
+
+      {/* ── Tablet prompt: download pricing history ── */}
+      {showTabletPrompt && (
+        <div className="fixed bottom-4 left-4 z-50 bg-white border rounded-lg shadow-lg px-4 py-3 max-w-xs">
+          <p className="text-xs font-medium text-slate-700 mb-2">Download pricing history for faster lookup?</p>
+          <div className="flex gap-2">
+            <button
+              className="text-xs px-3 py-1 bg-primary text-white rounded hover:bg-primary/90"
+              onClick={acceptTabletSync}
+              data-testid="button-sync-accept"
+            >Yes, download</button>
+            <button
+              className="text-xs px-3 py-1 text-slate-500 hover:text-slate-700"
+              onClick={dismissTabletSync}
+              data-testid="button-sync-dismiss"
+            >Not now</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Sync indicator ── */}
+      {isSyncing && (
+        <div className="fixed bottom-4 left-4 z-40 flex items-center gap-1.5 text-[10px] text-slate-400 pointer-events-none" data-testid="pos-sync-indicator">
+          <span className="inline-flex gap-0.5">
+            <span className="animate-bounce" style={{ animationDelay: '0ms' }}>•</span>
+            <span className="animate-bounce" style={{ animationDelay: '150ms' }}>•</span>
+            <span className="animate-bounce" style={{ animationDelay: '300ms' }}>•</span>
+          </span>
+          Syncing pricing history...
+        </div>
       )}
 
       <Toaster />

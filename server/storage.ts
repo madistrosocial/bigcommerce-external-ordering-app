@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, users, products, orders, settings, priceHistoryCache } from "@shared/schema";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { eq, desc, and, inArray, gt, asc } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -41,6 +41,7 @@ export interface IStorage {
   // Price history cache operations
   getCachedPriceHistory(customerId: number, bcProductId: number): Promise<PriceHistoryCacheEntry[]>;
   savePriceHistoryCacheEntries(entries: InsertPriceHistoryCache[]): Promise<void>;
+  getPriceHistoryForSync(afterMs: number | null, limit: number): Promise<PriceHistoryCacheEntry[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -205,6 +206,19 @@ export class DatabaseStorage implements IStorage {
         await db.insert(priceHistoryCache).values(entry);
       }
     }
+  }
+
+  async getPriceHistoryForSync(afterMs: number | null, limit: number): Promise<PriceHistoryCacheEntry[]> {
+    if (afterMs) {
+      const afterDate = new Date(afterMs);
+      return db.select().from(priceHistoryCache)
+        .where(gt(priceHistoryCache.created_at, afterDate))
+        .orderBy(asc(priceHistoryCache.created_at))
+        .limit(limit);
+    }
+    return db.select().from(priceHistoryCache)
+      .orderBy(asc(priceHistoryCache.created_at))
+      .limit(limit);
   }
 }
 

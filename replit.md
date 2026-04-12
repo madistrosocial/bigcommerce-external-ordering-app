@@ -49,6 +49,15 @@ Preferred communication style: Simple, everyday language.
 3. **Synced** - Successfully synced with BigCommerce order ID
 4. **Failed** - Sync attempt failed, error message stored in sync_error field
 
+### Local Price History Cache
+- IndexedDB table `localPriceHistory` mirrors the Postgres `price_history_cache` table
+- `getLocalPriceHistory(customerId, productId)` is checked first before backend price history API calls
+- Background sync hook (`usePriceHistorySync`) syncs Postgres records into IndexedDB incrementally
+- Sync is device-aware: mobile skips, tablet prompts user once, desktop syncs automatically when idle (2.5s)
+- Sync endpoint: `GET /api/price-history/sync?after=<ms>&limit=<n>`
+- Last sync timestamp stored in localStorage key `vansales_price_history_last_sync`
+- Sync indicator shown at bottom-left of POS during sync; tablet shows a confirm prompt
+
 ### Offline Mode
 - Automatic detection via browser online/offline events
 - When offline: Customer search disabled, manual input fields shown

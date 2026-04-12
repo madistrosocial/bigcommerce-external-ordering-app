@@ -57,7 +57,7 @@ const API_BASE = '/api';
  * Every protected API call must include these headers so the backend can
  * validate the caller without requiring a separate session cookie.
  */
-function getAuthHeaders(): Record<string, string> {
+export function getAuthHeaders(): Record<string, string> {
   try {
     const raw = localStorage.getItem('vansales_user');
     if (!raw) return {};
