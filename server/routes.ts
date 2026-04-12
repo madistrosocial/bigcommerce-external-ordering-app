@@ -1,28 +1,40 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertOrderSchema, type InsertProduct, type InsertOrder, type InsertPriceHistoryCache } from "@shared/schema";
+import {
+  insertProductSchema,
+  insertOrderSchema,
+  type InsertProduct,
+  type InsertOrder,
+  type InsertPriceHistoryCache,
+} from "@shared/schema";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 
 export async function registerRoutes(
   httpServer: Server,
-  app: Express
+  app: Express,
 ): Promise<Server> {
-
   // ===== AUTH MIDDLEWARE =====
 
   /**
    * Reads x-user-id from the request header, looks up the user in the DB,
    * and verifies the account is active. Attaches the user to req as (req as any).authUser.
    */
-  const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
-    const userId = req.headers['x-user-id'];
-    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+  const requireAuth = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    const userId = req.headers["x-user-id"];
+    if (!userId)
+      return res.status(401).json({ error: "Authentication required" });
 
-    const user = await storage.getUser(parseInt(userId as string)).catch(() => null);
+    const user = await storage
+      .getUser(parseInt(userId as string))
+      .catch(() => null);
     if (!user || !user.is_enabled) {
-      return res.status(401).json({ error: 'Authentication required' });
+      return res.status(401).json({ error: "Authentication required" });
     }
 
     (req as any).authUser = user;
@@ -32,16 +44,23 @@ export async function registerRoutes(
   /**
    * Extends requireAuth — additionally verifies the caller has role === 'admin'.
    */
-  const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
-    const userId = req.headers['x-user-id'];
-    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+  const requireAdmin = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    const userId = req.headers["x-user-id"];
+    if (!userId)
+      return res.status(401).json({ error: "Authentication required" });
 
-    const user = await storage.getUser(parseInt(userId as string)).catch(() => null);
+    const user = await storage
+      .getUser(parseInt(userId as string))
+      .catch(() => null);
     if (!user || !user.is_enabled) {
-      return res.status(401).json({ error: 'Authentication required' });
+      return res.status(401).json({ error: "Authentication required" });
     }
-    if (user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
+    if (user.role !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
     }
 
     (req as any).authUser = user;
@@ -49,7 +68,7 @@ export async function registerRoutes(
   };
 
   // ===== PRODUCT ROUTES =====
-  
+
   // Get all products (for admin view)
   app.get("/api/products", requireAdmin, async (req, res) => {
     try {
@@ -74,10 +93,12 @@ export async function registerRoutes(
   app.post("/api/products", requireAdmin, async (req, res) => {
     try {
       const productData = insertProductSchema.parse(req.body) as InsertProduct;
-      
+
       // Check if product already exists by BigCommerce ID
-      const existing = await storage.getProductByBigCommerceId(productData.bigcommerce_id);
-      
+      const existing = await storage.getProductByBigCommerceId(
+        productData.bigcommerce_id,
+      );
+
       if (existing) {
         // If exists, just pin it
         await storage.updateProductPin(existing.id, true);
@@ -97,7 +118,7 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const { is_pinned } = req.body;
-      
+
       await storage.updateProductPin(id, is_pinned);
       res.json({ success: true });
     } catch (error: any) {
@@ -109,23 +130,31 @@ export async function registerRoutes(
   app.post("/api/products/resync", requireAdmin, async (req, res) => {
     try {
       const pinnedProducts = await storage.getPinnedProducts();
-      
+
       if (pinnedProducts.length === 0) {
-        return res.json({ message: "No pinned products to re-sync", updated: 0 });
+        return res.json({
+          message: "No pinned products to re-sync",
+          updated: 0,
+        });
       }
 
-      const setting = await storage.getSetting('bigcommerce_config');
+      const setting = await storage.getSetting("bigcommerce_config");
       let storeHash = process.env.BC_STORE_HASH;
       let token = process.env.BC_TOKEN;
 
       if (setting && setting.value) {
-        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        const config =
+          typeof setting.value === "string"
+            ? JSON.parse(setting.value)
+            : setting.value;
         storeHash = config.storeHash || storeHash;
         token = config.token || token;
       }
 
       if (!token || !storeHash) {
-        return res.status(400).json({ error: "BigCommerce credentials not configured" });
+        return res
+          .status(400)
+          .json({ error: "BigCommerce credentials not configured" });
       }
 
       let updated = 0;
@@ -138,37 +167,43 @@ export async function registerRoutes(
             `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product.bigcommerce_id}?include=variants`,
             {
               headers: {
-                'X-Auth-Token': String(token),
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-              }
-            }
+                "X-Auth-Token": String(token),
+                "Content-Type": "application/json",
+                Accept: "application/json",
+              },
+            },
           );
 
           if (!response.ok) {
-            console.error(`Failed to fetch product ${product.bigcommerce_id}:`, response.status, response.statusText);
+            console.error(
+              `Failed to fetch product ${product.bigcommerce_id}:`,
+              response.status,
+              response.statusText,
+            );
             errors++;
             continue;
           }
 
           const { data: p } = await response.json();
-          
+
           // Transform variant data with full option_values
           // Always preserve at least one variant (base variant if no variants returned)
-          const variants = (p.variants && p.variants.length > 0) 
-            ? p.variants.map((v: any) => ({
-                id: v.id,
-                sku: v.sku,
-                price: v.price?.toString() || p.price?.toString() || product.price,
-                stock_level: v.inventory_level || 0,
-                option_values: (v.option_values || []).map((ov: any) => ({
-                  id: ov.id,
-                  option_id: ov.option_id,
-                  label: ov.label,
-                  option_display_name: ov.option_display_name
+          const variants =
+            p.variants && p.variants.length > 0
+              ? p.variants.map((v: any) => ({
+                  id: v.id,
+                  sku: v.sku,
+                  price:
+                    v.price?.toString() || p.price?.toString() || product.price,
+                  stock_level: v.inventory_level || 0,
+                  option_values: (v.option_values || []).map((ov: any) => ({
+                    id: ov.id,
+                    option_id: ov.option_id,
+                    label: ov.label,
+                    option_display_name: ov.option_display_name,
+                  })),
                 }))
-              }))
-            : product.variants; // Keep existing variants if none returned
+              : product.variants; // Keep existing variants if none returned
 
           // Update the product with fresh variant data
           await storage.updateProductByBigCommerceId(product.bigcommerce_id, {
@@ -178,30 +213,36 @@ export async function registerRoutes(
             name: p.name || product.name,
             sku: p.sku || product.sku,
             image: p.primary_image?.url_standard || product.image,
-            description: p.description ? p.description.replace(/<[^>]*>?/gm, '') : product.description,
+            description: p.description
+              ? p.description.replace(/<[^>]*>?/gm, "")
+              : product.description,
           });
 
           updated++;
         } catch (err) {
-          console.error(`Failed to re-sync product ${product.bigcommerce_id}:`, err);
+          console.error(
+            `Failed to re-sync product ${product.bigcommerce_id}:`,
+            err,
+          );
           errors++;
         }
       }
 
       if (errors > 0 && updated === 0) {
-        return res.status(502).json({ 
+        return res.status(502).json({
           error: `Failed to re-sync all ${pinnedProducts.length} products. Check server logs for details.`,
           updated: 0,
-          errors
+          errors,
         });
       }
 
-      res.json({ 
-        message: errors > 0 
-          ? `Re-synced ${updated} products (${errors} failed)`
-          : `Re-synced ${updated} products successfully`, 
+      res.json({
+        message:
+          errors > 0
+            ? `Re-synced ${updated} products (${errors} failed)`
+            : `Re-synced ${updated} products successfully`,
         updated,
-        errors
+        errors,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -209,7 +250,7 @@ export async function registerRoutes(
   });
 
   // ===== USER ROUTES =====
-  
+
   // Get all agents (for admin user management)
   app.get("/api/users/agents", requireAdmin, async (req, res) => {
     try {
@@ -247,14 +288,18 @@ export async function registerRoutes(
   app.post("/api/users", requireAdmin, async (req, res) => {
     try {
       const { username, password, name, role } = req.body;
-      
+
       // Validate role
-      const validRoles = ['admin', 'agent'];
-      const normalizedRole = (role || 'agent').toLowerCase();
+      const validRoles = ["admin", "agent"];
+      const normalizedRole = (role || "agent").toLowerCase();
       if (!validRoles.includes(normalizedRole)) {
-        return res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+        return res
+          .status(400)
+          .json({
+            error: `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+          });
       }
-      
+
       const existing = await storage.getUserByUsername(username);
       if (existing) {
         return res.status(400).json({ error: "Username already exists" });
@@ -266,7 +311,7 @@ export async function registerRoutes(
         password: hashedPassword,
         name,
         role: normalizedRole,
-        is_enabled: true
+        is_enabled: true,
       });
 
       const { password: _, ...safeUser } = user;
@@ -281,7 +326,7 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const { is_enabled } = req.body;
-      
+
       await storage.updateUserStatus(id, is_enabled);
       res.json({ success: true });
     } catch (error: any) {
@@ -294,7 +339,7 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const { allow_bigcommerce_search } = req.body;
-      
+
       await storage.updateUserPermission(id, allow_bigcommerce_search);
       res.json({ success: true });
     } catch (error: any) {
@@ -306,9 +351,9 @@ export async function registerRoutes(
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { username, password } = req.body;
-      
+
       const user = await storage.getUserByUsername(username);
-      
+
       if (!user) {
         return res.status(401).json({ error: "Invalid credentials" });
       }
@@ -320,7 +365,7 @@ export async function registerRoutes(
 
       // Verify password
       const isValid = await bcrypt.compare(password, user.password);
-      
+
       if (!isValid) {
         return res.status(401).json({ error: "Invalid credentials" });
       }
@@ -334,83 +379,94 @@ export async function registerRoutes(
   });
 
   // ===== ORDER ROUTES =====
-  
+
   // Create order with immediate sync attempt
   app.post("/api/orders", requireAuth, async (req, res) => {
     try {
       // Parse and create order with status 'pending_sync'
       const orderData = insertOrderSchema.parse(req.body) as InsertOrder;
-      
+
       // Validate billing address is provided for BigCommerce orders
       if (!orderData.billing_address || !orderData.billing_address.street_1) {
-        return res.status(400).json({ error: "Billing address is required for order creation" });
+        return res
+          .status(400)
+          .json({ error: "Billing address is required for order creation" });
       }
-      
-      orderData.status = 'pending_sync';
+
+      orderData.status = "pending_sync";
       const order = await storage.createOrder(orderData);
-      
+
       // Get settings
       const bcSetting = await storage.getSetting("bigcommerce_config");
       const webhookSetting = await storage.getSetting("google_sheets_webhook");
-      
+
       let bcSuccess = false;
       let bcOrderId: number | undefined;
       let bcError = "";
       let sheetsSuccess = false;
       let sheetsError = "";
-      
+
       // Try to sync to BigCommerce
       if (bcSetting && bcSetting.value) {
-        const config = typeof bcSetting.value === 'string' ? JSON.parse(bcSetting.value) : bcSetting.value;
+        const config =
+          typeof bcSetting.value === "string"
+            ? JSON.parse(bcSetting.value)
+            : bcSetting.value;
         const storeHash = config.storeHash;
         const token = config.token;
-        
+
         if (storeHash && token) {
           try {
             const nameParts = order.customer_name.trim().split(/\s+/);
             const firstName = nameParts[0] || "Customer";
             const lastName = nameParts.slice(1).join(" ") || "Customer";
-            
+
             const bcOrderData = {
               status_id: 1,
               customer_id: order.bigcommerce_customer_id || 0,
               billing_address: order.billing_address,
               staff_notes: order.order_note || undefined,
-              products: (order.items as any[]).map(item => {
+              products: (order.items as any[]).map((item) => {
                 const productData: any = {
                   product_id: item.bigcommerce_product_id,
                   quantity: item.quantity,
                   price_inc_tax: parseFloat(item.price_at_sale),
-                  price_ex_tax: parseFloat(item.price_at_sale)
+                  price_ex_tax: parseFloat(item.price_at_sale),
                 };
-                if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
-                  productData.product_options = item.variant_option_values.map((ov: any) => ({
-                    id: ov.option_id,
-                    value: String(ov.id)
-                  }));
+                if (
+                  item.variant_option_values &&
+                  Array.isArray(item.variant_option_values) &&
+                  item.variant_option_values.length > 0
+                ) {
+                  productData.product_options = item.variant_option_values.map(
+                    (ov: any) => ({
+                      id: ov.option_id,
+                      value: String(ov.id),
+                    }),
+                  );
                 }
                 return productData;
-              })
+              }),
             };
-            
+
             const response = await fetch(
               `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
               {
-                method: 'POST',
+                method: "POST",
                 headers: {
-                  'X-Auth-Token': String(token),
-                  'Content-Type': 'application/json',
-                  'Accept': 'application/json'
+                  "X-Auth-Token": String(token),
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
                 },
-                body: JSON.stringify(bcOrderData)
-              }
+                body: JSON.stringify(bcOrderData),
+              },
             );
-            
+
             if (response.ok) {
               const data = await response.json();
               bcOrderId = data.id;
               bcSuccess = true;
-              await storage.updateOrderStatus(order.id!, 'synced', bcOrderId);
+              await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
             } else {
               const errorText = await response.text();
               bcError = `BigCommerce sync failed: ${errorText}`;
@@ -422,11 +478,14 @@ export async function registerRoutes(
           }
         }
       }
-      
+
       // Log to Google Sheets webhook
       if (webhookSetting && webhookSetting.value) {
         try {
-          const webhookUrl = typeof webhookSetting.value === 'string' ? webhookSetting.value : null;
+          const webhookUrl =
+            typeof webhookSetting.value === "string"
+              ? webhookSetting.value
+              : null;
           if (webhookUrl) {
             const sheetsData = {
               order_id: order.id,
@@ -435,15 +494,15 @@ export async function registerRoutes(
               date: order.date,
               bigcommerce_order_id: bcOrderId || null,
               bigcommerce_synced: bcSuccess,
-              items: order.items
+              items: order.items,
             };
-            
+
             const sheetsResponse = await fetch(webhookUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(sheetsData)
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(sheetsData),
             });
-            
+
             sheetsSuccess = sheetsResponse.ok;
             if (!sheetsSuccess) {
               sheetsError = `Google Sheets logging failed: ${sheetsResponse.statusText}`;
@@ -453,7 +512,7 @@ export async function registerRoutes(
           sheetsError = `Google Sheets logging error: ${e.message}`;
         }
       }
-      
+
       // Return comprehensive status
       const updatedOrder = await storage.getOrder(order.id!);
       res.json({
@@ -461,12 +520,12 @@ export async function registerRoutes(
         bigcommerce: {
           success: bcSuccess,
           order_id: bcOrderId,
-          error: bcError || undefined
+          error: bcError || undefined,
         },
         google_sheets: {
           success: sheetsSuccess,
-          error: sheetsError || undefined
-        }
+          error: sheetsError || undefined,
+        },
       });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -516,158 +575,210 @@ export async function registerRoutes(
   });
 
   // Price history: recent prices a BC customer paid for a specific product/variant
-  app.get("/api/orders/customer/:bcCustomerId/price-history", requireAuth, async (req, res) => {
-    try {
-      const bcCustomerId = parseInt(req.params.bcCustomerId);
-      const bcProductId = req.query.bcProductId ? parseInt(req.query.bcProductId as string) : null;
-      const variantId = req.query.variantId ? parseInt(req.query.variantId as string) : null;
+  app.get(
+    "/api/orders/customer/:bcCustomerId/price-history",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const bcCustomerId = parseInt(req.params.bcCustomerId);
+        const bcProductId = req.query.bcProductId
+          ? parseInt(req.query.bcProductId as string)
+          : null;
+        const variantId = req.query.variantId
+          ? parseInt(req.query.variantId as string)
+          : null;
 
-      const GOAL = 5;
-      const history: { price: string; date: string; orderId?: number }[] = [];
+        const GOAL = 5;
+        const history: { price: string; date: string; orderId?: number }[] = [];
 
-      // ── Layer 1: Check Postgres cache first ──────────────────────────────
-      if (bcProductId) {
-        const cached = await storage.getCachedPriceHistory(bcCustomerId, bcProductId);
-        cached.sort((a, b) =>
-          new Date(b.order_date || 0).getTime() - new Date(a.order_date || 0).getTime()
-        );
-        if (cached.length >= GOAL) {
-          return res.json(cached.slice(0, GOAL).map(e => ({
-            price: e.price,
-            date: e.order_date || '',
-            orderId: e.order_id,
-          })));
-        }
-        // Pre-fill from cache, track already-seen order IDs
-        const seenOrderIds = new Set<number>();
-        for (const e of cached) {
-          history.push({ price: e.price, date: e.order_date || '', orderId: e.order_id });
-          seenOrderIds.add(e.order_id);
-        }
+        // ── Layer 1: Check Postgres cache first ──────────────────────────────
+        if (bcProductId) {
+          const cached = await storage.getCachedPriceHistory(
+            bcCustomerId,
+            bcProductId,
+          );
+          cached.sort(
+            (a, b) =>
+              new Date(b.order_date || 0).getTime() -
+              new Date(a.order_date || 0).getTime(),
+          );
+          if (cached.length >= GOAL) {
+            return res.json(
+              cached.slice(0, GOAL).map((e) => ({
+                price: e.price,
+                date: e.order_date || "",
+                orderId: e.order_id,
+              })),
+            );
+          }
+          // Pre-fill from cache, track already-seen order IDs
+          const seenOrderIds = new Set<number>();
+          for (const e of cached) {
+            history.push({
+              price: e.price,
+              date: e.order_date || "",
+              orderId: e.order_id,
+            });
+            seenOrderIds.add(e.order_id);
+          }
 
-        // ── Layer 2: BigCommerce scan for remaining slots ──────────────────
-        const bcCfg = await storage.getSetting("bigcommerce_config");
-        if (bcCfg && bcCfg.value) {
-          const cfg = typeof bcCfg.value === 'string' ? JSON.parse(bcCfg.value) : bcCfg.value;
-          const storeHash = cfg.storeHash;
-          const token = cfg.token;
-          if (storeHash && token) {
-            const newCacheEntries: InsertPriceHistoryCache[] = [];
-            try {
-              const bcHeaders = {
-                'X-Auth-Token': String(token),
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-              };
-              const PAGE_SIZE = 25;
-              let page = 1;
-              let morePages = true;
-              while (morePages && history.length < GOAL) {
-                const ordersRes = await fetch(
-                  `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?customer_id=${bcCustomerId}&sort=date_created:desc&limit=${PAGE_SIZE}&page=${page}`,
-                  { headers: bcHeaders }
-                );
-                if (!ordersRes.ok) break;
-                const bcOrders: any[] = await ordersRes.json();
-                if (!Array.isArray(bcOrders) || bcOrders.length === 0) break;
-                if (bcOrders.length < PAGE_SIZE) morePages = false;
-                for (const bcOrder of bcOrders) {
-                  if (history.length >= GOAL) break;
-                  if (seenOrderIds.has(bcOrder.id)) continue;
-                  try {
-                    const itemsRes = await fetch(
-                      `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrder.id}/products?limit=250`,
-                      { headers: bcHeaders }
-                    );
-                    if (!itemsRes.ok) continue;
-                    const bcItems: any[] = await itemsRes.json();
-                    let matched = false;
-                    for (const item of bcItems) {
-                      if (item.product_id !== bcProductId) continue;
-                      const itemVariantId = item.variant_id || 0;
-                      const isExact = variantId ? itemVariantId === variantId : true;
-                      if (isExact) {
-                        const price = item.price_ex_tax ?? item.base_price ?? 0;
-                        const entry = { price: String(price), date: bcOrder.date_created || '', orderId: bcOrder.id };
-                        history.push(entry);
-                        seenOrderIds.add(bcOrder.id);
-                        newCacheEntries.push({
-                          customer_id: bcCustomerId,
-                          product_id: bcProductId,
-                          variant_id: itemVariantId || null,
-                          price: String(price),
-                          order_id: bcOrder.id,
-                          order_date: bcOrder.date_created || null,
-                        });
-                        matched = true;
-                        break;
-                      }
-                    }
-                    if (!matched && variantId) {
+          // ── Layer 2: BigCommerce scan for remaining slots ──────────────────
+          const bcCfg = await storage.getSetting("bigcommerce_config");
+          if (bcCfg && bcCfg.value) {
+            const cfg =
+              typeof bcCfg.value === "string"
+                ? JSON.parse(bcCfg.value)
+                : bcCfg.value;
+            const storeHash = cfg.storeHash;
+            const token = cfg.token;
+            if (storeHash && token) {
+              const newCacheEntries: InsertPriceHistoryCache[] = [];
+              try {
+                const bcHeaders = {
+                  "X-Auth-Token": String(token),
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
+                };
+                const PAGE_SIZE = 25;
+                let page = 1;
+                let morePages = true;
+                while (morePages && history.length < GOAL) {
+                  const ordersRes = await fetch(
+                    `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?customer_id=${bcCustomerId}&sort=date_created:desc&limit=${PAGE_SIZE}&page=${page}`,
+                    { headers: bcHeaders },
+                  );
+                  if (!ordersRes.ok) break;
+                  const bcOrders: any[] = await ordersRes.json();
+                  if (!Array.isArray(bcOrders) || bcOrders.length === 0) break;
+                  if (bcOrders.length < PAGE_SIZE) morePages = false;
+                  for (const bcOrder of bcOrders) {
+                    if (history.length >= GOAL) break;
+                    if (seenOrderIds.has(bcOrder.id)) continue;
+                    try {
+                      const itemsRes = await fetch(
+                        `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrder.id}/products?limit=250`,
+                        { headers: bcHeaders },
+                      );
+                      if (!itemsRes.ok) continue;
+                      const bcItems: any[] = await itemsRes.json();
+                      let matched = false;
                       for (const item of bcItems) {
                         if (item.product_id !== bcProductId) continue;
-                        const price = item.price_ex_tax ?? item.base_price ?? 0;
-                        history.push({ price: String(price), date: bcOrder.date_created || '', orderId: bcOrder.id });
-                        seenOrderIds.add(bcOrder.id);
-                        newCacheEntries.push({
-                          customer_id: bcCustomerId,
-                          product_id: bcProductId,
-                          variant_id: item.variant_id || null,
-                          price: String(price),
-                          order_id: bcOrder.id,
-                          order_date: bcOrder.date_created || null,
-                        });
-                        break;
+                        const itemVariantId = item.variant_id || 0;
+                        const isExact = variantId
+                          ? itemVariantId === variantId
+                          : true;
+                        if (isExact) {
+                          const price =
+                            item.price_ex_tax ?? item.base_price ?? 0;
+                          const entry = {
+                            price: String(price),
+                            date: bcOrder.date_created || "",
+                            orderId: bcOrder.id,
+                          };
+                          history.push(entry);
+                          seenOrderIds.add(bcOrder.id);
+                          newCacheEntries.push({
+                            customer_id: bcCustomerId,
+                            product_id: bcProductId,
+                            variant_id: itemVariantId || null,
+                            price: String(price),
+                            order_id: bcOrder.id,
+                            order_date: bcOrder.date_created || null,
+                          });
+                          matched = true;
+                          break;
+                        }
                       }
-                    }
-                  } catch {}
+                      if (!matched && variantId) {
+                        for (const item of bcItems) {
+                          if (item.product_id !== bcProductId) continue;
+                          const price =
+                            item.price_ex_tax ?? item.base_price ?? 0;
+                          history.push({
+                            price: String(price),
+                            date: bcOrder.date_created || "",
+                            orderId: bcOrder.id,
+                          });
+                          seenOrderIds.add(bcOrder.id);
+                          newCacheEntries.push({
+                            customer_id: bcCustomerId,
+                            product_id: bcProductId,
+                            variant_id: item.variant_id || null,
+                            price: String(price),
+                            order_id: bcOrder.id,
+                            order_date: bcOrder.date_created || null,
+                          });
+                          break;
+                        }
+                      }
+                    } catch {}
+                  }
+                  page++;
                 }
-                page++;
+              } catch {}
+              // Save new entries to Postgres cache (non-blocking)
+              if (newCacheEntries.length > 0) {
+                storage
+                  .savePriceHistoryCacheEntries(newCacheEntries)
+                  .catch(() => {});
               }
-            } catch {}
-            // Save new entries to Postgres cache (non-blocking)
-            if (newCacheEntries.length > 0) {
-              storage.savePriceHistoryCacheEntries(newCacheEntries).catch(() => {});
             }
           }
         }
-      }
 
-      // ── Fallback: app-stored synced orders ────────────────────────────────
-      if (history.length < GOAL) {
-        const appOrders = await storage.getOrdersByBcCustomerId(bcCustomerId, ['synced']);
-        for (const o of appOrders) {
-          if (history.length >= GOAL) break;
-          const items = Array.isArray(o.items) ? o.items : [];
-          let matched = false;
-          for (const item of items as any[]) {
-            const productMatch = bcProductId ? item.bigcommerce_product_id === bcProductId : true;
-            const variantMatch = variantId ? item.variant_id === variantId : true;
-            if (productMatch && variantMatch) {
-              history.push({ price: item.price_at_sale, date: o.date ? String(o.date) : "", orderId: o.bigcommerce_order_id ?? o.id });
-              matched = true;
-              break;
-            }
-          }
-          if (!matched && variantId && bcProductId) {
+        // ── Fallback: app-stored synced orders ────────────────────────────────
+        if (history.length < GOAL) {
+          const appOrders = await storage.getOrdersByBcCustomerId(
+            bcCustomerId,
+            ["synced"],
+          );
+          for (const o of appOrders) {
+            if (history.length >= GOAL) break;
+            const items = Array.isArray(o.items) ? o.items : [];
+            let matched = false;
             for (const item of items as any[]) {
-              if (item.bigcommerce_product_id === bcProductId) {
-                history.push({ price: item.price_at_sale, date: o.date ? String(o.date) : "", orderId: o.bigcommerce_order_id ?? o.id });
+              const productMatch = bcProductId
+                ? item.bigcommerce_product_id === bcProductId
+                : true;
+              const variantMatch = variantId
+                ? item.variant_id === variantId
+                : true;
+              if (productMatch && variantMatch) {
+                history.push({
+                  price: item.price_at_sale,
+                  date: o.date ? String(o.date) : "",
+                  orderId: o.bigcommerce_order_id ?? o.id,
+                });
+                matched = true;
                 break;
               }
             }
+            if (!matched && variantId && bcProductId) {
+              for (const item of items as any[]) {
+                if (item.bigcommerce_product_id === bcProductId) {
+                  history.push({
+                    price: item.price_at_sale,
+                    date: o.date ? String(o.date) : "",
+                    orderId: o.bigcommerce_order_id ?? o.id,
+                  });
+                  break;
+                }
+              }
+            }
           }
         }
-      }
 
-      history.sort((a, b) =>
-        new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
-      );
-      res.json(history);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
+        history.sort(
+          (a, b) =>
+            new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
+        );
+        res.json(history);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
 
   // ── BigCommerce Price List Records ─────────────────────────────────────────
   app.get("/api/bigcommerce/price-list/:priceListId/records", requireAuth, async (req, res) => {
@@ -715,7 +826,7 @@ export async function registerRoutes(
   app.post("/api/orders/draft", requireAuth, async (req, res) => {
     try {
       const orderData = insertOrderSchema.parse(req.body) as InsertOrder;
-      orderData.status = 'draft';
+      orderData.status = "draft";
       const order = await storage.createOrder(orderData);
       res.json(order);
     } catch (error: any) {
@@ -728,13 +839,13 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const { bigcommerce_customer_id, billing_address } = req.body;
-      
+
       const order = await storage.getOrder(id);
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
       }
-      
-      if (order.status !== 'draft') {
+
+      if (order.status !== "draft") {
         return res.status(400).json({ error: "Order is not a draft" });
       }
 
@@ -742,7 +853,7 @@ export async function registerRoutes(
       await storage.updateOrderForSubmission(id, {
         bigcommerce_customer_id,
         billing_address,
-        status: 'pending_sync'
+        status: "pending_sync",
       });
 
       // Get updated order
@@ -751,19 +862,22 @@ export async function registerRoutes(
       // Get settings
       const bcSetting = await storage.getSetting("bigcommerce_config");
       const webhookSetting = await storage.getSetting("google_sheets_webhook");
-      
+
       let bcSuccess = false;
       let bcOrderId: number | undefined;
       let bcError = "";
       let sheetsSuccess = false;
       let sheetsError = "";
-      
+
       // Try to sync to BigCommerce
       if (bcSetting && bcSetting.value) {
-        const config = typeof bcSetting.value === 'string' ? JSON.parse(bcSetting.value) : bcSetting.value;
+        const config =
+          typeof bcSetting.value === "string"
+            ? JSON.parse(bcSetting.value)
+            : bcSetting.value;
         const storeHash = config.storeHash;
         const token = config.token;
-        
+
         if (storeHash && token) {
           try {
             const bcOrderData = {
@@ -771,41 +885,47 @@ export async function registerRoutes(
               customer_id: bigcommerce_customer_id || 0,
               billing_address: billing_address,
               staff_notes: updatedOrder!.order_note || undefined,
-              products: (updatedOrder!.items as any[]).map(item => {
+              products: (updatedOrder!.items as any[]).map((item) => {
                 const productData: any = {
                   product_id: item.bigcommerce_product_id,
                   quantity: item.quantity,
                   price_inc_tax: parseFloat(item.price_at_sale),
-                  price_ex_tax: parseFloat(item.price_at_sale)
+                  price_ex_tax: parseFloat(item.price_at_sale),
                 };
-                if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
-                  productData.product_options = item.variant_option_values.map((ov: any) => ({
-                    id: ov.option_id,
-                    value: String(ov.id)
-                  }));
+                if (
+                  item.variant_option_values &&
+                  Array.isArray(item.variant_option_values) &&
+                  item.variant_option_values.length > 0
+                ) {
+                  productData.product_options = item.variant_option_values.map(
+                    (ov: any) => ({
+                      id: ov.option_id,
+                      value: String(ov.id),
+                    }),
+                  );
                 }
                 return productData;
-              })
+              }),
             };
-            
+
             const response = await fetch(
               `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
               {
-                method: 'POST',
+                method: "POST",
                 headers: {
-                  'X-Auth-Token': String(token),
-                  'Content-Type': 'application/json',
-                  'Accept': 'application/json'
+                  "X-Auth-Token": String(token),
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
                 },
-                body: JSON.stringify(bcOrderData)
-              }
+                body: JSON.stringify(bcOrderData),
+              },
             );
-            
+
             if (response.ok) {
               const data = await response.json();
               bcOrderId = data.id;
               bcSuccess = true;
-              await storage.updateOrderStatus(id, 'synced', bcOrderId);
+              await storage.updateOrderStatus(id, "synced", bcOrderId);
             } else {
               const errorText = await response.text();
               bcError = `BigCommerce sync failed: ${errorText}`;
@@ -817,11 +937,14 @@ export async function registerRoutes(
           }
         }
       }
-      
+
       // Log to Google Sheets webhook
       if (webhookSetting && webhookSetting.value && bcSuccess) {
         try {
-          const webhookUrl = typeof webhookSetting.value === 'string' ? webhookSetting.value : null;
+          const webhookUrl =
+            typeof webhookSetting.value === "string"
+              ? webhookSetting.value
+              : null;
           if (webhookUrl) {
             const sheetsData = {
               order_id: id,
@@ -830,15 +953,15 @@ export async function registerRoutes(
               date: updatedOrder!.date,
               bigcommerce_order_id: bcOrderId || null,
               bigcommerce_synced: bcSuccess,
-              items: updatedOrder!.items
+              items: updatedOrder!.items,
             };
-            
+
             const sheetsResponse = await fetch(webhookUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(sheetsData)
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(sheetsData),
             });
-            
+
             sheetsSuccess = sheetsResponse.ok;
             if (!sheetsSuccess) {
               sheetsError = `Google Sheets logging failed: ${sheetsResponse.statusText}`;
@@ -848,7 +971,7 @@ export async function registerRoutes(
           sheetsError = `Google Sheets logging error: ${e.message}`;
         }
       }
-      
+
       // Return comprehensive status
       const finalOrder = await storage.getOrder(id);
       res.json({
@@ -856,12 +979,12 @@ export async function registerRoutes(
         bigcommerce: {
           success: bcSuccess,
           order_id: bcOrderId,
-          error: bcError || undefined
+          error: bcError || undefined,
         },
         google_sheets: {
           success: sheetsSuccess,
-          error: sheetsError || undefined
-        }
+          error: sheetsError || undefined,
+        },
       });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -873,7 +996,7 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const order = await storage.getOrder(id);
-      
+
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
       }
@@ -884,13 +1007,18 @@ export async function registerRoutes(
       let token = process.env.BC_TOKEN;
 
       if (setting && setting.value) {
-        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        const config =
+          typeof setting.value === "string"
+            ? JSON.parse(setting.value)
+            : setting.value;
         storeHash = config.storeHash || storeHash;
         token = config.token || token;
       }
 
       if (!storeHash || !token) {
-        return res.status(400).json({ error: "BigCommerce credentials not configured" });
+        return res
+          .status(400)
+          .json({ error: "BigCommerce credentials not configured" });
       }
 
       // Split customer name into first and last name
@@ -911,98 +1039,113 @@ export async function registerRoutes(
           zip: "78701",
           country: "United States",
           country_iso2: "US",
-          email: "customer@example.com"
+          email: "customer@example.com",
         },
-        products: (order.items as any[]).map(item => {
+        products: (order.items as any[]).map((item) => {
           const productData: any = {
             product_id: item.bigcommerce_product_id,
             quantity: item.quantity,
             price_inc_tax: parseFloat(item.price_at_sale),
-            price_ex_tax: parseFloat(item.price_at_sale)
+            price_ex_tax: parseFloat(item.price_at_sale),
           };
-          
+
           // Include product_options if variant has option_values
           // Note: We need to fetch the variant details to get option_values
           // For now, if item has variant info with option_values, map them
-          if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
-            productData.product_options = item.variant_option_values.map((ov: any) => ({
-              id: ov.option_id,
-              value: String(ov.id)
-            }));
+          if (
+            item.variant_option_values &&
+            Array.isArray(item.variant_option_values) &&
+            item.variant_option_values.length > 0
+          ) {
+            productData.product_options = item.variant_option_values.map(
+              (ov: any) => ({
+                id: ov.option_id,
+                value: String(ov.id),
+              }),
+            );
           }
-          
+
           return productData;
-        })
+        }),
       };
 
-      console.log('Creating BigCommerce order:', JSON.stringify(bcOrderData, null, 2));
+      console.log(
+        "Creating BigCommerce order:",
+        JSON.stringify(bcOrderData, null, 2),
+      );
 
       // Use v2 Orders API for creation
       const response = await fetch(
         `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
         {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'X-Auth-Token': String(token),
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            "X-Auth-Token": String(token),
+            "Content-Type": "application/json",
+            Accept: "application/json",
           },
-          body: JSON.stringify(bcOrderData)
-        }
+          body: JSON.stringify(bcOrderData),
+        },
       );
 
       const responseText = await response.text();
-      console.log('BigCommerce API response:', response.status, responseText);
+      console.log("BigCommerce API response:", response.status, responseText);
 
       if (response.ok) {
         const data = JSON.parse(responseText);
         const bcOrderId = data.id;
-        console.log('✅ BigCommerce order created successfully:', bcOrderId);
-        await storage.updateOrderStatus(id, 'synced', bcOrderId);
+        console.log("✅ BigCommerce order created successfully:", bcOrderId);
+        await storage.updateOrderStatus(id, "synced", bcOrderId);
         return res.json({ success: true, bigcommerce_order_id: bcOrderId });
       } else {
         // Parse error response
         let errorMessage = `BigCommerce API error: ${response.status}`;
         try {
           const errorData = JSON.parse(responseText);
-          errorMessage = errorData.title || errorData.message || JSON.stringify(errorData);
+          errorMessage =
+            errorData.title || errorData.message || JSON.stringify(errorData);
         } catch (e) {
           errorMessage = responseText || errorMessage;
         }
-        
-        console.error('❌ BigCommerce order creation failed:', errorMessage);
-        return res.status(response.status).json({ 
+
+        console.error("❌ BigCommerce order creation failed:", errorMessage);
+        return res.status(response.status).json({
           error: errorMessage,
-          details: responseText
+          details: responseText,
         });
       }
     } catch (error: any) {
-      console.error('❌ Order sync error:', error);
+      console.error("❌ Order sync error:", error);
       res.status(500).json({ error: error.message });
     }
   });
 
   // ===== BIGCOMMERCE PROXY =====
-  
+
   // Agent-facing BigCommerce product search (requires permission)
   app.get("/api/agent/bigcommerce/search", async (req, res) => {
     try {
       const { query, userId } = req.query;
-      
+
       if (!userId) {
         return res.status(401).json({ error: "User ID required" });
       }
-      
+
       const user = await storage.getUser(parseInt(userId as string));
       if (!user || !user.allow_bigcommerce_search) {
-        return res.status(403).json({ error: "BigCommerce search not permitted for this user" });
+        return res
+          .status(403)
+          .json({ error: "BigCommerce search not permitted for this user" });
       }
-      
+
       const setting = await storage.getSetting("bigcommerce_config");
       let storeHash = process.env.BC_STORE_HASH;
       let token = process.env.BC_TOKEN;
       if (setting && setting.value) {
-        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        const config =
+          typeof setting.value === "string"
+            ? JSON.parse(setting.value)
+            : setting.value;
         storeHash = config.storeHash || storeHash;
         token = config.token || token;
       }
@@ -1012,26 +1155,39 @@ export async function registerRoutes(
 
       const q = (query as string).trim();
       const bcHeaders = {
-        'X-Auth-Token': String(token),
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        "X-Auth-Token": String(token),
+        "Content-Type": "application/json",
+        Accept: "application/json",
       };
 
       // ── Helpers ──
 
-      const effectivePrice = (basePrice: number | null, salePrice: number | null, fallback: number): number => {
+      const effectivePrice = (
+        basePrice: number | null,
+        salePrice: number | null,
+        fallback: number,
+      ): number => {
         const base = basePrice != null ? basePrice : fallback;
-        if (salePrice != null && salePrice > 0 && salePrice < base) return salePrice;
+        if (salePrice != null && salePrice > 0 && salePrice < base)
+          return salePrice;
         return base;
       };
 
-      const shapeVariant = (v: any, fallbackPrice: string, productSalePrice?: number | null) => {
+      const shapeVariant = (
+        v: any,
+        fallbackPrice: string,
+        productSalePrice?: number | null,
+      ) => {
         const base = v.price != null ? v.price : parseFloat(fallbackPrice);
         let price: number;
         if (v.sale_price != null && v.sale_price > 0) {
           // Variant has its own sale price — use it
           price = v.sale_price;
-        } else if (productSalePrice != null && productSalePrice > 0 && productSalePrice < base) {
+        } else if (
+          productSalePrice != null &&
+          productSalePrice > 0 &&
+          productSalePrice < base
+        ) {
           // No variant-level sale price — inherit from parent product
           price = productSalePrice;
         } else {
@@ -1040,15 +1196,15 @@ export async function registerRoutes(
         return {
           id: v.id,
           sku: v.sku,
-          upc: v.upc || '',
+          upc: v.upc || "",
           price: price.toString(),
           stock_level: v.inventory_level || 0,
           option_values: (v.option_values || []).map((ov: any) => ({
             id: ov.id,
             option_id: ov.option_id,
             label: ov.label,
-            option_display_name: ov.option_display_name
-          }))
+            option_display_name: ov.option_display_name,
+          })),
         };
       };
 
@@ -1057,46 +1213,58 @@ export async function registerRoutes(
         bigcommerce_id: p.id,
         name: p.name,
         sku: p.sku,
-        price: effectivePrice(p.price, p.sale_price ?? null, p.price).toString(),
-        image: p.primary_image?.url_standard || '',
-        description: p.description ? p.description.replace(/<[^>]*>?/gm, '') : '',
+        price: effectivePrice(
+          p.price,
+          p.sale_price ?? null,
+          p.price,
+        ).toString(),
+        image: p.primary_image?.url_standard || "",
+        description: p.description
+          ? p.description.replace(/<[^>]*>?/gm, "")
+          : "",
         stock_level: p.inventory_level || 0,
         is_pinned: false,
-        variants: [] as any[]
+        variants: [] as any[],
       });
 
       // Fetch parent product details for a variant that was found via variants endpoint
-      const buildVariantResultFromId = async (variant: any, parentProductId: number) => {
+      const buildVariantResultFromId = async (
+        variant: any,
+        parentProductId: number,
+      ) => {
         const productRes = await fetch(
           `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${parentProductId}?include=primary_image`,
-          { headers: bcHeaders }
+          { headers: bcHeaders },
         );
-        if (!productRes.ok) throw new Error('Failed to fetch parent product');
+        if (!productRes.ok) throw new Error("Failed to fetch parent product");
         const pd = (await productRes.json()).data;
         return {
-          resultType: 'variant' as const,
+          resultType: "variant" as const,
           product: shapeProduct(pd),
-          variant: shapeVariant(variant, pd.price.toString(), pd.sale_price)
+          variant: shapeVariant(variant, pd.price.toString(), pd.sale_price),
         };
       };
 
       // Build a variant result directly from keyword-search product data (no extra API call)
       const buildVariantResultFromProductData = (p: any, v: any) => ({
-        resultType: 'variant' as const,
+        resultType: "variant" as const,
         product: shapeProduct(p),
-        variant: shapeVariant(v, p.price.toString(), p.sale_price)
+        variant: shapeVariant(v, p.price.toString(), p.sale_price),
       });
 
       // ── Step 1: Direct SKU lookup via variants endpoint ──
       const skuRes = await fetch(
         `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/variants?sku=${encodeURIComponent(q)}`,
-        { headers: bcHeaders }
+        { headers: bcHeaders },
       );
       if (skuRes.ok) {
         const skuData = await skuRes.json();
         if (skuData.data && skuData.data.length > 0) {
           // Exact SKU match — always return as direct variant, never as product card
-          const result = await buildVariantResultFromId(skuData.data[0], skuData.data[0].product_id);
+          const result = await buildVariantResultFromId(
+            skuData.data[0],
+            skuData.data[0].product_id,
+          );
           return res.json(result);
         }
       }
@@ -1105,12 +1273,15 @@ export async function registerRoutes(
       if (/^\d+$/.test(q)) {
         const upcRes = await fetch(
           `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/variants?upc=${encodeURIComponent(q)}`,
-          { headers: bcHeaders }
+          { headers: bcHeaders },
         );
         if (upcRes.ok) {
           const upcData = await upcRes.json();
           if (upcData.data && upcData.data.length > 0) {
-            const result = await buildVariantResultFromId(upcData.data[0], upcData.data[0].product_id);
+            const result = await buildVariantResultFromId(
+              upcData.data[0],
+              upcData.data[0].product_id,
+            );
             return res.json(result);
           }
         }
@@ -1119,9 +1290,10 @@ export async function registerRoutes(
       // ── Step 3: Keyword search — but rescue exact SKU/UPC hits before returning product cards ──
       const kwRes = await fetch(
         `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(q)}&include=primary_image,variants`,
-        { headers: bcHeaders }
+        { headers: bcHeaders },
       );
-      if (!kwRes.ok) throw new Error(`BigCommerce API error: ${kwRes.statusText}`);
+      if (!kwRes.ok)
+        throw new Error(`BigCommerce API error: ${kwRes.statusText}`);
 
       const kwData = await kwRes.json();
       const kwProducts: any[] = kwData.data || [];
@@ -1131,7 +1303,7 @@ export async function registerRoutes(
       const qLower = q.toLowerCase();
       const isNumeric = /^\d+$/.test(q);
       for (const p of kwProducts) {
-        for (const v of (p.variants || [])) {
+        for (const v of p.variants || []) {
           const skuMatch = v.sku && v.sku.toLowerCase() === qLower;
           const upcMatch = isNumeric && v.upc && v.upc === q;
           if (skuMatch || upcMatch) {
@@ -1143,264 +1315,338 @@ export async function registerRoutes(
       // ── No exact match found — return keyword product list ──
       const products = kwProducts.map((p: any) => ({
         ...shapeProduct(p),
-        variants: (p.variants || []).map((v: any) => shapeVariant(v, p.price.toString(), p.sale_price))
+        variants: (p.variants || []).map((v: any) =>
+          shapeVariant(v, p.price.toString(), p.sale_price),
+        ),
       }));
 
-      res.json({ resultType: 'products', products });
+      res.json({ resultType: "products", products });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
   // BigCommerce proxy for products (admin use)
-  app.get("/api/bigcommerce/products/search", requireAdmin, async (req, res) => {
-    try {
-      const { query } = req.query;
-      
-      // Fetch setting from database instead of localStorage
-      const setting = await storage.getSetting("bigcommerce_config");
-      let storeHash = process.env.BC_STORE_HASH;
-      let token = process.env.BC_TOKEN;
+  app.get(
+    "/api/bigcommerce/products/search",
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const { query } = req.query;
 
-      if (setting && setting.value) {
-        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
-        storeHash = config.storeHash || storeHash;
-        token = config.token || token;
-      }
+        // Fetch setting from database instead of localStorage
+        const setting = await storage.getSetting("bigcommerce_config");
+        let storeHash = process.env.BC_STORE_HASH;
+        let token = process.env.BC_TOKEN;
 
-      if (!token || !storeHash || !query) {
-        return res.status(400).json({ error: "Missing required parameters (search query or credentials)" });
-      }
-
-      // Call BigCommerce API for products
-      const response = await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(query as string)}&include=primary_image,variants`,
-        {
-          headers: {
-            'X-Auth-Token': String(token),
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          }
+        if (setting && setting.value) {
+          const config =
+            typeof setting.value === "string"
+              ? JSON.parse(setting.value)
+              : setting.value;
+          storeHash = config.storeHash || storeHash;
+          token = config.token || token;
         }
-      );
 
-      if (!response.ok) {
-        throw new Error(`BigCommerce API error: ${response.statusText}`);
+        if (!token || !storeHash || !query) {
+          return res
+            .status(400)
+            .json({
+              error:
+                "Missing required parameters (search query or credentials)",
+            });
+        }
+
+        // Call BigCommerce API for products
+        const response = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(query as string)}&include=primary_image,variants`,
+          {
+            headers: {
+              "X-Auth-Token": String(token),
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error(`BigCommerce API error: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        // Transform to our format
+        const products = data.data.map((p: any) => ({
+          id: p.id,
+          bigcommerce_id: p.id,
+          name: p.name,
+          sku: p.sku,
+          price: p.price.toString(),
+          image: p.primary_image?.url_standard || "",
+          description: p.description.replace(/<[^>]*>?/gm, ""),
+          stock_level: p.inventory_level || 0,
+          is_pinned: false,
+          // Always include variants array, regardless of option count
+          variants: (p.variants || []).map((v: any) => ({
+            id: v.id,
+            sku: v.sku,
+            price: v.price?.toString() || p.price.toString(),
+            stock_level: v.inventory_level || 0,
+            option_values: (v.option_values || []).map((ov: any) => ({
+              id: ov.id, // option value ID - needed for BigCommerce order API
+              option_id: ov.option_id, // option ID - needed for BigCommerce order API
+              label: ov.label,
+              option_display_name: ov.option_display_name,
+            })),
+          })),
+        }));
+
+        res.json(products);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
       }
-
-      const data = await response.json();
-      
-      // Transform to our format
-      const products = data.data.map((p: any) => ({
-        id: p.id,
-        bigcommerce_id: p.id,
-        name: p.name,
-        sku: p.sku,
-        price: p.price.toString(),
-        image: p.primary_image?.url_standard || '',
-        description: p.description.replace(/<[^>]*>?/gm, ''),
-        stock_level: p.inventory_level || 0,
-        is_pinned: false,
-        // Always include variants array, regardless of option count
-        variants: (p.variants || []).map((v: any) => ({
-          id: v.id,
-          sku: v.sku,
-          price: v.price?.toString() || p.price.toString(),
-          stock_level: v.inventory_level || 0,
-          option_values: (v.option_values || []).map((ov: any) => ({
-            id: ov.id, // option value ID - needed for BigCommerce order API
-            option_id: ov.option_id, // option ID - needed for BigCommerce order API
-            label: ov.label,
-            option_display_name: ov.option_display_name
-          }))
-        }))
-      }));
-
-      res.json(products);
-
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
+    },
+  );
 
   // BigCommerce customer search
-  app.get("/api/bigcommerce/customers/search", requireAuth, async (req, res) => {
-    try {
-      const { query } = req.query;
-      if (!query) {
-        return res.json([]);
-      }
-
-      const setting = await storage.getSetting("bigcommerce_config");
-      let storeHash = process.env.BC_STORE_HASH;
-      let token = process.env.BC_TOKEN;
-
-      if (setting && setting.value) {
-        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
-        storeHash = config.storeHash || storeHash;
-        token = config.token || token;
-      }
-
-      if (!storeHash || !token) {
-        return res.status(400).json({ error: "BigCommerce credentials not configured" });
-      }
-
-      // Search customers by name or email (try both)
-      const searchParam = (query as string).includes('@') 
-        ? `email:like=${encodeURIComponent(query as string)}`
-        : `name:like=${encodeURIComponent(query as string)}`;
-      const response = await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?${searchParam}&limit=10`,
-        {
-          headers: {
-            'X-Auth-Token': String(token),
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          }
+  app.get(
+    "/api/bigcommerce/customers/search",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const { query } = req.query;
+        if (!query) {
+          return res.json([]);
         }
-      );
 
-      if (!response.ok) {
-        throw new Error(`BigCommerce API error: ${response.statusText}`);
+        const setting = await storage.getSetting("bigcommerce_config");
+        let storeHash = process.env.BC_STORE_HASH;
+        let token = process.env.BC_TOKEN;
+
+        if (setting && setting.value) {
+          const config =
+            typeof setting.value === "string"
+              ? JSON.parse(setting.value)
+              : setting.value;
+          storeHash = config.storeHash || storeHash;
+          token = config.token || token;
+        }
+
+        if (!storeHash || !token) {
+          return res
+            .status(400)
+            .json({ error: "BigCommerce credentials not configured" });
+        }
+
+        // Search customers by name or email (try both)
+        const searchParam = (query as string).includes("@")
+          ? `email:like=${encodeURIComponent(query as string)}`
+          : `name:like=${encodeURIComponent(query as string)}`;
+        const response = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?${searchParam}&limit=10`,
+          {
+            headers: {
+              "X-Auth-Token": String(token),
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error(`BigCommerce API error: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        // Transform to simplified format
+        const customers = data.data.map((c: any) => ({
+          id: c.id,
+          first_name: c.first_name,
+          last_name: c.last_name,
+          email: c.email,
+          phone: c.phone || "",
+          company: c.company || "",
+        }));
+
+        res.json(customers);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
       }
-
-      const data = await response.json();
-      
-      // Transform to simplified format
-      const customers = data.data.map((c: any) => ({
-        id: c.id,
-        first_name: c.first_name,
-        last_name: c.last_name,
-        email: c.email,
-        phone: c.phone || '',
-        company: c.company || ''
-      }));
-
-      res.json(customers);
-
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
+    },
+  );
 
   // Get BigCommerce customer addresses
-  app.get("/api/bigcommerce/customers/:customerId/addresses", requireAuth, async (req, res) => {
-    try {
-      const { customerId } = req.params;
+  app.get(
+    "/api/bigcommerce/customers/:customerId/addresses",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const { customerId } = req.params;
 
-      const setting = await storage.getSetting("bigcommerce_config");
-      let storeHash = process.env.BC_STORE_HASH;
-      let token = process.env.BC_TOKEN;
+        const setting = await storage.getSetting("bigcommerce_config");
+        let storeHash = process.env.BC_STORE_HASH;
+        let token = process.env.BC_TOKEN;
 
-      if (setting && setting.value) {
-        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
-        storeHash = config.storeHash || storeHash;
-        token = config.token || token;
-      }
-
-      if (!storeHash || !token) {
-        return res.status(400).json({ error: "BigCommerce credentials not configured" });
-      }
-
-      const response = await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v3/customers/addresses?customer_id:in=${customerId}`,
-        {
-          headers: {
-            'X-Auth-Token': String(token),
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          }
+        if (setting && setting.value) {
+          const config =
+            typeof setting.value === "string"
+              ? JSON.parse(setting.value)
+              : setting.value;
+          storeHash = config.storeHash || storeHash;
+          token = config.token || token;
         }
-      );
 
-      if (!response.ok) {
-        throw new Error(`BigCommerce API error: ${response.statusText}`);
+        if (!storeHash || !token) {
+          return res
+            .status(400)
+            .json({ error: "BigCommerce credentials not configured" });
+        }
+
+        const response = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/customers/addresses?customer_id:in=${customerId}`,
+          {
+            headers: {
+              "X-Auth-Token": String(token),
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error(`BigCommerce API error: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        // Return addresses
+        const addresses = data.data.map((a: any) => ({
+          id: a.id,
+          first_name: a.first_name,
+          last_name: a.last_name,
+          company: a.company || "",
+          street_1: a.address1,
+          street_2: a.address2 || "",
+          city: a.city,
+          state: a.state_or_province,
+          zip: a.postal_code,
+          country: a.country,
+          country_iso2: a.country_code,
+          phone: a.phone || "",
+        }));
+
+        res.json(addresses);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
       }
-
-      const data = await response.json();
-      
-      // Return addresses
-      const addresses = data.data.map((a: any) => ({
-        id: a.id,
-        first_name: a.first_name,
-        last_name: a.last_name,
-        company: a.company || '',
-        street_1: a.address1,
-        street_2: a.address2 || '',
-        city: a.city,
-        state: a.state_or_province,
-        zip: a.postal_code,
-        country: a.country,
-        country_iso2: a.country_code,
-        phone: a.phone || ''
-      }));
-
-      res.json(addresses);
-
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
+    },
+  );
 
   // Look up a single BigCommerce customer by their BC ID
-  app.get("/api/bigcommerce/customers/by-bc-id/:bcId", requireAuth, async (req, res) => {
-    try {
-      const { bcId } = req.params;
-      const setting = await storage.getSetting("bigcommerce_config");
-      let storeHash = process.env.BC_STORE_HASH;
-      let token = process.env.BC_TOKEN;
-      if (setting?.value) {
-        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
-        storeHash = config.storeHash || storeHash;
-        token = config.token || token;
+  app.get(
+    "/api/bigcommerce/customers/by-bc-id/:bcId",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const { bcId } = req.params;
+        const setting = await storage.getSetting("bigcommerce_config");
+        let storeHash = process.env.BC_STORE_HASH;
+        let token = process.env.BC_TOKEN;
+        if (setting?.value) {
+          const config =
+            typeof setting.value === "string"
+              ? JSON.parse(setting.value)
+              : setting.value;
+          storeHash = config.storeHash || storeHash;
+          token = config.token || token;
+        }
+        if (!storeHash || !token)
+          return res
+            .status(400)
+            .json({ error: "BigCommerce credentials not configured" });
+        const response = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?id:in=${bcId}`,
+          {
+            headers: {
+              "X-Auth-Token": String(token),
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+          },
+        );
+        if (!response.ok)
+          throw new Error(`BigCommerce API error: ${response.statusText}`);
+        const data = await response.json();
+        if (!data.data || data.data.length === 0)
+          return res.status(404).json({ error: "Customer not found" });
+        const c = data.data[0];
+        res.json({
+          id: c.id,
+          first_name: c.first_name,
+          last_name: c.last_name,
+          email: c.email,
+          phone: c.phone || "",
+          company: c.company || "",
+          customer_group_id: c.customer_group_id,
+        });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
       }
-      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
-      const response = await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?id:in=${bcId}`,
-        { headers: { 'X-Auth-Token': String(token), 'Content-Type': 'application/json', 'Accept': 'application/json' } }
-      );
-      if (!response.ok) throw new Error(`BigCommerce API error: ${response.statusText}`);
-      const data = await response.json();
-      if (!data.data || data.data.length === 0) return res.status(404).json({ error: "Customer not found" });
-      const c = data.data[0];
-      res.json({ id: c.id, first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone || '', company: c.company || '', customer_group_id: c.customer_group_id });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
+    },
+  );
 
   // Refresh stock levels for given BigCommerce product IDs
   app.post("/api/products/refresh-stock", requireAuth, async (req, res) => {
     try {
       const { bigcommerce_ids } = req.body as { bigcommerce_ids: number[] };
-      if (!Array.isArray(bigcommerce_ids) || bigcommerce_ids.length === 0) return res.json([]);
+      if (!Array.isArray(bigcommerce_ids) || bigcommerce_ids.length === 0)
+        return res.json([]);
       const setting = await storage.getSetting("bigcommerce_config");
       let storeHash = process.env.BC_STORE_HASH;
       let token = process.env.BC_TOKEN;
       if (setting?.value) {
-        const config = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+        const config =
+          typeof setting.value === "string"
+            ? JSON.parse(setting.value)
+            : setting.value;
         storeHash = config.storeHash || storeHash;
         token = config.token || token;
       }
-      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
-      const results = await Promise.all(bigcommerce_ids.map(async (bcId: number) => {
-        try {
-          const r = await fetch(
-            `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${bcId}?include=variants`,
-            { headers: { 'X-Auth-Token': String(token), 'Content-Type': 'application/json', 'Accept': 'application/json' } }
-          );
-          if (!r.ok) return { bigcommerce_id: bcId, stock_level: 0, variants: [] };
-          const d = await r.json();
-          const p = d.data;
-          return {
-            bigcommerce_id: bcId,
-            stock_level: p.inventory_level ?? 0,
-            variants: (p.variants || []).map((v: any) => ({ id: v.id, stock_level: v.inventory_level ?? 0 }))
-          };
-        } catch {
-          return { bigcommerce_id: bcId, stock_level: 0, variants: [] };
-        }
-      }));
+      if (!storeHash || !token)
+        return res
+          .status(400)
+          .json({ error: "BigCommerce credentials not configured" });
+      const results = await Promise.all(
+        bigcommerce_ids.map(async (bcId: number) => {
+          try {
+            const r = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${bcId}?include=variants`,
+              {
+                headers: {
+                  "X-Auth-Token": String(token),
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
+                },
+              },
+            );
+            if (!r.ok)
+              return { bigcommerce_id: bcId, stock_level: 0, variants: [] };
+            const d = await r.json();
+            const p = d.data;
+            return {
+              bigcommerce_id: bcId,
+              stock_level: p.inventory_level ?? 0,
+              variants: (p.variants || []).map((v: any) => ({
+                id: v.id,
+                stock_level: v.inventory_level ?? 0,
+              })),
+            };
+          } catch {
+            return { bigcommerce_id: bcId, stock_level: 0, variants: [] };
+          }
+        }),
+      );
       res.json(results);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
