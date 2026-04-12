@@ -633,6 +633,8 @@ export async function registerRoutes(
             const token = cfg.token;
             if (storeHash && token) {
               const newCacheEntries: InsertPriceHistoryCache[] = [];
+              // Track (productId-orderId) to prevent duplicate cache entries
+              const seenCacheKeys = new Set<string>();
               try {
                 const bcHeaders = {
                   "X-Auth-Token": String(token),
@@ -652,8 +654,10 @@ export async function registerRoutes(
                   if (!Array.isArray(bcOrders) || bcOrders.length === 0) break;
                   if (bcOrders.length < PAGE_SIZE) morePages = false;
                   for (const bcOrder of bcOrders) {
+                    // Stop scanning further orders once we have 5 matches
                     if (history.length >= GOAL) break;
                     if (seenOrderIds.has(bcOrder.id)) continue;
+                    seenOrderIds.add(bcOrder.id);
                     try {
                       const itemsRes = await fetch(
                         `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrder.id}/products?limit=250`,
@@ -661,63 +665,51 @@ export async function registerRoutes(
                       );
                       if (!itemsRes.ok) continue;
                       const bcItems: any[] = await itemsRes.json();
-                      let matched = false;
+                      // Track exact and fallback matches for the target product
+                      let exactTargetItem: any | null = null;
+                      let fallbackTargetItem: any | null = null;
                       for (const item of bcItems) {
-                        if (item.product_id !== bcProductId) continue;
-                        const itemVariantId = item.variant_id || 0;
-                        const isExact = variantId
-                          ? itemVariantId === variantId
-                          : true;
-                        if (isExact) {
-                          const price =
-                            item.price_ex_tax ?? item.base_price ?? 0;
-                          const entry = {
-                            price: String(price),
-                            date: bcOrder.date_created || "",
-                            orderId: bcOrder.id,
-                          };
-                          history.push(entry);
-                          seenOrderIds.add(bcOrder.id);
+                        const itemProductId: number = item.product_id;
+                        const itemVariantId: number = item.variant_id || 0;
+                        const price = String(item.price_ex_tax ?? item.base_price ?? 0);
+                        // Track target product match for results
+                        if (itemProductId === bcProductId) {
+                          const isExact = variantId ? itemVariantId === variantId : true;
+                          if (isExact && !exactTargetItem) {
+                            exactTargetItem = item;
+                          } else if (!isExact && variantId && !fallbackTargetItem) {
+                            fallbackTargetItem = item;
+                          }
+                        }
+                        // Cache ALL products — deduplicate by (product_id, order_id)
+                        const cacheKey = `${itemProductId}-${bcOrder.id}`;
+                        if (!seenCacheKeys.has(cacheKey)) {
+                          seenCacheKeys.add(cacheKey);
                           newCacheEntries.push({
                             customer_id: bcCustomerId,
-                            product_id: bcProductId,
+                            product_id: itemProductId,
                             variant_id: itemVariantId || null,
-                            price: String(price),
+                            price,
                             order_id: bcOrder.id,
                             order_date: bcOrder.date_created || null,
                           });
-                          matched = true;
-                          break;
                         }
                       }
-                      if (!matched && variantId) {
-                        for (const item of bcItems) {
-                          if (item.product_id !== bcProductId) continue;
-                          const price =
-                            item.price_ex_tax ?? item.base_price ?? 0;
-                          history.push({
-                            price: String(price),
-                            date: bcOrder.date_created || "",
-                            orderId: bcOrder.id,
-                          });
-                          seenOrderIds.add(bcOrder.id);
-                          newCacheEntries.push({
-                            customer_id: bcCustomerId,
-                            product_id: bcProductId,
-                            variant_id: item.variant_id || null,
-                            price: String(price),
-                            order_id: bcOrder.id,
-                            order_date: bcOrder.date_created || null,
-                          });
-                          break;
-                        }
+                      // Push result using best available match (exact preferred, fallback secondary)
+                      const resultItem = exactTargetItem ?? fallbackTargetItem;
+                      if (resultItem) {
+                        history.push({
+                          price: String(resultItem.price_ex_tax ?? resultItem.base_price ?? 0),
+                          date: bcOrder.date_created || "",
+                          orderId: bcOrder.id,
+                        });
                       }
                     } catch {}
                   }
                   page++;
                 }
               } catch {}
-              // Save new entries to Postgres cache (non-blocking)
+              // Save all scanned product prices to Postgres cache (non-blocking)
               if (newCacheEntries.length > 0) {
                 storage
                   .savePriceHistoryCacheEntries(newCacheEntries)
