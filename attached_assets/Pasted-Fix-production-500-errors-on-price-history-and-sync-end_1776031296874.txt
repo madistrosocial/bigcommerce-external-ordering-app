@@ -1,0 +1,182 @@
+Fix production 500 errors on price history and sync endpoints without refactoring core logic.
+
+---
+
+ISSUE SUMMARY
+
+* `/api/orders/customer/:id/price-history` returns 500
+* `/api/price-history/sync` returns 500
+* No logs visible due to early crashes
+* Likely causes:
+
+  * JSON.parse crash on BigCommerce config
+  * Undefined config values
+  * Unprotected DB or fetch logic
+
+---
+
+GOAL
+
+* Prevent crashes
+* Add safe parsing and guards
+* Add clear server logs
+* Keep existing pricing logic intact
+
+---
+
+1. SAFE BIGCOMMERCE CONFIG HANDLING
+
+Locate:
+
+```ts
+const bcCfg = await storage.getSetting("bigcommerce_config");
+const cfg =
+  typeof bcCfg.value === "string"
+    ? JSON.parse(bcCfg.value)
+    : bcCfg.value;
+```
+
+Replace with:
+
+```ts
+const bcCfg = await storage.getSetting("bigcommerce_config");
+
+let cfg: any = {};
+
+try {
+  if (bcCfg?.value) {
+    cfg =
+      typeof bcCfg.value === "string"
+        ? JSON.parse(bcCfg.value)
+        : bcCfg.value;
+  }
+} catch (e) {
+  console.error("Invalid BigCommerce config format:", bcCfg?.value);
+  cfg = {};
+}
+
+console.log("BC CONFIG PARSED:", cfg);
+```
+
+---
+
+2. VALIDATE CONFIG BEFORE USE
+
+Immediately after parsing:
+
+```ts
+if (!cfg?.storeHash || !cfg?.accessToken) {
+  console.error("Missing or invalid BigCommerce config:", cfg);
+}
+```
+
+Do NOT crash — just log and allow fallback.
+
+---
+
+3. PROTECT BIGCOMMERCE FETCH
+
+Wrap all BigCommerce API calls:
+
+```ts
+try {
+  const ordersRes = await fetch(...);
+
+  if (!ordersRes.ok) {
+    const text = await ordersRes.text();
+    console.error("BC API ERROR:", ordersRes.status, text);
+    break; // stop loop safely
+  }
+
+  const orders = await ordersRes.json();
+} catch (err) {
+  console.error("BC FETCH FAILED:", err);
+  break;
+}
+```
+
+---
+
+4. ADD TOP-LEVEL DEBUG LOGGING
+
+At start of price history route:
+
+```ts
+console.log("PRICE HISTORY REQUEST:", {
+  customerId: bcCustomerId,
+  productId: bcProductId,
+  variantId,
+});
+```
+
+---
+
+5. IMPROVE ERROR RESPONSE
+
+Replace catch block with:
+
+```ts
+catch (error: any) {
+  console.error("PRICE HISTORY ERROR:", error);
+
+  res.status(500).json({
+    error: error.message,
+    stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+  });
+}
+```
+
+---
+
+6. FIX /api/price-history/sync (500 ERROR)
+
+Locate sync route and wrap DB call:
+
+```ts
+try {
+  console.log("SYNC REQUEST:", { afterMs, limit });
+
+  const records = await storage.getPriceHistoryForSync(afterMs, limit);
+
+  console.log("SYNC RESULT COUNT:", records.length);
+
+  res.json(records);
+} catch (error: any) {
+  console.error("SYNC ERROR:", error);
+
+  res.status(500).json({
+    error: error.message,
+  });
+}
+```
+
+---
+
+7. DO NOT MODIFY THESE
+
+* Do NOT change pricing logic
+* Do NOT change caching logic
+* Do NOT change checkout flow
+* Do NOT remove Postgres writes
+
+---
+
+EXPECTED RESULT
+
+* No more 500 crashes
+* Clear logs visible in Render
+* BigCommerce config safely handled
+* Price history endpoint returns data again
+* Sync endpoint works without crashing
+
+---
+
+After deployment, check Render logs for:
+
+* "BC CONFIG PARSED"
+* "PRICE HISTORY REQUEST"
+* "SYNC RESULT COUNT"
+
+---
+
+END

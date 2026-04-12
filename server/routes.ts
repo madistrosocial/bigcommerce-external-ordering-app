@@ -586,6 +586,8 @@ export async function registerRoutes(
           ? parseInt(req.query.variantId as string)
           : null;
 
+        console.log("PRICE HISTORY REQUEST:", { customerId: bcCustomerId, productId: bcProductId, variantId });
+
         const GOAL = 5;
         const history: { price: string; date: string; orderId?: number }[] = [];
 
@@ -622,14 +624,22 @@ export async function registerRoutes(
 
           // ── Layer 2: BigCommerce scan for remaining slots ──────────────────
           const bcCfg = await storage.getSetting("bigcommerce_config");
-          if (bcCfg && bcCfg.value) {
-            const cfg =
-              typeof bcCfg.value === "string"
-                ? JSON.parse(bcCfg.value)
-                : bcCfg.value;
-            const storeHash = cfg.storeHash;
-            const token = cfg.token;
-            if (storeHash && token) {
+          let cfg: any = {};
+          try {
+            if (bcCfg?.value) {
+              cfg = typeof bcCfg.value === "string" ? JSON.parse(bcCfg.value) : bcCfg.value;
+            }
+          } catch (e) {
+            console.error("Invalid BigCommerce config format:", bcCfg?.value);
+            cfg = {};
+          }
+          console.log("BC CONFIG PARSED:", cfg);
+          if (!cfg?.storeHash || !cfg?.token) {
+            console.error("Missing or invalid BigCommerce config:", cfg);
+          }
+          const storeHash = cfg.storeHash;
+          const token = cfg.token;
+          if (storeHash && token) {
               const newCacheEntries: InsertPriceHistoryCache[] = [];
               // Track (productId-orderId) to prevent duplicate cache entries
               const seenCacheKeys = new Set<string>();
@@ -647,7 +657,11 @@ export async function registerRoutes(
                     `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?customer_id=${bcCustomerId}&sort=date_created:desc&limit=${PAGE_SIZE}&page=${page}`,
                     { headers: bcHeaders },
                   );
-                  if (!ordersRes.ok) break;
+                  if (!ordersRes.ok) {
+                    const text = await ordersRes.text().catch(() => "");
+                    console.error("BC API ERROR (orders):", ordersRes.status, text);
+                    break;
+                  }
                   const bcOrders: any[] = await ordersRes.json();
                   if (!Array.isArray(bcOrders) || bcOrders.length === 0) break;
                   if (bcOrders.length < PAGE_SIZE) morePages = false;
@@ -714,18 +728,21 @@ export async function registerRoutes(
                           orderId: bcOrder.id,
                         });
                       }
-                    } catch {}
+                    } catch (err) {
+                      console.error("BC FETCH FAILED (items):", err);
+                    }
                   }
                   page++;
                 }
-              } catch {}
+              } catch (err) {
+                console.error("BC FETCH FAILED (orders loop):", err);
+              }
               // Save all scanned product prices to Postgres cache (non-blocking)
               if (newCacheEntries.length > 0) {
                 storage
                   .savePriceHistoryCacheEntries(newCacheEntries)
                   .catch(() => {});
               }
-            }
           }
         }
 
@@ -777,7 +794,11 @@ export async function registerRoutes(
         );
         res.json(history);
       } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        console.error("PRICE HISTORY ERROR:", error);
+        res.status(500).json({
+          error: error.message,
+          stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+        });
       }
     },
   );
@@ -792,9 +813,12 @@ export async function registerRoutes(
         parseInt((req.query.limit as string) || "10000"),
         10000,
       );
+      console.log("SYNC REQUEST:", { afterMs, limit });
       const records = await storage.getPriceHistoryForSync(afterMs, limit);
+      console.log("SYNC RESULT COUNT:", records.length);
       res.json(records);
     } catch (error: any) {
+      console.error("SYNC ERROR:", error);
       res.status(500).json({ error: error.message });
     }
   });
