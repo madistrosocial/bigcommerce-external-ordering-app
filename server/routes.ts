@@ -528,6 +528,9 @@ export async function registerRoutes(
       // ── Layer 1: Check Postgres cache first ──────────────────────────────
       if (bcProductId) {
         const cached = await storage.getCachedPriceHistory(bcCustomerId, bcProductId);
+        cached.sort((a, b) =>
+          new Date(b.order_date || 0).getTime() - new Date(a.order_date || 0).getTime()
+        );
         if (cached.length >= GOAL) {
           return res.json(cached.slice(0, GOAL).map(e => ({
             price: e.price,
@@ -657,6 +660,9 @@ export async function registerRoutes(
         }
       }
 
+      history.sort((a, b) =>
+        new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
+      );
       res.json(history);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -668,7 +674,10 @@ export async function registerRoutes(
     try {
       const priceListId = parseInt(req.params.priceListId);
       const variantIdsStr = req.query.variantIds as string;
-      if (!variantIdsStr) return res.json({});
+      if (!variantIdsStr) {
+        console.warn("Missing variantIds in price list request for priceListId:", priceListId);
+        return res.json({});
+      }
       const variantIds = variantIdsStr.split(',').map(Number).filter(n => !isNaN(n) && n > 0);
       if (variantIds.length === 0) return res.json({});
 

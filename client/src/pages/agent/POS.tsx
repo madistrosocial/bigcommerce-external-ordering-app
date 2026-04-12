@@ -668,7 +668,8 @@ export default function POSPage() {
           setPopupFreshVariantStock(map);
           // Fetch price list prices from matched tier (with Dexie cache)
           if (tier && tier.priceListId) {
-            const variantIds = info.variants.map(v => v.id).filter(Boolean) as number[];
+            const variantIds = info.variants.map((v: any) => v.id).filter((id: any) => typeof id === 'number' && id > 0) as number[];
+            console.log("PRICE LIST LOOKUP:", { priceListId: tier.priceListId, variantIds, tier: tier.label });
             if (variantIds.length > 0) {
               try {
                 const cached = await getPriceListCacheBatch(tier.priceListId, variantIds);
@@ -676,13 +677,21 @@ export default function POSPage() {
                 const uncached = variantIds.filter(id => !(id in cached));
                 if (uncached.length > 0) {
                   const fetched = await api.getPriceListRecords(tier.priceListId, uncached);
+                  console.log("PRICE LIST RESPONSE:", fetched);
                   Object.assign(result, fetched);
-                  await setPriceListCacheBatch(tier.priceListId, fetched);
+                  if (Object.keys(fetched).length > 0) {
+                    await setPriceListCacheBatch(tier.priceListId, fetched);
+                  }
+                } else {
+                  console.log("PRICE LIST RESPONSE: (all from cache)", cached);
                 }
                 setPopupPriceListPrices(result);
-              } catch {
+              } catch (err) {
+                console.error("PRICE LIST ERROR:", err);
                 setPopupPriceListPrices({});
               }
+            } else {
+              console.warn("PRICE LIST LOOKUP: no valid variant IDs found for product", product.name);
             }
           }
         }

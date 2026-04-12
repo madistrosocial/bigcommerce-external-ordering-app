@@ -1,0 +1,193 @@
+Apply fixes incrementally without breaking existing functionality. Do NOT modify unrelated logic.
+
+---
+
+Fix the following issues in the pricing system:
+
+---
+
+1. FIX: Price History Order (Newest First)
+
+Problem:
+Price history currently returns oldest records first.
+
+Fix:
+
+In `/api/orders/customer/:bcCustomerId/price-history`:
+
+A. After fetching cached results:
+
+```ts
+const cached = await storage.getCachedPriceHistory(bcCustomerId, bcProductId);
+```
+
+ADD:
+
+```ts
+cached.sort((a, b) =>
+  new Date(b.order_date || 0).getTime() - new Date(a.order_date || 0).getTime()
+);
+```
+
+---
+
+B. Before final response:
+
+```ts
+// BEFORE res.json(history)
+history.sort((a, b) =>
+  new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
+);
+```
+
+---
+
+Ensure newest records appear first.
+
+---
+
+2. FIX: Price Tier Not Applying (Critical)
+
+Problem:
+Price tier system does not return any price list records.
+
+---
+
+2.1 Ensure correct variant IDs are passed
+
+Locate frontend logic where price list API is called:
+
+Endpoint:
+
+```
+/api/bigcommerce/price-list/:priceListId/records
+```
+
+Ensure query parameter is:
+
+```js
+variantIds = variants.map(v => v.id)
+```
+
+DO NOT use:
+
+* product_id
+* internal IDs
+* undefined values
+
+---
+
+2.2 Validate API request format
+
+Ensure request is:
+
+```js
+fetch(`/api/bigcommerce/price-list/${priceListId}/records?variantIds=${variantIds.join(',')}`)
+```
+
+---
+
+2.3 Ensure response is used correctly
+
+API returns:
+
+```json
+{
+  "12345": "48.75"
+}
+```
+
+Apply price using:
+
+```js
+const price = priceMap[variant.id];
+```
+
+DO NOT use:
+
+* SKU
+* product_id
+
+---
+
+2.4 Prevent caching empty results
+
+If API returns empty:
+
+```js
+if (!response || Object.keys(response).length === 0) {
+  // DO NOT cache this result
+}
+```
+
+---
+
+2.5 Add debug logs (temporary)
+
+Before API call:
+
+```js
+console.log("PRICE LIST LOOKUP:", {
+  priceListId,
+  variantIds
+});
+```
+
+After response:
+
+```js
+console.log("PRICE LIST RESPONSE:", response);
+```
+
+---
+
+3. FIX: Silent Failure in Backend
+
+In:
+
+```
+/api/bigcommerce/price-list/:priceListId/records
+```
+
+Update:
+
+```ts
+if (!variantIdsStr) return res.json({});
+```
+
+TO:
+
+```ts
+if (!variantIdsStr) {
+  console.warn("Missing variantIds in price list request");
+  return res.json({});
+}
+```
+
+---
+
+4. VALIDATION RULES
+
+Ensure:
+
+* Only apply PRICE TIER if record exists
+* Do NOT show tier badge if no record
+* Fallback to sale/default properly
+
+---
+
+5. DO NOT MODIFY
+
+* Pricing priority logic
+* UI layout
+* Cart behavior
+* History logic (except sorting)
+
+---
+
+Output:
+
+* Price history sorted newest → oldest
+* Price tier correctly applied using variant_id
+* No silent failures
+* Debug logs visible for verification
