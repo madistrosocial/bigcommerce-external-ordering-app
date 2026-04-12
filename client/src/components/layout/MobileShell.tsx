@@ -133,7 +133,7 @@ export function MobileShell({ children, title = "Sales | Midatlantic Distributio
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
-      <header className="shrink-0 z-40 w-full border-b bg-white dark:bg-slate-950 px-4 h-16 flex items-center justify-between shadow-sm">
+      <header className="shrink-0 z-40 w-full border-b bg-white dark:bg-slate-950 px-4 flex items-center justify-between shadow-sm" style={{ paddingTop: 'env(safe-area-inset-top)', minHeight: 'calc(4rem + env(safe-area-inset-top))' }}>
         <div className="flex items-center gap-2">
           <Sheet>
             <SheetTrigger asChild>
@@ -315,7 +315,7 @@ export function MobileShell({ children, title = "Sales | Midatlantic Distributio
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto overscroll-contain p-4 md:p-6 max-w-4xl mx-auto w-full animate-in fade-in duration-300">
+      <main className="flex-1 overflow-y-auto overscroll-contain p-4 md:p-6 max-w-4xl mx-auto w-full animate-in fade-in duration-300" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
         {children}
       </main>
       <Toaster />

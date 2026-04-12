@@ -1759,7 +1759,7 @@ export default function POSPage() {
       onClick={handlePageClick}
     >
       {/* ── Header ── */}
-      <header className="flex items-center gap-3 px-4 h-14 bg-white border-b shadow-sm shrink-0 z-20">
+      <header className="flex items-center gap-3 px-4 h-14 bg-white border-b shadow-sm shrink-0 z-20" style={{ paddingTop: 'env(safe-area-inset-top)', height: 'calc(3.5rem + env(safe-area-inset-top))' }}>
         <span className="font-bold text-base uppercase tracking-widest text-slate-800 shrink-0">
           POS
         </span>
@@ -1999,7 +1999,7 @@ export default function POSPage() {
       </header>
 
       {/* ── Body ── */}
-      <div className="flex-1 flex overflow-hidden pb-8">
+      <div className="flex-1 flex overflow-hidden">
         {/* ── LEFT: Search + Pinned Products ── */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* Search input */}
@@ -2825,6 +2825,25 @@ export default function POSPage() {
                 {isSubmitting ? "Processing…" : "Checkout"}
               </Button>
             </div>
+
+            {/* ── Inline sync row ── */}
+            <div
+              className="flex items-center gap-2 pt-1.5 border-t mt-2"
+              style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+              data-testid="pos-sync-footer"
+            >
+              <button
+                onClick={syncPriceHistory}
+                disabled={isSyncing}
+                className="text-blue-600 font-medium text-xs disabled:opacity-50 shrink-0"
+                data-testid="button-sync-prices"
+              >
+                {isSyncing ? "Syncing..." : "Sync"}
+              </button>
+              <span className="text-gray-400 text-xs truncate" data-testid="text-sync-status">
+                {syncStatusText}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -2948,24 +2967,6 @@ export default function POSPage() {
           matchedTier={matchedTier}
         />
       )}
-
-      {/* ── Sync footer bar ── */}
-      <div
-        className="fixed bottom-0 left-0 w-full border-t bg-white px-3 py-1 text-xs flex items-center justify-between z-50"
-        data-testid="pos-sync-footer"
-      >
-        <span className="text-gray-500 truncate" data-testid="text-sync-status">
-          {syncStatusText}
-        </span>
-        <button
-          onClick={syncPriceHistory}
-          disabled={isSyncing}
-          className="text-blue-600 font-medium text-xs disabled:opacity-50 ml-3 shrink-0"
-          data-testid="button-sync-prices"
-        >
-          {isSyncing ? "Syncing..." : "Sync"}
-        </button>
-      </div>
 
       <Toaster />
     </div>
