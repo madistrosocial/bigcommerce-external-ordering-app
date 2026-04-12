@@ -685,6 +685,26 @@ export default function POSPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
 
+  // ── POS body mode ────────────────────────────────────────────────────────
+  useEffect(() => {
+    document.body.classList.add("pos-mode");
+    return () => document.body.classList.remove("pos-mode");
+  }, []);
+
+  // ── Sync status text ──────────────────────────────────────────────────────
+  const syncStatusText = isOfflineMode
+    ? "Offline mode"
+    : isSyncing
+    ? "Syncing price history..."
+    : lastSyncTime
+    ? (() => {
+        const diffMs = Date.now() - lastSyncTime;
+        const diffMin = Math.floor(diffMs / 60000);
+        if (diffMin < 1) return "Synced just now";
+        return `Last sync: ${diffMin}m ago`;
+      })()
+    : "No sync yet";
+
   // ── Allow Overselling ─────────────────────────────────────────────────────
   const [allowOverselling, setAllowOverselling] = useState<boolean>(
     () => localStorage.getItem("pos_allow_overselling") === "true",
@@ -1985,7 +2005,7 @@ export default function POSPage() {
       </header>
 
       {/* ── Body ── */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden pb-8">
         {/* ── LEFT: Search + Pinned Products ── */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* Search input */}
@@ -2935,27 +2955,22 @@ export default function POSPage() {
         />
       )}
 
-      {/* ── Manual sync button ── */}
+      {/* ── Sync footer bar ── */}
       <div
-        className="fixed bottom-4 left-4 z-40 flex flex-col items-start gap-0.5"
-        data-testid="pos-sync-controls"
+        className="fixed bottom-0 left-0 w-full border-t bg-white px-3 py-1 text-xs flex items-center justify-between z-50"
+        data-testid="pos-sync-footer"
       >
+        <span className="text-gray-500 truncate" data-testid="text-sync-status">
+          {syncStatusText}
+        </span>
         <button
-          className="text-[11px] px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 disabled:opacity-50 border border-slate-200"
           onClick={syncPriceHistory}
           disabled={isSyncing}
+          className="text-blue-600 font-medium text-xs disabled:opacity-50 ml-3 shrink-0"
           data-testid="button-sync-prices"
         >
-          {isSyncing ? "Syncing..." : "Sync Prices"}
+          {isSyncing ? "Syncing..." : "Sync"}
         </button>
-        <span
-          className="text-[10px] text-slate-400 pl-0.5"
-          data-testid="text-last-sync-time"
-        >
-          {lastSyncTime
-            ? `Last sync: ${new Date(lastSyncTime).toLocaleTimeString()}`
-            : "Never synced"}
-        </span>
       </div>
 
       <Toaster />

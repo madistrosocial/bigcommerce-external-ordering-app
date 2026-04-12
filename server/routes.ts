@@ -630,12 +630,11 @@ export async function registerRoutes(
               cfg = typeof bcCfg.value === "string" ? JSON.parse(bcCfg.value) : bcCfg.value;
             }
           } catch (e) {
-            console.error("Invalid BigCommerce config format:", bcCfg?.value);
+            console.error("Invalid BigCommerce config: could not parse stored value");
             cfg = {};
           }
-          console.log("BC CONFIG PARSED:", cfg);
           if (!cfg?.storeHash || !cfg?.token) {
-            console.error("Missing or invalid BigCommerce config:", cfg);
+            console.error("Missing or invalid BigCommerce config: storeHash or token not found");
           }
           const storeHash = cfg.storeHash;
           const token = cfg.token;
