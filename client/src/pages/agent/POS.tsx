@@ -685,12 +685,6 @@ export default function POSPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
 
-  // ── POS body mode ────────────────────────────────────────────────────────
-  useEffect(() => {
-    document.body.classList.add("pos-mode");
-    return () => document.body.classList.remove("pos-mode");
-  }, []);
-
   // ── Sync status text ──────────────────────────────────────────────────────
   const syncStatusText = isOfflineMode
     ? "Offline mode"
@@ -975,7 +969,7 @@ export default function POSPage() {
           return;
         }
         logout();
-        window.location.href = window.location.origin;
+        navigate("/");
         return;
       }
       if (cart.length > 0) {
@@ -991,7 +985,7 @@ export default function POSPage() {
     if (navTarget) {
       if (navTarget === "/logout") {
         logout();
-        window.location.href = window.location.origin;
+        navigate("/");
       } else {
         navigate(navTarget);
       }
