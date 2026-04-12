@@ -20,7 +20,7 @@ import { Toaster } from "@/components/ui/toaster";
 import {
   Search, Loader2, X, Plus, Minus, Trash2, User,
   ShoppingCart, AlertCircle, CheckCircle2, CreditCard, Package,
-  ChevronDown, Wifi, WifiOff, LogOut, Package as PackageIcon, Monitor, FileText, RotateCw,
+  ChevronDown, Wifi, WifiOff, LogOut, Package as PackageIcon, Monitor, FileText, RotateCw, Printer,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
@@ -514,6 +514,29 @@ export default function POSPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [navTarget, setNavTarget] = useState<string | null>(null);
   const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
+
+  // ── Invoice overlay ───────────────────────────────────────────────────────
+  const [showInvoice, setShowInvoice] = useState(false);
+  const [invoiceUrl, setInvoiceUrl] = useState("");
+  const [invoiceOrderId, setInvoiceOrderId] = useState<number | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const storeHashRef = useRef<string>("");
+  // Fetch storeHash once on mount for invoice URL building
+  useEffect(() => {
+    api.getSetting('bigcommerce_config').then(s => {
+      const cfg = s?.value;
+      if (cfg?.storeHash) storeHashRef.current = cfg.storeHash;
+    }).catch(() => {});
+  }, []);
+  const buildInvoiceUrl = (orderId: number) =>
+    `https://store-${storeHashRef.current}.mybigcommerce.com/manage/orders/${orderId}/invoice`;
+  const handleInvoicePrint = () => {
+    try {
+      iframeRef.current?.contentWindow?.print();
+    } catch {
+      window.open(invoiceUrl, "_blank");
+    }
+  };
 
   // ── Price history ─────────────────────────────────────────────────────────
   const [priceHistoryCache, setPriceHistoryCache] = useState<Map<string, api.PriceHistoryEntry[]>>(new Map());
@@ -1100,6 +1123,12 @@ export default function POSPage() {
         setInventoryErrorIds(new Set()); setFreshStockByLineId(new Map());
         setSelectedCustomer(null); setSelectedAddress(null); setCustomerAddresses([]);
         setCustomerSearch(""); setOrderNote(""); focusSearch();
+        if (response.bigcommerce.order_id) {
+          const bcOrderId = response.bigcommerce.order_id;
+          setInvoiceOrderId(bcOrderId);
+          setInvoiceUrl(buildInvoiceUrl(bcOrderId));
+          setShowInvoice(true);
+        }
       } else {
         const errMsg = response.bigcommerce?.error || "Sync failed";
         if (isInventoryErr(errMsg)) {
@@ -2006,6 +2035,38 @@ export default function POSPage() {
             <span className="animate-bounce" style={{ animationDelay: '300ms' }}>•</span>
           </span>
           Syncing pricing history...
+        </div>
+      )}
+
+      {/* ── Invoice Overlay ── */}
+      {showInvoice && (
+        <div className="fixed inset-0 z-[9999] flex flex-col bg-white" data-testid="invoice-overlay">
+          <div className="flex items-center justify-between px-4 py-3 bg-slate-800 text-white shrink-0">
+            <button
+              className="flex items-center gap-1.5 text-sm font-medium hover:text-slate-300"
+              onClick={() => setShowInvoice(false)}
+              data-testid="button-invoice-close"
+            >
+              <X className="h-4 w-4" /> Close
+            </button>
+            <span className="text-sm font-semibold" data-testid="text-invoice-order-id">
+              Invoice — Order #{invoiceOrderId}
+            </span>
+            <button
+              className="flex items-center gap-1.5 text-sm font-medium hover:text-slate-300"
+              onClick={handleInvoicePrint}
+              data-testid="button-invoice-print"
+            >
+              <Printer className="h-4 w-4" /> Print
+            </button>
+          </div>
+          <iframe
+            ref={iframeRef}
+            src={invoiceUrl}
+            className="flex-1 w-full border-0"
+            title="Invoice"
+            data-testid="iframe-invoice"
+          />
         </div>
       )}
 
