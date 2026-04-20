@@ -1812,12 +1812,14 @@ export async function registerRoutes(
 
   app.post("/api/inventory/push", requireAuth, async (req, res) => {
     try {
-      const { product_id, variant_id, sku, quantity_added, reason } = req.body as {
+      const { product_id, variant_id, sku, quantity_added, reason, product_name, variant_name } = req.body as {
         product_id: number;
         variant_id: number;
         sku: string;
         quantity_added: number;
         reason?: string;
+        product_name?: string;
+        variant_name?: string;
       };
       const authUser = (req as any).authUser;
 
@@ -1876,9 +1878,12 @@ export async function registerRoutes(
       // 3. Log the push
       const logEntry: InsertInventoryPushLog = {
         user_id: authUser.id,
+        username: authUser.username || "",
         sku,
         product_id,
         variant_id,
+        product_name: product_name || "",
+        variant_name: variant_name || "",
         previous_inventory,
         new_inventory,
         quantity_added,

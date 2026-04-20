@@ -67,17 +67,19 @@ Preferred communication style: Simple, everyday language.
 - Backend route extends refresh-stock and BC search to include `min_purchase_quantity` / `max_purchase_quantity` per variant
 
 ### Product Layout (POS)
-- Pinned products shown as 2-column grid of `PinnedProductCard` components
-- Each card has product image, name, price, stock, and an "Add to Cart" button
-- Single-variant: "Add" button fetches fresh stock (incl. min/max) then calls `autoAddVariant` directly
-- Multi-variant: "Add" button opens the VariantPopupDialog
+- Pinned products shown as compact single-column rows (`PinnedProductRow`): small thumbnail, name, price/stock, Add button
+- Clicking the row area opens the VariantPopupDialog; "Add" button on the right: single-variant auto-adds, multi-variant opens popup
+- Variant popup: 2-column grid, default qty=0 per variant, single "Add Selected to Cart" bulk button at bottom
+- All per-variant pricing controls (Last $, History, Disc %, Price $) preserved
+- Max purchase warning fires (non-blocking toast) when qty exceeds limit; override handled at checkout
 
 ### Manual Inventory Push
-- `inventory_push_logs` table in PostgreSQL logs every push action
+- `inventory_push_logs` table in PostgreSQL logs every push action with username, product_name, variant_name
 - `POST /api/inventory/push` fetches current BC inventory, increments, updates BC, logs to DB
 - `GET /api/inventory/push-logs` returns log entries
-- POS dropdown has "Push Inventory" button → opens `PushInventoryModal`
-- Modal: search product → select variant (if multi-variant) → qty input → confirm dialog → push
+- POS dropdown has "Push Inventory" and "Inventory Push Logs" buttons
+- Modal (95vw/90vh): searches full BigCommerce catalog by name/SKU/UPC → shows mother titles → click to select → pick variant if multi-variant → qty + reason → confirm
+- `/inventory-push-logs` page: full table view sorted newest first
 
 ### Offline Mode
 - Automatic detection via browser online/offline events

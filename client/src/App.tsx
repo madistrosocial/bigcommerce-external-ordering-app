@@ -12,6 +12,7 @@ import Catalog from "@/pages/agent/Catalog";
 import Cart from "@/pages/agent/Cart";
 import Orders from "@/pages/agent/Orders";
 import POSPage from "@/pages/agent/POS";
+import InventoryPushLogs from "@/pages/agent/InventoryPushLogs";
 import NotFound from "@/pages/not-found";
 
 /**
@@ -60,6 +61,10 @@ function Router() {
 
       <Route path="/pos">
         {() => <ProtectedRoute component={POSPage} role="agent" />}
+      </Route>
+
+      <Route path="/inventory-push-logs">
+        {() => <ProtectedRoute component={InventoryPushLogs} role="agent" />}
       </Route>
 
       <Route component={NotFound} />

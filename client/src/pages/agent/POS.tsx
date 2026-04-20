@@ -137,17 +137,14 @@ function VariantPopupDialog({
   const [isFree, setIsFree] = useState<Record<string, boolean>>({});
   const [pctInputs, setPctInputs] = useState<Record<string, string>>({});
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
-  const [loadingHistoryKey, setLoadingHistoryKey] = useState<string | null>(
-    null,
-  );
-  const [historyData, setHistoryData] = useState<
-    Record<string, api.PriceHistoryEntry[]>
-  >({});
+  const [loadingHistoryKey, setLoadingHistoryKey] = useState<string | null>(null);
+  const [historyData, setHistoryData] = useState<Record<string, api.PriceHistoryEntry[]>>({});
   const [openHistoryKey, setOpenHistoryKey] = useState<string | null>(null);
   const [historicalKeys, setHistoricalKeys] = useState<Set<string>>(new Set());
 
   const key = (v: any) => String(v?.id ?? "0");
-  const getQty = (v: any) => qtys[key(v)] ?? 1;
+  // Default qty is 0 (not 1)
+  const getQty = (v: any) => qtys[key(v)] ?? 0;
   const getStock = (v: any): number => {
     if (freshVariantStock) {
       const id = v?.id ?? 0;
@@ -156,9 +153,11 @@ function VariantPopupDialog({
     return v?.stock_level ?? (product as any).stock_level ?? 0;
   };
   const setQty = (v: any, q: number) => {
-    const max = allowOverselling ? Infinity : getStock(v);
-    const clamped = max > 0 ? Math.min(q, max) : q;
-    setQtys((p) => ({ ...p, [key(v)]: Math.max(1, clamped) }));
+    const stock = getStock(v);
+    const max = allowOverselling ? Infinity : (stock > 0 ? stock : 0);
+    const clamped = allowOverselling ? q : Math.min(q, max);
+    // min is 0
+    setQtys((p) => ({ ...p, [key(v)]: Math.max(0, clamped) }));
   };
   const getBasePrice = (v: any) => {
     const plPrice = v?.id !== undefined ? priceListPrices[v.id] : undefined;
@@ -166,69 +165,33 @@ function VariantPopupDialog({
     return parseFloat(v?.price || product.price) || 0;
   };
 
-  const computePrice = (
-    v: any,
-  ): {
-    finalPrice: number;
-    discountType: "free" | "percent" | null;
-    discountValue: number | null;
-  } => {
+  const computePrice = (v: any): { finalPrice: number; discountType: "free" | "percent" | null; discountValue: number | null } => {
     const base = getBasePrice(v);
     const k = key(v);
-    if (isFree[k])
-      return { finalPrice: 0, discountType: "free", discountValue: null };
+    if (isFree[k]) return { finalPrice: 0, discountType: "free", discountValue: null };
     const manualRaw = priceInputs[k];
     if (manualRaw && manualRaw !== "") {
       const p = parseFloat(manualRaw);
-      if (!isNaN(p) && p >= 0)
-        return { finalPrice: p, discountType: null, discountValue: null };
+      if (!isNaN(p) && p >= 0) return { finalPrice: p, discountType: null, discountValue: null };
     }
     const pctRaw = pctInputs[k];
     if (pctRaw && pctRaw !== "") {
       const pct = parseFloat(pctRaw);
       if (!isNaN(pct) && pct >= 0 && pct <= 100) {
-        return {
-          finalPrice: Math.max(0, base * (1 - pct / 100)),
-          discountType: "percent",
-          discountValue: pct,
-        };
+        return { finalPrice: Math.max(0, base * (1 - pct / 100)), discountType: "percent", discountValue: pct };
       }
     }
     return { finalPrice: base, discountType: null, discountValue: null };
   };
 
-  // Add to cart but keep popup open
-  const handleAdd = (v: any) => {
-    if (!allowOverselling) {
-      const stock = getStock(v);
-      if (stock <= 0) {
-        toast({
-          title: "Out of stock",
-          description: `${v?.sku || product.sku} has no available inventory.`,
-          variant: "destructive",
-        });
-        return;
-      }
-      const qty = getQty(v);
-      if (qty > stock) {
-        toast({
-          title: "Exceeds inventory",
-          description: `Only ${stock} available.`,
-          variant: "destructive",
-        });
-        return;
-      }
-    }
+  const buildAddArgs = (v: any) => {
     const k = key(v);
     const base = getBasePrice(v);
     const { finalPrice, discountType, discountValue } = computePrice(v);
-
-    // Determine price source
     const hasPL = v?.id !== undefined && priceListPrices[v.id] !== undefined;
     const hasManualPrice = !!(priceInputs[k] && priceInputs[k] !== "");
     const hasPct = !!(pctInputs[k] && pctInputs[k] !== "");
     const isHistorical = historicalKeys.has(k);
-
     let priceSource: CartItem["price_source"] = "default";
     if (isFree[k]) {
       priceSource = "custom";
@@ -241,53 +204,62 @@ function VariantPopupDialog({
       const varDefault = parseFloat(v?.price || product.price);
       if (varSale > 0 && varSale < varDefault) priceSource = "sale";
     }
-
-    const tierLabel =
-      priceSource === "price_list" ? matchedTier?.label || "TIER" : undefined;
-    const tierColor =
-      priceSource === "price_list"
-        ? matchedTier?.color || "#6366f1"
-        : undefined;
-
-    onAdd(
-      product,
-      v,
-      getQty(v),
-      base,
-      finalPrice,
-      discountType,
-      discountValue,
-      priceSource,
-      tierLabel,
-      tierColor,
-    );
-    // Reset just this variant's controls after adding
-    setQtys((p) => ({ ...p, [k]: 1 }));
-    setIsFree((p) => ({ ...p, [k]: false }));
-    setPctInputs((p) => {
-      const n = { ...p };
-      delete n[k];
-      return n;
-    });
-    setPriceInputs((p) => {
-      const n = { ...p };
-      delete n[k];
-      return n;
-    });
-    setHistoricalKeys((prev) => {
-      const n = new Set(prev);
-      n.delete(k);
-      return n;
-    });
+    const tierLabel = priceSource === "price_list" ? matchedTier?.label || "TIER" : undefined;
+    const tierColor = priceSource === "price_list" ? matchedTier?.color || "#6366f1" : undefined;
+    return { base, finalPrice, discountType, discountValue, priceSource, tierLabel, tierColor };
   };
 
+  const resetVariant = (k: string) => {
+    setQtys((p) => ({ ...p, [k]: 0 }));
+    setIsFree((p) => ({ ...p, [k]: false }));
+    setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+    setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+    setHistoricalKeys((prev) => { const n = new Set(prev); n.delete(k); return n; });
+  };
+
+  // Warn about max purchase quantity (non-blocking)
+  const warnIfMaxExceeded = (v: any, qty: number) => {
+    const maxQty: number | null = v?.max_purchase_quantity ?? null;
+    if (maxQty != null && qty > maxQty) {
+      toast({
+        title: "Purchase limit",
+        description: `This item has a max of ${maxQty}. You can override at checkout.`,
+        duration: 3000,
+      });
+    }
+  };
+
+  // Bulk add all variants with qty > 0
+  const handleBulkAdd = () => {
+    let addedCount = 0;
+    for (const v of rows) {
+      const qty = getQty(v);
+      if (qty <= 0) continue;
+      const stock = getStock(v);
+      if (!allowOverselling && stock <= 0) {
+        toast({ title: `${v?.sku || product.sku} is out of stock — skipped`, variant: "destructive", duration: 2000 });
+        continue;
+      }
+      warnIfMaxExceeded(v, qty);
+      const { base, finalPrice, discountType, discountValue, priceSource, tierLabel, tierColor } = buildAddArgs(v);
+      onAdd(product, v, qty, base, finalPrice, discountType, discountValue, priceSource, tierLabel, tierColor);
+      resetVariant(key(v));
+      addedCount++;
+    }
+    if (addedCount === 0) {
+      toast({ title: "No items selected", description: "Set a quantity > 0 to add variants.", duration: 2000 });
+    }
+  };
+
+  const selectedCount = rows.reduce((n, v) => n + (getQty(v) > 0 ? 1 : 0), 0);
+  const selectedTotal = rows.reduce((sum, v) => {
+    const qty = getQty(v);
+    if (qty <= 0) return sum;
+    return sum + computePrice(v).finalPrice * qty;
+  }, 0);
+
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
         className="w-[65vw] max-w-[65vw] max-h-[85vh] flex flex-col p-0 gap-0"
         onInteractOutside={(e) => e.preventDefault()}
@@ -296,61 +268,46 @@ function VariantPopupDialog({
         <DialogHeader className="px-5 pt-5 pb-3 border-b shrink-0">
           <div className="flex items-start gap-3">
             {product.image && (
-              <img
-                src={product.image}
-                alt={product.name}
-                className="w-12 h-12 object-cover rounded border shrink-0"
-              />
+              <img src={product.image} alt={product.name} className="w-12 h-12 object-cover rounded border shrink-0" />
             )}
             <div className="flex-1 min-w-0">
-              <DialogTitle className="text-base leading-snug">
-                {product.name}
-              </DialogTitle>
-              {product.sku && (
-                <p className="text-xs text-slate-500 mt-0.5">
-                  SKU: {product.sku}
-                </p>
-              )}
+              <DialogTitle className="text-base leading-snug">{product.name}</DialogTitle>
+              {product.sku && <p className="text-xs text-slate-500 mt-0.5">SKU: {product.sku}</p>}
             </div>
           </div>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto divide-y">
-          {rows.map((v) => {
-            const k = key(v);
-            const base = getBasePrice(v);
-            const { finalPrice } = computePrice(v);
-            const isDiscounted = finalPrice < base;
-            const qty = getQty(v);
+        <div className="flex-1 overflow-y-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:gap-px sm:bg-slate-200">
+            {rows.map((v) => {
+              const k = key(v);
+              const base = getBasePrice(v);
+              const { finalPrice } = computePrice(v);
+              const isDiscounted = finalPrice < base;
+              const qty = getQty(v);
+              const stock = getStock(v);
+              const outOfStock = !allowOverselling && stock <= 0;
 
-            return (
-              <div
-                key={k}
-                className="px-5 py-3"
-                data-testid={`popup-variant-row-${k}`}
-              >
-                {/* Variant name + price (header row) */}
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    {v && (
-                      <p className="text-sm font-semibold text-slate-900">
-                        {variantLabel(v) || v.sku}
+              return (
+                <div
+                  key={k}
+                  className={`px-4 py-3 bg-white ${outOfStock ? "opacity-60" : ""}`}
+                  data-testid={`popup-variant-row-${k}`}
+                >
+                  {/* Variant name + price */}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="min-w-0 flex-1">
+                      {v && <p className="text-sm font-semibold text-slate-900 truncate">{variantLabel(v) || v.sku}</p>}
+                      <p className="text-xs text-slate-500">
+                        SKU: {v?.sku || product.sku}
+                        <span className={`ml-2 font-medium ${stock <= 0 ? "text-red-500" : "text-slate-400"}`}>
+                          · Stock: {stock}
+                        </span>
                       </p>
-                    )}
-                    <p className="text-xs text-slate-500">
-                      SKU: {v?.sku || product.sku}
-                      <span
-                        className={`ml-2 font-medium ${getStock(v) <= 0 ? "text-red-500" : "text-slate-400"}`}
-                      >
-                        · Stock: {getStock(v)}
-                      </span>
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="flex items-center gap-1.5 justify-end">
-                      {v?.id !== undefined &&
-                        priceListPrices[v.id] !== undefined &&
-                        matchedTier && (
+                    </div>
+                    <div className="text-right shrink-0 ml-2">
+                      <div className="flex items-center gap-1.5 justify-end">
+                        {v?.id !== undefined && priceListPrices[v.id] !== undefined && matchedTier && (
                           <span
                             className="text-[10px] px-1.5 py-0.5 rounded font-bold text-white leading-none"
                             style={{ backgroundColor: matchedTier.color }}
@@ -359,252 +316,189 @@ function VariantPopupDialog({
                             {matchedTier.label || "TIER"}
                           </span>
                         )}
-                      <p
-                        className={`text-base font-bold ${isDiscounted ? "text-red-600" : "text-slate-900"}`}
-                      >
-                        ${finalPrice.toFixed(2)}
-                      </p>
+                        <p className={`text-base font-bold ${isDiscounted ? "text-red-600" : "text-slate-900"}`}>
+                          ${finalPrice.toFixed(2)}
+                        </p>
+                      </div>
+                      {isDiscounted && <p className="text-xs text-slate-400 line-through">${base.toFixed(2)}</p>}
                     </div>
-                    {isDiscounted && (
-                      <p className="text-xs text-slate-400 line-through">
-                        ${base.toFixed(2)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Single inline control row: [- qty +] [Last $] [History ▼] [Disc (%)] [Price ($)] [Add] */}
-                <div className="flex items-center gap-2 flex-nowrap">
-                  {/* Qty controls */}
-                  <div className="flex items-center gap-1 border rounded-md px-1 py-0.5 bg-slate-50 shrink-0">
-                    <button
-                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200 disabled:opacity-40"
-                      onClick={() => setQty(v, qty - 1)}
-                      disabled={qty <= 1}
-                      data-testid={`popup-minus-${k}`}
-                    >
-                      <Minus className="h-3 w-3" />
-                    </button>
-                    <Input
-                      type="number"
-                      min="1"
-                      className="w-12 h-7 text-center text-sm font-bold bg-white px-0.5"
-                      defaultValue={qty}
-                      key={`popup-qty-${k}-${qty}`}
-                      onBlur={(e) => {
-                        const newQty = parseInt(e.target.value, 10);
-                        if (!isNaN(newQty) && newQty >= 1) setQty(v, newQty);
-                      }}
-                      data-testid={`popup-qty-${k}`}
-                    />
-                    <button
-                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200 disabled:opacity-40"
-                      onClick={() => setQty(v, qty + 1)}
-                      disabled={!allowOverselling && qty >= getStock(v)}
-                      data-testid={`popup-plus-${k}`}
-                    >
-                      <Plus className="h-3 w-3" />
-                    </button>
                   </div>
 
-                  {/* Last $ button */}
-                  {selectedCustomer && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 px-2.5 text-xs shrink-0"
-                      disabled={loadingHistoryKey === k}
-                      onClick={async () => {
-                        setLoadingHistoryKey(k);
-                        try {
-                          const hist = await onFetchPriceHistory(v?.id);
-                          if (hist.length === 0) {
-                            toast({
-                              title: "No price history",
-                              variant: "destructive",
-                              duration: 2000,
-                            });
-                            return;
-                          }
-                          setHistoryData((prev) => ({ ...prev, [k]: hist }));
-                          setPriceInputs((p) => ({ ...p, [k]: hist[0].price }));
-                          setIsFree((p) => ({ ...p, [k]: false }));
-                          setPctInputs((p) => {
-                            const n = { ...p };
-                            delete n[k];
-                            return n;
-                          });
-                          setHistoricalKeys((prev) => new Set(prev).add(k));
-                        } finally {
-                          setLoadingHistoryKey(null);
-                        }
-                      }}
-                      data-testid={`popup-last-price-${k}`}
-                    >
-                      {loadingHistoryKey === k ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        "Last $"
-                      )}
-                    </Button>
-                  )}
+                  {/* Controls row */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Qty stepper — default 0, disabled if out of stock */}
+                    <div className="flex items-center gap-1 border rounded-md px-1 py-0.5 bg-slate-50 shrink-0">
+                      <button
+                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200 disabled:opacity-40"
+                        onClick={() => setQty(v, qty - 1)}
+                        disabled={qty <= 0}
+                        data-testid={`popup-minus-${k}`}
+                      >
+                        <Minus className="h-3 w-3" />
+                      </button>
+                      <Input
+                        type="number"
+                        min="0"
+                        className="w-12 h-7 text-center text-sm font-bold bg-white px-0.5"
+                        defaultValue={qty}
+                        key={`popup-qty-${k}-${qty}`}
+                        onBlur={(e) => {
+                          const newQty = parseInt(e.target.value, 10);
+                          if (!isNaN(newQty) && newQty >= 0) setQty(v, newQty);
+                        }}
+                        data-testid={`popup-qty-${k}`}
+                      />
+                      <button
+                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200 disabled:opacity-40"
+                        onClick={() => setQty(v, qty + 1)}
+                        disabled={outOfStock}
+                        data-testid={`popup-plus-${k}`}
+                      >
+                        <Plus className="h-3 w-3" />
+                      </button>
+                    </div>
 
-                  {/* History dropdown */}
-                  {selectedCustomer && (
-                    <div className="relative shrink-0">
+                    {/* Last $ button */}
+                    {selectedCustomer && (
                       <Button
                         variant="outline"
                         size="sm"
-                        className="h-8 px-2.5 text-xs"
+                        className="h-8 px-2.5 text-xs shrink-0"
                         disabled={loadingHistoryKey === k}
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (openHistoryKey === k) {
-                            setOpenHistoryKey(null);
-                            return;
-                          }
+                        onClick={async () => {
                           setLoadingHistoryKey(k);
                           try {
                             const hist = await onFetchPriceHistory(v?.id);
+                            if (hist.length === 0) {
+                              toast({ title: "No price history", variant: "destructive", duration: 2000 });
+                              return;
+                            }
                             setHistoryData((prev) => ({ ...prev, [k]: hist }));
+                            setPriceInputs((p) => ({ ...p, [k]: hist[0].price }));
+                            setIsFree((p) => ({ ...p, [k]: false }));
+                            setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                            setHistoricalKeys((prev) => new Set(prev).add(k));
                           } finally {
                             setLoadingHistoryKey(null);
                           }
-                          setOpenHistoryKey(k);
                         }}
-                        data-testid={`popup-history-${k}`}
+                        data-testid={`popup-last-price-${k}`}
                       >
-                        History ▾
+                        {loadingHistoryKey === k ? <Loader2 className="h-3 w-3 animate-spin" /> : "Last $"}
                       </Button>
-                      {openHistoryKey === k && (
-                        <div
-                          className="absolute left-0 top-full mt-1 w-56 bg-white border rounded-md shadow-lg z-50 py-1"
-                          onMouseDown={(e) => e.preventDefault()}
+                    )}
+
+                    {/* History dropdown */}
+                    {selectedCustomer && (
+                      <div className="relative shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-2.5 text-xs"
+                          disabled={loadingHistoryKey === k}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (openHistoryKey === k) { setOpenHistoryKey(null); return; }
+                            setLoadingHistoryKey(k);
+                            try {
+                              const hist = await onFetchPriceHistory(v?.id);
+                              setHistoryData((prev) => ({ ...prev, [k]: hist }));
+                            } finally {
+                              setLoadingHistoryKey(null);
+                            }
+                            setOpenHistoryKey(k);
+                          }}
+                          data-testid={`popup-history-${k}`}
                         >
-                          {(historyData[k] ?? []).length === 0 ? (
-                            <p className="px-3 py-2 text-xs text-slate-500">
-                              No history
-                            </p>
-                          ) : (
-                            (historyData[k] ?? []).map((h, hi) => (
-                              <button
-                                key={hi}
-                                className="w-full text-left px-3 py-1.5 hover:bg-slate-50 border-b last:border-0"
-                                onClick={() => {
-                                  setPriceInputs((p) => ({
-                                    ...p,
-                                    [k]: h.price,
-                                  }));
-                                  setIsFree((p) => ({ ...p, [k]: false }));
-                                  setPctInputs((p) => {
-                                    const n = { ...p };
-                                    delete n[k];
-                                    return n;
-                                  });
-                                  setHistoricalKeys((prev) =>
-                                    new Set(prev).add(k),
-                                  );
-                                  setOpenHistoryKey(null);
-                                }}
-                                data-testid={`popup-history-option-${k}-${hi}`}
-                              >
-                                <p className="text-sm font-bold text-green-600">
-                                  ${parseFloat(h.price).toFixed(2)}
-                                </p>
-                                <p className="text-xs text-slate-400">
-                                  {h.date
-                                    ? new Date(h.date).toLocaleDateString(
-                                        "en-US",
-                                        {
-                                          month: "short",
-                                          day: "numeric",
-                                          year: "numeric",
-                                        },
-                                      )
-                                    : ""}
-                                  {h.orderId ? ` | #${h.orderId}` : ""}
-                                </p>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                          History ▾
+                        </Button>
+                        {openHistoryKey === k && (
+                          <div
+                            className="absolute left-0 top-full mt-1 w-56 bg-white border rounded-md shadow-lg z-50 py-1"
+                            onMouseDown={(e) => e.preventDefault()}
+                          >
+                            {(historyData[k] ?? []).length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-slate-500">No history</p>
+                            ) : (
+                              (historyData[k] ?? []).map((h, hi) => (
+                                <button
+                                  key={hi}
+                                  className="w-full text-left px-3 py-1.5 hover:bg-slate-50 border-b last:border-0"
+                                  onClick={() => {
+                                    setPriceInputs((p) => ({ ...p, [k]: h.price }));
+                                    setIsFree((p) => ({ ...p, [k]: false }));
+                                    setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                                    setHistoricalKeys((prev) => new Set(prev).add(k));
+                                    setOpenHistoryKey(null);
+                                  }}
+                                  data-testid={`popup-history-option-${k}-${hi}`}
+                                >
+                                  <p className="text-sm font-bold text-green-600">${parseFloat(h.price).toFixed(2)}</p>
+                                  <p className="text-xs text-slate-400">
+                                    {h.date ? new Date(h.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : ""}
+                                    {h.orderId ? ` | #${h.orderId}` : ""}
+                                  </p>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
-                  {/* Disc (%) */}
-                  <Input
-                    type="number"
-                    min="0"
-                    max="100"
-                    placeholder="Disc (%)"
-                    className="w-24 h-8 text-xs bg-white"
-                    value={pctInputs[k] ?? ""}
-                    onChange={(e) => {
-                      setPctInputs((p) => ({ ...p, [k]: e.target.value }));
-                      setIsFree((p) => ({ ...p, [k]: false }));
-                      setPriceInputs((p) => {
-                        const n = { ...p };
-                        delete n[k];
-                        return n;
-                      });
-                      setHistoricalKeys((prev) => {
-                        const n = new Set(prev);
-                        n.delete(k);
-                        return n;
-                      });
-                    }}
-                    data-testid={`popup-pct-${k}`}
-                  />
+                    {/* Disc (%) */}
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      placeholder="Disc (%)"
+                      className="w-20 h-8 text-xs bg-white"
+                      value={pctInputs[k] ?? ""}
+                      onChange={(e) => {
+                        setPctInputs((p) => ({ ...p, [k]: e.target.value }));
+                        setIsFree((p) => ({ ...p, [k]: false }));
+                        setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                        setHistoricalKeys((prev) => { const n = new Set(prev); n.delete(k); return n; });
+                      }}
+                      data-testid={`popup-pct-${k}`}
+                    />
 
-                  {/* Price ($) */}
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="Price ($)"
-                    className="w-24 h-8 text-xs bg-white"
-                    value={priceInputs[k] ?? ""}
-                    onChange={(e) => {
-                      setPriceInputs((p) => ({ ...p, [k]: e.target.value }));
-                      setIsFree((p) => ({ ...p, [k]: false }));
-                      setPctInputs((p) => {
-                        const n = { ...p };
-                        delete n[k];
-                        return n;
-                      });
-                      setHistoricalKeys((prev) => {
-                        const n = new Set(prev);
-                        n.delete(k);
-                        return n;
-                      });
-                    }}
-                    data-testid={`popup-price-${k}`}
-                  />
-
-                  {/* Add button — far right, stays open */}
-                  <Button
-                    size="sm"
-                    className="h-8 px-4 ml-auto shrink-0 font-semibold"
-                    onClick={() => handleAdd(v)}
-                    data-testid={`popup-add-${k}`}
-                  >
-                    Add — ${(finalPrice * qty).toFixed(2)}
-                  </Button>
+                    {/* Price ($) */}
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="Price ($)"
+                      className="w-20 h-8 text-xs bg-white"
+                      value={priceInputs[k] ?? ""}
+                      onChange={(e) => {
+                        setPriceInputs((p) => ({ ...p, [k]: e.target.value }));
+                        setIsFree((p) => ({ ...p, [k]: false }));
+                        setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                        setHistoricalKeys((prev) => { const n = new Set(prev); n.delete(k); return n; });
+                      }}
+                      data-testid={`popup-price-${k}`}
+                    />
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
 
-        {/* Done button — centered, closes popup only */}
-        <div className="px-5 py-3 border-t shrink-0 flex justify-center">
+        {/* Footer: Add Selected + Done */}
+        <div className="px-5 py-3 border-t shrink-0 flex items-center gap-3">
           <Button
-            variant="outline"
-            className="w-32"
-            onClick={onClose}
-            data-testid="popup-done"
+            className="flex-1 font-semibold"
+            onClick={handleBulkAdd}
+            disabled={selectedCount === 0}
+            data-testid="popup-bulk-add"
           >
+            {selectedCount > 0
+              ? `Add ${selectedCount} variant${selectedCount !== 1 ? "s" : ""} — $${selectedTotal.toFixed(2)}`
+              : "Add Selected to Cart"}
+          </Button>
+          <Button variant="outline" className="w-24" onClick={onClose} data-testid="popup-done">
             Done
           </Button>
         </div>
@@ -613,9 +507,9 @@ function VariantPopupDialog({
   );
 }
 
-// ─── Pinned Product Row ───────────────────────────────────────────────────────
+// ─── Pinned Product Row (compact single-column) ───────────────────────────────
 
-const PinnedProductCard = memo(function PinnedProductCard({
+const PinnedProductRow = memo(function PinnedProductRow({
   product,
   onOpen,
   onDirectAdd,
@@ -633,45 +527,47 @@ const PinnedProductCard = memo(function PinnedProductCard({
 
   return (
     <div
-      className="bg-white rounded-lg border shadow-sm flex flex-col overflow-hidden hover:shadow-md transition-shadow"
-      data-testid={`pinned-card-${product.id}`}
+      className="flex items-center gap-3 px-3 py-2 bg-white hover:bg-slate-50 transition-colors border-b last:border-b-0"
+      data-testid={`pinned-row-${product.id}`}
     >
-      {/* Image / tap area to open popup */}
+      {/* Thumbnail + info — opens popup */}
       <button
-        className="flex flex-col items-start text-left p-2.5 flex-1 gap-1.5"
+        className="flex items-center gap-3 flex-1 min-w-0 text-left"
         onClick={onOpen}
-        data-testid={`pinned-card-open-${product.id}`}
+        data-testid={`pinned-row-open-${product.id}`}
       >
         {product.image ? (
           <img
             src={product.image}
             alt={product.name}
-            className="w-full h-20 object-cover rounded border bg-slate-50"
+            className="w-10 h-10 object-cover rounded border shrink-0 bg-slate-50"
           />
         ) : (
-          <div className="w-full h-20 rounded border bg-slate-100 flex items-center justify-center">
-            <Package className="h-8 w-8 text-slate-300" />
+          <div className="w-10 h-10 rounded border bg-slate-100 flex items-center justify-center shrink-0">
+            <Package className="h-5 w-5 text-slate-300" />
           </div>
         )}
-        <p className="text-xs font-semibold text-slate-800 leading-snug line-clamp-2 w-full">
-          {product.name}
-        </p>
-        <div className="flex items-center justify-between w-full">
-          <span className="text-xs text-slate-400">${parseFloat(product.price).toFixed(2)}</span>
-          <span className={`text-[10px] font-medium ${totalStock <= 0 ? "text-red-500" : "text-slate-400"}`}>
-            {totalStock <= 0 ? "Out of stock" : `Stock: ${totalStock}`}
-          </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-800 truncate leading-snug">
+            {product.name}
+          </p>
+          <p className="text-xs text-slate-400">
+            ${parseFloat(product.price).toFixed(2)}
+            <span className={`ml-2 ${totalStock <= 0 ? "text-red-500" : "text-slate-400"}`}>
+              · {totalStock <= 0 ? "Out of stock" : `Stock: ${totalStock}`}
+            </span>
+          </p>
         </div>
       </button>
       {/* Add button */}
       <button
-        className="w-full flex items-center justify-center gap-1.5 py-2 bg-slate-900 hover:bg-slate-700 active:bg-slate-800 text-white text-xs font-semibold transition-colors disabled:opacity-40"
+        className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-700 active:bg-slate-800 text-white text-xs font-semibold rounded transition-colors disabled:opacity-40"
         onClick={onDirectAdd}
         disabled={totalStock <= 0}
-        data-testid={`pinned-card-add-${product.id}`}
+        data-testid={`pinned-row-add-${product.id}`}
       >
-        <Plus className="h-3.5 w-3.5" />
-        {isMultiVariant ? `Add (${variants.length} variants)` : "Add to Cart"}
+        <Plus className="h-3 w-3" />
+        {isMultiVariant ? "Add" : "Add"}
       </button>
     </div>
   );
@@ -2148,6 +2044,13 @@ export default function POSPage() {
                 <Package className="mr-2 h-4 w-4" />
                 Push Inventory
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => guardedNavigate("/inventory-push-logs")}
+                data-testid="pos-menu-inv-push-logs"
+              >
+                <Package className="mr-2 h-4 w-4" />
+                Inventory Push Logs
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-red-600"
@@ -2386,9 +2289,9 @@ export default function POSPage() {
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 px-1">
                     Pinned Products
                   </p>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="border rounded-lg overflow-hidden">
                     {pinnedProducts.map((p) => (
-                      <PinnedProductCard
+                      <PinnedProductRow
                         key={p.id}
                         product={p}
                         onOpen={() => openPopupWithFreshStock(p, matchedTier)}
@@ -3176,8 +3079,6 @@ export default function POSPage() {
       {showPushInventoryModal && (
         <PushInventoryModal
           onClose={() => setShowPushInventoryModal(false)}
-          pinnedProducts={pinnedProducts}
-          canSearchBC={canSearchBC}
         />
       )}
 
@@ -3188,15 +3089,7 @@ export default function POSPage() {
 
 // ─── Push Inventory Modal ─────────────────────────────────────────────────────
 
-function PushInventoryModal({
-  onClose,
-  pinnedProducts,
-  canSearchBC,
-}: {
-  onClose: () => void;
-  pinnedProducts: api.Product[];
-  canSearchBC: boolean;
-}) {
+function PushInventoryModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<api.Product[]>([]);
@@ -3211,41 +3104,26 @@ function PushInventoryModal({
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    searchRef.current?.focus();
+    setTimeout(() => searchRef.current?.focus(), 80);
   }, []);
 
+  // Always search full BigCommerce catalog (title, SKU, UPC)
   const handleSearch = useCallback((q: string) => {
     setSearch(q);
-    if (!q.trim()) {
-      setResults([]);
-      return;
-    }
+    if (!q.trim()) { setResults([]); return; }
     if (debRef.current) clearTimeout(debRef.current);
     debRef.current = setTimeout(async () => {
       setIsSearching(true);
       try {
-        // Filter pinned products first
-        const lower = q.toLowerCase();
-        const pinned = pinnedProducts.filter(
-          (p) =>
-            p.name.toLowerCase().includes(lower) ||
-            p.sku.toLowerCase().includes(lower),
-        );
-        if (pinned.length > 0) {
-          setResults(pinned.slice(0, 10));
-        } else if (canSearchBC) {
-          const bc = await api.searchBigCommerceProducts(q, "", "");
-          setResults(bc.slice(0, 10));
-        } else {
-          setResults([]);
-        }
+        const bc = await api.searchBigCommerceProducts(q, "", "");
+        setResults(bc.slice(0, 20));
       } catch {
         setResults([]);
       } finally {
         setIsSearching(false);
       }
     }, 350);
-  }, [pinnedProducts, canSearchBC]);
+  }, []);
 
   const selectProduct = useCallback((p: api.Product) => {
     setSelectedProduct(p);
@@ -3267,6 +3145,8 @@ function PushInventoryModal({
         sku: selectedVariant.sku || selectedProduct.sku,
         quantity_added: quantity,
         reason: reason || undefined,
+        product_name: selectedProduct.name,
+        variant_name: variantLabel(selectedVariant) || selectedVariant.sku || "",
       });
       toast({
         title: "Inventory Updated",
@@ -3277,6 +3157,8 @@ function PushInventoryModal({
       setQuantityInput("1");
       setReason("");
       setShowConfirm(false);
+      // Refocus search for next push
+      setTimeout(() => searchRef.current?.focus(), 80);
     } catch (e: any) {
       toast({ title: "Failed to push inventory", description: e.message, variant: "destructive" });
     } finally {
@@ -3288,105 +3170,155 @@ function PushInventoryModal({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-md" data-testid="dialog-push-inventory">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+      <DialogContent
+        className="w-[95vw] max-w-[95vw] h-[90vh] max-h-[90vh] flex flex-col p-0 gap-0"
+        data-testid="dialog-push-inventory"
+      >
+        <DialogHeader className="px-5 pt-5 pb-3 border-b shrink-0">
+          <DialogTitle className="flex items-center gap-2 text-base">
             <Package className="h-5 w-5" /> Push Inventory
           </DialogTitle>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Search the full catalog by product name, SKU, or UPC to manually increment stock.
+          </p>
         </DialogHeader>
 
-        <div className="space-y-4">
-          {!selectedProduct ? (
-            <>
-              <div className="relative">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
-                <Input
-                  ref={searchRef}
-                  placeholder="Search by SKU or product name…"
-                  value={search}
-                  onChange={(e) => handleSearch(e.target.value)}
-                  className="pl-9"
-                  data-testid="input-push-inv-search"
-                />
-                {isSearching && (
-                  <Loader2 className="absolute right-3 top-3 h-4 w-4 animate-spin text-slate-400" />
-                )}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {/* Search bar — always visible */}
+          <div className="relative">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
+            <Input
+              ref={searchRef}
+              placeholder="Search by name, SKU, or UPC…"
+              value={search}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="pl-9 pr-9"
+              data-testid="input-push-inv-search"
+            />
+            {isSearching && (
+              <Loader2 className="absolute right-3 top-3 h-4 w-4 animate-spin text-slate-400" />
+            )}
+            {search && !isSearching && (
+              <button
+                className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
+                onClick={() => { setSearch(""); setResults([]); }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Search results — mother titles */}
+          {results.length > 0 && !selectedProduct && (
+            <div className="border rounded-md overflow-hidden">
+              <div className="px-3 py-2 bg-slate-50 border-b">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  {results.length} result{results.length !== 1 ? "s" : ""} — click to select
+                </p>
               </div>
-              {results.length > 0 && (
-                <div className="border rounded-md divide-y max-h-48 overflow-y-auto">
-                  {results.map((p) => (
+              <div className="divide-y max-h-[40vh] overflow-y-auto">
+                {results.map((p) => {
+                  const pvariants = getVariants(p);
+                  return (
                     <button
                       key={p.id}
-                      className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 text-left"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 text-left transition-colors"
                       onClick={() => selectProduct(p)}
                       data-testid={`push-inv-result-${p.id}`}
                     >
-                      {p.image && <img src={p.image} alt="" className="w-8 h-8 object-cover rounded border shrink-0" />}
+                      {p.image && (
+                        <img src={p.image} alt="" className="w-10 h-10 object-cover rounded border shrink-0 bg-slate-50" />
+                      )}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{p.name}</p>
-                        <p className="text-xs text-slate-400">SKU: {p.sku}</p>
+                        <p className="text-sm font-medium truncate text-slate-800">{p.name}</p>
+                        <p className="text-xs text-slate-400">
+                          SKU: {p.sku}
+                          {pvariants.length > 1 && (
+                            <span className="ml-2 text-slate-400">· {pvariants.length} variants</span>
+                          )}
+                        </p>
                       </div>
+                      <Plus className="h-4 w-4 text-slate-400 shrink-0" />
                     </button>
-                  ))}
-                </div>
-              )}
-              {search && !isSearching && results.length === 0 && (
-                <p className="text-sm text-slate-400 text-center py-2">No products found</p>
-              )}
-            </>
-          ) : (
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {search && !isSearching && results.length === 0 && !selectedProduct && (
+            <p className="text-sm text-slate-400 text-center py-4">No products found for "{search}"</p>
+          )}
+
+          {/* Selected product + variant + quantity */}
+          {selectedProduct && (
             <>
-              {/* Selected product header */}
+              {/* Product header */}
               <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border">
                 {selectedProduct.image && (
-                  <img src={selectedProduct.image} alt="" className="w-10 h-10 object-cover rounded border shrink-0" />
+                  <img src={selectedProduct.image} alt="" className="w-12 h-12 object-cover rounded border shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate">{selectedProduct.name}</p>
+                  <p className="text-sm font-semibold text-slate-800 truncate">{selectedProduct.name}</p>
                   <p className="text-xs text-slate-500">SKU: {selectedProduct.sku}</p>
+                  {selectedVariant && (
+                    <p className="text-xs text-blue-600 font-medium mt-0.5">
+                      {variantLabel(selectedVariant) || selectedVariant.sku} · Stock: {selectedVariant.stock_level ?? 0}
+                    </p>
+                  )}
                 </div>
                 <button
-                  onClick={() => { setSelectedProduct(null); setSelectedVariant(null); }}
-                  className="text-slate-400 hover:text-slate-600"
+                  onClick={() => { setSelectedProduct(null); setSelectedVariant(null); setShowConfirm(false); }}
+                  className="text-slate-400 hover:text-slate-600 shrink-0"
                   data-testid="button-push-inv-change-product"
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-5 w-5" />
                 </button>
               </div>
 
               {/* Variant selection if multiple */}
               {variants.length > 1 && (
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1 block">
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">
                     Select Variant
                   </label>
-                  <div className="border rounded-md divide-y max-h-36 overflow-y-auto">
-                    {variants.map((v: any) => (
-                      <button
-                        key={v.id}
-                        className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50 ${selectedVariant?.id === v.id ? "bg-blue-50 font-semibold text-blue-700" : ""}`}
-                        onClick={() => setSelectedVariant(v)}
-                        data-testid={`push-inv-variant-${v.id}`}
-                      >
-                        <span>{variantLabel(v) || v.sku}</span>
-                        <span className="text-xs text-slate-400">Stock: {v.stock_level ?? 0}</span>
-                      </button>
-                    ))}
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="max-h-[30vh] overflow-y-auto divide-y">
+                      {variants.map((v: any) => (
+                        <button
+                          key={v.id}
+                          className={`w-full flex items-center justify-between px-4 py-2.5 text-left text-sm hover:bg-slate-50 transition-colors ${selectedVariant?.id === v.id ? "bg-blue-50 font-semibold text-blue-700" : ""}`}
+                          onClick={() => setSelectedVariant(v)}
+                          data-testid={`push-inv-variant-${v.id}`}
+                        >
+                          <span>{variantLabel(v) || v.sku}</span>
+                          <div className="flex items-center gap-3 text-xs">
+                            <span className="text-slate-400 font-mono">{v.sku}</span>
+                            <span className={v.stock_level <= 0 ? "text-red-500" : "text-slate-400"}>
+                              Stock: {v.stock_level ?? 0}
+                            </span>
+                            {selectedVariant?.id === v.id && (
+                              <span className="text-blue-600">✓</span>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* Quantity */}
+              {/* Quantity + reason */}
               {selectedVariant && (
                 <>
                   <div>
-                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1 block">
-                      Quantity to Add (Increment)
+                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">
+                      Quantity to Add
                     </label>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-3">
                       <button
                         onClick={() => setQuantityInput(String(Math.max(1, quantity - 1)))}
-                        className="border rounded p-2 hover:bg-slate-100"
+                        className="border rounded-lg p-2.5 hover:bg-slate-100 transition-colors"
                         data-testid="button-push-inv-minus"
                       >
                         <Minus className="h-4 w-4" />
@@ -3396,28 +3328,29 @@ function PushInventoryModal({
                         min="1"
                         value={quantityInput}
                         onChange={(e) => setQuantityInput(e.target.value)}
-                        className="text-center w-24 font-bold text-lg"
+                        className="text-center w-28 font-bold text-xl h-12"
                         data-testid="input-push-inv-quantity"
                       />
                       <button
                         onClick={() => setQuantityInput(String(quantity + 1))}
-                        className="border rounded p-2 hover:bg-slate-100"
+                        className="border rounded-lg p-2.5 hover:bg-slate-100 transition-colors"
                         data-testid="button-push-inv-plus"
                       >
                         <Plus className="h-4 w-4" />
                       </button>
+                      <div className="text-sm text-slate-500 ml-2">
+                        <p>{selectedVariant.stock_level ?? 0} <span className="text-slate-400">current</span></p>
+                        <p className="font-semibold text-slate-800">→ {(selectedVariant.stock_level ?? 0) + quantity} <span className="text-slate-400 font-normal">after</span></p>
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Current stock: {selectedVariant.stock_level ?? "unknown"} → New: {(selectedVariant.stock_level ?? 0) + quantity}
-                    </p>
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1 block">
+                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">
                       Reason (Optional)
                     </label>
                     <Input
-                      placeholder="e.g. Stock correction, Received shipment…"
+                      placeholder="e.g. Received shipment, Stock correction…"
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
                       data-testid="input-push-inv-reason"
@@ -3426,34 +3359,32 @@ function PushInventoryModal({
 
                   {!showConfirm ? (
                     <Button
-                      className="w-full"
+                      className="w-full h-12 text-base font-semibold"
                       disabled={quantity <= 0}
                       onClick={() => setShowConfirm(true)}
                       data-testid="button-push-inv-confirm-open"
                     >
-                      Push Inventory
+                      <Package className="h-4 w-4 mr-2" />
+                      Push {quantity} Unit{quantity !== 1 ? "s" : ""} to BigCommerce
                     </Button>
                   ) : (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-                      <p className="text-sm font-semibold text-amber-800">Confirm Push</p>
-                      <p className="text-xs text-amber-700">
-                        Add <strong>{quantity}</strong> units to{" "}
-                        <strong>{selectedVariant.sku || selectedProduct.sku}</strong>.<br />
-                        Stock will go from{" "}
-                        <strong>{selectedVariant.stock_level ?? 0}</strong> →{" "}
-                        <strong>{(selectedVariant.stock_level ?? 0) + quantity}</strong>.
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
+                      <p className="text-sm font-semibold text-amber-800">Confirm Inventory Push</p>
+                      <p className="text-sm text-amber-700">
+                        Add <strong>{quantity}</strong> unit{quantity !== 1 ? "s" : ""} to{" "}
+                        <strong>{variantLabel(selectedVariant) || selectedVariant.sku}</strong> on BigCommerce.<br />
+                        Stock: <strong>{selectedVariant.stock_level ?? 0}</strong> → <strong>{(selectedVariant.stock_level ?? 0) + quantity}</strong>
+                        {reason && <><br />Reason: <em>{reason}</em></>}
                       </p>
                       <div className="flex gap-2">
                         <Button
                           variant="outline"
-                          size="sm"
                           onClick={() => setShowConfirm(false)}
                           data-testid="button-push-inv-cancel"
                         >
                           Cancel
                         </Button>
                         <Button
-                          size="sm"
                           disabled={isSubmitting}
                           onClick={handleSubmit}
                           data-testid="button-push-inv-submit"

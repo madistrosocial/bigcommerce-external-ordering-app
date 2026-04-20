@@ -62,9 +62,12 @@ export const priceHistoryCache = pgTable("price_history_cache", {
 export const inventoryPushLogs = pgTable("inventory_push_logs", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   user_id: integer("user_id").notNull().references(() => users.id),
+  username: text("username").notNull().default(""),
   sku: text("sku").notNull(),
   product_id: integer("product_id").notNull(),
   variant_id: integer("variant_id").notNull(),
+  product_name: text("product_name").notNull().default(""),
+  variant_name: text("variant_name").notNull().default(""),
   previous_inventory: integer("previous_inventory").notNull(),
   new_inventory: integer("new_inventory").notNull(),
   quantity_added: integer("quantity_added").notNull(),

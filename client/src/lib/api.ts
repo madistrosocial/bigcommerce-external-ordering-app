@@ -495,9 +495,12 @@ export async function setVariantMaxQty(
 export interface InventoryPushLog {
   id: number;
   user_id: number;
+  username: string;
   sku: string;
   product_id: number;
   variant_id: number;
+  product_name: string;
+  variant_name: string;
   previous_inventory: number;
   new_inventory: number;
   quantity_added: number;
@@ -511,6 +514,8 @@ export async function pushInventory(data: {
   sku: string;
   quantity_added: number;
   reason?: string;
+  product_name?: string;
+  variant_name?: string;
 }): Promise<{ success: boolean; previous_inventory: number; new_inventory: number; log: InventoryPushLog }> {
   const res = await fetch(`${API_BASE}/inventory/push`, {
     method: 'POST',
