@@ -7,6 +7,7 @@ import {
   type InsertProduct,
   type InsertOrder,
   type InsertPriceHistoryCache,
+  type InsertInventoryPushLog,
 } from "@shared/schema";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
@@ -1449,6 +1450,8 @@ export async function registerRoutes(
             sku: v.sku,
             price: v.price?.toString() || p.price.toString(),
             stock_level: v.inventory_level || 0,
+            min_purchase_quantity: v.min_purchase_quantity ?? null,
+            max_purchase_quantity: v.max_purchase_quantity ?? null,
             option_values: (v.option_values || []).map((ov: any) => ({
               id: ov.id, // option value ID - needed for BigCommerce order API
               option_id: ov.option_id, // option ID - needed for BigCommerce order API
@@ -1715,9 +1718,13 @@ export async function registerRoutes(
             return {
               bigcommerce_id: bcId,
               stock_level: p.inventory_level ?? 0,
+              min_purchase_quantity: p.min_purchase_quantity ?? null,
+              max_purchase_quantity: p.max_purchase_quantity ?? null,
               variants: (p.variants || []).map((v: any) => ({
                 id: v.id,
                 stock_level: v.inventory_level ?? 0,
+                min_purchase_quantity: v.min_purchase_quantity ?? null,
+                max_purchase_quantity: v.max_purchase_quantity ?? null,
               })),
             };
           } catch {
@@ -1746,6 +1753,150 @@ export async function registerRoutes(
       const { key, value } = req.body;
       await storage.setSetting(key, value);
       res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ===== BIGCOMMERCE PRODUCT MAX QTY OVERRIDE =====
+
+  // Set (or remove) max_purchase_quantity for a list of variants
+  // Used for checkout override: set to null to remove limit, then restore original after order
+  app.post("/api/bigcommerce/products/set-variant-max-qty", requireAuth, async (req, res) => {
+    try {
+      const { items } = req.body as {
+        items: Array<{ product_id: number; variant_id: number; max_purchase_quantity: number | null }>;
+      };
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "items array required" });
+      }
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+      if (setting?.value) {
+        const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+        storeHash = cfg.storeHash || storeHash;
+        token = cfg.token || token;
+      }
+      if (!storeHash || !token) {
+        return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      }
+      const results = await Promise.all(
+        items.map(async ({ product_id, variant_id, max_purchase_quantity }) => {
+          try {
+            const r = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product_id}/variants/${variant_id}`,
+              {
+                method: "PUT",
+                headers: {
+                  "X-Auth-Token": String(token),
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
+                },
+                body: JSON.stringify({ max_purchase_quantity }),
+              }
+            );
+            return { product_id, variant_id, ok: r.ok, status: r.status };
+          } catch (err: any) {
+            return { product_id, variant_id, ok: false, error: err.message };
+          }
+        })
+      );
+      res.json({ results });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ===== INVENTORY PUSH =====
+
+  app.post("/api/inventory/push", requireAuth, async (req, res) => {
+    try {
+      const { product_id, variant_id, sku, quantity_added, reason } = req.body as {
+        product_id: number;
+        variant_id: number;
+        sku: string;
+        quantity_added: number;
+        reason?: string;
+      };
+      const authUser = (req as any).authUser;
+
+      if (!product_id || !variant_id || !quantity_added || quantity_added <= 0) {
+        return res.status(400).json({ error: "product_id, variant_id, and quantity_added (>0) are required" });
+      }
+
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+      if (setting?.value) {
+        const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+        storeHash = cfg.storeHash || storeHash;
+        token = cfg.token || token;
+      }
+      if (!storeHash || !token) {
+        return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      }
+
+      // 1. Fetch current inventory
+      const getRes = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product_id}/variants/${variant_id}`,
+        {
+          headers: {
+            "X-Auth-Token": String(token),
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+        }
+      );
+      if (!getRes.ok) {
+        throw new Error(`Failed to fetch variant: ${getRes.statusText}`);
+      }
+      const variantData = await getRes.json();
+      const previous_inventory: number = variantData.data?.inventory_level ?? 0;
+      const new_inventory = previous_inventory + quantity_added;
+
+      // 2. Update BC inventory
+      const putRes = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product_id}/variants/${variant_id}`,
+        {
+          method: "PUT",
+          headers: {
+            "X-Auth-Token": String(token),
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ inventory_level: new_inventory }),
+        }
+      );
+      if (!putRes.ok) {
+        const errData = await putRes.json().catch(() => ({}));
+        throw new Error(`Failed to update inventory: ${JSON.stringify(errData)}`);
+      }
+
+      // 3. Log the push
+      const logEntry: InsertInventoryPushLog = {
+        user_id: authUser.id,
+        sku,
+        product_id,
+        variant_id,
+        previous_inventory,
+        new_inventory,
+        quantity_added,
+        reason: reason || null,
+      };
+      const log = await storage.createInventoryPushLog(logEntry);
+
+      res.json({ success: true, previous_inventory, new_inventory, log });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/inventory/push-logs", requireAuth, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 100;
+      const logs = await storage.getInventoryPushLogs(limit);
+      res.json(logs);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

@@ -615,44 +615,65 @@ function VariantPopupDialog({
 
 // ─── Pinned Product Row ───────────────────────────────────────────────────────
 
-const PinnedProductRow = memo(function PinnedProductRow({
+const PinnedProductCard = memo(function PinnedProductCard({
   product,
-  onClick,
+  onOpen,
+  onDirectAdd,
 }: {
   product: api.Product;
-  onClick: () => void;
+  onOpen: () => void;
+  onDirectAdd: () => void;
 }) {
+  const variants = getVariants(product);
+  const totalStock =
+    variants.reduce((s: number, v: any) => s + (v.stock_level ?? 0), 0) ||
+    product.stock_level ||
+    0;
+  const isMultiVariant = variants.length > 1;
+
   return (
-    <button
-      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left border-b last:border-0"
-      onClick={onClick}
-      data-testid={`pinned-row-${product.id}`}
+    <div
+      className="bg-white rounded-lg border shadow-sm flex flex-col overflow-hidden hover:shadow-md transition-shadow"
+      data-testid={`pinned-card-${product.id}`}
     >
-      {product.image ? (
-        <img
-          src={product.image}
-          alt={product.name}
-          className="w-9 h-9 object-cover rounded border shrink-0"
-        />
-      ) : (
-        <div className="w-9 h-9 rounded border bg-slate-100 flex items-center justify-center shrink-0">
-          <Package className="h-4 w-4 text-slate-400" />
-        </div>
-      )}
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-slate-800 leading-snug">
+      {/* Image / tap area to open popup */}
+      <button
+        className="flex flex-col items-start text-left p-2.5 flex-1 gap-1.5"
+        onClick={onOpen}
+        data-testid={`pinned-card-open-${product.id}`}
+      >
+        {product.image ? (
+          <img
+            src={product.image}
+            alt={product.name}
+            className="w-full h-20 object-cover rounded border bg-slate-50"
+          />
+        ) : (
+          <div className="w-full h-20 rounded border bg-slate-100 flex items-center justify-center">
+            <Package className="h-8 w-8 text-slate-300" />
+          </div>
+        )}
+        <p className="text-xs font-semibold text-slate-800 leading-snug line-clamp-2 w-full">
           {product.name}
         </p>
-        <p className="text-xs text-slate-500 mt-0.5">
-          SKU: {product.sku} · ${parseFloat(product.price).toFixed(2)}
-        </p>
-      </div>
-      <span className="text-xs text-slate-400 shrink-0 font-medium">
-        {getVariants(product).length > 1
-          ? `${getVariants(product).length} variants`
-          : ""}
-      </span>
-    </button>
+        <div className="flex items-center justify-between w-full">
+          <span className="text-xs text-slate-400">${parseFloat(product.price).toFixed(2)}</span>
+          <span className={`text-[10px] font-medium ${totalStock <= 0 ? "text-red-500" : "text-slate-400"}`}>
+            {totalStock <= 0 ? "Out of stock" : `Stock: ${totalStock}`}
+          </span>
+        </div>
+      </button>
+      {/* Add button */}
+      <button
+        className="w-full flex items-center justify-center gap-1.5 py-2 bg-slate-900 hover:bg-slate-700 active:bg-slate-800 text-white text-xs font-semibold transition-colors disabled:opacity-40"
+        onClick={onDirectAdd}
+        disabled={totalStock <= 0}
+        data-testid={`pinned-card-add-${product.id}`}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        {isMultiVariant ? `Add (${variants.length} variants)` : "Add to Cart"}
+      </button>
+    </div>
   );
 });
 
@@ -772,6 +793,14 @@ export default function POSPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [navTarget, setNavTarget] = useState<string | null>(null);
   const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
+
+  // ── Max purchase quantity override ────────────────────────────────────────
+  const [showMaxOverrideModal, setShowMaxOverrideModal] = useState(false);
+  const [maxOverrideItems, setMaxOverrideItems] = useState<CartItem[]>([]);
+  const [isOverriding, setIsOverriding] = useState(false);
+
+  // ── Push inventory modal ───────────────────────────────────────────────────
+  const [showPushInventoryModal, setShowPushInventoryModal] = useState(false);
 
   // ── Invoice ───────────────────────────────────────────────────────────────
   const storeHashRef = useRef<string>("");
@@ -1214,8 +1243,11 @@ export default function POSPage() {
         });
         return;
       }
+      const stock: number = variant?.stock_level ?? product.stock_level ?? 0;
+      const minQty: number = variant?.min_purchase_quantity ?? 1;
+      const maxQty: number | null = variant?.max_purchase_quantity ?? null;
+
       if (!allowOverselling) {
-        const stock: number = variant?.stock_level ?? product.stock_level ?? 0;
         if (stock <= 0) {
           toast({
             title: "Out of stock",
@@ -1224,10 +1256,31 @@ export default function POSPage() {
           });
           return;
         }
+        if (minQty > stock) {
+          toast({
+            title: "Cannot add item",
+            description: `Minimum order (${minQty}) exceeds available stock (${stock}).`,
+            variant: "destructive",
+          });
+          return;
+        }
       }
+
+      // Auto-adjust qty to minimum if below min
+      let finalQty = Math.max(qty, minQty);
+
+      // Warn (non-blocking) if quantity exceeds max
+      if (maxQty != null && finalQty > maxQty) {
+        toast({
+          title: "Purchase limit exceeded",
+          description: `This item has a limit of ${maxQty}. You can override at checkout.`,
+          duration: 4000,
+        });
+      }
+
       const price = parseFloat(variant?.price || product.price);
       const beforeIds = new Set(useStore.getState().cart.map((i) => i.lineId));
-      addToCart(product, qty, variant ?? undefined, price, price, null, null);
+      addToCart(product, finalQty, variant ?? undefined, price, price, null, null);
       setTimeout(() => {
         const after = useStore.getState().cart;
         const newLine = after.find((i) => !beforeIds.has(i.lineId));
@@ -1244,7 +1297,7 @@ export default function POSPage() {
       }, 0);
       toast({
         title: "Added to cart",
-        description: `${variant?.sku || product.sku} × ${qty}`,
+        description: `${variant?.sku || product.sku} × ${finalQty}`,
         duration: 1500,
       });
     },
@@ -1307,6 +1360,45 @@ export default function POSPage() {
       // Popup stays open — user closes it with Done
     },
     [addToCart, toast, selectedCustomer],
+  );
+
+  // ── Direct add from pinned card (fetches fresh stock for min/max) ──────────
+  const handleDirectAddPinned = useCallback(
+    async (product: api.Product) => {
+      const variants = getVariants(product);
+      if (variants.length > 1) {
+        openPopupWithFreshStock(product, matchedTier);
+        return;
+      }
+      // Single variant or no variant — auto-add with fresh stock check
+      try {
+        const stockData = await api.refreshProductStock([product.bigcommerce_id]);
+        if (stockData.length > 0) {
+          const info = stockData[0];
+          if (variants.length === 1) {
+            const freshVariant = {
+              ...variants[0],
+              stock_level: info.variants.find((v) => v.id === variants[0].id)?.stock_level ?? info.stock_level,
+              min_purchase_quantity: info.variants.find((v) => v.id === variants[0].id)?.min_purchase_quantity ?? info.min_purchase_quantity,
+              max_purchase_quantity: info.variants.find((v) => v.id === variants[0].id)?.max_purchase_quantity ?? info.max_purchase_quantity,
+            };
+            autoAddVariant(product, freshVariant);
+          } else {
+            // No variants — product-level
+            const freshProduct = { ...product, stock_level: info.stock_level };
+            autoAddVariant(freshProduct, null);
+          }
+          return;
+        }
+      } catch {}
+      // Fallback: add with cached data
+      if (variants.length === 1) {
+        autoAddVariant(product, variants[0]);
+      } else {
+        autoAddVariant(product, null);
+      }
+    },
+    [autoAddVariant, openPopupWithFreshStock, matchedTier],
   );
 
   // ── Build suggestions from BC products ──────────────────────────────────────
@@ -1576,6 +1668,71 @@ export default function POSPage() {
       price_tier_color:
         item.price_source === "price_list" ? item.price_tier_color : undefined,
     });
+  };
+
+  // ── Checkout – step 1: check for max-qty exceeded items ───────────────────
+  const handleCheckoutClick = useCallback(() => {
+    const exceeded = cart.filter((item) => {
+      const maxQty = item.variant?.max_purchase_quantity ?? null;
+      return maxQty != null && item.quantity > maxQty;
+    });
+    if (exceeded.length > 0) {
+      setMaxOverrideItems(exceeded);
+      setShowMaxOverrideModal(true);
+    } else {
+      setShowCheckoutConfirm(true);
+    }
+  }, [cart]);
+
+  // ── Checkout with max override ─────────────────────────────────────────────
+  const handleCheckoutWithOverride = async () => {
+    if (isOverriding) return;
+    setIsOverriding(true);
+    setShowMaxOverrideModal(false);
+
+    const overrideList = maxOverrideItems
+      .filter((item) => item.variant?.id && item.product.bigcommerce_id)
+      .map((item) => ({
+        product_id: item.product.bigcommerce_id,
+        variant_id: item.variant!.id,
+        max_purchase_quantity: null as null,
+        original: item.variant!.max_purchase_quantity as number,
+      }));
+
+    const restoreList = overrideList.map(({ product_id, variant_id, original }) => ({
+      product_id,
+      variant_id,
+      max_purchase_quantity: original,
+    }));
+
+    try {
+      // Remove limits
+      await api.setVariantMaxQty(
+        overrideList.map(({ product_id, variant_id }) => ({
+          product_id,
+          variant_id,
+          max_purchase_quantity: null,
+        }))
+      );
+      // Proceed with checkout
+      await handleCheckout();
+    } finally {
+      // Always restore limits
+      if (restoreList.length > 0) {
+        await api.setVariantMaxQty(restoreList).catch(() => {});
+      }
+      setIsOverriding(false);
+      setMaxOverrideItems([]);
+      // Open BC product pages for verification
+      overrideList.forEach(({ product_id }) => {
+        if (storeHashRef.current) {
+          window.open(
+            `https://store-${storeHashRef.current}.mybigcommerce.com/manage/products/${product_id}`,
+            "_blank"
+          );
+        }
+      });
+    }
   };
 
   // ── Checkout ──────────────────────────────────────────────────────────────
@@ -1984,6 +2141,13 @@ export default function POSPage() {
                 <AlertCircle className="mr-2 h-4 w-4" />
                 Allow Overselling: {allowOverselling ? "ON" : "OFF"}
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setShowPushInventoryModal(true)}
+                data-testid="pos-menu-push-inventory"
+              >
+                <Package className="mr-2 h-4 w-4" />
+                Push Inventory
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-red-600"
@@ -2218,19 +2382,20 @@ export default function POSPage() {
                   </p>
                 </div>
               ) : (
-                <div className="bg-white mx-4 my-2 rounded-lg border shadow-sm overflow-hidden">
-                  <div className="px-4 py-2 border-b bg-slate-50">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                      Pinned Products
-                    </p>
+                <div className="mx-4 my-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 px-1">
+                    Pinned Products
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {pinnedProducts.map((p) => (
+                      <PinnedProductCard
+                        key={p.id}
+                        product={p}
+                        onOpen={() => openPopupWithFreshStock(p, matchedTier)}
+                        onDirectAdd={() => handleDirectAddPinned(p)}
+                      />
+                    ))}
                   </div>
-                  {pinnedProducts.map((p) => (
-                    <PinnedProductRow
-                      key={p.id}
-                      product={p}
-                      onClick={() => openPopupWithFreshStock(p, matchedTier)}
-                    />
-                  ))}
                 </div>
               )}
             </div>
@@ -2814,7 +2979,7 @@ export default function POSPage() {
                   !selectedAddress ||
                   isSubmitting
                 }
-                onClick={() => setShowCheckoutConfirm(true)}
+                onClick={handleCheckoutClick}
                 data-testid="button-pos-checkout"
               >
                 {isSubmitting ? (
@@ -2968,7 +3133,344 @@ export default function POSPage() {
         />
       )}
 
+      {/* ── Max Purchase Qty Override Modal ── */}
+      <AlertDialog open={showMaxOverrideModal} onOpenChange={setShowMaxOverrideModal}>
+        <AlertDialogContent data-testid="dialog-max-override">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Purchase Limits Exceeded</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>Some items in your cart exceed their purchase limits. Temporarily disable limits and proceed?</p>
+                <ul className="text-xs bg-amber-50 border border-amber-200 rounded p-2 space-y-1 mt-2">
+                  {maxOverrideItems.map((item) => (
+                    <li key={item.lineId} className="flex justify-between">
+                      <span className="truncate mr-2">{item.variant?.sku || item.product.sku}</span>
+                      <span className="shrink-0 font-medium text-amber-700">
+                        Qty {item.quantity} / Max {item.variant?.max_purchase_quantity}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-slate-500 mt-1">
+                  Limits will be automatically restored after checkout. BC product pages will open for verification.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-max-override-cancel">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isOverriding}
+              onClick={handleCheckoutWithOverride}
+              data-testid="button-max-override-confirm"
+            >
+              {isOverriding ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Overriding…</>
+              ) : "Disable Limits & Checkout"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Push Inventory Modal ── */}
+      {showPushInventoryModal && (
+        <PushInventoryModal
+          onClose={() => setShowPushInventoryModal(false)}
+          pinnedProducts={pinnedProducts}
+          canSearchBC={canSearchBC}
+        />
+      )}
+
       <Toaster />
     </div>
+  );
+}
+
+// ─── Push Inventory Modal ─────────────────────────────────────────────────────
+
+function PushInventoryModal({
+  onClose,
+  pinnedProducts,
+  canSearchBC,
+}: {
+  onClose: () => void;
+  pinnedProducts: api.Product[];
+  canSearchBC: boolean;
+}) {
+  const { toast } = useToast();
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<api.Product[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<api.Product | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<any | null>(null);
+  const [quantityInput, setQuantityInput] = useState("1");
+  const [reason, setReason] = useState("");
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    searchRef.current?.focus();
+  }, []);
+
+  const handleSearch = useCallback((q: string) => {
+    setSearch(q);
+    if (!q.trim()) {
+      setResults([]);
+      return;
+    }
+    if (debRef.current) clearTimeout(debRef.current);
+    debRef.current = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        // Filter pinned products first
+        const lower = q.toLowerCase();
+        const pinned = pinnedProducts.filter(
+          (p) =>
+            p.name.toLowerCase().includes(lower) ||
+            p.sku.toLowerCase().includes(lower),
+        );
+        if (pinned.length > 0) {
+          setResults(pinned.slice(0, 10));
+        } else if (canSearchBC) {
+          const bc = await api.searchBigCommerceProducts(q, "", "");
+          setResults(bc.slice(0, 10));
+        } else {
+          setResults([]);
+        }
+      } catch {
+        setResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 350);
+  }, [pinnedProducts, canSearchBC]);
+
+  const selectProduct = useCallback((p: api.Product) => {
+    setSelectedProduct(p);
+    const variants = getVariants(p);
+    setSelectedVariant(variants.length === 1 ? variants[0] : null);
+    setSearch("");
+    setResults([]);
+  }, []);
+
+  const quantity = parseInt(quantityInput) || 0;
+
+  const handleSubmit = async () => {
+    if (!selectedProduct || !selectedVariant || quantity <= 0) return;
+    setIsSubmitting(true);
+    try {
+      const result = await api.pushInventory({
+        product_id: selectedProduct.bigcommerce_id,
+        variant_id: selectedVariant.id,
+        sku: selectedVariant.sku || selectedProduct.sku,
+        quantity_added: quantity,
+        reason: reason || undefined,
+      });
+      toast({
+        title: "Inventory Updated",
+        description: `${selectedVariant.sku || selectedProduct.sku}: ${result.previous_inventory} → ${result.new_inventory}`,
+      });
+      setSelectedProduct(null);
+      setSelectedVariant(null);
+      setQuantityInput("1");
+      setReason("");
+      setShowConfirm(false);
+    } catch (e: any) {
+      toast({ title: "Failed to push inventory", description: e.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const variants = selectedProduct ? getVariants(selectedProduct) : [];
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-md" data-testid="dialog-push-inventory">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Package className="h-5 w-5" /> Push Inventory
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {!selectedProduct ? (
+            <>
+              <div className="relative">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
+                <Input
+                  ref={searchRef}
+                  placeholder="Search by SKU or product name…"
+                  value={search}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  className="pl-9"
+                  data-testid="input-push-inv-search"
+                />
+                {isSearching && (
+                  <Loader2 className="absolute right-3 top-3 h-4 w-4 animate-spin text-slate-400" />
+                )}
+              </div>
+              {results.length > 0 && (
+                <div className="border rounded-md divide-y max-h-48 overflow-y-auto">
+                  {results.map((p) => (
+                    <button
+                      key={p.id}
+                      className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 text-left"
+                      onClick={() => selectProduct(p)}
+                      data-testid={`push-inv-result-${p.id}`}
+                    >
+                      {p.image && <img src={p.image} alt="" className="w-8 h-8 object-cover rounded border shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{p.name}</p>
+                        <p className="text-xs text-slate-400">SKU: {p.sku}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {search && !isSearching && results.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-2">No products found</p>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Selected product header */}
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border">
+                {selectedProduct.image && (
+                  <img src={selectedProduct.image} alt="" className="w-10 h-10 object-cover rounded border shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate">{selectedProduct.name}</p>
+                  <p className="text-xs text-slate-500">SKU: {selectedProduct.sku}</p>
+                </div>
+                <button
+                  onClick={() => { setSelectedProduct(null); setSelectedVariant(null); }}
+                  className="text-slate-400 hover:text-slate-600"
+                  data-testid="button-push-inv-change-product"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Variant selection if multiple */}
+              {variants.length > 1 && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1 block">
+                    Select Variant
+                  </label>
+                  <div className="border rounded-md divide-y max-h-36 overflow-y-auto">
+                    {variants.map((v: any) => (
+                      <button
+                        key={v.id}
+                        className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50 ${selectedVariant?.id === v.id ? "bg-blue-50 font-semibold text-blue-700" : ""}`}
+                        onClick={() => setSelectedVariant(v)}
+                        data-testid={`push-inv-variant-${v.id}`}
+                      >
+                        <span>{variantLabel(v) || v.sku}</span>
+                        <span className="text-xs text-slate-400">Stock: {v.stock_level ?? 0}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Quantity */}
+              {selectedVariant && (
+                <>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1 block">
+                      Quantity to Add (Increment)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setQuantityInput(String(Math.max(1, quantity - 1)))}
+                        className="border rounded p-2 hover:bg-slate-100"
+                        data-testid="button-push-inv-minus"
+                      >
+                        <Minus className="h-4 w-4" />
+                      </button>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={quantityInput}
+                        onChange={(e) => setQuantityInput(e.target.value)}
+                        className="text-center w-24 font-bold text-lg"
+                        data-testid="input-push-inv-quantity"
+                      />
+                      <button
+                        onClick={() => setQuantityInput(String(quantity + 1))}
+                        className="border rounded p-2 hover:bg-slate-100"
+                        data-testid="button-push-inv-plus"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Current stock: {selectedVariant.stock_level ?? "unknown"} → New: {(selectedVariant.stock_level ?? 0) + quantity}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1 block">
+                      Reason (Optional)
+                    </label>
+                    <Input
+                      placeholder="e.g. Stock correction, Received shipment…"
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                      data-testid="input-push-inv-reason"
+                    />
+                  </div>
+
+                  {!showConfirm ? (
+                    <Button
+                      className="w-full"
+                      disabled={quantity <= 0}
+                      onClick={() => setShowConfirm(true)}
+                      data-testid="button-push-inv-confirm-open"
+                    >
+                      Push Inventory
+                    </Button>
+                  ) : (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+                      <p className="text-sm font-semibold text-amber-800">Confirm Push</p>
+                      <p className="text-xs text-amber-700">
+                        Add <strong>{quantity}</strong> units to{" "}
+                        <strong>{selectedVariant.sku || selectedProduct.sku}</strong>.<br />
+                        Stock will go from{" "}
+                        <strong>{selectedVariant.stock_level ?? 0}</strong> →{" "}
+                        <strong>{(selectedVariant.stock_level ?? 0) + quantity}</strong>.
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowConfirm(false)}
+                          data-testid="button-push-inv-cancel"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={isSubmitting}
+                          onClick={handleSubmit}
+                          data-testid="button-push-inv-submit"
+                        >
+                          {isSubmitting ? (
+                            <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Pushing…</>
+                          ) : "Confirm Push"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

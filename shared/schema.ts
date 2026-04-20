@@ -59,11 +59,25 @@ export const priceHistoryCache = pgTable("price_history_cache", {
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const inventoryPushLogs = pgTable("inventory_push_logs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").notNull().references(() => users.id),
+  sku: text("sku").notNull(),
+  product_id: integer("product_id").notNull(),
+  variant_id: integer("variant_id").notNull(),
+  previous_inventory: integer("previous_inventory").notNull(),
+  new_inventory: integer("new_inventory").notNull(),
+  quantity_added: integer("quantity_added").notNull(),
+  reason: text("reason"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertProductSchema = createInsertSchema(products).omit({ id: true });
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, date: true });
 export const insertPriceHistoryCacheSchema = createInsertSchema(priceHistoryCache).omit({ id: true, created_at: true });
+export const insertInventoryPushLogSchema = createInsertSchema(inventoryPushLogs).omit({ id: true, created_at: true });
 
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -77,3 +91,6 @@ export type Order = typeof orders.$inferSelect;
 
 export type InsertPriceHistoryCache = z.infer<typeof insertPriceHistoryCacheSchema>;
 export type PriceHistoryCacheEntry = typeof priceHistoryCache.$inferSelect;
+
+export type InsertInventoryPushLog = z.infer<typeof insertInventoryPushLogSchema>;
+export type InventoryPushLog = typeof inventoryPushLogs.$inferSelect;

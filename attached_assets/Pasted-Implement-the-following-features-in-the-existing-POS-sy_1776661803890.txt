@@ -1,0 +1,162 @@
+Implement the following features in the existing POS system. All changes must be backward compatible and must NOT break current pricing, cart, checkout, or caching logic.
+
+---
+
+1. CART VALIDATION + MAX PURCHASE OVERRIDE (COMBINED)
+
+A. ADD TO CART VALIDATION
+
+Apply validation when:
+- scanning item
+- adding from search
+- increasing quantity
+- manual quantity input
+
+For each item, fetch:
+- inventory_level
+- min_purchase_quantity (if exists)
+- max_purchase_quantity (if exists)
+
+Compute:
+- max_allowed = min(inventory_level, max_purchase_quantity OR Infinity)
+- min_allowed = min_purchase_quantity OR 1
+
+Behavior:
+- If inventory_level = 0 → block add
+- If min_allowed > inventory_level → block add
+- If quantity > max_allowed → allow but mark as "exceeds limit"
+- If quantity < min_allowed → auto-adjust to min_allowed
+
+If item has max_purchase_quantity:
+- Show non-blocking warning:
+  "This item has a purchase limit (Max: X). You can override during checkout."
+
+---
+
+B. CHECKOUT OVERRIDE FLOW
+
+Before checkout:
+- Scan cart for items where quantity > max_purchase_quantity
+
+If found:
+- Show modal:
+  "Some items exceed purchase limits. Disable limits temporarily and proceed?"
+
+If user confirms:
+- For EACH affected product:
+  1. Fetch current max_purchase_quantity
+  2. Store original value (in memory or temporary store)
+  3. Update product in BigCommerce:
+     → set max_purchase_quantity = null (remove restriction)
+
+- Proceed with normal checkout flow
+
+AFTER checkout (SUCCESS OR FAIL):
+- ALWAYS restore all affected products:
+  → set max_purchase_quantity back to original value
+
+- Open BigCommerce product edit page(s) for verification:
+  https://store-<storehash>.mybigcommerce.com/manage/products/{product_id}
+
+Rules:
+- Must handle multiple products
+- Must use try/finally pattern to guarantee restore
+- Must not rely only on successful checkout
+- Prevent duplicate override calls during active process
+
+---
+
+2. PRODUCT LAYOUT OPTIMIZATION (POS SPEED)
+
+Update product listing UI:
+
+- Use 2-column grid layout when screen width allows
+- Keep single column for small screens
+
+Each product card:
+- More compact height
+- Better spacing for faster scanning
+
+Add ONE “Add to Cart” button per product:
+
+Behavior:
+- If product has only 1 variant:
+  → Add directly to cart
+
+- If product has multiple variants:
+  → Open existing variant selection modal
+
+Goals:
+- Reduce clicks
+- Improve bulk ordering speed
+- Improve tablet usability
+
+---
+
+3. MANUAL INVENTORY PUSH FEATURE
+
+Add a new feature accessible in POS/admin:
+
+A. UI
+- Add button: "Push Inventory"
+- Opens modal/dialog
+
+B. Product selection:
+- Search by SKU / name (reuse POS search)
+
+C. Input:
+- Quantity input
+- Mode:
+  → Increment (add to current inventory)
+
+D. Confirmation:
+- Show confirmation dialog before submit
+
+E. API ACTION:
+- Update BigCommerce inventory via API:
+  PUT /catalog/products/{product_id}/variants/{variant_id}
+  → inventory_level = current + input quantity
+
+F. LOGGING (create new table if needed):
+Store:
+- user_id
+- SKU
+- product_id
+- variant_id
+- previous_inventory
+- new_inventory
+- quantity_added
+- reason (optional)
+- timestamp
+
+G. RULES:
+- Do NOT overwrite inventory directly (use incremental only)
+- Must confirm before pushing
+- Must log every action
+
+---
+
+4. GENERAL RULES
+
+- Do NOT break:
+  - price tier system
+  - pricing cache system
+  - cart flow
+  - checkout logic
+
+- Maintain performance:
+  - No unnecessary API calls
+  - No blocking UI for normal add-to-cart
+
+- Keep UI clean and minimal
+
+---
+
+EXPECTED RESULT:
+
+- Cart prevents invalid states before checkout
+- Max purchase limits can be safely overridden when needed
+- Checkout no longer fails due to max limits
+- Product browsing and adding is significantly faster
+- Inventory discrepancies can be corrected directly from POS
+- All override and inventory actions are controlled and logged

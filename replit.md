@@ -58,6 +58,27 @@ Preferred communication style: Simple, everyday language.
 - Last sync timestamp stored in localStorage key `vansales_price_history_last_sync`
 - Sync indicator shown at bottom-left of POS during sync; tablet shows a confirm prompt
 
+### Cart Validation + Max Purchase Override
+- `autoAddVariant` applies min/max purchase quantity validation on every add
+- Below min → auto-adjusted to min; above max → non-blocking warning toast
+- Before checkout, cart is scanned for items where `quantity > max_purchase_quantity`
+- If any found → Max Override Modal appears listing affected items
+- On confirm: removes BC limit for each variant via `POST /api/bigcommerce/products/set-variant-max-qty`, proceeds checkout, always restores original limits in `finally` block; opens BC product edit pages for verification
+- Backend route extends refresh-stock and BC search to include `min_purchase_quantity` / `max_purchase_quantity` per variant
+
+### Product Layout (POS)
+- Pinned products shown as 2-column grid of `PinnedProductCard` components
+- Each card has product image, name, price, stock, and an "Add to Cart" button
+- Single-variant: "Add" button fetches fresh stock (incl. min/max) then calls `autoAddVariant` directly
+- Multi-variant: "Add" button opens the VariantPopupDialog
+
+### Manual Inventory Push
+- `inventory_push_logs` table in PostgreSQL logs every push action
+- `POST /api/inventory/push` fetches current BC inventory, increments, updates BC, logs to DB
+- `GET /api/inventory/push-logs` returns log entries
+- POS dropdown has "Push Inventory" button → opens `PushInventoryModal`
+- Modal: search product → select variant (if multi-variant) → qty input → confirm dialog → push
+
 ### Offline Mode
 - Automatic detection via browser online/offline events
 - When offline: Customer search disabled, manual input fields shown

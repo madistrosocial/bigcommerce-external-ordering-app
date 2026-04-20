@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, users, products, orders, settings, priceHistoryCache } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, users, products, orders, settings, priceHistoryCache, inventoryPushLogs } from "@shared/schema";
 import { eq, desc, and, inArray, gt, asc } from "drizzle-orm";
 
 export interface IStorage {
@@ -42,6 +42,10 @@ export interface IStorage {
   getCachedPriceHistory(customerId: number, bcProductId: number): Promise<PriceHistoryCacheEntry[]>;
   savePriceHistoryCacheEntries(entries: InsertPriceHistoryCache[]): Promise<void>;
   getPriceHistoryForSync(afterMs: number | null, limit: number): Promise<PriceHistoryCacheEntry[]>;
+
+  // Inventory push log operations
+  createInventoryPushLog(entry: InsertInventoryPushLog): Promise<InventoryPushLog>;
+  getInventoryPushLogs(limit?: number): Promise<InventoryPushLog[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -218,6 +222,17 @@ export class DatabaseStorage implements IStorage {
     }
     return db.select().from(priceHistoryCache)
       .orderBy(asc(priceHistoryCache.created_at))
+      .limit(limit);
+  }
+
+  async createInventoryPushLog(entry: InsertInventoryPushLog): Promise<InventoryPushLog> {
+    const result = await db.insert(inventoryPushLogs).values(entry).returning();
+    return result[0];
+  }
+
+  async getInventoryPushLogs(limit = 100): Promise<InventoryPushLog[]> {
+    return db.select().from(inventoryPushLogs)
+      .orderBy(desc(inventoryPushLogs.created_at))
       .limit(limit);
   }
 }

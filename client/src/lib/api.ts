@@ -398,7 +398,14 @@ export async function getCustomerByBcId(bcId: number): Promise<BigCommerceCustom
 export interface StockInfo {
   bigcommerce_id: number;
   stock_level: number;
-  variants: { id: number; stock_level: number }[];
+  min_purchase_quantity: number | null;
+  max_purchase_quantity: number | null;
+  variants: {
+    id: number;
+    stock_level: number;
+    min_purchase_quantity: number | null;
+    max_purchase_quantity: number | null;
+  }[];
 }
 
 export async function refreshProductStock(bigcommerceIds: number[]): Promise<StockInfo[]> {
@@ -468,4 +475,59 @@ export async function saveSetting(key: string, value: any): Promise<void> {
     body: JSON.stringify({ key, value })
   });
   if (!res.ok) throw new Error('Failed to save setting');
+}
+
+// ─── Max Purchase Qty Override ────────────────────────────────────────────────
+
+export async function setVariantMaxQty(
+  items: Array<{ product_id: number; variant_id: number; max_purchase_quantity: number | null }>
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/bigcommerce/products/set-variant-max-qty`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ items })
+  });
+  if (!res.ok) throw new Error('Failed to update variant max qty');
+}
+
+// ─── Inventory Push ───────────────────────────────────────────────────────────
+
+export interface InventoryPushLog {
+  id: number;
+  user_id: number;
+  sku: string;
+  product_id: number;
+  variant_id: number;
+  previous_inventory: number;
+  new_inventory: number;
+  quantity_added: number;
+  reason: string | null;
+  created_at: string;
+}
+
+export async function pushInventory(data: {
+  product_id: number;
+  variant_id: number;
+  sku: string;
+  quantity_added: number;
+  reason?: string;
+}): Promise<{ success: boolean; previous_inventory: number; new_inventory: number; log: InventoryPushLog }> {
+  const res = await fetch(`${API_BASE}/inventory/push`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Failed to push inventory' }));
+    throw new Error(err.error || 'Failed to push inventory');
+  }
+  return res.json();
+}
+
+export async function getInventoryPushLogs(): Promise<InventoryPushLog[]> {
+  const res = await fetch(`${API_BASE}/inventory/push-logs`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) throw new Error('Failed to fetch inventory push logs');
+  return res.json();
 }
