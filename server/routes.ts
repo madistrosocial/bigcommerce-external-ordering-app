@@ -1259,7 +1259,10 @@ export async function registerRoutes(
           sku: v.sku,
           upc: v.upc || "",
           price: price.toString(),
+          sale_price: v.sale_price != null && v.sale_price > 0 ? v.sale_price.toString() : undefined,
           stock_level: v.inventory_level || 0,
+          min_purchase_quantity: v.min_purchase_quantity ?? null,
+          max_purchase_quantity: v.max_purchase_quantity ?? null,
           option_values: (v.option_values || []).map((ov: any) => ({
             id: ov.id,
             option_id: ov.option_id,

@@ -217,14 +217,14 @@ function VariantPopupDialog({
     setHistoricalKeys((prev) => { const n = new Set(prev); n.delete(k); return n; });
   };
 
-  // Warn about max purchase quantity (non-blocking)
-  const warnIfMaxExceeded = (v: any, qty: number) => {
+  // Warn about max purchase quantity (non-blocking) — fires whenever limit exists
+  const warnIfMaxExists = (v: any) => {
     const maxQty: number | null = v?.max_purchase_quantity ?? null;
-    if (maxQty != null && qty > maxQty) {
+    if (maxQty != null) {
       toast({
-        title: "Purchase limit",
-        description: `This item has a max of ${maxQty}. You can override at checkout.`,
-        duration: 3000,
+        title: "Purchase limit detected",
+        description: `This item has a maximum purchase limit of ${maxQty}. You can override at checkout.`,
+        duration: 3500,
       });
     }
   };
@@ -240,7 +240,7 @@ function VariantPopupDialog({
         toast({ title: `${v?.sku || product.sku} is out of stock — skipped`, variant: "destructive", duration: 2000 });
         continue;
       }
-      warnIfMaxExceeded(v, qty);
+      warnIfMaxExists(v);
       const { base, finalPrice, discountType, discountValue, priceSource, tierLabel, tierColor } = buildAddArgs(v);
       onAdd(product, v, qty, base, finalPrice, discountType, discountValue, priceSource, tierLabel, tierColor);
       resetVariant(key(v));
@@ -1165,12 +1165,12 @@ export default function POSPage() {
       // Auto-adjust qty to minimum if below min
       let finalQty = Math.max(qty, minQty);
 
-      // Warn (non-blocking) if quantity exceeds max
-      if (maxQty != null && finalQty > maxQty) {
+      // Warn (non-blocking) whenever a max purchase limit exists
+      if (maxQty != null) {
         toast({
-          title: "Purchase limit exceeded",
-          description: `This item has a limit of ${maxQty}. You can override at checkout.`,
-          duration: 4000,
+          title: "Purchase limit detected",
+          description: `This item has a maximum purchase limit of ${maxQty}. You can override at checkout.`,
+          duration: 3500,
         });
       }
 
@@ -1221,6 +1221,15 @@ export default function POSPage() {
           duration: 2000,
         });
         return;
+      }
+      // Warn (non-blocking) if max purchase limit exists
+      const maxQty: number | null = variant?.max_purchase_quantity ?? null;
+      if (maxQty != null) {
+        toast({
+          title: "Purchase limit detected",
+          description: `This item has a maximum purchase limit of ${maxQty}. You can override at checkout.`,
+          duration: 3500,
+        });
       }
       const beforeIds = new Set(useStore.getState().cart.map((i) => i.lineId));
       addToCart(
@@ -3091,6 +3100,7 @@ export default function POSPage() {
 
 function PushInventoryModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
+  const { currentUser } = useStore();
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<api.Product[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -3107,7 +3117,19 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
     setTimeout(() => searchRef.current?.focus(), 80);
   }, []);
 
-  // Always search full BigCommerce catalog (title, SKU, UPC)
+  const selectProduct = useCallback((p: api.Product, autoVariant?: any) => {
+    setSelectedProduct(p);
+    if (autoVariant) {
+      setSelectedVariant(autoVariant);
+    } else {
+      const variants = getVariants(p);
+      setSelectedVariant(variants.length === 1 ? variants[0] : null);
+    }
+    setSearch("");
+    setResults([]);
+  }, []);
+
+  // Always search full BigCommerce catalog via agent route (SKU, UPC, keyword)
   const handleSearch = useCallback((q: string) => {
     setSearch(q);
     if (!q.trim()) { setResults([]); return; }
@@ -3115,23 +3137,24 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
     debRef.current = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const bc = await api.searchBigCommerceProducts(q, "", "");
-        setResults(bc.slice(0, 20));
+        const userId = currentUser?.id;
+        if (!userId) { setResults([]); return; }
+        const result = await api.agentBigCommerceSearch(q, userId);
+        if (result.resultType === "variant") {
+          // Direct SKU/UPC hit — auto-select product + variant immediately
+          // Merge min/max onto the variant from search result
+          selectProduct(result.product, result.variant);
+        } else {
+          // Keyword results — show product list for user to pick from
+          setResults((result.products || []).slice(0, 20));
+        }
       } catch {
         setResults([]);
       } finally {
         setIsSearching(false);
       }
     }, 350);
-  }, []);
-
-  const selectProduct = useCallback((p: api.Product) => {
-    setSelectedProduct(p);
-    const variants = getVariants(p);
-    setSelectedVariant(variants.length === 1 ? variants[0] : null);
-    setSearch("");
-    setResults([]);
-  }, []);
+  }, [currentUser?.id, selectProduct]);
 
   const quantity = parseInt(quantityInput) || 0;
 
