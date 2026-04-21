@@ -1287,6 +1287,8 @@ export async function registerRoutes(
           ? p.description.replace(/<[^>]*>?/gm, "")
           : "",
         stock_level: p.inventory_level || 0,
+        min_purchase_quantity: p.min_purchase_quantity ?? null,
+        max_purchase_quantity: p.max_purchase_quantity ?? null,
         is_pinned: false,
         variants: [] as any[],
       });
@@ -1763,8 +1765,55 @@ export async function registerRoutes(
 
   // ===== BIGCOMMERCE PRODUCT MAX QTY OVERRIDE =====
 
-  // Set (or remove) max_purchase_quantity for a list of variants
+  // Set (or remove) max_purchase_quantity at PRODUCT level (not variant)
   // Used for checkout override: set to null to remove limit, then restore original after order
+  app.post("/api/bigcommerce/products/set-product-max-qty", requireAuth, async (req, res) => {
+    try {
+      const { items } = req.body as {
+        items: Array<{ product_id: number; max_purchase_quantity: number | null }>;
+      };
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "items array required" });
+      }
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+      if (setting?.value) {
+        const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+        storeHash = cfg.storeHash || storeHash;
+        token = cfg.token || token;
+      }
+      if (!storeHash || !token) {
+        return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      }
+      const results = await Promise.all(
+        items.map(async ({ product_id, max_purchase_quantity }) => {
+          try {
+            const r = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product_id}`,
+              {
+                method: "PUT",
+                headers: {
+                  "X-Auth-Token": String(token),
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
+                },
+                body: JSON.stringify({ max_purchase_quantity }),
+              }
+            );
+            return { product_id, ok: r.ok, status: r.status };
+          } catch (err: any) {
+            return { product_id, ok: false, error: err.message };
+          }
+        })
+      );
+      res.json({ results });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Set (or remove) max_purchase_quantity for a list of variants (kept for backward compat)
   app.post("/api/bigcommerce/products/set-variant-max-qty", requireAuth, async (req, res) => {
     try {
       const { items } = req.body as {

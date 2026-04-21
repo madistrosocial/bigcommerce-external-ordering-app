@@ -1575,68 +1575,73 @@ export default function POSPage() {
     });
   };
 
-  // ── Checkout – step 1: check for max-qty exceeded items ───────────────────
+  // ── Checkout – step 1: check for any items with max purchase limits ──────────
   const handleCheckoutClick = useCallback(() => {
-    const exceeded = cart.filter((item) => {
-      const maxQty = item.variant?.max_purchase_quantity ?? null;
-      return maxQty != null && item.quantity > maxQty;
+    // Trigger override modal for ANY item that has a max purchase quantity (not just exceeded ones)
+    const withMax = cart.filter((item) => {
+      const maxQty = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity ?? null;
+      return maxQty != null;
     });
-    if (exceeded.length > 0) {
-      setMaxOverrideItems(exceeded);
+    if (withMax.length > 0) {
+      setMaxOverrideItems(withMax);
       setShowMaxOverrideModal(true);
     } else {
       setShowCheckoutConfirm(true);
     }
   }, [cart]);
 
-  // ── Checkout with max override ─────────────────────────────────────────────
+  // ── Checkout with max override (product-level, deduplicated) ─────────────────
   const handleCheckoutWithOverride = async () => {
     if (isOverriding) return;
     setIsOverriding(true);
     setShowMaxOverrideModal(false);
 
-    const overrideList = maxOverrideItems
-      .filter((item) => item.variant?.id && item.product.bigcommerce_id)
-      .map((item) => ({
-        product_id: item.product.bigcommerce_id,
-        variant_id: item.variant!.id,
-        max_purchase_quantity: null as null,
-        original: item.variant!.max_purchase_quantity as number,
-      }));
-
-    const restoreList = overrideList.map(({ product_id, variant_id, original }) => ({
-      product_id,
-      variant_id,
-      max_purchase_quantity: original,
-    }));
+    // Deduplicate by product_id — BigCommerce max_purchase_quantity is product-level
+    const uniqueProductMap = new Map<number, number | null>();
+    for (const item of maxOverrideItems) {
+      const pid = item.product.bigcommerce_id;
+      if (pid && !uniqueProductMap.has(pid)) {
+        const originalMax =
+          item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity ?? null;
+        uniqueProductMap.set(pid, originalMax);
+      }
+    }
+    const productList = Array.from(uniqueProductMap.entries()).map(
+      ([product_id, originalMax]) => ({ product_id, originalMax })
+    );
 
     try {
-      // Remove limits
-      await api.setVariantMaxQty(
-        overrideList.map(({ product_id, variant_id }) => ({
-          product_id,
-          variant_id,
-          max_purchase_quantity: null,
-        }))
+      // Step 1: Remove product-level limits
+      await api.setProductMaxQty(
+        productList.map(({ product_id }) => ({ product_id, max_purchase_quantity: null }))
       );
-      // Proceed with checkout
+      // Step 2: Proceed with checkout
       await handleCheckout();
     } finally {
-      // Always restore limits
-      if (restoreList.length > 0) {
-        await api.setVariantMaxQty(restoreList).catch(() => {});
-      }
+      // Step 3: ALWAYS restore limits (success or fail)
+      await api
+        .setProductMaxQty(
+          productList.map(({ product_id, originalMax }) => ({
+            product_id,
+            max_purchase_quantity: originalMax,
+          }))
+        )
+        .catch((err) => console.error("Failed to restore max qty limits:", err));
+
       setIsOverriding(false);
       setMaxOverrideItems([]);
-      // Open BC product pages for verification
-      overrideList.forEach(({ product_id }) => {
-        if (storeHashRef.current) {
+
+      // Step 4: Open ONE tab per unique product for verification (after restore)
+      const openedProducts = new Set<number>();
+      for (const { product_id } of productList) {
+        if (!openedProducts.has(product_id) && storeHashRef.current) {
+          openedProducts.add(product_id);
           window.open(
             `https://store-${storeHashRef.current}.mybigcommerce.com/manage/products/${product_id}`,
             "_blank"
           );
         }
-      });
+      }
     }
   };
 
@@ -2505,8 +2510,12 @@ export default function POSPage() {
                           0);
                       const atMax =
                         !allowOverselling && item.quantity >= itemStock;
+                      const maxPurchase =
+                        item.variant?.max_purchase_quantity ??
+                        item.product.max_purchase_quantity ??
+                        null;
                       return (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <Button
                             variant="outline"
                             size="icon"
@@ -2555,6 +2564,14 @@ export default function POSPage() {
                           <span className="text-xs text-slate-500 ml-1">
                             qty
                           </span>
+                          {maxPurchase != null && (
+                            <span
+                              className="text-xs text-amber-600 font-medium ml-1"
+                              data-testid={`text-max-purchase-${item.lineId}`}
+                            >
+                              Maximum Purchase: {maxPurchase}
+                            </span>
+                          )}
                         </div>
                       );
                     })()}
@@ -3049,22 +3066,25 @@ export default function POSPage() {
       <AlertDialog open={showMaxOverrideModal} onOpenChange={setShowMaxOverrideModal}>
         <AlertDialogContent data-testid="dialog-max-override">
           <AlertDialogHeader>
-            <AlertDialogTitle>Purchase Limits Exceeded</AlertDialogTitle>
+            <AlertDialogTitle>Maximum Purchase Limits Detected</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2">
-                <p>Some items in your cart exceed their purchase limits. Temporarily disable limits and proceed?</p>
+                <p>Some items in your cart have maximum purchase limits. Temporarily disable limits to proceed with checkout?</p>
                 <ul className="text-xs bg-amber-50 border border-amber-200 rounded p-2 space-y-1 mt-2">
-                  {maxOverrideItems.map((item) => (
-                    <li key={item.lineId} className="flex justify-between">
-                      <span className="truncate mr-2">{item.variant?.sku || item.product.sku}</span>
-                      <span className="shrink-0 font-medium text-amber-700">
-                        Qty {item.quantity} / Max {item.variant?.max_purchase_quantity}
-                      </span>
-                    </li>
-                  ))}
+                  {maxOverrideItems.map((item) => {
+                    const maxQty = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity;
+                    return (
+                      <li key={item.lineId} className="flex justify-between">
+                        <span className="truncate mr-2">{item.product.name || item.variant?.sku || item.product.sku}</span>
+                        <span className="shrink-0 font-medium text-amber-700">
+                          Qty {item.quantity} · Max {maxQty}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
                 <p className="text-xs text-slate-500 mt-1">
-                  Limits will be automatically restored after checkout. BC product pages will open for verification.
+                  Limits are removed at the product level and restored automatically after checkout. BC product pages will open for verification.
                 </p>
               </div>
             </AlertDialogDescription>
@@ -3078,7 +3098,7 @@ export default function POSPage() {
             >
               {isOverriding ? (
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Overriding…</>
-              ) : "Disable Limits & Checkout"}
+              ) : "Proceed"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

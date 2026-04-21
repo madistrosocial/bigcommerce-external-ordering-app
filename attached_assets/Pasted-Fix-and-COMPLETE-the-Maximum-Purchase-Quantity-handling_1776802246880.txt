@@ -1,0 +1,260 @@
+Fix and COMPLETE the Maximum Purchase Quantity handling from BigCommerce, including detection, UI display, and temporary override during checkout.
+
+---
+
+ISSUE:
+- App does NOT detect max purchase quantity from BigCommerce
+- No warning shown when adding restricted items
+- No UI indication in cart
+- Checkout fails when limit is exceeded
+- No override system exists
+
+---
+
+GOAL:
+1. Detect max purchase limits from BigCommerce
+2. Show warnings + UI indicators
+3. Allow adding beyond limit (no blocking)
+4. During checkout:
+   - Temporarily REMOVE max limit in BigCommerce (product-level)
+   - Proceed with checkout
+   - Restore limit AFTER (success OR fail)
+   - Open product edit page (1 tab per product) for verification
+
+---
+
+========================
+1. BACKEND FIX (CRITICAL)
+========================
+
+Update BigCommerce product search API to include:
+
+- product.max_purchase_quantity
+- product.min_purchase_quantity
+- variant.max_purchase_quantity (fallback to product)
+- variant.min_purchase_quantity (fallback to product)
+
+Ensure response structure:
+
+{
+  id,
+  name,
+  sku,
+  inventory_level,
+  max_purchase_quantity,
+  min_purchase_quantity,
+  variants: [
+    {
+      id,
+      sku,
+      inventory_level,
+      max_purchase_quantity,
+      min_purchase_quantity
+    }
+  ]
+}
+
+Fallback logic required if variant values are null.
+
+---
+
+========================
+2. FRONTEND – STORE LIMIT
+========================
+
+When adding to cart:
+
+cartItem.maxPurchaseQuantity = variant.max_purchase_quantity ?? null
+cartItem.minPurchaseQuantity = variant.min_purchase_quantity ?? null
+cartItem.productId = product.id
+
+---
+
+========================
+3. ADD TO CART DETECTION
+========================
+
+When item has maxPurchaseQuantity:
+
+- Show warning popup:
+  "This item has a maximum purchase limit of X"
+
+If quantity exceeds limit:
+  "Maximum purchase limit is X"
+
+IMPORTANT:
+DO NOT block adding to cart
+
+---
+
+========================
+4. CART UI DISPLAY
+========================
+
+Beside quantity selector, show:
+
+Maximum Purchase: X
+
+Only if limit exists
+
+Example:
+[-] 4 [+] qty   Maximum Purchase: 1
+
+Style:
+- small text
+- subtle warning color
+
+---
+
+========================
+5. CHECKOUT OVERRIDE LOGIC (CORE FEATURE)
+========================
+
+IMPORTANT:
+Maximum Purchase Quantity is PRODUCT-LEVEL (not per variant)
+
+---
+
+STEP 1: DETECT RESTRICTED ITEMS
+
+Before checkout:
+Scan cart items
+
+If ANY item has maxPurchaseQuantity:
+→ Show modal:
+
+"Some items in your cart have maximum purchase limits.
+Temporarily disable limits to proceed with checkout?"
+
+Buttons:
+- Cancel
+- Proceed
+
+---
+
+STEP 2: REMOVE LIMIT (PRODUCT LEVEL)
+
+If user clicks Proceed:
+
+- Collect UNIQUE productIds from cart items with limits
+- Deduplicate (VERY IMPORTANT)
+
+For EACH productId:
+
+CALL BigCommerce API:
+PUT /catalog/products/{product_id}
+
+Update:
+max_purchase_quantity = null
+
+IMPORTANT:
+- DO NOT use 0 (BigCommerce rejects it)
+- null removes restriction
+
+Store original values:
+
+[
+  {
+    productId,
+    originalMax
+  }
+]
+
+---
+
+STEP 3: PROCEED CHECKOUT
+
+Continue normal checkout flow
+
+---
+
+STEP 4: RESTORE LIMIT (ALWAYS RUN)
+
+After checkout (SUCCESS OR FAIL):
+
+For EACH stored product:
+
+PUT /catalog/products/{product_id}
+
+max_purchase_quantity = originalMax
+
+CRITICAL:
+- Must run even if checkout fails
+- Use try/finally pattern
+- No silent failures
+
+---
+
+STEP 5: OPEN PRODUCT PAGE (PRODUCT-LEVEL ONLY)
+
+After ALL limits are restored:
+
+- Deduplicate productIds
+- Open ONLY ONE tab per product
+
+Use:
+https://store-{STORE_HASH}.mybigcommerce.com/manage/products/{product_id}
+
+Rules:
+
+- Do NOT open per variant
+- Do NOT open duplicates
+- Open AFTER restoration completes
+
+Examples:
+
+Cart has 5 variants of same product:
+→ Open 1 tab only
+
+Cart has 3 different restricted products:
+→ Open 3 tabs
+
+Purpose:
+Allow manual verification that max quantity was restored
+
+---
+
+========================
+6. SAFETY RULES
+========================
+
+- Do NOT run override if no restricted items
+- ALWAYS restore limits (success or fail)
+- Prevent duplicate API calls
+- Handle API errors safely
+- Log errors but DO NOT skip restoration
+
+---
+
+========================
+7. DO NOT MODIFY
+========================
+
+- inventory push feature
+- pricing logic
+- price tiers
+- search behavior (except adding limit fields)
+- cart structure (only extend)
+
+---
+
+========================
+8. VALIDATION CHECKLIST
+========================
+
+After fix:
+
+✔ Adding restricted item shows warning
+✔ Cart shows "Maximum Purchase: X"
+✔ Checkout triggers override modal
+✔ Limits removed before checkout
+✔ Checkout works beyond limit
+✔ Limits restored after success/fail
+✔ Only 1 tab per product opens
+✔ No duplicate tabs
+✔ No 403 errors
+✔ No regression on existing features
+
+---
+
+This must be stable, safe, and non-breaking.

@@ -11,6 +11,8 @@ export interface Product {
   is_pinned: boolean;
   bigcommerce_id: number;
   variants: any[];
+  min_purchase_quantity?: number | null;
+  max_purchase_quantity?: number | null;
 }
 
 export interface User {
@@ -478,6 +480,18 @@ export async function saveSetting(key: string, value: any): Promise<void> {
 }
 
 // ─── Max Purchase Qty Override ────────────────────────────────────────────────
+
+// Product-level override (per spec: max_purchase_quantity is product-level in BigCommerce)
+export async function setProductMaxQty(
+  items: Array<{ product_id: number; max_purchase_quantity: number | null }>
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/bigcommerce/products/set-product-max-qty`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ items })
+  });
+  if (!res.ok) throw new Error('Failed to update product max qty');
+}
 
 export async function setVariantMaxQty(
   items: Array<{ product_id: number; variant_id: number; max_purchase_quantity: number | null }>
