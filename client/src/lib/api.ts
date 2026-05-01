@@ -43,6 +43,7 @@ export interface Order {
   status: 'draft' | 'pending_sync' | 'failed' | 'synced';
   sync_error?: string;
   order_note?: string;
+  customer_note?: string;
   items: OrderItem[];
   total: string;
   date?: string;

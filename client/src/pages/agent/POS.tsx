@@ -137,8 +137,12 @@ function VariantPopupDialog({
   const [isFree, setIsFree] = useState<Record<string, boolean>>({});
   const [pctInputs, setPctInputs] = useState<Record<string, string>>({});
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
-  const [loadingHistoryKey, setLoadingHistoryKey] = useState<string | null>(null);
-  const [historyData, setHistoryData] = useState<Record<string, api.PriceHistoryEntry[]>>({});
+  const [loadingHistoryKey, setLoadingHistoryKey] = useState<string | null>(
+    null,
+  );
+  const [historyData, setHistoryData] = useState<
+    Record<string, api.PriceHistoryEntry[]>
+  >({});
   const [openHistoryKey, setOpenHistoryKey] = useState<string | null>(null);
   const [historicalKeys, setHistoricalKeys] = useState<Set<string>>(new Set());
 
@@ -154,7 +158,7 @@ function VariantPopupDialog({
   };
   const setQty = (v: any, q: number) => {
     const stock = getStock(v);
-    const max = allowOverselling ? Infinity : (stock > 0 ? stock : 0);
+    const max = allowOverselling ? Infinity : stock > 0 ? stock : 0;
     const clamped = allowOverselling ? q : Math.min(q, max);
     // min is 0
     setQtys((p) => ({ ...p, [key(v)]: Math.max(0, clamped) }));
@@ -165,20 +169,32 @@ function VariantPopupDialog({
     return parseFloat(v?.price || product.price) || 0;
   };
 
-  const computePrice = (v: any): { finalPrice: number; discountType: "free" | "percent" | null; discountValue: number | null } => {
+  const computePrice = (
+    v: any,
+  ): {
+    finalPrice: number;
+    discountType: "free" | "percent" | null;
+    discountValue: number | null;
+  } => {
     const base = getBasePrice(v);
     const k = key(v);
-    if (isFree[k]) return { finalPrice: 0, discountType: "free", discountValue: null };
+    if (isFree[k])
+      return { finalPrice: 0, discountType: "free", discountValue: null };
     const manualRaw = priceInputs[k];
     if (manualRaw && manualRaw !== "") {
       const p = parseFloat(manualRaw);
-      if (!isNaN(p) && p >= 0) return { finalPrice: p, discountType: null, discountValue: null };
+      if (!isNaN(p) && p >= 0)
+        return { finalPrice: p, discountType: null, discountValue: null };
     }
     const pctRaw = pctInputs[k];
     if (pctRaw && pctRaw !== "") {
       const pct = parseFloat(pctRaw);
       if (!isNaN(pct) && pct >= 0 && pct <= 100) {
-        return { finalPrice: Math.max(0, base * (1 - pct / 100)), discountType: "percent", discountValue: pct };
+        return {
+          finalPrice: Math.max(0, base * (1 - pct / 100)),
+          discountType: "percent",
+          discountValue: pct,
+        };
       }
     }
     return { finalPrice: base, discountType: null, discountValue: null };
@@ -204,22 +220,47 @@ function VariantPopupDialog({
       const varDefault = parseFloat(v?.price || product.price);
       if (varSale > 0 && varSale < varDefault) priceSource = "sale";
     }
-    const tierLabel = priceSource === "price_list" ? matchedTier?.label || "TIER" : undefined;
-    const tierColor = priceSource === "price_list" ? matchedTier?.color || "#6366f1" : undefined;
-    return { base, finalPrice, discountType, discountValue, priceSource, tierLabel, tierColor };
+    const tierLabel =
+      priceSource === "price_list" ? matchedTier?.label || "TIER" : undefined;
+    const tierColor =
+      priceSource === "price_list"
+        ? matchedTier?.color || "#6366f1"
+        : undefined;
+    return {
+      base,
+      finalPrice,
+      discountType,
+      discountValue,
+      priceSource,
+      tierLabel,
+      tierColor,
+    };
   };
 
   const resetVariant = (k: string) => {
     setQtys((p) => ({ ...p, [k]: 0 }));
     setIsFree((p) => ({ ...p, [k]: false }));
-    setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
-    setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
-    setHistoricalKeys((prev) => { const n = new Set(prev); n.delete(k); return n; });
+    setPctInputs((p) => {
+      const n = { ...p };
+      delete n[k];
+      return n;
+    });
+    setPriceInputs((p) => {
+      const n = { ...p };
+      delete n[k];
+      return n;
+    });
+    setHistoricalKeys((prev) => {
+      const n = new Set(prev);
+      n.delete(k);
+      return n;
+    });
   };
 
   // Warn about max purchase quantity (non-blocking) — fires whenever limit exists
   const warnIfMaxExists = (v: any) => {
-    const maxQty: number | null = v?.max_purchase_quantity ?? null;
+    const maxQty: number | null =
+      v?.max_purchase_quantity ?? product?.max_purchase_quantity ?? null;
     if (maxQty != null) {
       toast({
         title: "Purchase limit detected",
@@ -237,17 +278,44 @@ function VariantPopupDialog({
       if (qty <= 0) continue;
       const stock = getStock(v);
       if (!allowOverselling && stock <= 0) {
-        toast({ title: `${v?.sku || product.sku} is out of stock — skipped`, variant: "destructive", duration: 2000 });
+        toast({
+          title: `${v?.sku || product.sku} is out of stock — skipped`,
+          variant: "destructive",
+          duration: 2000,
+        });
         continue;
       }
       warnIfMaxExists(v);
-      const { base, finalPrice, discountType, discountValue, priceSource, tierLabel, tierColor } = buildAddArgs(v);
-      onAdd(product, v, qty, base, finalPrice, discountType, discountValue, priceSource, tierLabel, tierColor);
+      const {
+        base,
+        finalPrice,
+        discountType,
+        discountValue,
+        priceSource,
+        tierLabel,
+        tierColor,
+      } = buildAddArgs(v);
+      onAdd(
+        product,
+        v,
+        qty,
+        base,
+        finalPrice,
+        discountType,
+        discountValue,
+        priceSource,
+        tierLabel,
+        tierColor,
+      );
       resetVariant(key(v));
       addedCount++;
     }
     if (addedCount === 0) {
-      toast({ title: "No items selected", description: "Set a quantity > 0 to add variants.", duration: 2000 });
+      toast({
+        title: "No items selected",
+        description: "Set a quantity > 0 to add variants.",
+        duration: 2000,
+      });
     }
   };
 
@@ -259,20 +327,35 @@ function VariantPopupDialog({
   }, 0);
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent
-        className="w-[65vw] max-w-[65vw] max-h-[85vh] flex flex-col p-0 gap-0"
+        className="w-[95vw] max-w-[95vw] max-h-[85vh] flex flex-col p-0 gap-0"
         onInteractOutside={(e) => e.preventDefault()}
         data-testid="dialog-variant-picker"
       >
         <DialogHeader className="px-5 pt-5 pb-3 border-b shrink-0">
           <div className="flex items-start gap-3">
             {product.image && (
-              <img src={product.image} alt={product.name} className="w-12 h-12 object-cover rounded border shrink-0" />
+              <img
+                src={product.image}
+                alt={product.name}
+                className="w-12 h-12 object-cover rounded border shrink-0"
+              />
             )}
             <div className="flex-1 min-w-0">
-              <DialogTitle className="text-base leading-snug">{product.name}</DialogTitle>
-              {product.sku && <p className="text-xs text-slate-500 mt-0.5">SKU: {product.sku}</p>}
+              <DialogTitle className="text-base leading-snug">
+                {product.name}
+              </DialogTitle>
+              {product.sku && (
+                <p className="text-xs text-slate-500 mt-0.5">
+                  SKU: {product.sku}
+                </p>
+              )}
             </div>
           </div>
         </DialogHeader>
@@ -297,30 +380,44 @@ function VariantPopupDialog({
                   {/* Variant name + price */}
                   <div className="flex items-center justify-between mb-2">
                     <div className="min-w-0 flex-1">
-                      {v && <p className="text-sm font-semibold text-slate-900 truncate">{variantLabel(v) || v.sku}</p>}
+                      {v && (
+                        <p className="text-sm font-semibold text-slate-900 truncate">
+                          {variantLabel(v) || v.sku}
+                        </p>
+                      )}
                       <p className="text-xs text-slate-500">
                         SKU: {v?.sku || product.sku}
-                        <span className={`ml-2 font-medium ${stock <= 0 ? "text-red-500" : "text-slate-400"}`}>
+                        <span
+                          className={`ml-2 font-medium ${stock <= 0 ? "text-red-500" : "text-slate-400"}`}
+                        >
                           · Stock: {stock}
                         </span>
                       </p>
                     </div>
                     <div className="text-right shrink-0 ml-2">
                       <div className="flex items-center gap-1.5 justify-end">
-                        {v?.id !== undefined && priceListPrices[v.id] !== undefined && matchedTier && (
-                          <span
-                            className="text-[10px] px-1.5 py-0.5 rounded font-bold text-white leading-none"
-                            style={{ backgroundColor: matchedTier.color }}
-                            data-testid={`badge-tier-popup-${k}`}
-                          >
-                            {matchedTier.label || "TIER"}
-                          </span>
-                        )}
-                        <p className={`text-base font-bold ${isDiscounted ? "text-red-600" : "text-slate-900"}`}>
+                        {v?.id !== undefined &&
+                          priceListPrices[v.id] !== undefined &&
+                          matchedTier && (
+                            <span
+                              className="text-[10px] px-1.5 py-0.5 rounded font-bold text-white leading-none"
+                              style={{ backgroundColor: matchedTier.color }}
+                              data-testid={`badge-tier-popup-${k}`}
+                            >
+                              {matchedTier.label || "TIER"}
+                            </span>
+                          )}
+                        <p
+                          className={`text-base font-bold ${isDiscounted ? "text-red-600" : "text-slate-900"}`}
+                        >
                           ${finalPrice.toFixed(2)}
                         </p>
                       </div>
-                      {isDiscounted && <p className="text-xs text-slate-400 line-through">${base.toFixed(2)}</p>}
+                      {isDiscounted && (
+                        <p className="text-xs text-slate-400 line-through">
+                          ${base.toFixed(2)}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -358,6 +455,19 @@ function VariantPopupDialog({
                       </button>
                     </div>
 
+                    {(() => {
+                      const maxQty =
+                        v?.max_purchase_quantity ??
+                        product?.max_purchase_quantity ??
+                        null;
+
+                      return maxQty != null ? (
+                        <div className="text-[10px] text-amber-600 mt-1">
+                          Maximum Purchase: {maxQty}
+                        </div>
+                      ) : null;
+                    })()}
+
                     {/* Last $ button */}
                     {selectedCustomer && (
                       <Button
@@ -370,13 +480,24 @@ function VariantPopupDialog({
                           try {
                             const hist = await onFetchPriceHistory(v?.id);
                             if (hist.length === 0) {
-                              toast({ title: "No price history", variant: "destructive", duration: 2000 });
+                              toast({
+                                title: "No price history",
+                                variant: "destructive",
+                                duration: 2000,
+                              });
                               return;
                             }
                             setHistoryData((prev) => ({ ...prev, [k]: hist }));
-                            setPriceInputs((p) => ({ ...p, [k]: hist[0].price }));
+                            setPriceInputs((p) => ({
+                              ...p,
+                              [k]: hist[0].price,
+                            }));
                             setIsFree((p) => ({ ...p, [k]: false }));
-                            setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
+                            setPctInputs((p) => {
+                              const n = { ...p };
+                              delete n[k];
+                              return n;
+                            });
                             setHistoricalKeys((prev) => new Set(prev).add(k));
                           } finally {
                             setLoadingHistoryKey(null);
@@ -384,7 +505,11 @@ function VariantPopupDialog({
                         }}
                         data-testid={`popup-last-price-${k}`}
                       >
-                        {loadingHistoryKey === k ? <Loader2 className="h-3 w-3 animate-spin" /> : "Last $"}
+                        {loadingHistoryKey === k ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          "Last $"
+                        )}
                       </Button>
                     )}
 
@@ -398,11 +523,17 @@ function VariantPopupDialog({
                           disabled={loadingHistoryKey === k}
                           onClick={async (e) => {
                             e.stopPropagation();
-                            if (openHistoryKey === k) { setOpenHistoryKey(null); return; }
+                            if (openHistoryKey === k) {
+                              setOpenHistoryKey(null);
+                              return;
+                            }
                             setLoadingHistoryKey(k);
                             try {
                               const hist = await onFetchPriceHistory(v?.id);
-                              setHistoryData((prev) => ({ ...prev, [k]: hist }));
+                              setHistoryData((prev) => ({
+                                ...prev,
+                                [k]: hist,
+                              }));
                             } finally {
                               setLoadingHistoryKey(null);
                             }
@@ -418,24 +549,46 @@ function VariantPopupDialog({
                             onMouseDown={(e) => e.preventDefault()}
                           >
                             {(historyData[k] ?? []).length === 0 ? (
-                              <p className="px-3 py-2 text-xs text-slate-500">No history</p>
+                              <p className="px-3 py-2 text-xs text-slate-500">
+                                No history
+                              </p>
                             ) : (
                               (historyData[k] ?? []).map((h, hi) => (
                                 <button
                                   key={hi}
                                   className="w-full text-left px-3 py-1.5 hover:bg-slate-50 border-b last:border-0"
                                   onClick={() => {
-                                    setPriceInputs((p) => ({ ...p, [k]: h.price }));
+                                    setPriceInputs((p) => ({
+                                      ...p,
+                                      [k]: h.price,
+                                    }));
                                     setIsFree((p) => ({ ...p, [k]: false }));
-                                    setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
-                                    setHistoricalKeys((prev) => new Set(prev).add(k));
+                                    setPctInputs((p) => {
+                                      const n = { ...p };
+                                      delete n[k];
+                                      return n;
+                                    });
+                                    setHistoricalKeys((prev) =>
+                                      new Set(prev).add(k),
+                                    );
                                     setOpenHistoryKey(null);
                                   }}
                                   data-testid={`popup-history-option-${k}-${hi}`}
                                 >
-                                  <p className="text-sm font-bold text-green-600">${parseFloat(h.price).toFixed(2)}</p>
+                                  <p className="text-sm font-bold text-green-600">
+                                    ${parseFloat(h.price).toFixed(2)}
+                                  </p>
                                   <p className="text-xs text-slate-400">
-                                    {h.date ? new Date(h.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : ""}
+                                    {h.date
+                                      ? new Date(h.date).toLocaleDateString(
+                                          "en-US",
+                                          {
+                                            month: "short",
+                                            day: "numeric",
+                                            year: "numeric",
+                                          },
+                                        )
+                                      : ""}
                                     {h.orderId ? ` | #${h.orderId}` : ""}
                                   </p>
                                 </button>
@@ -457,8 +610,16 @@ function VariantPopupDialog({
                       onChange={(e) => {
                         setPctInputs((p) => ({ ...p, [k]: e.target.value }));
                         setIsFree((p) => ({ ...p, [k]: false }));
-                        setPriceInputs((p) => { const n = { ...p }; delete n[k]; return n; });
-                        setHistoricalKeys((prev) => { const n = new Set(prev); n.delete(k); return n; });
+                        setPriceInputs((p) => {
+                          const n = { ...p };
+                          delete n[k];
+                          return n;
+                        });
+                        setHistoricalKeys((prev) => {
+                          const n = new Set(prev);
+                          n.delete(k);
+                          return n;
+                        });
                       }}
                       data-testid={`popup-pct-${k}`}
                     />
@@ -474,8 +635,16 @@ function VariantPopupDialog({
                       onChange={(e) => {
                         setPriceInputs((p) => ({ ...p, [k]: e.target.value }));
                         setIsFree((p) => ({ ...p, [k]: false }));
-                        setPctInputs((p) => { const n = { ...p }; delete n[k]; return n; });
-                        setHistoricalKeys((prev) => { const n = new Set(prev); n.delete(k); return n; });
+                        setPctInputs((p) => {
+                          const n = { ...p };
+                          delete n[k];
+                          return n;
+                        });
+                        setHistoricalKeys((prev) => {
+                          const n = new Set(prev);
+                          n.delete(k);
+                          return n;
+                        });
                       }}
                       data-testid={`popup-price-${k}`}
                     />
@@ -498,12 +667,57 @@ function VariantPopupDialog({
               ? `Add ${selectedCount} variant${selectedCount !== 1 ? "s" : ""} — $${selectedTotal.toFixed(2)}`
               : "Add Selected to Cart"}
           </Button>
-          <Button variant="outline" className="w-24" onClick={onClose} data-testid="popup-done">
+          <Button
+            variant="outline"
+            className="w-24"
+            onClick={onClose}
+            data-testid="popup-done"
+          >
             Done
           </Button>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Collapsible Textarea ─────────────────────────────────────────────────────
+
+function CollapsibleTextarea({
+  label,
+  placeholder,
+  value,
+  onChange,
+  testId,
+}: {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+  testId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border rounded bg-slate-50">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span>{label}{value ? ` · ${value.slice(0, 30)}${value.length > 30 ? "…" : ""}` : ""}</span>
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <Textarea
+          placeholder={placeholder}
+          className="text-xs bg-white border-t rounded-none rounded-b min-h-[60px] resize-none focus:ring-0 focus-visible:ring-0 border-x-0 border-b-0"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          data-testid={testId}
+          autoFocus
+        />
+      )}
+    </div>
   );
 }
 
@@ -553,21 +767,21 @@ const PinnedProductRow = memo(function PinnedProductRow({
           </p>
           <p className="text-xs text-slate-400">
             ${parseFloat(product.price).toFixed(2)}
-            <span className={`ml-2 ${totalStock <= 0 ? "text-red-500" : "text-slate-400"}`}>
+            <span
+              className={`ml-2 ${totalStock <= 0 ? "text-red-500" : "text-slate-400"}`}
+            >
               · {totalStock <= 0 ? "Out of stock" : `Stock: ${totalStock}`}
             </span>
           </p>
         </div>
       </button>
-      {/* Add button */}
+      {/* Variant count badge */}
       <button
-        className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-700 active:bg-slate-800 text-white text-xs font-semibold rounded transition-colors disabled:opacity-40"
-        onClick={onDirectAdd}
-        disabled={totalStock <= 0}
-        data-testid={`pinned-row-add-${product.id}`}
+        className="shrink-0 px-2.5 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded transition-colors whitespace-nowrap"
+        onClick={onOpen}
+        data-testid={`pinned-row-variants-${product.id}`}
       >
-        <Plus className="h-3 w-3" />
-        {isMultiVariant ? "Add" : "Add"}
+        {variants.length === 0 ? "1 variant" : `${variants.length} variant${variants.length !== 1 ? "s" : ""}`}
       </button>
     </div>
   );
@@ -606,15 +820,15 @@ export default function POSPage() {
   const syncStatusText = isOfflineMode
     ? "Offline mode"
     : isSyncing
-    ? "Syncing price history..."
-    : lastSyncTime
-    ? (() => {
-        const diffMs = Date.now() - lastSyncTime;
-        const diffMin = Math.floor(diffMs / 60000);
-        if (diffMin < 1) return "Synced just now";
-        return `Last sync: ${diffMin}m ago`;
-      })()
-    : "No sync yet";
+      ? "Syncing price history..."
+      : lastSyncTime
+        ? (() => {
+            const diffMs = Date.now() - lastSyncTime;
+            const diffMin = Math.floor(diffMs / 60000);
+            if (diffMin < 1) return "Synced just now";
+            return `Last sync: ${diffMin}m ago`;
+          })()
+        : "No sync yet";
 
   // ── Allow Overselling ─────────────────────────────────────────────────────
   const [allowOverselling, setAllowOverselling] = useState<boolean>(
@@ -685,12 +899,12 @@ export default function POSPage() {
   const customerDebRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [orderNote, setOrderNote] = useState("");
-  const [paymentType, setPaymentType] = useState("Cash");
+  const [staffNote, setStaffNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [navTarget, setNavTarget] = useState<string | null>(null);
   const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
 
-  // ── Max purchase quantity override ────────────────────────────────────────
+  // ── Max purchase quantity override ────────────────  �───────────────────────
   const [showMaxOverrideModal, setShowMaxOverrideModal] = useState(false);
   const [maxOverrideItems, setMaxOverrideItems] = useState<CartItem[]>([]);
   const [isOverriding, setIsOverriding] = useState(false);
@@ -1059,27 +1273,9 @@ export default function POSPage() {
   );
 
   // ── Build structured checkout note at submit time ─────────────────────────
-  const buildCheckoutNote = (userNote: string) => {
-    const discount = cart.reduce(
-      (sum, item) =>
-        sum + (item.original_price - item.price_at_sale) * item.quantity,
-      0,
-    );
-    const groupId = (selectedCustomer as any)?.customer_group_id;
-    const tierLabel = !selectedCustomer
-      ? "Default"
-      : groupId && groupId !== 0
-        ? `Group #${groupId}`
-        : "Default";
-    return [
-      "Sales App Checkout",
-      `Checkout by : ${currentUser?.name || ""}`,
-      `Payment Type : ${paymentType}`,
-      `Total Discount Applied : $${discount.toFixed(2)}`,
-      `Price Tier : ${tierLabel}`,
-      "Notes:",
-      userNote,
-    ].join("\n");
+  const buildCheckoutNote = (note: string) => {
+    return [`Checkout by: ${currentUser?.name || ""}`, `Notes: ${note}`]
+      .join("\n");
   };
 
   // ── Navigation guard: refresh / tab close ─────────────────────────────────
@@ -1141,7 +1337,18 @@ export default function POSPage() {
       }
       const stock: number = variant?.stock_level ?? product.stock_level ?? 0;
       const minQty: number = variant?.min_purchase_quantity ?? 1;
-      const maxQty: number | null = variant?.max_purchase_quantity ?? null;
+      const maxQty: number | null =
+        variant?.max_purchase_quantity ??
+        product?.max_purchase_quantity ??
+        null;
+
+      console.log("FULL PRODUCT:", product);
+      console.log("FULL VARIANT:", variant);
+
+      console.log("MAX DEBUG:", {
+        variantMax: variant?.max_purchase_quantity,
+        productMax: product?.max_purchase_quantity,
+      });
 
       if (!allowOverselling) {
         if (stock <= 0) {
@@ -1176,7 +1383,15 @@ export default function POSPage() {
 
       const price = parseFloat(variant?.price || product.price);
       const beforeIds = new Set(useStore.getState().cart.map((i) => i.lineId));
-      addToCart(product, finalQty, variant ?? undefined, price, price, null, null);
+      addToCart(
+        product,
+        finalQty,
+        variant ?? undefined,
+        price,
+        price,
+        null,
+        null,
+      );
       setTimeout(() => {
         const after = useStore.getState().cart;
         const newLine = after.find((i) => !beforeIds.has(i.lineId));
@@ -1223,7 +1438,10 @@ export default function POSPage() {
         return;
       }
       // Warn (non-blocking) if max purchase limit exists
-      const maxQty: number | null = variant?.max_purchase_quantity ?? null;
+      const maxQty: number | null =
+        variant?.max_purchase_quantity ??
+        product?.max_purchase_quantity ??
+        null;
       if (maxQty != null) {
         toast({
           title: "Purchase limit detected",
@@ -1277,20 +1495,33 @@ export default function POSPage() {
       }
       // Single variant or no variant — auto-add with fresh stock check
       try {
-        const stockData = await api.refreshProductStock([product.bigcommerce_id]);
+        const stockData = await api.refreshProductStock([
+          product.bigcommerce_id,
+        ]);
         if (stockData.length > 0) {
           const info = stockData[0];
           if (variants.length === 1) {
             const freshVariant = {
               ...variants[0],
-              stock_level: info.variants.find((v) => v.id === variants[0].id)?.stock_level ?? info.stock_level,
-              min_purchase_quantity: info.variants.find((v) => v.id === variants[0].id)?.min_purchase_quantity ?? info.min_purchase_quantity,
-              max_purchase_quantity: info.variants.find((v) => v.id === variants[0].id)?.max_purchase_quantity ?? info.max_purchase_quantity,
+              stock_level:
+                info.variants.find((v) => v.id === variants[0].id)
+                  ?.stock_level ?? info.stock_level,
+              min_purchase_quantity:
+                info.variants.find((v) => v.id === variants[0].id)
+                  ?.min_purchase_quantity ?? info.min_purchase_quantity,
+              max_purchase_quantity:
+                info.variants.find((v) => v.id === variants[0].id)
+                  ?.max_purchase_quantity ?? info.max_purchase_quantity,
             };
             autoAddVariant(product, freshVariant);
           } else {
             // No variants — product-level
-            const freshProduct = { ...product, stock_level: info.stock_level };
+            const freshProduct = {
+              ...product,
+              stock_level: info.stock_level,
+              min_purchase_quantity: info.min_purchase_quantity ?? product.min_purchase_quantity,
+              max_purchase_quantity: info.max_purchase_quantity ?? product.max_purchase_quantity,
+            };
             autoAddVariant(freshProduct, null);
           }
           return;
@@ -1579,7 +1810,10 @@ export default function POSPage() {
   const handleCheckoutClick = useCallback(() => {
     // Trigger override modal for ANY item that has a max purchase quantity (not just exceeded ones)
     const withMax = cart.filter((item) => {
-      const maxQty = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity ?? null;
+      const maxQty =
+        item.variant?.max_purchase_quantity ??
+        item.product.max_purchase_quantity ??
+        null;
       return maxQty != null;
     });
     if (withMax.length > 0) {
@@ -1602,18 +1836,23 @@ export default function POSPage() {
       const pid = item.product.bigcommerce_id;
       if (pid && !uniqueProductMap.has(pid)) {
         const originalMax =
-          item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity ?? null;
+          item.variant?.max_purchase_quantity ??
+          item.product.max_purchase_quantity ??
+          null;
         uniqueProductMap.set(pid, originalMax);
       }
     }
     const productList = Array.from(uniqueProductMap.entries()).map(
-      ([product_id, originalMax]) => ({ product_id, originalMax })
+      ([product_id, originalMax]) => ({ product_id, originalMax }),
     );
 
     try {
       // Step 1: Remove product-level limits
       await api.setProductMaxQty(
-        productList.map(({ product_id }) => ({ product_id, max_purchase_quantity: null }))
+        productList.map(({ product_id }) => ({
+          product_id,
+          max_purchase_quantity: null,
+        })),
       );
       // Step 2: Proceed with checkout
       await handleCheckout();
@@ -1624,9 +1863,11 @@ export default function POSPage() {
           productList.map(({ product_id, originalMax }) => ({
             product_id,
             max_purchase_quantity: originalMax,
-          }))
+          })),
         )
-        .catch((err) => console.error("Failed to restore max qty limits:", err));
+        .catch((err) =>
+          console.error("Failed to restore max qty limits:", err),
+        );
 
       setIsOverriding(false);
       setMaxOverrideItems([]);
@@ -1638,7 +1879,7 @@ export default function POSPage() {
           openedProducts.add(product_id);
           window.open(
             `https://store-${storeHashRef.current}.mybigcommerce.com/manage/products/${product_id}`,
-            "_blank"
+            "_blank",
           );
         }
       }
@@ -1681,7 +1922,8 @@ export default function POSPage() {
         status: "pending_sync",
         bigcommerce_customer_id: selectedCustomer.id,
         billing_address: billing,
-        order_note: buildCheckoutNote(orderNote),
+        order_note: buildCheckoutNote(staffNote),
+        customer_note: orderNote || undefined,
         items: cart.map((item) => ({
           product_id: item.product.id,
           bigcommerce_product_id: item.product.bigcommerce_id,
@@ -1714,6 +1956,7 @@ export default function POSPage() {
         setCustomerAddresses([]);
         setCustomerSearch("");
         setOrderNote("");
+        setStaffNote("");
         focusSearch();
         if (response.bigcommerce.order_id) {
           window.open(buildInvoiceUrl(response.bigcommerce.order_id), "_blank");
@@ -1757,7 +2000,8 @@ export default function POSPage() {
         customer_email: selectedCustomer?.email,
         bigcommerce_customer_id: selectedCustomer?.id,
         status: "draft",
-        order_note: buildCheckoutNote(orderNote),
+        order_note: buildCheckoutNote(staffNote),
+        customer_note: orderNote || undefined,
         items: cart.map((item) => ({
           product_id: item.product.id,
           bigcommerce_product_id: item.product.bigcommerce_id,
@@ -1797,6 +2041,7 @@ export default function POSPage() {
       setCustomerAddresses([]);
       setCustomerSearch("");
       setOrderNote("");
+      setStaffNote("");
       focusSearch();
     } catch (e: any) {
       toast({
@@ -1826,7 +2071,13 @@ export default function POSPage() {
       onClick={handlePageClick}
     >
       {/* ── Header ── */}
-      <header className="flex items-center gap-3 px-4 h-14 bg-white border-b shadow-sm shrink-0 z-20" style={{ paddingTop: 'env(safe-area-inset-top)', height: 'calc(3.5rem + env(safe-area-inset-top))' }}>
+      <header
+        className="flex items-center gap-3 px-4 h-14 bg-white border-b shadow-sm shrink-0 z-20"
+        style={{
+          paddingTop: "env(safe-area-inset-top)",
+          height: "calc(3.5rem + env(safe-area-inset-top))",
+        }}
+      >
         <span className="font-bold text-base uppercase tracking-widest text-slate-800 shrink-0">
           POS
         </span>
@@ -2824,26 +3075,22 @@ export default function POSPage() {
             )}
           </div>
 
-          {/* Payment type + Order note */}
+          {/* Notes section */}
           {cart.length > 0 && (
             <div className="px-3 py-2 border-t shrink-0 space-y-2">
-              <select
-                className="w-full h-8 border rounded px-2 text-xs bg-slate-50"
-                value={paymentType}
-                onChange={(e) => setPaymentType(e.target.value)}
-                data-testid="select-pos-payment-type"
-              >
-                <option>Cash</option>
-                <option>Check</option>
-                <option>Card on File</option>
-                <option>Via Bigcommerce</option>
-              </select>
-              <Textarea
-                placeholder="Order note (optional)…"
-                className="text-xs bg-slate-50 min-h-[60px] resize-none"
+              <CollapsibleTextarea
+                label="Customer Note"
+                placeholder="Visible to customer on order…"
                 value={orderNote}
-                onChange={(e) => setOrderNote(e.target.value)}
-                data-testid="input-pos-order-note"
+                onChange={setOrderNote}
+                testId="input-pos-order-note"
+              />
+              <CollapsibleTextarea
+                label="Staff Note"
+                placeholder="Internal staff note (not shared with customer)…"
+                value={staffNote}
+                onChange={setStaffNote}
+                testId="input-pos-staff-note"
               />
             </div>
           )}
@@ -2923,7 +3170,7 @@ export default function POSPage() {
             {/* ── Inline sync row ── */}
             <div
               className="flex items-center gap-2 pt-1.5 border-t mt-2"
-              style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+              style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
               data-testid="pos-sync-footer"
             >
               <button
@@ -2934,7 +3181,10 @@ export default function POSPage() {
               >
                 {isSyncing ? "Syncing..." : "Sync"}
               </button>
-              <span className="text-gray-400 text-xs truncate" data-testid="text-sync-status">
+              <span
+                className="text-gray-400 text-xs truncate"
+                data-testid="text-sync-status"
+              >
                 {syncStatusText}
               </span>
             </div>
@@ -3063,19 +3313,33 @@ export default function POSPage() {
       )}
 
       {/* ── Max Purchase Qty Override Modal ── */}
-      <AlertDialog open={showMaxOverrideModal} onOpenChange={setShowMaxOverrideModal}>
+      <AlertDialog
+        open={showMaxOverrideModal}
+        onOpenChange={setShowMaxOverrideModal}
+      >
         <AlertDialogContent data-testid="dialog-max-override">
           <AlertDialogHeader>
-            <AlertDialogTitle>Maximum Purchase Limits Detected</AlertDialogTitle>
+            <AlertDialogTitle>
+              Maximum Purchase Limits Detected
+            </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2">
-                <p>Some items in your cart have maximum purchase limits. Temporarily disable limits to proceed with checkout?</p>
+                <p>
+                  Some items in your cart have maximum purchase limits.
+                  Temporarily disable limits to proceed with checkout?
+                </p>
                 <ul className="text-xs bg-amber-50 border border-amber-200 rounded p-2 space-y-1 mt-2">
                   {maxOverrideItems.map((item) => {
-                    const maxQty = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity;
+                    const maxQty =
+                      item.variant?.max_purchase_quantity ??
+                      item.product.max_purchase_quantity;
                     return (
                       <li key={item.lineId} className="flex justify-between">
-                        <span className="truncate mr-2">{item.product.name || item.variant?.sku || item.product.sku}</span>
+                        <span className="truncate mr-2">
+                          {item.product.name ||
+                            item.variant?.sku ||
+                            item.product.sku}
+                        </span>
                         <span className="shrink-0 font-medium text-amber-700">
                           Qty {item.quantity} · Max {maxQty}
                         </span>
@@ -3084,21 +3348,30 @@ export default function POSPage() {
                   })}
                 </ul>
                 <p className="text-xs text-slate-500 mt-1">
-                  Limits are removed at the product level and restored automatically after checkout. BC product pages will open for verification.
+                  Limits are removed at the product level and restored
+                  automatically after checkout. BC product pages will open for
+                  verification.
                 </p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-max-override-cancel">Cancel</AlertDialogCancel>
+            <AlertDialogCancel data-testid="button-max-override-cancel">
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
               disabled={isOverriding}
               onClick={handleCheckoutWithOverride}
               data-testid="button-max-override-confirm"
             >
               {isOverriding ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Overriding…</>
-              ) : "Proceed"}
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Overriding…
+                </>
+              ) : (
+                "Proceed"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -3106,9 +3379,7 @@ export default function POSPage() {
 
       {/* ── Push Inventory Modal ── */}
       {showPushInventoryModal && (
-        <PushInventoryModal
-          onClose={() => setShowPushInventoryModal(false)}
-        />
+        <PushInventoryModal onClose={() => setShowPushInventoryModal(false)} />
       )}
 
       <Toaster />
@@ -3124,7 +3395,9 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<api.Product[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<api.Product | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<api.Product | null>(
+    null,
+  );
   const [selectedVariant, setSelectedVariant] = useState<any | null>(null);
   const [quantityInput, setQuantityInput] = useState("1");
   const [reason, setReason] = useState("");
@@ -3150,31 +3423,40 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   // Always search full BigCommerce catalog via agent route (SKU, UPC, keyword)
-  const handleSearch = useCallback((q: string) => {
-    setSearch(q);
-    if (!q.trim()) { setResults([]); return; }
-    if (debRef.current) clearTimeout(debRef.current);
-    debRef.current = setTimeout(async () => {
-      setIsSearching(true);
-      try {
-        const userId = currentUser?.id;
-        if (!userId) { setResults([]); return; }
-        const result = await api.agentBigCommerceSearch(q, userId);
-        if (result.resultType === "variant") {
-          // Direct SKU/UPC hit — auto-select product + variant immediately
-          // Merge min/max onto the variant from search result
-          selectProduct(result.product, result.variant);
-        } else {
-          // Keyword results — show product list for user to pick from
-          setResults((result.products || []).slice(0, 20));
-        }
-      } catch {
+  const handleSearch = useCallback(
+    (q: string) => {
+      setSearch(q);
+      if (!q.trim()) {
         setResults([]);
-      } finally {
-        setIsSearching(false);
+        return;
       }
-    }, 350);
-  }, [currentUser?.id, selectProduct]);
+      if (debRef.current) clearTimeout(debRef.current);
+      debRef.current = setTimeout(async () => {
+        setIsSearching(true);
+        try {
+          const userId = currentUser?.id;
+          if (!userId) {
+            setResults([]);
+            return;
+          }
+          const result = await api.agentBigCommerceSearch(q, userId);
+          if (result.resultType === "variant") {
+            // Direct SKU/UPC hit — auto-select product + variant immediately
+            // Merge min/max onto the variant from search result
+            selectProduct(result.product, result.variant);
+          } else {
+            // Keyword results — show product list for user to pick from
+            setResults((result.products || []).slice(0, 20));
+          }
+        } catch {
+          setResults([]);
+        } finally {
+          setIsSearching(false);
+        }
+      }, 350);
+    },
+    [currentUser?.id, selectProduct],
+  );
 
   const quantity = parseInt(quantityInput) || 0;
 
@@ -3189,7 +3471,8 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
         quantity_added: quantity,
         reason: reason || undefined,
         product_name: selectedProduct.name,
-        variant_name: variantLabel(selectedVariant) || selectedVariant.sku || "",
+        variant_name:
+          variantLabel(selectedVariant) || selectedVariant.sku || "",
       });
       toast({
         title: "Inventory Updated",
@@ -3203,7 +3486,11 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
       // Refocus search for next push
       setTimeout(() => searchRef.current?.focus(), 80);
     } catch (e: any) {
-      toast({ title: "Failed to push inventory", description: e.message, variant: "destructive" });
+      toast({
+        title: "Failed to push inventory",
+        description: e.message,
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -3212,7 +3499,12 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
   const variants = selectedProduct ? getVariants(selectedProduct) : [];
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent
         className="w-[95vw] max-w-[95vw] h-[90vh] max-h-[90vh] flex flex-col p-0 gap-0"
         data-testid="dialog-push-inventory"
@@ -3222,7 +3514,8 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
             <Package className="h-5 w-5" /> Push Inventory
           </DialogTitle>
           <p className="text-xs text-slate-500 mt-0.5">
-            Search the full catalog by product name, SKU, or UPC to manually increment stock.
+            Search the full catalog by product name, SKU, or UPC to manually
+            increment stock.
           </p>
         </DialogHeader>
 
@@ -3244,7 +3537,10 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
             {search && !isSearching && (
               <button
                 className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
-                onClick={() => { setSearch(""); setResults([]); }}
+                onClick={() => {
+                  setSearch("");
+                  setResults([]);
+                }}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -3256,7 +3552,8 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
             <div className="border rounded-md overflow-hidden">
               <div className="px-3 py-2 bg-slate-50 border-b">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                  {results.length} result{results.length !== 1 ? "s" : ""} — click to select
+                  {results.length} result{results.length !== 1 ? "s" : ""} —
+                  click to select
                 </p>
               </div>
               <div className="divide-y max-h-[40vh] overflow-y-auto">
@@ -3270,14 +3567,22 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
                       data-testid={`push-inv-result-${p.id}`}
                     >
                       {p.image && (
-                        <img src={p.image} alt="" className="w-10 h-10 object-cover rounded border shrink-0 bg-slate-50" />
+                        <img
+                          src={p.image}
+                          alt=""
+                          className="w-10 h-10 object-cover rounded border shrink-0 bg-slate-50"
+                        />
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate text-slate-800">{p.name}</p>
+                        <p className="text-sm font-medium truncate text-slate-800">
+                          {p.name}
+                        </p>
                         <p className="text-xs text-slate-400">
                           SKU: {p.sku}
                           {pvariants.length > 1 && (
-                            <span className="ml-2 text-slate-400">· {pvariants.length} variants</span>
+                            <span className="ml-2 text-slate-400">
+                              · {pvariants.length} variants
+                            </span>
                           )}
                         </p>
                       </div>
@@ -3289,9 +3594,14 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {search && !isSearching && results.length === 0 && !selectedProduct && (
-            <p className="text-sm text-slate-400 text-center py-4">No products found for "{search}"</p>
-          )}
+          {search &&
+            !isSearching &&
+            results.length === 0 &&
+            !selectedProduct && (
+              <p className="text-sm text-slate-400 text-center py-4">
+                No products found for "{search}"
+              </p>
+            )}
 
           {/* Selected product + variant + quantity */}
           {selectedProduct && (
@@ -3299,19 +3609,32 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
               {/* Product header */}
               <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border">
                 {selectedProduct.image && (
-                  <img src={selectedProduct.image} alt="" className="w-12 h-12 object-cover rounded border shrink-0" />
+                  <img
+                    src={selectedProduct.image}
+                    alt=""
+                    className="w-12 h-12 object-cover rounded border shrink-0"
+                  />
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-800 truncate">{selectedProduct.name}</p>
-                  <p className="text-xs text-slate-500">SKU: {selectedProduct.sku}</p>
+                  <p className="text-sm font-semibold text-slate-800 truncate">
+                    {selectedProduct.name}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    SKU: {selectedProduct.sku}
+                  </p>
                   {selectedVariant && (
                     <p className="text-xs text-blue-600 font-medium mt-0.5">
-                      {variantLabel(selectedVariant) || selectedVariant.sku} · Stock: {selectedVariant.stock_level ?? 0}
+                      {variantLabel(selectedVariant) || selectedVariant.sku} ·
+                      Stock: {selectedVariant.stock_level ?? 0}
                     </p>
                   )}
                 </div>
                 <button
-                  onClick={() => { setSelectedProduct(null); setSelectedVariant(null); setShowConfirm(false); }}
+                  onClick={() => {
+                    setSelectedProduct(null);
+                    setSelectedVariant(null);
+                    setShowConfirm(false);
+                  }}
                   className="text-slate-400 hover:text-slate-600 shrink-0"
                   data-testid="button-push-inv-change-product"
                 >
@@ -3336,8 +3659,16 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
                         >
                           <span>{variantLabel(v) || v.sku}</span>
                           <div className="flex items-center gap-3 text-xs">
-                            <span className="text-slate-400 font-mono">{v.sku}</span>
-                            <span className={v.stock_level <= 0 ? "text-red-500" : "text-slate-400"}>
+                            <span className="text-slate-400 font-mono">
+                              {v.sku}
+                            </span>
+                            <span
+                              className={
+                                v.stock_level <= 0
+                                  ? "text-red-500"
+                                  : "text-slate-400"
+                              }
+                            >
                               Stock: {v.stock_level ?? 0}
                             </span>
                             {selectedVariant?.id === v.id && (
@@ -3360,7 +3691,9 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
                     </label>
                     <div className="flex items-center gap-3">
                       <button
-                        onClick={() => setQuantityInput(String(Math.max(1, quantity - 1)))}
+                        onClick={() =>
+                          setQuantityInput(String(Math.max(1, quantity - 1)))
+                        }
                         className="border rounded-lg p-2.5 hover:bg-slate-100 transition-colors"
                         data-testid="button-push-inv-minus"
                       >
@@ -3382,8 +3715,16 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
                         <Plus className="h-4 w-4" />
                       </button>
                       <div className="text-sm text-slate-500 ml-2">
-                        <p>{selectedVariant.stock_level ?? 0} <span className="text-slate-400">current</span></p>
-                        <p className="font-semibold text-slate-800">→ {(selectedVariant.stock_level ?? 0) + quantity} <span className="text-slate-400 font-normal">after</span></p>
+                        <p>
+                          {selectedVariant.stock_level ?? 0}{" "}
+                          <span className="text-slate-400">current</span>
+                        </p>
+                        <p className="font-semibold text-slate-800">
+                          → {(selectedVariant.stock_level ?? 0) + quantity}{" "}
+                          <span className="text-slate-400 font-normal">
+                            after
+                          </span>
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -3408,16 +3749,35 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
                       data-testid="button-push-inv-confirm-open"
                     >
                       <Package className="h-4 w-4 mr-2" />
-                      Push {quantity} Unit{quantity !== 1 ? "s" : ""} to BigCommerce
+                      Push {quantity} Unit{quantity !== 1 ? "s" : ""} to
+                      BigCommerce
                     </Button>
                   ) : (
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
-                      <p className="text-sm font-semibold text-amber-800">Confirm Inventory Push</p>
+                      <p className="text-sm font-semibold text-amber-800">
+                        Confirm Inventory Push
+                      </p>
                       <p className="text-sm text-amber-700">
-                        Add <strong>{quantity}</strong> unit{quantity !== 1 ? "s" : ""} to{" "}
-                        <strong>{variantLabel(selectedVariant) || selectedVariant.sku}</strong> on BigCommerce.<br />
-                        Stock: <strong>{selectedVariant.stock_level ?? 0}</strong> → <strong>{(selectedVariant.stock_level ?? 0) + quantity}</strong>
-                        {reason && <><br />Reason: <em>{reason}</em></>}
+                        Add <strong>{quantity}</strong> unit
+                        {quantity !== 1 ? "s" : ""} to{" "}
+                        <strong>
+                          {variantLabel(selectedVariant) || selectedVariant.sku}
+                        </strong>{" "}
+                        on BigCommerce.
+                        <br />
+                        Stock:{" "}
+                        <strong>
+                          {selectedVariant.stock_level ?? 0}
+                        </strong> →{" "}
+                        <strong>
+                          {(selectedVariant.stock_level ?? 0) + quantity}
+                        </strong>
+                        {reason && (
+                          <>
+                            <br />
+                            Reason: <em>{reason}</em>
+                          </>
+                        )}
                       </p>
                       <div className="flex gap-2">
                         <Button
@@ -3433,8 +3793,13 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
                           data-testid="button-push-inv-submit"
                         >
                           {isSubmitting ? (
-                            <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Pushing…</>
-                          ) : "Confirm Push"}
+                            <>
+                              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                              Pushing…
+                            </>
+                          ) : (
+                            "Confirm Push"
+                          )}
                         </Button>
                       </div>
                     </div>

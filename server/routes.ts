@@ -425,6 +425,7 @@ export async function registerRoutes(
               customer_id: order.bigcommerce_customer_id || 0,
               billing_address: order.billing_address,
               staff_notes: order.order_note || undefined,
+              customer_message: (order as any).customer_note || undefined,
               products: (order.items as any[]).map((item) => {
                 const productData: any = {
                   product_id: item.bigcommerce_product_id,
@@ -712,6 +713,7 @@ export async function registerRoutes(
                             price,
                             order_id: bcOrder.id,
                             order_date: bcOrder.date_created || null,
+                            sku: item.sku || item.variant_sku || null,
                           });
                         }
                       }
@@ -946,6 +948,7 @@ export async function registerRoutes(
               customer_id: bigcommerce_customer_id || 0,
               billing_address: billing_address,
               staff_notes: updatedOrder!.order_note || undefined,
+              customer_message: (updatedOrder as any)?.customer_note || undefined,
               products: (updatedOrder!.items as any[]).map((item) => {
                 const productData: any = {
                   product_id: item.bigcommerce_product_id,

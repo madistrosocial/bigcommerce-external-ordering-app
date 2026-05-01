@@ -1,0 +1,274 @@
+Fix the following issues in the POS system. Do NOT modify unrelated logic. Keep all existing working behaviors intact.
+
+==============================
+
+1. FIX MAX PURCHASE QUANTITY DETECTION (CRITICAL)
+   ==============================
+
+Problem:
+max_purchase_quantity is not being detected in the frontend even when set in BigCommerce.
+
+Root Cause:
+The field is not consistently passed from backend → frontend → cart.
+
+Tasks:
+
+1. Backend (route.ts):
+
+* Ensure BOTH product and variant include:
+
+  * max_purchase_quantity
+  * min_purchase_quantity
+
+Inside ALL BigCommerce response mappings (search, pinned, refresh stock):
+
+product mapping must include:
+max_purchase_quantity: p.max_purchase_quantity ?? null
+
+variant mapping must include:
+max_purchase_quantity: v.max_purchase_quantity ?? null
+
+DO NOT remove existing fields.
+
+---
+
+2. Frontend (POS.tsx):
+
+Ensure when adding to cart, FULL objects are preserved.
+
+Fix autoAddVariant and any cart creation logic:
+
+MUST use:
+product: { ...product }
+variant: { ...variant }
+
+DO NOT manually reconstruct product objects with partial fields.
+
+---
+
+3. Cart Logic:
+
+Ensure max quantity is resolved as:
+
+const maxQty =
+item.variant?.max_purchase_quantity ??
+item.product?.max_purchase_quantity ??
+null;
+
+---
+
+4. UI Display (Cart):
+
+Add next to quantity selector:
+
+"Maximum Purchase: X"
+
+Only show if maxQty is not null.
+
+---
+
+5. Checkout Override:
+
+Ensure override triggers if ANY cart item has max_purchase_quantity (not only exceeded).
+
+Keep existing logic:
+
+* Set max to null before checkout
+* Restore after checkout
+* Open product page AFTER restore
+
+DO NOT change flow, only ensure detection works.
+
+==============================
+2. NOTE SECTION REWORK (UI + LOGIC)
+===================================
+
+A. STAFF NOTE TEMPLATE
+
+Replace ALL existing generated content with ONLY:
+
+Checkout by: [username]
+Notes: [user input]
+
+Remove:
+
+* Payment Type
+* Discount
+* Price Tier
+* Order ID
+* Any other metadata
+
+---
+
+B. ORDER NOTE (CUSTOMER VISIBLE)
+
+* Keep empty by default
+* Add placeholder:
+
+"Note added in this section will be visible on the invoice."
+
+* This must sync to BigCommerce order comment
+
+---
+
+C. COLLAPSIBLE TEXTAREA BEHAVIOR (BOTH FIELDS)
+
+Apply to BOTH:
+
+* Staff note
+* Order note
+
+Behavior:
+
+1. When NOT focused:
+
+* Display as single line
+* No border
+* Truncate with "..."
+* Looks like plain text (div)
+
+2. When clicked:
+
+* Expand into textarea
+* Auto resize based on content
+* Show full content
+* Apply normal input styling
+
+3. When blurred:
+
+* Collapse back to single line
+* Hide overflow with ellipsis
+
+Implementation:
+
+* Create reusable component (CollapsibleTextarea)
+* Use internal focus state
+* Use textarea auto-resize logic
+
+DO NOT break existing layout.
+
+==============================
+3. PRICE HISTORY — ADD SKU SUPPORT
+==================================
+
+Goal:
+Store SKU in price history moving forward WITHOUT breaking current system.
+
+---
+
+A. DATABASE UPDATE
+
+Modify table:
+price_history_cache
+
+Add column at END:
+
+sku TEXT
+
+IMPORTANT:
+
+* Do NOT reorder existing columns
+* Do NOT modify existing schema
+
+---
+
+B. BACKEND SAVE LOGIC
+
+When saving price history:
+
+Include:
+sku: variant?.sku OR product?.sku
+
+Priority:
+
+1. variant.sku
+2. fallback to product.sku
+
+---
+
+C. DO NOT MODIFY:
+
+* Existing price history logic
+* Existing queries
+* Existing retrieval logic
+
+ONLY append SKU during insert.
+
+---
+
+D. BACKWARD COMPATIBILITY
+
+* Existing records without SKU must still work
+* No migration required for old data
+
+==============================
+4. PINNED PRODUCTS UI UPDATE
+============================
+
+Remove the "Add" button from pinned products list.
+
+Replace it with:
+
+Display text showing total number of variants for that product.
+
+Example:
+"10 variants"
+
+Requirements:
+
+* No other UI or logic changes
+* Clicking behavior remains unchanged
+* Do NOT modify search behavior
+* Do NOT modify layout except replacing button with variant count
+
+==============================
+5. VARIANT POPUP MODAL SIZE
+===========================
+
+Update the product variant (mother title) popup modal:
+
+* Set width to 95% of screen on:
+
+  * Desktop
+  * Tablet
+
+Requirements:
+
+* Do NOT modify internal layout
+* Do NOT change behavior
+* Do NOT change mobile layout unless necessary
+* Only adjust modal container width
+
+==============================
+6. REMOVE PAYMENT OPTION DROPDOWN
+=================================
+
+Remove the payment type dropdown from the POS UI.
+
+Reason:
+It is currently only used for notes and not required.
+
+Requirements:
+
+* Remove UI element completely
+* Remove any related state if not used elsewhere
+* Do NOT affect checkout logic
+* Do NOT break existing note functionality
+
+==============================
+FINAL RULES
+===========
+
+* DO NOT refactor unrelated code
+* DO NOT change API structure beyond required fields
+* DO NOT remove existing working features
+* ONLY fix:
+
+  * max quantity detection
+  * note UI/logic
+  * SKU storage
+  * pinned product button replacement
+  * modal width
+  * payment dropdown removal
+
+Ensure app compiles with zero errors after changes.

@@ -33,7 +33,8 @@ export const orders = pgTable("orders", {
   billing_address: jsonb("billing_address"),
   status: text("status").notNull(), // 'draft', 'pending_sync', 'failed', or 'synced'
   sync_error: text("sync_error"), // Error message from failed BigCommerce sync
-  order_note: text("order_note"), // Agent order notes
+  order_note: text("order_note"), // Agent internal/staff note
+  customer_note: text("customer_note"), // Customer-visible note (synced to BC customer_message)
   items: jsonb("items").notNull(), // Array of order items including variant info
   total: decimal("total", { precision: 10, scale: 2 }).notNull(),
   date: timestamp("date").notNull().defaultNow(),
@@ -57,6 +58,7 @@ export const priceHistoryCache = pgTable("price_history_cache", {
   order_id: integer("order_id").notNull(),
   order_date: text("order_date"),
   created_at: timestamp("created_at").notNull().defaultNow(),
+  sku: text("sku"),
 });
 
 export const inventoryPushLogs = pgTable("inventory_push_logs", {

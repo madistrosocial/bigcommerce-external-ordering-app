@@ -41,7 +41,7 @@ Preferred communication style: Simple, everyday language.
 ### Key Data Models
 - **Users**: Admin and agent accounts with enable/disable functionality
 - **Products**: Catalog items with BigCommerce ID references, pinning for featured items
-- **Orders**: Sales orders with status tracking (draft/pending_sync/failed/synced), order notes, sync error capture
+- **Orders**: Sales orders with status tracking (draft/pending_sync/failed/synced), dual-note fields (`order_note` for internal staff, `customer_note` for customer-visible BC `customer_message`), sync error capture
 
 ### Order Status Flow
 1. **Draft** - Created offline with manual customer input, no BigCommerce sync
@@ -57,6 +57,7 @@ Preferred communication style: Simple, everyday language.
 - Sync endpoint: `GET /api/price-history/sync?after=<ms>&limit=<n>`
 - Last sync timestamp stored in localStorage key `vansales_price_history_last_sync`
 - Sync indicator shown at bottom-left of POS during sync; tablet shows a confirm prompt
+- `sku` column added to `price_history_cache` table (nullable, populated from BC order items going forward)
 
 ### Cart Validation + Max Purchase Override
 - `autoAddVariant` applies min/max purchase quantity validation on every add
