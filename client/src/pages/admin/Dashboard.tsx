@@ -1,4 +1,3 @@
-import { MobileShell } from "@/components/layout/MobileShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -252,7 +251,7 @@ export default function AdminDashboard() {
   const pinnedProducts = products.filter(p => p.is_pinned);
 
   return (
-    <MobileShell title="Admin Console">
+    <div className="p-4 md:p-6 max-w-5xl mx-auto">
       <div className="flex justify-end mb-4">
         <Dialog open={showConfig} onOpenChange={setShowConfig}>
           <DialogTrigger asChild>
@@ -710,6 +709,6 @@ export default function AdminDashboard() {
           </Tabs>
         </TabsContent>
       </Tabs>
-    </MobileShell>
+    </div>
   );
 }

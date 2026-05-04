@@ -60,6 +60,7 @@ import {
   getPriceListCacheBatch,
   setPriceListCacheBatch,
   getLocalPriceHistory,
+  saveLocalPriceHistoryBatch,
 } from "@/lib/db";
 import { usePriceHistorySync } from "@/lib/usePriceHistorySync";
 
@@ -1141,13 +1142,37 @@ export default function POSPage() {
       if (!selectedCustomer) return [];
       const key = `${selectedCustomer.id}-${item.product.bigcommerce_id}-${item.variant?.id ?? 0}`;
       if (priceHistoryCache.has(key)) return priceHistoryCache.get(key)!;
-      // Check local IndexedDB cache first
-      const local = await getLocalPriceHistory(
-        selectedCustomer.id,
-        item.product.bigcommerce_id,
-        10,
-      );
-      if (local.length > 0) {
+      // Always call the server — it checks BC for fresh data and updates the Postgres cache.
+      // Local IndexedDB is only used as an offline fallback.
+      try {
+        const history = await api.getCustomerPriceHistory(
+          selectedCustomer.id,
+          item.product.bigcommerce_id,
+          item.variant?.id,
+        );
+        // Persist fresh results to local IndexedDB so offline fallback stays current
+        if (history.length > 0) {
+          saveLocalPriceHistoryBatch(
+            history.map((h) => ({
+              customer_id: selectedCustomer.id,
+              product_id: item.product.bigcommerce_id,
+              variant_id: item.variant?.id ?? null,
+              price: h.price,
+              order_id: h.orderId ?? 0,
+              order_date: h.date || null,
+              sku: null,
+            })),
+          ).catch(() => {});
+        }
+        setPriceHistoryCache((prev) => new Map(prev).set(key, history));
+        return history;
+      } catch {
+        // Offline fallback: use local IndexedDB (up to 20 entries)
+        const local = await getLocalPriceHistory(
+          selectedCustomer.id,
+          item.product.bigcommerce_id,
+          20,
+        );
         const mapped: api.PriceHistoryEntry[] = local.map((e) => ({
           price: e.price,
           date: e.order_date || "",
@@ -1156,13 +1181,6 @@ export default function POSPage() {
         setPriceHistoryCache((prev) => new Map(prev).set(key, mapped));
         return mapped;
       }
-      const history = await api.getCustomerPriceHistory(
-        selectedCustomer.id,
-        item.product.bigcommerce_id,
-        item.variant?.id,
-      );
-      setPriceHistoryCache((prev) => new Map(prev).set(key, history));
-      return history;
     },
     [selectedCustomer, priceHistoryCache],
   );
@@ -1180,13 +1198,37 @@ export default function POSPage() {
       const cacheKey = `${selectedCustomer.id}-${popupProduct.bigcommerce_id ?? 0}-${variantId ?? 0}`;
       if (priceHistoryCache.has(cacheKey))
         return priceHistoryCache.get(cacheKey)!;
-      // Check local IndexedDB cache first
-      const local = await getLocalPriceHistory(
-        selectedCustomer.id,
-        popupProduct.bigcommerce_id ?? 0,
-        10,
-      );
-      if (local.length > 0) {
+      // Always call the server — it checks BC for fresh data and updates the Postgres cache.
+      // Local IndexedDB is only used as an offline fallback.
+      try {
+        const history = await api.getCustomerPriceHistory(
+          selectedCustomer.id,
+          popupProduct.bigcommerce_id ?? 0,
+          variantId,
+        );
+        // Persist fresh results to local IndexedDB so offline fallback stays current
+        if (history.length > 0) {
+          saveLocalPriceHistoryBatch(
+            history.map((h) => ({
+              customer_id: selectedCustomer.id,
+              product_id: popupProduct.bigcommerce_id ?? 0,
+              variant_id: variantId ?? null,
+              price: h.price,
+              order_id: h.orderId ?? 0,
+              order_date: h.date || null,
+              sku: null,
+            })),
+          ).catch(() => {});
+        }
+        setPriceHistoryCache((prev) => new Map(prev).set(cacheKey, history));
+        return history;
+      } catch {
+        // Offline fallback: use local IndexedDB (up to 20 entries)
+        const local = await getLocalPriceHistory(
+          selectedCustomer.id,
+          popupProduct.bigcommerce_id ?? 0,
+          20,
+        );
         const mapped: api.PriceHistoryEntry[] = local.map((e) => ({
           price: e.price,
           date: e.order_date || "",
@@ -1195,13 +1237,6 @@ export default function POSPage() {
         setPriceHistoryCache((prev) => new Map(prev).set(cacheKey, mapped));
         return mapped;
       }
-      const history = await api.getCustomerPriceHistory(
-        selectedCustomer.id,
-        popupProduct.bigcommerce_id ?? 0,
-        variantId,
-      );
-      setPriceHistoryCache((prev) => new Map(prev).set(cacheKey, history));
-      return history;
     },
     [selectedCustomer, popupProduct, priceHistoryCache],
   );
@@ -2067,7 +2102,7 @@ export default function POSPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div
-      className="h-screen overflow-hidden flex flex-col bg-slate-100"
+      className="h-full overflow-hidden flex flex-col bg-slate-100"
       onClick={handlePageClick}
     >
       {/* ── Header ── */}
@@ -2233,101 +2268,6 @@ export default function POSPage() {
             return null;
           })()}
 
-        {/* User dropdown — same as catalog view */}
-        <div className="ml-auto shrink-0">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                className="flex items-center gap-2"
-                data-testid="button-pos-user-menu"
-              >
-                <User className="h-5 w-5" />
-                <span className="text-sm font-medium max-w-[100px] truncate">
-                  {currentUser?.name}
-                </span>
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="w-56 bg-white dark:bg-slate-950 shadow-lg border z-50"
-            >
-              <DropdownMenuLabel>
-                <div className="flex flex-col">
-                  <span>{currentUser?.name}</span>
-                  <span className="text-xs font-normal text-slate-500">
-                    {currentUser?.role}
-                  </span>
-                </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => guardedNavigate("/catalog")}
-                data-testid="pos-menu-catalog"
-              >
-                <Package className="mr-2 h-4 w-4" />
-                Product Catalog
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => guardedNavigate("/orders")}
-                data-testid="pos-menu-orders"
-              >
-                <ShoppingCart className="mr-2 h-4 w-4" />
-                Order History
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => guardedNavigate("/pos")}
-                data-testid="pos-menu-pos"
-              >
-                <Monitor className="mr-2 h-4 w-4" />
-                POS Mode
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={toggleOfflineMode}
-                data-testid="pos-menu-offline"
-              >
-                {isOfflineMode ? (
-                  <WifiOff className="mr-2 h-4 w-4" />
-                ) : (
-                  <Wifi className="mr-2 h-4 w-4" />
-                )}
-                Offline Mode: {isOfflineMode ? "ON" : "OFF"}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={toggleAllowOverselling}
-                data-testid="pos-menu-oversell"
-              >
-                <AlertCircle className="mr-2 h-4 w-4" />
-                Allow Overselling: {allowOverselling ? "ON" : "OFF"}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setShowPushInventoryModal(true)}
-                data-testid="pos-menu-push-inventory"
-              >
-                <Package className="mr-2 h-4 w-4" />
-                Push Inventory
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => guardedNavigate("/inventory-push-logs")}
-                data-testid="pos-menu-inv-push-logs"
-              >
-                <Package className="mr-2 h-4 w-4" />
-                Inventory Push Logs
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-red-600"
-                onClick={() => guardedNavigate("/logout")}
-                data-testid="pos-menu-logout"
-              >
-                <LogOut className="mr-2 h-4 w-4" />
-                Sign Out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
       </header>
 
       {/* ── Body ── */}

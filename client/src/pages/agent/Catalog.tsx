@@ -1,4 +1,3 @@
-import { MobileShell } from "@/components/layout/MobileShell";
 import { useStore } from "@/lib/store";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -533,7 +532,7 @@ export default function Catalog() {
     : [];
 
   return (
-    <MobileShell title="Catalog">
+    <div className="p-4 md:p-6 max-w-5xl mx-auto">
       <div className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-900 pb-4 pt-1">
         <div className="relative">
           <Search className="absolute left-3 top-2.5 h-5 w-5 text-slate-400" />
@@ -574,6 +573,6 @@ export default function Catalog() {
 
         {!showingBcVariant && displayProducts.map(renderProductCard)}
       </div>
-    </MobileShell>
+    </div>
   );
 }

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, users, products, orders, settings, priceHistoryCache, inventoryPushLogs } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, roles, permissions, rolePermissions, userPermissions } from "@shared/schema";
 import { eq, desc, and, inArray, gt, asc } from "drizzle-orm";
 
 export interface IStorage {
@@ -12,6 +12,7 @@ export interface IStorage {
   getAllUsers(): Promise<User[]>;
   updateUserStatus(id: number, is_enabled: boolean): Promise<void>;
   updateUserPermission(id: number, allow_bigcommerce_search: boolean): Promise<void>;
+  updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean }>): Promise<User>;
 
   // Product operations
   getAllProducts(): Promise<Product[]>;
@@ -33,6 +34,7 @@ export interface IStorage {
   updateOrderForSubmission(id: number, updates: { bigcommerce_customer_id: number; billing_address: any; status: string }): Promise<void>;
   deleteOrder(id: number): Promise<void>;
   getOrdersByBcCustomerId(bcCustomerId: number, statuses: string[]): Promise<Order[]>;
+  getAllOrders(): Promise<Order[]>;
 
   // Setting operations
   getSetting(key: string): Promise<any>;
@@ -46,6 +48,24 @@ export interface IStorage {
   // Inventory push log operations
   createInventoryPushLog(entry: InsertInventoryPushLog): Promise<InventoryPushLog>;
   getInventoryPushLogs(limit?: number): Promise<InventoryPushLog[]>;
+
+  // RBAC operations
+  getAllRoles(): Promise<Role[]>;
+  getRoleById(id: number): Promise<Role | undefined>;
+  createRole(role: InsertRole): Promise<Role>;
+  deleteRole(id: number): Promise<void>;
+  getAllPermissions(): Promise<Permission[]>;
+  createPermission(perm: InsertPermission): Promise<Permission>;
+  deletePermission(id: number): Promise<void>;
+  getPermissionsForRole(roleId: number): Promise<Permission[]>;
+  addPermissionToRole(entry: InsertRolePermission): Promise<void>;
+  removePermissionFromRole(roleId: number, permissionId: number): Promise<void>;
+  getPermissionsForUser(userId: number): Promise<Permission[]>;
+  addPermissionToUser(entry: InsertUserPermission): Promise<void>;
+  removePermissionFromUser(userId: number, permissionId: number): Promise<void>;
+  getUserPermissionStrings(userId: number): Promise<string[]>;
+  setUserRole(userId: number, roleId: number | null): Promise<void>;
+  updateRole(id: number, data: Partial<{ name: string; description: string | null }>): Promise<Role>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -83,6 +103,11 @@ export class DatabaseStorage implements IStorage {
 
   async updateUserPermission(id: number, allow_bigcommerce_search: boolean): Promise<void> {
     await db.update(users).set({ allow_bigcommerce_search }).where(eq(users.id, id));
+  }
+
+  async updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean }>): Promise<User> {
+    const result = await db.update(users).set(data).where(eq(users.id, id)).returning();
+    return result[0];
   }
 
   // Product operations
@@ -165,6 +190,10 @@ export class DatabaseStorage implements IStorage {
     await db.delete(orders).where(eq(orders.id, id));
   }
 
+  async getAllOrders(): Promise<Order[]> {
+    return db.select().from(orders).orderBy(desc(orders.date));
+  }
+
   async getOrdersByBcCustomerId(bcCustomerId: number, statuses: string[]): Promise<Order[]> {
     return db.select().from(orders)
       .where(and(eq(orders.bigcommerce_customer_id, bcCustomerId), inArray(orders.status, statuses)))
@@ -234,6 +263,96 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(inventoryPushLogs)
       .orderBy(desc(inventoryPushLogs.created_at))
       .limit(limit);
+  }
+
+  // ── RBAC ──────────────────────────────────────────────────────────────────
+
+  async getAllRoles(): Promise<Role[]> {
+    return db.select().from(roles).orderBy(asc(roles.name));
+  }
+
+  async getRoleById(id: number): Promise<Role | undefined> {
+    const result = await db.select().from(roles).where(eq(roles.id, id));
+    return result[0];
+  }
+
+  async createRole(role: InsertRole): Promise<Role> {
+    const result = await db.insert(roles).values(role).returning();
+    return result[0];
+  }
+
+  async deleteRole(id: number): Promise<void> {
+    await db.delete(roles).where(eq(roles.id, id));
+  }
+
+  async getAllPermissions(): Promise<Permission[]> {
+    return db.select().from(permissions).orderBy(asc(permissions.module), asc(permissions.action));
+  }
+
+  async createPermission(perm: InsertPermission): Promise<Permission> {
+    const result = await db.insert(permissions).values(perm).returning();
+    return result[0];
+  }
+
+  async deletePermission(id: number): Promise<void> {
+    await db.delete(permissions).where(eq(permissions.id, id));
+  }
+
+  async getPermissionsForRole(roleId: number): Promise<Permission[]> {
+    const rps = await db.select({ permission_id: rolePermissions.permission_id })
+      .from(rolePermissions)
+      .where(eq(rolePermissions.role_id, roleId));
+    if (rps.length === 0) return [];
+    const ids = rps.map((r) => r.permission_id);
+    return db.select().from(permissions).where(inArray(permissions.id, ids));
+  }
+
+  async addPermissionToRole(entry: InsertRolePermission): Promise<void> {
+    await db.insert(rolePermissions).values(entry).onConflictDoNothing();
+  }
+
+  async removePermissionFromRole(roleId: number, permissionId: number): Promise<void> {
+    await db.delete(rolePermissions)
+      .where(and(eq(rolePermissions.role_id, roleId), eq(rolePermissions.permission_id, permissionId)));
+  }
+
+  async getPermissionsForUser(userId: number): Promise<Permission[]> {
+    const ups = await db.select({ permission_id: userPermissions.permission_id })
+      .from(userPermissions)
+      .where(eq(userPermissions.user_id, userId));
+    if (ups.length === 0) return [];
+    const ids = ups.map((u) => u.permission_id);
+    return db.select().from(permissions).where(inArray(permissions.id, ids));
+  }
+
+  async addPermissionToUser(entry: InsertUserPermission): Promise<void> {
+    await db.insert(userPermissions).values(entry).onConflictDoNothing();
+  }
+
+  async removePermissionFromUser(userId: number, permissionId: number): Promise<void> {
+    await db.delete(userPermissions)
+      .where(and(eq(userPermissions.user_id, userId), eq(userPermissions.permission_id, permissionId)));
+  }
+
+  async getUserPermissionStrings(userId: number): Promise<string[]> {
+    const user = await this.getUser(userId);
+    if (!user) return [];
+    const directPerms = await this.getPermissionsForUser(userId);
+    let rolePerms: Permission[] = [];
+    if (user.role_id) {
+      rolePerms = await this.getPermissionsForRole(user.role_id);
+    }
+    const all = [...directPerms, ...rolePerms];
+    return [...new Set(all.map((p) => `${p.module}:${p.action}`))];
+  }
+
+  async setUserRole(userId: number, roleId: number | null): Promise<void> {
+    await db.update(users).set({ role_id: roleId }).where(eq(users.id, userId));
+  }
+
+  async updateRole(id: number, data: Partial<{ name: string; description: string | null }>): Promise<Role> {
+    const result = await db.update(roles).set(data).where(eq(roles.id, id)).returning();
+    return result[0];
   }
 }
 

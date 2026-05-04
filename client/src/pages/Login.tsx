@@ -19,8 +19,7 @@ export default function Login() {
 
   useEffect(() => {
     if (currentUser) {
-      if (currentUser.role === 'admin') setLocation('/admin');
-      else setLocation('/catalog');
+      setLocation("/dashboard");
     }
   }, [currentUser, setLocation]);
 

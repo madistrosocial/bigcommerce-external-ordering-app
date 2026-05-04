@@ -1,0 +1,233 @@
+Implement SaaS dashboard layout + RBAC UI + sidebar/navigation WITHOUT modifying existing business logic.
+
+==================================================
+🚨 HARD RULES (DO NOT BREAK)
+============================
+
+* DO NOT refactor existing pages (POS, catalog, cart, pricing, inventory push)
+* DO NOT change any API logic
+* DO NOT rename existing routes
+* ONLY wrap pages, add layout, add sidebar, add RBAC UI
+* Existing functionality must remain 100% intact
+
+==================================================
+
+1. GLOBAL LAYOUT (NON-INTRUSIVE)
+   ==================================================
+
+Create:
+components/layout/SaaSLayout.tsx
+
+* Uses React Router Outlet
+* DOES NOT change page internals
+* Only wraps pages visually
+
+Layout:
+
+[ Sidebar ] [ Header ]
+[ Content (Outlet) ]
+
+==================================================
+2. APPLY LAYOUT (SAFE WRAP ONLY)
+================================
+
+Wrap routes WITHOUT modifying them:
+
+<Route element={<SaaSLayout />}>
+<Route path="/dashboard" element={<Dashboard />} />
+
+<Route path="/pos" element={<POS />} />
+<Route path="/catalog" element={<Catalog />} />  // KEEP EXISTING
+
+<Route path="/orders" element={<Orders />} />
+<Route path="/orders/all" element={<OrdersAll />} />
+<Route path="/orders/drafts" element={<Drafts />} />
+
+<Route path="/inventory/push" element={<InventoryPush />} />
+<Route path="/inventory/logs" element={<InventoryLogs />} />
+
+<Route path="/pricing" element={<Pricing />} />
+<Route path="/customers" element={<Customers />} />
+<Route path="/reports" element={<Reports />} />
+
+<Route path="/admin/catalog" element={<AdminCatalog />} />
+<Route path="/admin/users" element={<AdminUsers />} />
+<Route path="/admin/integration" element={<AdminIntegration />} /> </Route>
+
+==================================================
+3. LOGIN REDIRECT (DEVICE-BASED)
+================================
+
+On login:
+
+if (mobile):
+navigate("/catalog")   // KEEP existing mobile flow
+
+if (desktop):
+navigate("/dashboard")
+
+DO NOT change /catalog behavior
+
+==================================================
+4. SIDEBAR (FINAL STRUCTURE)
+============================
+
+---
+
+## [ LOGO ] Midatlantic
+
+— MAIN —
+Dashboard
+POS
+
+Orders ▼
+• /orders
+• /orders/all
+• /orders/drafts
+
+Inventory ▼
+• /inventory/push
+• /inventory/logs
+
+Pricing ▼
+• /pricing
+
+Customers
+Reports
+
+---
+
+— SETTINGS (ADMIN ONLY) —
+Settings ▼
+• /admin/catalog
+• /admin/users
+• /admin/integration
+
+---
+
+[ User Profile ]
+[ Logout ]
+----------
+
+==================================================
+5. SIDEBAR BEHAVIOR
+===================
+
+Desktop:
+
+* Fixed sidebar
+* Auto-collapse on /pos
+
+Mobile:
+
+* Hidden by default
+* Burger menu in header
+* Slide-in drawer
+* Overlay background
+
+IMPORTANT:
+
+* Sidebar NEVER disappears
+* Only collapses or overlays
+
+==================================================
+6. POS + CATALOG BEHAVIOR (CRITICAL)
+====================================
+
+* /pos → inside layout, sidebar collapses
+* /catalog → MUST remain unchanged internally
+
+DO NOT:
+
+* modify catalog UI
+* modify cart logic
+* modify POS logic
+
+==================================================
+7. RBAC (SAFE IMPLEMENTATION)
+=============================
+
+DEFAULT:
+
+* All users can access ALL modules
+* EXCEPT admin/settings
+
+Admin permission:
+
+* "admin:view"
+
+Apply:
+
+* Hide Settings section if no permission
+* Protect routes:
+
+/admin/* → requires admin:view
+
+DO NOT block any other routes
+
+==================================================
+8. ADMIN MODULE (SETTINGS)
+==========================
+
+Convert existing features into pages (NO logic changes):
+
+/admin/catalog → existing Admin Console
+/admin/users → new RBAC UI
+/admin/integration → replace modal with page
+
+==================================================
+9. USER MANAGEMENT (RBAC UI ONLY)
+=================================
+
+AdminUsers page:
+
+* User list
+* Role dropdown
+* Module toggles:
+
+[ ] Dashboard
+[ ] POS
+[ ] Orders
+[ ] Inventory
+[ ] Pricing
+[ ] Customers
+[ ] Reports
+[ ] Admin
+
+Save → persist to DB
+
+USE existing RBAC tables
+
+==================================================
+10. MOBILE OPTIMIZATION
+=======================
+
+* Sidebar → drawer on mobile
+* Header → burger menu
+* No horizontal overflow
+* Keep catalog layout intact
+
+==================================================
+11. UI STYLE
+============
+
+* Dark sidebar
+* Light content
+* Rounded cards
+* Clean spacing
+
+==================================================
+EXPECTED RESULT
+===============
+
+✔ Existing app behavior unchanged
+✔ /catalog still works exactly the same
+✔ SaaS layout wraps everything
+✔ Sidebar + navigation added
+✔ Mobile uses burger menu
+✔ Desktop uses fixed sidebar
+✔ Admin section appears only if permitted
+✔ RBAC UI exists for managing permissions
+✔ No broken features
+
+==================================================

@@ -1,4 +1,3 @@
-import { MobileShell } from "@/components/layout/MobileShell";
 import { useStore } from "@/lib/store";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -348,7 +347,7 @@ export default function Orders() {
   };
 
   return (
-    <MobileShell title="Order History">
+    <div className="p-4 md:p-6 max-w-4xl mx-auto">
       <div className="space-y-4">
         {orders.map((order) => (
           <Card key={order.id} className="overflow-hidden" data-testid={`order-${order.id}`}>
@@ -613,6 +612,6 @@ export default function Orders() {
         </DialogContent>
       </Dialog>
 
-    </MobileShell>
+    </div>
   );
 }

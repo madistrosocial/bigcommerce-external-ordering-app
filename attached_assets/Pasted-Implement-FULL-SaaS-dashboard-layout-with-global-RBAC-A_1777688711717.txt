@@ -1,0 +1,229 @@
+Implement FULL SaaS dashboard layout with global RBAC + Admin Settings system.
+
+==================================================
+🚨 CRITICAL RULES
+=================
+
+* DO NOT modify existing business logic (POS, cart, pricing, inventory push, etc.)
+* ONLY wrap pages, restructure layout, and add RBAC UI + routing
+* Preserve all current functionality
+
+==================================================
+
+1. GLOBAL SAAS LAYOUT (APPLY TO ALL PAGES)
+   ==================================================
+
+Create:
+components/layout/SaaSLayout.tsx
+
+Structure:
+
+* Dark collapsible sidebar (left)
+* Header (top)
+* Content (Outlet)
+
+Use React Router Outlet pattern.
+
+Sidebar is ALWAYS visible (never removed).
+
+==================================================
+2. ROUTER RESTRUCTURE (GLOBAL WRAP)
+===================================
+
+Wrap ALL routes inside SaaSLayout:
+
+<Route element={<SaaSLayout />}>
+<Route path="/dashboard" element={<Dashboard />} />
+<Route path="/pos" element={<POS />} />
+<Route path="/orders" element={<Orders />} />
+<Route path="/orders/all" element={<OrdersAll />} />
+<Route path="/orders/drafts" element={<Drafts />} />
+<Route path="/pricing" element={<Pricing />} />
+<Route path="/customers" element={<Customers />} />
+<Route path="/reports" element={<Reports />} />
+
+<Route path="/admin/catalog" element={<AdminCatalog />} />
+<Route path="/admin/users" element={<AdminUsers />} />
+<Route path="/admin/integration" element={<AdminIntegration />} /> </Route>
+
+Login redirect → /dashboard
+
+==================================================
+3. SIDEBAR STRUCTURE (FINAL)
+============================
+
+MAIN:
+
+* Dashboard
+* POS
+* Orders (dropdown)
+  • My Orders
+  • All Orders
+  • Drafts
+* Pricing
+  • Price Tier
+* Customers
+* Reports
+
+SETTINGS (ADMIN ONLY):
+
+* Catalog Management
+* User Management
+* Integration
+
+User profile at bottom.
+
+==================================================
+4. SIDEBAR BEHAVIOR
+===================
+
+* Sidebar ALWAYS present
+* On /pos → auto-collapse sidebar (DO NOT remove it)
+* Admin section visible ONLY if hasPermission("admin","view")
+
+==================================================
+5. RBAC VISIBILITY RULE (IMPORTANT)
+===================================
+
+DEFAULT:
+
+* All users can access ALL modules
+* EXCEPT admin/settings
+
+Admin permission:
+
+* "admin:view" → enables Settings section
+
+DO NOT block non-admin routes.
+
+ONLY protect admin routes:
+
+/admin/* → requires admin:view
+
+==================================================
+6. ADMIN MODULE (SETTINGS)
+==========================
+
+Convert existing admin features into pages:
+
+/admin/catalog → current Admin Console
+/admin/users → user management (NEW RBAC UI)
+/admin/integration → replaces BC modal
+
+NO modals for integration → full page
+
+==================================================
+7. USER MANAGEMENT (RBAC CONTROL PANEL)
+=======================================
+
+Revamp AdminUsers page:
+
+For each user:
+
+* Role dropdown
+* Module access toggles:
+
+Modules:
+
+* dashboard
+* pos
+* orders
+* pricing
+* customers
+* reports
+* admin
+
+UI:
+
+User list → select user → permission panel
+
+Example:
+
+Role: [dropdown]
+
+Modules:
+[Toggle] Dashboard
+[Toggle] POS
+[Toggle] Orders
+[Toggle] Pricing
+[Toggle] Customers
+[Toggle] Reports
+[Toggle] Admin (controls admin:view)
+
+Save button → persists to DB
+
+==================================================
+8. PERMISSION SYSTEM
+====================
+
+Use existing:
+
+* roles
+* permissions
+* role_permissions
+* user_permissions
+
+Frontend:
+usePermissions()
+
+Behavior:
+
+hasPermission(module, action)
+
+Default:
+return TRUE for all modules except "admin"
+
+==================================================
+9. SIDEBAR FILTERING
+====================
+
+Show ALL modules by default.
+
+ONLY hide:
+
+Settings section if no admin permission
+
+==================================================
+10. POS INTEGRATION
+===================
+
+POS must run INSIDE SaaS layout
+
+DO NOT render fullscreen
+
+Sidebar collapses automatically on /pos
+
+==================================================
+11. UI STYLE
+============
+
+* Dark sidebar
+* Light content area
+* Rounded cards
+* Clean spacing
+* Consistent padding
+
+==================================================
+12. DO NOT TOUCH
+================
+
+* POS logic
+* Inventory push logic
+* Pricing logic
+* Cart logic
+* Existing APIs
+
+==================================================
+EXPECTED RESULT
+===============
+
+✔ Single unified SaaS dashboard
+✔ Sidebar always visible
+✔ POS inside layout with collapse behavior
+✔ Admin section at bottom
+✔ RBAC controls visibility (not structure)
+✔ User management can assign permissions
+✔ Integration page no longer modal
+✔ No broken existing features
+
+==================================================

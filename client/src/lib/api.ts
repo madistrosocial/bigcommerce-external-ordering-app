@@ -551,3 +551,155 @@ export async function getInventoryPushLogs(): Promise<InventoryPushLog[]> {
   if (!res.ok) throw new Error('Failed to fetch inventory push logs');
   return res.json();
 }
+
+export async function getAllAdminOrders(): Promise<Order[]> {
+  const res = await fetch(`${API_BASE}/orders/all`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch all orders');
+  return res.json();
+}
+
+// ─── RBAC ─────────────────────────────────────────────────────────────────────
+
+export interface RbacPermission {
+  id: number;
+  module: string;
+  action: string;
+  description?: string | null;
+}
+
+export interface RbacRole {
+  id: number;
+  name: string;
+  description?: string | null;
+  created_at: string;
+  permissions: RbacPermission[];
+}
+
+export interface RbacUser {
+  id: number;
+  username: string;
+  name: string;
+  role: string;
+  is_enabled: boolean;
+  allow_bigcommerce_search: boolean;
+  role_id?: number | null;
+  permissions: RbacPermission[];
+}
+
+export async function updateUserDetails(
+  id: number,
+  data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean }>,
+): Promise<User> {
+  const res = await fetch(`${API_BASE}/users/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any).error || "Failed to update user");
+  }
+  return res.json();
+}
+
+export async function updateRole(id: number, data: { name: string; description?: string }): Promise<RbacRole> {
+  const res = await fetch(`${API_BASE}/roles/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update group");
+  return res.json();
+}
+
+export async function getRoles(): Promise<RbacRole[]> {
+  const res = await fetch(`${API_BASE}/roles`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch roles');
+  return res.json();
+}
+
+export async function createRole(data: { name: string; description?: string }): Promise<RbacRole> {
+  const res = await fetch(`${API_BASE}/roles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to create role');
+  return res.json();
+}
+
+export async function deleteRole(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/roles/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to delete role');
+}
+
+export async function getPermissions(): Promise<RbacPermission[]> {
+  const res = await fetch(`${API_BASE}/permissions`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch permissions');
+  return res.json();
+}
+
+export async function createPermission(data: { module: string; action: string; description?: string }): Promise<RbacPermission> {
+  const res = await fetch(`${API_BASE}/permissions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to create permission');
+  return res.json();
+}
+
+export async function deletePermission(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/permissions/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to delete permission');
+}
+
+export async function addPermissionToRole(roleId: number, permId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/roles/${roleId}/permissions/${permId}`, {
+    method: 'POST', headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to assign permission to role');
+}
+
+export async function removePermissionFromRole(roleId: number, permId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/roles/${roleId}/permissions/${permId}`, {
+    method: 'DELETE', headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to remove permission from role');
+}
+
+export async function getAdminUsers(): Promise<RbacUser[]> {
+  const res = await fetch(`${API_BASE}/admin/users`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch users');
+  return res.json();
+}
+
+export async function setUserRole(userId: number, roleId: number | null): Promise<void> {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}/role`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ role_id: roleId }),
+  });
+  if (!res.ok) throw new Error('Failed to set user role');
+}
+
+export async function addPermissionToUser(userId: number, permId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}/permissions/${permId}`, {
+    method: 'POST', headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to add user permission');
+}
+
+export async function removePermissionFromUser(userId: number, permId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}/permissions/${permId}`, {
+    method: 'DELETE', headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to remove user permission');
+}
+
+export async function getMyPermissions(): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/auth/permissions`, { headers: getAuthHeaders() });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.permissions || [];
+}

@@ -2,6 +2,36 @@ import { pgTable, text, integer, boolean, decimal, timestamp, jsonb } from "driz
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// ─── RBAC ────────────────────────────────────────────────────────────────────
+
+export const roles = pgTable("roles", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const permissions = pgTable("permissions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  module: text("module").notNull(),
+  action: text("action").notNull(),
+  description: text("description"),
+});
+
+export const rolePermissions = pgTable("role_permissions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  role_id: integer("role_id").notNull().references(() => roles.id, { onDelete: "cascade" }),
+  permission_id: integer("permission_id").notNull().references(() => permissions.id, { onDelete: "cascade" }),
+});
+
+export const userPermissions = pgTable("user_permissions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").notNull(),
+  permission_id: integer("permission_id").notNull().references(() => permissions.id, { onDelete: "cascade" }),
+});
+
+// ─── Core ─────────────────────────────────────────────────────────────────────
+
 export const users = pgTable("users", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   username: text("username").notNull().unique(),
@@ -10,6 +40,7 @@ export const users = pgTable("users", {
   role: text("role").notNull(), // 'admin' or 'agent'
   is_enabled: boolean("is_enabled").notNull().default(true),
   allow_bigcommerce_search: boolean("allow_bigcommerce_search").notNull().default(false),
+  role_id: integer("role_id"), // nullable FK to roles
 });
 
 export const products = pgTable("products", {
@@ -77,6 +108,12 @@ export const inventoryPushLogs = pgTable("inventory_push_logs", {
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Insert schemas — RBAC
+export const insertRoleSchema = createInsertSchema(roles).omit({ id: true, created_at: true });
+export const insertPermissionSchema = createInsertSchema(permissions).omit({ id: true });
+export const insertRolePermissionSchema = createInsertSchema(rolePermissions).omit({ id: true });
+export const insertUserPermissionSchema = createInsertSchema(userPermissions).omit({ id: true });
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertProductSchema = createInsertSchema(products).omit({ id: true });
@@ -99,3 +136,16 @@ export type PriceHistoryCacheEntry = typeof priceHistoryCache.$inferSelect;
 
 export type InsertInventoryPushLog = z.infer<typeof insertInventoryPushLogSchema>;
 export type InventoryPushLog = typeof inventoryPushLogs.$inferSelect;
+
+// RBAC types
+export type InsertRole = z.infer<typeof insertRoleSchema>;
+export type Role = typeof roles.$inferSelect;
+
+export type InsertPermission = z.infer<typeof insertPermissionSchema>;
+export type Permission = typeof permissions.$inferSelect;
+
+export type InsertRolePermission = z.infer<typeof insertRolePermissionSchema>;
+export type RolePermission = typeof rolePermissions.$inferSelect;
+
+export type InsertUserPermission = z.infer<typeof insertUserPermissionSchema>;
+export type UserPermission = typeof userPermissions.$inferSelect;

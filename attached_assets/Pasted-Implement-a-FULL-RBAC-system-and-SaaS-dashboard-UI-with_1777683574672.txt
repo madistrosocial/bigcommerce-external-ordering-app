@@ -1,0 +1,211 @@
+Implement a FULL RBAC system and SaaS dashboard UI with STRICT NON-DESTRUCTIVE RULES.
+
+==================================================
+🚨 CRITICAL RULE (DO NOT VIOLATE)
+==================================================
+
+- DO NOT modify any existing business logic
+- DO NOT change POS logic
+- DO NOT change inventory logic
+- DO NOT change pricing logic
+- DO NOT refactor existing working code
+- ONLY ADD new code or wrap existing routes safely
+
+All existing functionality must continue working exactly the same.
+
+==================================================
+GOAL
+==================================================
+
+- Add RBAC system (backend + frontend)
+- Default: allow everything EXCEPT admin
+- Add SaaS dashboard layout (sidebar + header)
+- Admin page access is permission-based
+- Existing pages remain unchanged
+
+==================================================
+BACKEND (SAFE ADDITIONS ONLY)
+==================================================
+
+1. ADD NEW TABLES (DO NOT TOUCH EXISTING TABLES)
+
+Create:
+
+roles
+permissions
+role_permissions
+user_permissions
+
+DO NOT modify existing tables except:
+- add nullable role_id to users
+
+--------------------------------------------------
+
+2. CREATE NEW FILE
+
+Create new file:
+server/permissions.ts (or equivalent)
+
+Add:
+
+export function hasPermission(user, module, action) {
+  if (module === "admin") {
+    return user.permissions?.includes("admin:view");
+  }
+
+  if (user.user_permissions?.length) {
+    return user.user_permissions.includes(`${module}:${action}`);
+  }
+
+  if (user.role_permissions?.length) {
+    return user.role_permissions.includes(`${module}:${action}`);
+  }
+
+  return true; // default allow
+}
+
+--------------------------------------------------
+
+3. CREATE OPTIONAL MIDDLEWARE
+
+Create:
+requirePermission(module, action)
+
+IMPORTANT:
+DO NOT apply globally
+ONLY apply to NEW admin routes
+
+--------------------------------------------------
+
+4. ADD ADMIN ROUTES ONLY
+
+Create new routes:
+
+/api/admin/*
+/api/roles
+/api/permissions
+
+Protect ONLY these with:
+
+requirePermission("admin", "view")
+
+DO NOT modify existing routes
+
+==================================================
+FRONTEND (SAFE ADDITIONS ONLY)
+==================================================
+
+1. CREATE NEW HOOK
+
+Create:
+hooks/usePermissions.ts
+
+export function usePermissions(user) {
+  function hasPermission(module, action) {
+    if (module === "admin") {
+      return user?.permissions?.includes("admin:view");
+    }
+    return true;
+  }
+
+  return { hasPermission };
+}
+
+--------------------------------------------------
+
+2. DO NOT MODIFY EXISTING PAGES
+
+- POS.tsx → DO NOT TOUCH
+- Inventory → DO NOT TOUCH
+- Pricing → DO NOT TOUCH
+
+--------------------------------------------------
+
+3. ADD NEW LAYOUT WRAPPER
+
+Create new component:
+
+components/Layout.tsx
+
+Structure:
+
+- Sidebar (left)
+- Header (top)
+- Content (children)
+
+Wrap ONLY main routes with this layout
+Do not rewrite page logic
+
+--------------------------------------------------
+
+4. SIDEBAR (SAFE)
+
+Show all menu items by default
+
+ONLY condition:
+
+Admin/System menu:
+
+{hasPermission("admin", "view") && <AdminMenu />}
+
+--------------------------------------------------
+
+5. ADMIN PAGE (NEW PAGE ONLY)
+
+Create:
+
+/admin
+
+Basic UI:
+- Role list
+- Permission list
+- User assignment
+
+No integration with existing pages required yet
+
+--------------------------------------------------
+
+UI DESIGN REQUIREMENTS
+==================================================
+
+- Clean SaaS style
+- White + dark mode
+- Rounded cards
+- Soft shadows
+- Collapsible sidebar
+
+Sidebar:
+
+Expanded:
+[icon] Dashboard
+[icon] POS
+[icon] Orders
+[icon] Inventory
+[icon] Pricing
+[icon] Customers
+[icon] Reports
+[icon] System (admin only)
+
+Collapsed:
+icons only + labels under icons
+
+--------------------------------------------------
+
+MODAL STANDARD
+
+Support 95% width:
+className="w-[95vw] max-w-[95vw]"
+
+--------------------------------------------------
+
+EXPECTED RESULT
+==================================================
+
+✔ Existing app behavior unchanged
+✔ RBAC system added safely
+✔ Admin page protected
+✔ Sidebar hides admin if not allowed
+✔ SaaS UI layout added
+✔ Ready for future permission expansion
+
+==================================================

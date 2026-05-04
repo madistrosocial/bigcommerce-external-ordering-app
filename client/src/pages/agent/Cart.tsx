@@ -1,4 +1,3 @@
-import { MobileShell } from "@/components/layout/MobileShell";
 import { useStore } from "@/lib/store";
 import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
@@ -384,18 +383,18 @@ export default function Cart() {
 
   if (cart.length === 0) {
     return (
-      <MobileShell title="Cart" showBack>
+      <div className="p-4 md:p-6 max-w-2xl mx-auto">
         <div className="flex flex-col items-center justify-center h-[60vh] text-center">
           <CreditCard className="h-12 w-12 text-slate-400 mb-4" />
           <h2 className="text-xl font-bold">Your cart is empty</h2>
           <Button onClick={() => setLocation('/catalog')} className="mt-4">Browse Catalog</Button>
         </div>
-      </MobileShell>
+      </div>
     );
   }
 
   return (
-    <MobileShell title="Checkout" showBack>
+    <div className="p-4 md:p-6 max-w-2xl mx-auto">
       <div className="space-y-6 pb-24">
         {isOfflineMode && (
           <Card className="p-3 bg-orange-50 border-orange-200">
@@ -718,6 +717,6 @@ export default function Cart() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </MobileShell>
+    </div>
   );
 }

@@ -320,6 +320,32 @@ export async function registerRoutes(
     }
   });
 
+  // Update all user details (name, username, password, role, is_enabled, allow_bigcommerce_search)
+  app.put("/api/users/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { name, username, password, role, is_enabled, allow_bigcommerce_search } = req.body;
+      const update: Record<string, any> = {};
+      if (name !== undefined) update.name = name;
+      if (username !== undefined) update.username = username;
+      if (role !== undefined) update.role = role;
+      if (is_enabled !== undefined) update.is_enabled = is_enabled;
+      if (allow_bigcommerce_search !== undefined) update.allow_bigcommerce_search = allow_bigcommerce_search;
+      if (password && password.trim()) {
+        const bcrypt = await import("bcryptjs");
+        update.password = await bcrypt.hash(password, 10);
+      }
+      const updated = await storage.updateUserDetails(id, update);
+      res.json(updated);
+    } catch (error: any) {
+      if (error.code === "23505") {
+        res.status(409).json({ error: "Username already taken." });
+      } else {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  });
+
   // Update user enabled status
   app.patch("/api/users/:id/status", requireAdmin, async (req, res) => {
     try {
@@ -590,10 +616,12 @@ export async function registerRoutes(
 
         console.log("PRICE HISTORY REQUEST:", { customerId: bcCustomerId, productId: bcProductId, variantId });
 
-        const GOAL = 5;
+        // BC scan is always capped at 5 new entries for speed; display up to 20 total
+        const BC_FETCH_GOAL = 5;
+        const DISPLAY_LIMIT = 20;
         const history: { price: string; date: string; orderId?: number }[] = [];
 
-        // ── Layer 1: Check Postgres cache first ──────────────────────────────
+        // ── Layer 1: Load Postgres cache (always, no early-return) ────────────
         if (bcProductId) {
           const cached = await storage.getCachedPriceHistory(
             bcCustomerId,
@@ -604,16 +632,8 @@ export async function registerRoutes(
               new Date(b.order_date || 0).getTime() -
               new Date(a.order_date || 0).getTime(),
           );
-          if (cached.length >= GOAL) {
-            return res.json(
-              cached.slice(0, GOAL).map((e) => ({
-                price: e.price,
-                date: e.order_date || "",
-                orderId: e.order_id,
-              })),
-            );
-          }
           // Pre-fill from cache, track already-seen order IDs
+          // Always continue to BC even if cache is full — to keep cache fresh
           const seenOrderIds = new Set<number>();
           for (const e of cached) {
             history.push({
@@ -624,8 +644,18 @@ export async function registerRoutes(
             seenOrderIds.add(e.order_id);
           }
 
-          // ── Layer 2: BigCommerce scan for remaining slots ──────────────────
-          const bcCfg = await storage.getSetting("bigcommerce_config");
+          // ── Layer 2: BigCommerce scan — always runs to keep cache fresh ──────
+          // Load both BC config and the scan cutoff date in parallel
+          const [bcCfg, cutoffSetting] = await Promise.all([
+            storage.getSetting("bigcommerce_config"),
+            storage.getSetting("bc_scan_cutoff_date"),
+          ]);
+          // If a cutoff date is configured, stop scanning BC orders that predate it
+          const cutoffDate: Date | null = cutoffSetting?.value
+            ? new Date(cutoffSetting.value)
+            : null;
+          // Shift cutoff to start-of-day UTC so date comparisons are inclusive
+          if (cutoffDate) cutoffDate.setUTCHours(0, 0, 0, 0);
           let cfg: any = {};
           try {
             if (bcCfg?.value) {
@@ -653,7 +683,8 @@ export async function registerRoutes(
                 const PAGE_SIZE = 25;
                 let page = 1;
                 let morePages = true;
-                while (morePages && history.length < GOAL) {
+                let newBcEntries = 0; // tracks only freshly found BC entries (not from cache)
+                while (morePages && newBcEntries < BC_FETCH_GOAL) {
                   const ordersRes = await fetch(
                     `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?customer_id=${bcCustomerId}&sort=date_created:desc&limit=${PAGE_SIZE}&page=${page}`,
                     { headers: bcHeaders },
@@ -667,8 +698,16 @@ export async function registerRoutes(
                   if (!Array.isArray(bcOrders) || bcOrders.length === 0) break;
                   if (bcOrders.length < PAGE_SIZE) morePages = false;
                   for (const bcOrder of bcOrders) {
-                    // Stop scanning further orders once we have 5 matches
-                    if (history.length >= GOAL) break;
+                    // Stop scanning once we've found BC_FETCH_GOAL new entries from BC
+                    if (newBcEntries >= BC_FETCH_GOAL) break;
+                    // Stop scanning orders that predate the cutoff date (orders are newest-first)
+                    if (cutoffDate && bcOrder.date_created) {
+                      const orderDate = new Date(bcOrder.date_created);
+                      if (orderDate < cutoffDate) {
+                        morePages = false; // all subsequent orders will also be older
+                        break;
+                      }
+                    }
                     if (seenOrderIds.has(bcOrder.id)) continue;
                     seenOrderIds.add(bcOrder.id);
                     try {
@@ -729,6 +768,7 @@ export async function registerRoutes(
                           date: bcOrder.date_created || "",
                           orderId: bcOrder.id,
                         });
+                        newBcEntries++;
                       }
                     } catch (err) {
                       console.error("BC FETCH FAILED (items):", err);
@@ -748,14 +788,14 @@ export async function registerRoutes(
           }
         }
 
-        // ── Fallback: app-stored synced orders ────────────────────────────────
-        if (history.length < GOAL) {
+        // ── Fallback: app-stored synced orders (fill up to DISPLAY_LIMIT) ───────
+        if (history.length < DISPLAY_LIMIT) {
           const appOrders = await storage.getOrdersByBcCustomerId(
             bcCustomerId,
             ["synced"],
           );
           for (const o of appOrders) {
-            if (history.length >= GOAL) break;
+            if (history.length >= DISPLAY_LIMIT) break;
             const items = Array.isArray(o.items) ? o.items : [];
             let matched = false;
             for (const item of items as any[]) {
@@ -794,7 +834,15 @@ export async function registerRoutes(
           (a, b) =>
             new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
         );
-        res.json(history);
+        // Deduplicate by orderId (BC scan may overlap with cache entries)
+        const seenIds = new Set<number | undefined>();
+        const deduped = history.filter((h) => {
+          if (h.orderId == null) return true;
+          if (seenIds.has(h.orderId)) return false;
+          seenIds.add(h.orderId);
+          return true;
+        });
+        res.json(deduped.slice(0, DISPLAY_LIMIT));
       } catch (error: any) {
         console.error("PRICE HISTORY ERROR:", error);
         res.status(500).json({
@@ -1959,6 +2007,452 @@ export async function registerRoutes(
       res.json(logs);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ===== DASHBOARD / ADMIN DATA ROUTES ======================================
+
+  app.get("/api/admin/orders", requireAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getAllOrders());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // All orders — accessible to any authenticated user (permission gating on frontend)
+  app.get("/api/orders/all", requireAuth, async (_req, res) => {
+    try {
+      res.json(await storage.getAllOrders());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ===== RBAC ROUTES (admin-protected new routes only) ======================
+
+  // Roles
+  app.get("/api/roles", requireAdmin, async (_req, res) => {
+    try {
+      const allRoles = await storage.getAllRoles();
+      // Attach permissions to each role
+      const result = await Promise.all(
+        allRoles.map(async (r) => ({
+          ...r,
+          permissions: await storage.getPermissionsForRole(r.id),
+        })),
+      );
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/roles", requireAdmin, async (req, res) => {
+    try {
+      const { name, description } = req.body;
+      if (!name) return res.status(400).json({ error: "name required" });
+      const role = await storage.createRole({ name, description: description || null });
+      res.json(role);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/roles/:id", requireAdmin, async (req, res) => {
+    try {
+      const { name, description } = req.body;
+      if (!name?.trim()) return res.status(400).json({ error: "name required" });
+      const role = await storage.updateRole(parseInt(req.params.id), { name: name.trim(), description: description || null });
+      res.json(role);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/roles/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteRole(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Permissions
+  app.get("/api/permissions", requireAdmin, async (_req, res) => {
+    try {
+      res.json(await storage.getAllPermissions());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/permissions", requireAdmin, async (req, res) => {
+    try {
+      const { module, action, description } = req.body;
+      if (!module || !action) return res.status(400).json({ error: "module and action required" });
+      const perm = await storage.createPermission({ module, action, description: description || null });
+      res.json(perm);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/permissions/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deletePermission(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Role ↔ Permission assignments
+  app.post("/api/roles/:roleId/permissions/:permId", requireAdmin, async (req, res) => {
+    try {
+      await storage.addPermissionToRole({
+        role_id: parseInt(req.params.roleId),
+        permission_id: parseInt(req.params.permId),
+      });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/roles/:roleId/permissions/:permId", requireAdmin, async (req, res) => {
+    try {
+      await storage.removePermissionFromRole(
+        parseInt(req.params.roleId),
+        parseInt(req.params.permId),
+      );
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Admin user management (RBAC)
+  app.get("/api/admin/users", requireAdmin, async (_req, res) => {
+    try {
+      const allUsers = await storage.getAllUsers();
+      const result = await Promise.all(
+        allUsers.map(async (u) => ({
+          ...u,
+          permissions: await storage.getPermissionsForUser(u.id),
+        })),
+      );
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/admin/users/:id/role", requireAdmin, async (req, res) => {
+    try {
+      const roleId = req.body.role_id != null ? parseInt(req.body.role_id) : null;
+      await storage.setUserRole(parseInt(req.params.id), roleId);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/users/:id/permissions/:permId", requireAdmin, async (req, res) => {
+    try {
+      await storage.addPermissionToUser({
+        user_id: parseInt(req.params.id),
+        permission_id: parseInt(req.params.permId),
+      });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/admin/users/:id/permissions/:permId", requireAdmin, async (req, res) => {
+    try {
+      await storage.removePermissionFromUser(
+        parseInt(req.params.id),
+        parseInt(req.params.permId),
+      );
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── BigCommerce Orders (list / detail / edit) ─────────────────────────────
+
+  // Helper to get BC creds inline
+  async function getBcCreds() {
+    const setting = await storage.getSetting("bigcommerce_config");
+    let storeHash = process.env.BC_STORE_HASH || "";
+    let token = process.env.BC_TOKEN || "";
+    if (setting?.value) {
+      const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+      storeHash = cfg.storeHash || storeHash;
+      token = cfg.token || token;
+    }
+    if (!storeHash || !token) throw new Error("BigCommerce credentials not configured");
+    const headers = { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" };
+    return { storeHash, token, headers };
+  }
+
+  // List BC orders (paginated, sortable, filterable by status)
+  app.get("/api/bigcommerce/orders/list", requireAuth, async (req, res) => {
+    try {
+      const { storeHash, headers } = await getBcCreds();
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 25));
+      const sort = req.query.sort === "oldest" ? "date_created:asc" : "date_created:desc";
+      const statusId = req.query.status_id !== undefined && req.query.status_id !== "" ? req.query.status_id : undefined;
+
+      let url = `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?limit=${limit}&page=${page}&sort=${sort}`;
+      if (statusId !== undefined) url += `&status_id=${statusId}`;
+
+      const r = await fetch(url, { headers });
+      if (r.status === 204) return res.json({ orders: [], hasMore: false, page, limit });
+      if (!r.ok) throw new Error(`BigCommerce API error: ${r.statusText}`);
+      const data = await r.json();
+      const orders = Array.isArray(data) ? data : [];
+
+      const shaped = orders.map((o: any) => ({
+        id: o.id,
+        status: o.status,
+        status_id: o.status_id,
+        date_created: o.date_created,
+        customer_id: o.customer_id,
+        billing_address: {
+          first_name: o.billing_address?.first_name || "",
+          last_name: o.billing_address?.last_name || "",
+          email: o.billing_address?.email || "",
+          company: o.billing_address?.company || "",
+        },
+        total_inc_tax: o.total_inc_tax,
+        subtotal_inc_tax: o.subtotal_inc_tax,
+        items_total: o.items_total,
+        payment_method: o.payment_method || "",
+        staff_notes: o.staff_notes || "",
+        customer_message: o.customer_message || "",
+      }));
+
+      res.json({ orders: shaped, hasMore: orders.length === limit, page, limit });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Get a single BC order detail with line items
+  app.get("/api/bigcommerce/orders/:orderId/detail", requireAuth, async (req, res) => {
+    try {
+      const { storeHash, headers } = await getBcCreds();
+      const { orderId } = req.params;
+      const [orderRes, productsRes] = await Promise.all([
+        fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}`, { headers }),
+        fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}/products?limit=250`, { headers }),
+      ]);
+      if (!orderRes.ok) throw new Error(`Order fetch failed: ${orderRes.statusText}`);
+      if (!productsRes.ok) throw new Error(`Products fetch failed: ${productsRes.statusText}`);
+      const order = await orderRes.json();
+      const products = await productsRes.json();
+      res.json({ order, products: Array.isArray(products) ? products : [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Update a BC order line item (qty / price)
+  app.put("/api/bigcommerce/orders/:orderId/products/:lineId", requireAuth, async (req, res) => {
+    try {
+      const { storeHash, headers } = await getBcCreds();
+      const { orderId, lineId } = req.params;
+      const { quantity, price_inc_tax, price_ex_tax } = req.body;
+      const body: any = {};
+      if (quantity !== undefined) body.quantity = quantity;
+      if (price_inc_tax !== undefined) { body.price_inc_tax = price_inc_tax; body.price_ex_tax = price_ex_tax ?? price_inc_tax; }
+      const r = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}/products/${lineId}`,
+        { method: "PUT", headers, body: JSON.stringify(body) }
+      );
+      const data = await r.json();
+      if (!r.ok) return res.status(r.status).json({ error: data?.title || r.statusText });
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Delete a BC order line item
+  app.delete("/api/bigcommerce/orders/:orderId/products/:lineId", requireAuth, async (req, res) => {
+    try {
+      const { storeHash, headers } = await getBcCreds();
+      const { orderId, lineId } = req.params;
+      const r = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}/products/${lineId}`,
+        { method: "DELETE", headers }
+      );
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        return res.status(r.status).json({ error: data?.title || r.statusText });
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Add a product to an existing BC order
+  app.post("/api/bigcommerce/orders/:orderId/products", requireAuth, async (req, res) => {
+    try {
+      const { storeHash, headers } = await getBcCreds();
+      const { orderId } = req.params;
+      const { product_id, variant_id, quantity, price_inc_tax, price_ex_tax, name, sku } = req.body;
+      if (!product_id || !quantity) return res.status(400).json({ error: "product_id and quantity are required" });
+      const payload: any = {
+        product_id,
+        quantity,
+        price_inc_tax: price_inc_tax ?? undefined,
+        price_ex_tax: price_ex_tax ?? price_inc_tax ?? undefined,
+        name: name || undefined,
+        sku: sku || undefined,
+      };
+      if (variant_id) payload.variant_id = variant_id;
+      const r = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}/products`,
+        { method: "POST", headers, body: JSON.stringify(payload) }
+      );
+      const data = await r.json();
+      if (!r.ok) return res.status(r.status).json({ error: data?.title || data?.message || r.statusText });
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── BigCommerce Customers ──────────────────────────────────────────────────
+
+  // List all BC customers (v2 — includes orders_count, total_spent, date_last_order_placed)
+  app.get("/api/bigcommerce/customers/all", requireAuth, async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH || "";
+      let token = process.env.BC_TOKEN || "";
+      if (setting?.value) {
+        const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+        storeHash = cfg.storeHash || storeHash;
+        token = cfg.token || token;
+      }
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+
+      const headers = { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" };
+      let all: any[] = [];
+      let page = 1;
+      while (true) {
+        const r = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v2/customers?limit=250&page=${page}`,
+          { headers }
+        );
+        if (!r.ok) throw new Error(`BigCommerce API error: ${r.statusText}`);
+        const data = await r.json();
+        if (!Array.isArray(data) || data.length === 0) break;
+        all = all.concat(data);
+        if (data.length < 250) break;
+        page++;
+      }
+
+      const customers = all.map((c: any) => ({
+        id: c.id,
+        first_name: c.first_name,
+        last_name: c.last_name,
+        email: c.email,
+        company: c.company || "",
+        phone: c.phone || "",
+        customer_group_id: c.customer_group_id ?? null,
+        orders_count: c.orders_count ?? 0,
+        total_spent: parseFloat(c.total_spent ?? "0"),
+        date_created: c.date_created || null,
+        date_modified: c.date_modified || null,
+        date_last_order_placed: c.date_last_order_placed || null,
+      }));
+
+      res.json(customers);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Create a new BC customer and assign to group 8 (Verification Pending)
+  app.post("/api/bigcommerce/customers/create", requireAuth, async (req, res) => {
+    try {
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH || "";
+      let token = process.env.BC_TOKEN || "";
+      if (setting?.value) {
+        const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+        storeHash = cfg.storeHash || storeHash;
+        token = cfg.token || token;
+      }
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+
+      const { first_name, last_name, email, phone, company, address1, address2, city, state_or_province, postal_code, country_code } = req.body;
+      if (!first_name || !last_name || !email) return res.status(400).json({ error: "first_name, last_name, and email are required" });
+
+      const payload: any = [{
+        first_name,
+        last_name,
+        email,
+        phone: phone || "",
+        company: company || "",
+        customer_group_id: 8,
+      }];
+
+      if (address1) {
+        payload[0].addresses = [{
+          first_name,
+          last_name,
+          company: company || "",
+          address1,
+          address2: address2 || "",
+          city: city || "",
+          state_or_province: state_or_province || "",
+          postal_code: postal_code || "",
+          country_code: country_code || "US",
+          phone: phone || "",
+          address_type: "residential",
+        }];
+      }
+
+      const r = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/customers`,
+        {
+          method: "POST",
+          headers: { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const data = await r.json();
+      if (!r.ok) {
+        const msg = data?.errors ? JSON.stringify(data.errors) : data?.title || r.statusText;
+        return res.status(r.status).json({ error: msg });
+      }
+
+      res.json(data.data?.[0] ?? data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Current user's permission strings (for usePermissions hook)
+  app.get("/api/auth/permissions", requireAuth, async (req, res) => {
+    try {
+      const userId = (req as any).authUser.id as number;
+      const perms = await storage.getUserPermissionStrings(userId);
+      res.json({ permissions: perms });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 
