@@ -2475,6 +2475,30 @@ export async function registerRoutes(
 
   // ===== TOOLS: BC PRODUCT LINK =====
 
+  // Fetch existing custom fields for a BC product (to show already-linked products)
+  app.get("/api/tools/bc/product-custom-fields/:productId", requirePermission("tools_bc_link"), async (req, res) => {
+    try {
+      const productId = parseInt(req.params.productId);
+      if (isNaN(productId)) return res.status(400).json({ error: "Invalid product ID" });
+      const setting = await storage.getSetting("bigcommerce_config");
+      let cfg: any = {};
+      try {
+        if (setting?.value) cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+      } catch {}
+      const { storeHash, token } = cfg;
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce is not configured" });
+      const resp = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${productId}/custom-fields`,
+        { headers: { "X-Auth-Token": String(token), "Accept": "application/json" } },
+      );
+      if (!resp.ok) return res.status(502).json({ error: "BigCommerce API error" });
+      const data = await resp.json();
+      res.json(data.data ?? []);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Search BC products by keyword (Tools > BC Product Link)
   app.get("/api/tools/bc/product-search", requirePermission("tools_bc_link"), async (req, res) => {
     try {
@@ -2521,6 +2545,7 @@ export async function registerRoutes(
         links: Array<{
           linkedProductId: number;
           linkedProductName: string;
+          linkedDisplayName: string;
           linkedProductSlug: string;
           mainProductName: string;
           mainProductSlug: string;
@@ -2557,7 +2582,7 @@ export async function registerRoutes(
               method: "POST",
               headers: bcHeaders,
               body: JSON.stringify({
-                name: link.linkedProductName,
+                name: link.linkedDisplayName || link.linkedProductName,
                 value: `<a href="${linkedUrl}">Available Here</a>`,
               }),
             },
@@ -2612,7 +2637,7 @@ export async function registerRoutes(
           main_product_id: mainProductId,
           main_product_name: link.mainProductName,
           linked_product_id: link.linkedProductId,
-          linked_product_name: link.linkedProductName,
+          linked_product_name: link.linkedDisplayName || link.linkedProductName,
           bidirectional: link.bidirectional,
           created_by_user_id: actor?.id ?? 0,
           created_by_name: actor?.name ?? "Unknown",

@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import {
-  Link2, Search, Plus, X, Loader2, RefreshCw, CheckCircle2, AlertCircle, ChevronRight,
+  Link2, Search, Plus, X, Loader2, RefreshCw, CheckCircle2, AlertCircle,
+  ChevronRight, Tag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getAuthHeaders } from "@/lib/api";
@@ -20,14 +20,17 @@ interface BCProduct {
   slug: string;
 }
 
+interface BCCustomField {
+  id: number;
+  name: string;
+  value: string;
+}
+
 interface LinkedRow {
   rowId: string;
-  query: string;
   product: BCProduct | null;
+  displayName: string;
   bidirectional: boolean;
-  results: BCProduct[];
-  searching: boolean;
-  open: boolean;
 }
 
 interface LinkResult {
@@ -40,7 +43,6 @@ interface LinkResult {
 // ─── Product search dropdown ──────────────────────────────────────────────────
 
 function ProductSearchBox({
-  value,
   placeholder,
   selected,
   onSelect,
@@ -48,7 +50,6 @@ function ProductSearchBox({
   disabled,
   testId,
 }: {
-  value: string;
   placeholder?: string;
   selected: BCProduct | null;
   onSelect: (p: BCProduct) => void;
@@ -56,7 +57,7 @@ function ProductSearchBox({
   disabled?: boolean;
   testId?: string;
 }) {
-  const [query, setQuery] = useState(value);
+  const [query, setQuery] = useState("");
   const [results, setResults] = useState<BCProduct[]>([]);
   const [searching, setSearching] = useState(false);
   const [open, setOpen] = useState(false);
@@ -64,14 +65,8 @@ function ProductSearchBox({
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setQuery(value);
-  }, [value]);
-
-  useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -87,11 +82,7 @@ function ProductSearchBox({
         const res = await fetch(`/api/tools/bc/product-search?q=${encodeURIComponent(q.trim())}`, {
           headers: getAuthHeaders(),
         });
-        if (res.ok) {
-          const data = await res.json();
-          setResults(data);
-          setOpen(true);
-        }
+        if (res.ok) { setResults(await res.json()); setOpen(true); }
       } catch {}
       setSearching(false);
     }, 350);
@@ -151,11 +142,61 @@ function ProductSearchBox({
   );
 }
 
+// ─── Existing custom fields panel ─────────────────────────────────────────────
+
+function ExistingLinkedProducts({ productId }: { productId: number }) {
+  const { data: fields = [], isLoading } = useQuery<BCCustomField[]>({
+    queryKey: ["bc-custom-fields", productId],
+    queryFn: async () => {
+      const res = await fetch(`/api/tools/bc/product-custom-fields/${productId}`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  const linkFields = fields.filter((f) => f.value.includes("Available Here"));
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-2">
+        <Loader2 className="h-3 w-3 animate-spin" /> Loading existing links…
+      </div>
+    );
+  }
+
+  if (linkFields.length === 0) {
+    return (
+      <p className="mt-2 text-[11px] text-slate-400 italic">No existing product links found on this product.</p>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-1.5">
+      <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1">
+        <Tag className="h-3 w-3" /> Already linked ({linkFields.length})
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {linkFields.map((f) => (
+          <Badge
+            key={f.id}
+            className="text-[11px] bg-emerald-50 text-emerald-700 border-emerald-200 font-normal"
+          >
+            {f.name}
+          </Badge>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 let rowCounter = 0;
 function newRow(): LinkedRow {
-  return { rowId: String(++rowCounter), query: "", product: null, bidirectional: false, results: [], searching: false, open: false };
+  return { rowId: String(++rowCounter), product: null, displayName: "", bidirectional: false };
 }
 
 export default function BCProductLinkPage() {
@@ -182,15 +223,13 @@ export default function BCProductLinkPage() {
     try {
       const res = await fetch("/api/tools/bc/product-link", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeaders(),
-        },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           mainProductId: mainProduct.id,
           links: validRows.map((r) => ({
             linkedProductId: r.product!.id,
             linkedProductName: r.product!.name,
+            linkedDisplayName: r.displayName.trim() || r.product!.name,
             linkedProductSlug: r.product!.slug,
             mainProductName: mainProduct.name,
             mainProductSlug: mainProduct.slug,
@@ -246,17 +285,19 @@ export default function BCProductLinkPage() {
         </CardHeader>
         <CardContent>
           <ProductSearchBox
-            value=""
             placeholder="Search BigCommerce products…"
             selected={mainProduct}
-            onSelect={setMainProduct}
+            onSelect={(p) => { setMainProduct(p); setLinkResults(null); }}
             onClear={() => { setMainProduct(null); setLinkResults(null); }}
             testId="main-product"
           />
           {mainProduct && (
-            <p className="mt-2 text-[11px] text-slate-400">
-              Custom fields will be added to: <span className="font-medium text-slate-600">{mainProduct.name}</span>
-            </p>
+            <>
+              <p className="mt-2 text-[11px] text-slate-400">
+                Custom fields will be added to: <span className="font-medium text-slate-600">{mainProduct.name}</span>
+              </p>
+              <ExistingLinkedProducts productId={mainProduct.id} />
+            </>
           )}
         </CardContent>
       </Card>
@@ -271,28 +312,41 @@ export default function BCProductLinkPage() {
             </div>
             <CardDescription className="text-xs">
               Each selected product will be added as a custom field on the main product.
-              Enable <RefreshCw className="inline h-3 w-3 mx-0.5" /> to also link the main product back into the linked product.
+              Enable <RefreshCw className="inline h-3 w-3 mx-0.5" /> to also link the main product back.
+              Edit the display name to shorten long product names in BC.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-4">
             {rows.map((row, idx) => (
               <div key={row.rowId} className="flex items-start gap-2">
                 {/* Row number */}
                 <span className="mt-2.5 text-[11px] text-slate-400 w-4 shrink-0 text-right">{idx + 1}.</span>
 
-                {/* Search box */}
-                <div className="flex-1 min-w-0">
+                {/* Product selector + display name */}
+                <div className="flex-1 min-w-0 space-y-1.5">
                   <ProductSearchBox
-                    value={row.query}
-                    placeholder={`Search linked product…`}
+                    placeholder="Search linked product…"
                     selected={row.product}
-                    onSelect={(p) => updateRow(row.rowId, { product: p, query: "" })}
-                    onClear={() => updateRow(row.rowId, { product: null, query: "" })}
+                    onSelect={(p) => updateRow(row.rowId, { product: p, displayName: p.name })}
+                    onClear={() => updateRow(row.rowId, { product: null, displayName: "" })}
                     testId={`linked-product-${row.rowId}`}
                   />
+                  {/* Display name field — shown once product is selected */}
+                  {row.product && (
+                    <div className="flex items-center gap-1.5">
+                      <Tag className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                      <Input
+                        value={row.displayName}
+                        onChange={(e) => updateRow(row.rowId, { displayName: e.target.value })}
+                        placeholder="Custom field name (display name)…"
+                        className="h-8 text-xs"
+                        data-testid={`display-name-${row.rowId}`}
+                      />
+                    </div>
+                  )}
                 </div>
 
-                {/* Bidirectional checkbox */}
+                {/* Bidirectional toggle */}
                 <div
                   className={cn(
                     "mt-2 flex h-7 w-7 shrink-0 items-center justify-center rounded border transition-colors cursor-pointer",
@@ -300,7 +354,7 @@ export default function BCProductLinkPage() {
                       ? "bg-blue-600 border-blue-600 text-white"
                       : "border-slate-300 text-slate-400 hover:border-blue-400",
                   )}
-                  title={row.bidirectional ? "Also link main product into this product (on)" : "Enable reverse link"}
+                  title={row.bidirectional ? "Reverse link ON" : "Enable reverse link"}
                   data-testid={`bidir-${row.rowId}`}
                   onClick={() => updateRow(row.rowId, { bidirectional: !row.bidirectional })}
                 >
@@ -313,7 +367,7 @@ export default function BCProductLinkPage() {
                     className="mt-2 text-slate-300 hover:text-red-400 transition-colors"
                     onClick={() => removeRow(row.rowId)}
                     data-testid={`remove-row-${row.rowId}`}
-                    title="Remove this row"
+                    title="Remove row"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -321,12 +375,10 @@ export default function BCProductLinkPage() {
               </div>
             ))}
 
-            {/* Bidirectional legend */}
             <p className="text-[11px] text-slate-400 flex items-center gap-1">
-              <RefreshCw className="h-3 w-3" /> = Also add reverse link (main product → linked product's custom fields)
+              <RefreshCw className="h-3 w-3" /> = Also add reverse link on the linked product
             </p>
 
-            {/* Add row */}
             <Button
               variant="outline"
               size="sm"
@@ -337,7 +389,6 @@ export default function BCProductLinkPage() {
               <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Another Product
             </Button>
 
-            {/* Link button */}
             <Button
               className="w-full"
               disabled={!canLink || linking}
@@ -354,55 +405,61 @@ export default function BCProductLinkPage() {
         </Card>
       )}
 
-      {/* Preview — what will be written */}
+      {/* Preview */}
       {mainProduct && rows.some((r) => r.product !== null) && !linkResults && (
         <Card className="shadow-sm bg-slate-50">
           <CardHeader className="pb-1">
             <CardTitle className="text-xs text-slate-500 uppercase tracking-wide">Preview — Custom Fields to be Added</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-xs">
-            {rows.filter((r) => r.product).map((row) => (
-              <div key={row.rowId} className="space-y-1.5">
-                <div className="rounded border border-slate-200 bg-white p-2.5 space-y-1">
-                  <div className="text-[10px] text-blue-600 font-semibold uppercase">On: {mainProduct.name}</div>
-                  <div className="flex gap-1">
-                    <ChevronRight className="h-3 w-3 text-slate-400 mt-0.5 shrink-0" />
-                    <div>
-                      <span className="font-semibold text-slate-700">Name:</span>{" "}
-                      <span className="text-slate-600">{row.product!.name}</span>
-                    </div>
-                  </div>
-                  <div className="flex gap-1">
-                    <ChevronRight className="h-3 w-3 text-slate-400 mt-0.5 shrink-0" />
-                    <div>
-                      <span className="font-semibold text-slate-700">Value:</span>{" "}
-                      <span className="font-mono text-slate-500 break-all">{`<a href="[storefrontUrl]${row.product!.slug}">Available Here</a>`}</span>
-                    </div>
-                  </div>
-                </div>
-                {row.bidirectional && (
-                  <div className="rounded border border-blue-100 bg-blue-50 p-2.5 space-y-1">
-                    <div className="text-[10px] text-blue-600 font-semibold uppercase flex items-center gap-1">
-                      <RefreshCw className="h-2.5 w-2.5" /> Reverse — On: {row.product!.name}
-                    </div>
+            {rows.filter((r) => r.product).map((row) => {
+              const fieldName = row.displayName.trim() || row.product!.name;
+              return (
+                <div key={row.rowId} className="space-y-1.5">
+                  <div className="rounded border border-slate-200 bg-white p-2.5 space-y-1">
+                    <div className="text-[10px] text-blue-600 font-semibold uppercase">On: {mainProduct.name}</div>
                     <div className="flex gap-1">
                       <ChevronRight className="h-3 w-3 text-slate-400 mt-0.5 shrink-0" />
                       <div>
                         <span className="font-semibold text-slate-700">Name:</span>{" "}
-                        <span className="text-slate-600">{mainProduct.name}</span>
+                        <span className="text-slate-600">{fieldName}</span>
+                        {fieldName !== row.product!.name && (
+                          <span className="ml-1.5 text-[10px] text-slate-400">(custom display name)</span>
+                        )}
                       </div>
                     </div>
                     <div className="flex gap-1">
                       <ChevronRight className="h-3 w-3 text-slate-400 mt-0.5 shrink-0" />
                       <div>
                         <span className="font-semibold text-slate-700">Value:</span>{" "}
-                        <span className="font-mono text-slate-500 break-all">{`<a href="[storefrontUrl]${mainProduct.slug}">Available Here</a>`}</span>
+                        <span className="font-mono text-slate-500 break-all">{`<a href="[storefrontUrl]${row.product!.slug}">Available Here</a>`}</span>
                       </div>
                     </div>
                   </div>
-                )}
-              </div>
-            ))}
+                  {row.bidirectional && (
+                    <div className="rounded border border-blue-100 bg-blue-50 p-2.5 space-y-1">
+                      <div className="text-[10px] text-blue-600 font-semibold uppercase flex items-center gap-1">
+                        <RefreshCw className="h-2.5 w-2.5" /> Reverse — On: {row.product!.name}
+                      </div>
+                      <div className="flex gap-1">
+                        <ChevronRight className="h-3 w-3 text-slate-400 mt-0.5 shrink-0" />
+                        <div>
+                          <span className="font-semibold text-slate-700">Name:</span>{" "}
+                          <span className="text-slate-600">{mainProduct.name}</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <ChevronRight className="h-3 w-3 text-slate-400 mt-0.5 shrink-0" />
+                        <div>
+                          <span className="font-semibold text-slate-700">Value:</span>{" "}
+                          <span className="font-mono text-slate-500 break-all">{`<a href="[storefrontUrl]${mainProduct.slug}">Available Here</a>`}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}
