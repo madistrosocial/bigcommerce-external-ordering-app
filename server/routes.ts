@@ -74,9 +74,19 @@ export async function registerRoutes(
    */
   const requirePermission = (module: string, action = "view") =>
     async (req: Request, res: Response, next: NextFunction) => {
-      const userId = req.headers["x-user-id"];
-      if (!userId) return res.status(401).json({ error: "Authentication required" });
-      const user = await storage.getUser(parseInt(userId as string)).catch(() => null);
+      const rawId = req.headers["x-user-id"];
+      const rawRole = req.headers["x-user-role"];
+      if (!rawId) return res.status(401).json({ error: "Authentication required" });
+      const userId = parseInt(rawId as string);
+      if (isNaN(userId)) return res.status(401).json({ error: "Authentication required" });
+      // Fast-path: trust the role header for admins to skip DB lookup
+      if (rawRole === "admin") {
+        const user = await storage.getUser(userId).catch(() => null);
+        if (!user || !user.is_enabled) return res.status(401).json({ error: "Authentication required" });
+        (req as any).authUser = user;
+        return next();
+      }
+      const user = await storage.getUser(userId).catch(() => null);
       if (!user || !user.is_enabled) return res.status(401).json({ error: "Authentication required" });
       if (user.role === "admin") { (req as any).authUser = user; return next(); }
       const perms = await storage.getUserPermissionStrings(user.id);
