@@ -29,6 +29,7 @@ import AllCustomers from "@/pages/agent/AllCustomers";
 import BCOrders from "@/pages/agent/BCOrders";
 import AdminGroups from "@/pages/admin/AdminGroups";
 import BCProductLink from "@/pages/tools/BCProductLink";
+import BCProductLinkLogs from "@/pages/tools/BCProductLinkLogs";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -154,6 +155,9 @@ function Router() {
       {/* ── Tools routes ── */}
       <Route path="/tools/bc-product-link">
         {() => <ProtectedRoute component={BCProductLink} />}
+      </Route>
+      <Route path="/tools/bc-product-link-logs">
+        {() => <ProtectedRoute component={BCProductLinkLogs} />}
       </Route>
 
       <Route component={NotFound} />

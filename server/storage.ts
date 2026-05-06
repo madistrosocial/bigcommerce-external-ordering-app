@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, roles, permissions, rolePermissions, userPermissions } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions } from "@shared/schema";
 import { eq, desc, and, inArray, gt, asc } from "drizzle-orm";
 
 export interface IStorage {
@@ -48,6 +48,10 @@ export interface IStorage {
   // Inventory push log operations
   createInventoryPushLog(entry: InsertInventoryPushLog): Promise<InventoryPushLog>;
   getInventoryPushLogs(limit?: number): Promise<InventoryPushLog[]>;
+
+  // Product link log operations
+  createProductLinkLog(entry: InsertProductLinkLog): Promise<ProductLinkLog>;
+  getProductLinkLogs(limit?: number): Promise<ProductLinkLog[]>;
 
   // RBAC operations
   getAllRoles(): Promise<Role[]>;
@@ -262,6 +266,17 @@ export class DatabaseStorage implements IStorage {
   async getInventoryPushLogs(limit = 100): Promise<InventoryPushLog[]> {
     return db.select().from(inventoryPushLogs)
       .orderBy(desc(inventoryPushLogs.created_at))
+      .limit(limit);
+  }
+
+  async createProductLinkLog(entry: InsertProductLinkLog): Promise<ProductLinkLog> {
+    const result = await db.insert(productLinkLogs).values(entry).returning();
+    return result[0];
+  }
+
+  async getProductLinkLogs(limit = 200): Promise<ProductLinkLog[]> {
+    return db.select().from(productLinkLogs)
+      .orderBy(desc(productLinkLogs.created_at))
       .limit(limit);
   }
 

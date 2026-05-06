@@ -8,6 +8,7 @@ import {
   type InsertOrder,
   type InsertPriceHistoryCache,
   type InsertInventoryPushLog,
+  type InsertProductLinkLog,
 } from "@shared/schema";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
@@ -2597,7 +2598,43 @@ export async function registerRoutes(
         }
       }
 
+      // Write one log entry per linked product
+      const actor = (req as any).authUser;
+      for (const link of links) {
+        const forwardSuccess = results.some(
+          (r) => r.productId === mainProductId && r.direction === "main->linked" && r.success,
+        );
+        const backSuccess = !link.bidirectional || results.some(
+          (r) => r.productId === link.linkedProductId && r.direction === "linked->main" && r.success,
+        );
+        const status = forwardSuccess && backSuccess ? "success" : forwardSuccess || backSuccess ? "partial" : "failed";
+        const logEntry: InsertProductLinkLog = {
+          main_product_id: mainProductId,
+          main_product_name: link.mainProductName,
+          linked_product_id: link.linkedProductId,
+          linked_product_name: link.linkedProductName,
+          bidirectional: link.bidirectional,
+          created_by_user_id: actor?.id ?? 0,
+          created_by_name: actor?.name ?? "Unknown",
+          status,
+          results: results.filter(
+            (r) => r.productId === mainProductId || r.productId === link.linkedProductId,
+          ),
+        };
+        await storage.createProductLinkLog(logEntry).catch(() => {});
+      }
+
       res.json({ results });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET product link logs
+  app.get("/api/tools/bc/product-link-logs", requirePermission("tools_bc_link_logs"), async (_req, res) => {
+    try {
+      const logs = await storage.getProductLinkLogs(200);
+      res.json(logs);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

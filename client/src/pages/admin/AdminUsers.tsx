@@ -33,6 +33,7 @@ export const MODULES = [
   { key: "pricing", label: "Price Tiers" },
   { key: "reports", label: "Reports" },
   { key: "tools_bc_link", label: "Tools › BC Product Link" },
+  { key: "tools_bc_link_logs", label: "Tools › Product Link Logs" },
   { key: "admin", label: "Admin / Settings" },
 ];
 

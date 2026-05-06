@@ -92,6 +92,20 @@ export const priceHistoryCache = pgTable("price_history_cache", {
   sku: text("sku"),
 });
 
+export const productLinkLogs = pgTable("product_link_logs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  main_product_id: integer("main_product_id").notNull(),
+  main_product_name: text("main_product_name").notNull(),
+  linked_product_id: integer("linked_product_id").notNull(),
+  linked_product_name: text("linked_product_name").notNull(),
+  bidirectional: boolean("bidirectional").notNull().default(false),
+  created_by_user_id: integer("created_by_user_id").notNull().references(() => users.id),
+  created_by_name: text("created_by_name").notNull().default(""),
+  status: text("status").notNull().default("success"), // 'success' | 'partial' | 'failed'
+  results: jsonb("results").notNull().default([]),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const inventoryPushLogs = pgTable("inventory_push_logs", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   user_id: integer("user_id").notNull().references(() => users.id),
@@ -120,6 +134,7 @@ export const insertProductSchema = createInsertSchema(products).omit({ id: true 
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, date: true });
 export const insertPriceHistoryCacheSchema = createInsertSchema(priceHistoryCache).omit({ id: true, created_at: true });
 export const insertInventoryPushLogSchema = createInsertSchema(inventoryPushLogs).omit({ id: true, created_at: true });
+export const insertProductLinkLogSchema = createInsertSchema(productLinkLogs).omit({ id: true, created_at: true });
 
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -136,6 +151,9 @@ export type PriceHistoryCacheEntry = typeof priceHistoryCache.$inferSelect;
 
 export type InsertInventoryPushLog = z.infer<typeof insertInventoryPushLogSchema>;
 export type InventoryPushLog = typeof inventoryPushLogs.$inferSelect;
+
+export type InsertProductLinkLog = z.infer<typeof insertProductLinkLogSchema>;
+export type ProductLinkLog = typeof productLinkLogs.$inferSelect;
 
 // RBAC types
 export type InsertRole = z.infer<typeof insertRoleSchema>;

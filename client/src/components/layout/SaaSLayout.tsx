@@ -108,6 +108,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   // Tools children — permission-gated
   const toolsChildren: NavLeaf[] = [
     ...(hasPermission("tools_bc_link") ? [{ label: "BC Product Link", path: "/tools/bc-product-link" }] : []),
+    ...(hasPermission("tools_bc_link_logs") ? [{ label: "Product Link Logs", path: "/tools/bc-product-link-logs" }] : []),
   ];
 
   // Build final nav list — only include items the user can access
