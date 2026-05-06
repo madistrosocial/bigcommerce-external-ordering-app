@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Monitor, ShoppingBag, Package, BookOpen,
   ShoppingCart, Settings, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, LogOut, Truck, Wifi, WifiOff, Menu, X,
-  Users, Layers, Pin, Plug, UsersRound,
+  Users, Layers, Pin, Plug, UsersRound, Wrench,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -106,6 +106,11 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("inventory_logs") ? [{ label: "Push Logs", path: "/inventory-push-logs" }] : []),
   ];
 
+  // Tools children — admin only
+  const toolsChildren: NavLeaf[] = role === "admin"
+    ? [{ label: "BC Product Link", path: "/tools/bc-product-link" }]
+    : [];
+
   // Build final nav list — only include items the user can access
   const navItems: NavGroup[] = [
     ...(hasPermission("dashboard") ? [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" }] : []),
@@ -115,6 +120,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(inventoryChildren.length > 0 ? [{ id: "inventory", label: "Inventory", icon: Package, children: inventoryChildren }] : []),
     ...(hasPermission("catalog") ? [{ id: "catalog", label: "Catalog", icon: BookOpen, path: "/catalog" }] : []),
     ...(hasPermission("cart") ? [{ id: "cart", label: "Cart", icon: ShoppingCart, path: "/cart" }] : []),
+    ...(toolsChildren.length > 0 ? [{ id: "tools", label: "Tools", icon: Wrench, children: toolsChildren }] : []),
   ];
 
   // Settings section: system admins always; agents with admin:view permission

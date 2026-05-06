@@ -2445,6 +2445,137 @@ export async function registerRoutes(
     }
   });
 
+  // ===== TOOLS: BC PRODUCT LINK =====
+
+  // Search BC products by keyword (Tools > BC Product Link)
+  app.get("/api/tools/bc/product-search", requireAdmin, async (req, res) => {
+    try {
+      const q = (req.query.q as string) ?? "";
+      if (q.trim().length < 2) return res.json([]);
+      const setting = await storage.getSetting("bigcommerce_config");
+      let cfg: any = {};
+      try {
+        if (setting?.value) cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+      } catch {}
+      const { storeHash, token } = cfg;
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce is not configured" });
+      const bcHeaders = {
+        "X-Auth-Token": String(token),
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      };
+      const resp = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(q.trim())}&limit=12&include=custom_fields`,
+        { headers: bcHeaders },
+      );
+      if (!resp.ok) {
+        const txt = await resp.text().catch(() => "");
+        console.error("BC product search error:", resp.status, txt);
+        return res.status(502).json({ error: "BigCommerce API error" });
+      }
+      const data = await resp.json();
+      const products = (data.data ?? []).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        slug: p.custom_url?.url ?? `/${p.name.toLowerCase().replace(/\s+/g, "-")}/`,
+      }));
+      res.json(products);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Add cross-reference custom fields to linked BC products
+  app.post("/api/tools/bc/product-link", requireAdmin, async (req, res) => {
+    try {
+      const { mainProductId, links } = req.body as {
+        mainProductId: number;
+        links: Array<{
+          linkedProductId: number;
+          linkedProductName: string;
+          linkedProductSlug: string;
+          mainProductName: string;
+          mainProductSlug: string;
+          bidirectional: boolean;
+        }>;
+      };
+      if (!mainProductId || !Array.isArray(links) || links.length === 0) {
+        return res.status(400).json({ error: "mainProductId and links[] are required" });
+      }
+      const setting = await storage.getSetting("bigcommerce_config");
+      let cfg: any = {};
+      try {
+        if (setting?.value) cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+      } catch {}
+      const { storeHash, token, storefrontUrl = "" } = cfg;
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce is not configured" });
+      const bcHeaders = {
+        "X-Auth-Token": String(token),
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      };
+      const baseUrl = String(storefrontUrl).replace(/\/$/, "");
+      const results: { productId: number; direction: string; success: boolean; error?: string }[] = [];
+
+      for (const link of links) {
+        const linkedUrl = `${baseUrl}${link.linkedProductSlug}`;
+        const mainUrl = `${baseUrl}${link.mainProductSlug}`;
+
+        // Add linked product as custom field on the main product
+        try {
+          const r = await fetch(
+            `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${mainProductId}/custom-fields`,
+            {
+              method: "POST",
+              headers: bcHeaders,
+              body: JSON.stringify({
+                name: link.linkedProductName,
+                value: `<a href="${linkedUrl}">Available Here</a>`,
+              }),
+            },
+          );
+          if (!r.ok) {
+            const txt = await r.text().catch(() => "");
+            results.push({ productId: mainProductId, direction: "main->linked", success: false, error: `BC ${r.status}: ${txt.slice(0, 120)}` });
+          } else {
+            results.push({ productId: mainProductId, direction: "main->linked", success: true });
+          }
+        } catch (e: any) {
+          results.push({ productId: mainProductId, direction: "main->linked", success: false, error: e.message });
+        }
+
+        // If bidirectional: also add main product as custom field on the linked product
+        if (link.bidirectional) {
+          try {
+            const r = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${link.linkedProductId}/custom-fields`,
+              {
+                method: "POST",
+                headers: bcHeaders,
+                body: JSON.stringify({
+                  name: link.mainProductName,
+                  value: `<a href="${mainUrl}">Available Here</a>`,
+                }),
+              },
+            );
+            if (!r.ok) {
+              const txt = await r.text().catch(() => "");
+              results.push({ productId: link.linkedProductId, direction: "linked->main", success: false, error: `BC ${r.status}: ${txt.slice(0, 120)}` });
+            } else {
+              results.push({ productId: link.linkedProductId, direction: "linked->main", success: true });
+            }
+          } catch (e: any) {
+            results.push({ productId: link.linkedProductId, direction: "linked->main", success: false, error: e.message });
+          }
+        }
+      }
+
+      res.json({ results });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Current user's permission strings (for usePermissions hook)
   app.get("/api/auth/permissions", requireAuth, async (req, res) => {
     try {

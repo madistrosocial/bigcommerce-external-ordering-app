@@ -15,6 +15,7 @@ export default function AdminIntegrationPage() {
   const [storeHash, setStoreHash] = useState("");
   const [token, setToken] = useState("");
   const [channelId, setChannelId] = useState("1");
+  const [storefrontUrl, setStorefrontUrl] = useState("");
   const [cutoffDate, setCutoffDate] = useState("");
 
   useEffect(() => {
@@ -27,6 +28,7 @@ export default function AdminIntegrationPage() {
         setStoreHash(cfg.value.storeHash ?? "");
         setToken(cfg.value.token ?? "");
         setChannelId(String(cfg.value.channelId ?? cfg.value.channel_id ?? "1"));
+        setStorefrontUrl(cfg.value.storefrontUrl ?? "");
       }
       if (cutoff?.value) {
         setCutoffDate(cutoff.value);
@@ -44,6 +46,7 @@ export default function AdminIntegrationPage() {
         storeHash,
         token,
         channelId: channelId ? parseInt(channelId) : 1,
+        storefrontUrl: storefrontUrl.trim().replace(/\/$/, ""),
       });
       toast({ title: "Settings saved", description: "BigCommerce integration updated successfully." });
     } catch (err: any) {
@@ -157,6 +160,19 @@ export default function AdminIntegrationPage() {
                   data-testid="input-channel-id"
                 />
                 <p className="text-[11px] text-slate-400">Default is 1 for the main storefront.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="storefront_url">Storefront URL</Label>
+                <Input
+                  id="storefront_url"
+                  placeholder="https://yourdomain.com"
+                  value={storefrontUrl}
+                  onChange={(e) => setStorefrontUrl(e.target.value)}
+                  data-testid="input-storefront-url"
+                />
+                <p className="text-[11px] text-slate-400">
+                  Your public store URL (no trailing slash). Used by the BC Product Link tool to build product URLs in custom fields.
+                </p>
               </div>
               <Button
                 type="submit"

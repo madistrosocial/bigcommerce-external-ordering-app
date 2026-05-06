@@ -28,6 +28,7 @@ import CreateCustomer from "@/pages/agent/CreateCustomer";
 import AllCustomers from "@/pages/agent/AllCustomers";
 import BCOrders from "@/pages/agent/BCOrders";
 import AdminGroups from "@/pages/admin/AdminGroups";
+import BCProductLink from "@/pages/tools/BCProductLink";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -148,6 +149,11 @@ function Router() {
       {/* Admin orders view */}
       <Route path="/orders/admin">
         {() => <ProtectedRoute component={AdminDashboard} role="admin" />}
+      </Route>
+
+      {/* ── Tools routes ── */}
+      <Route path="/tools/bc-product-link">
+        {() => <ProtectedRoute component={BCProductLink} role="admin" />}
       </Route>
 
       <Route component={NotFound} />
