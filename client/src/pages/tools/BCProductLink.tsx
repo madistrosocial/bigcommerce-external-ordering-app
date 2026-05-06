@@ -10,6 +10,7 @@ import {
   Link2, Search, Plus, X, Loader2, RefreshCw, CheckCircle2, AlertCircle, ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getAuthHeaders } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ function ProductSearchBox({
       setSearching(true);
       try {
         const res = await fetch(`/api/tools/bc/product-search?q=${encodeURIComponent(q.trim())}`, {
-          headers: { "x-user": localStorage.getItem("vansales_user") ?? "" },
+          headers: getAuthHeaders(),
         });
         if (res.ok) {
           const data = await res.json();
@@ -183,7 +184,7 @@ export default function BCProductLinkPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-user": localStorage.getItem("vansales_user") ?? "",
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           mainProductId: mainProduct.id,
