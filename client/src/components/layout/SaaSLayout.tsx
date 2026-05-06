@@ -49,10 +49,6 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
       setMobileOpen(false);
       prevLocation.current = location;
     }
-    if (location === "/pos") {
-      setCollapsed(true);
-      try { localStorage.setItem("vansales_sidebar_collapsed", "true"); } catch {}
-    }
   }, [location]);
 
   useEffect(() => {
@@ -75,7 +71,10 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     try { localStorage.setItem("vansales_sidebar_collapsed", String(v)); } catch {}
   };
   const toggleGroup = (id: string) => {
-    setOpenGroups((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+    setOpenGroups((prev) => {
+      if (prev.has(id)) return new Set();
+      return new Set([id]);
+    });
   };
   const navigate = (path: string) => { setLocation(path); setMobileOpen(false); };
 
@@ -254,11 +253,11 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         )}
-        <div className={cn("px-2 pb-0.5", collapsed && "flex justify-center")}>
+        <div className={cn("px-3 pb-2", collapsed && "flex justify-center px-2")}>
           <button onClick={handleLogout} data-testid="btn-sidebar-logout"
-            className={cn("w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-red-400 hover:bg-red-900/20 hover:text-red-300 transition-colors",
-              collapsed && "justify-center w-auto px-2")}>
-            <LogOut className="h-3.5 w-3.5 shrink-0" />
+            className={cn("w-full flex items-center justify-center gap-2 rounded-md px-3 py-2 text-[13px] font-semibold bg-red-600 hover:bg-red-700 text-white transition-colors",
+              collapsed && "w-auto px-2 py-2")}>
+            <LogOut className="h-4 w-4 shrink-0" />
             {!collapsed && <span>Sign Out</span>}
           </button>
         </div>
