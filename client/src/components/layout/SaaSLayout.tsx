@@ -106,10 +106,10 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("inventory_logs") ? [{ label: "Push Logs", path: "/inventory-push-logs" }] : []),
   ];
 
-  // Tools children — admin only
-  const toolsChildren: NavLeaf[] = role === "admin"
-    ? [{ label: "BC Product Link", path: "/tools/bc-product-link" }]
-    : [];
+  // Tools children — permission-gated
+  const toolsChildren: NavLeaf[] = [
+    ...(hasPermission("tools_bc_link") ? [{ label: "BC Product Link", path: "/tools/bc-product-link" }] : []),
+  ];
 
   // Build final nav list — only include items the user can access
   const navItems: NavGroup[] = [

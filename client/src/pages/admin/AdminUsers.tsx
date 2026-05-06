@@ -32,6 +32,7 @@ export const MODULES = [
   { key: "inventory_logs", label: "Inventory › Push Logs" },
   { key: "pricing", label: "Price Tiers" },
   { key: "reports", label: "Reports" },
+  { key: "tools_bc_link", label: "Tools › BC Product Link" },
   { key: "admin", label: "Admin / Settings" },
 ];
 

@@ -153,7 +153,7 @@ function Router() {
 
       {/* ── Tools routes ── */}
       <Route path="/tools/bc-product-link">
-        {() => <ProtectedRoute component={BCProductLink} role="admin" />}
+        {() => <ProtectedRoute component={BCProductLink} />}
       </Route>
 
       <Route component={NotFound} />

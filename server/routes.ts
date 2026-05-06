@@ -68,6 +68,23 @@ export async function registerRoutes(
     next();
   };
 
+  /**
+   * Permission-based middleware — allows system admins always, otherwise
+   * checks that the authenticated user has the given module:action permission.
+   */
+  const requirePermission = (module: string, action = "view") =>
+    async (req: Request, res: Response, next: NextFunction) => {
+      const userId = req.headers["x-user-id"];
+      if (!userId) return res.status(401).json({ error: "Authentication required" });
+      const user = await storage.getUser(parseInt(userId as string)).catch(() => null);
+      if (!user || !user.is_enabled) return res.status(401).json({ error: "Authentication required" });
+      if (user.role === "admin") { (req as any).authUser = user; return next(); }
+      const perms = await storage.getUserPermissionStrings(user.id);
+      if (!perms.includes(`${module}:${action}`)) return res.status(403).json({ error: "Forbidden" });
+      (req as any).authUser = user;
+      next();
+    };
+
   // ===== PRODUCT ROUTES =====
 
   // Get all products (for admin view)
@@ -2448,7 +2465,7 @@ export async function registerRoutes(
   // ===== TOOLS: BC PRODUCT LINK =====
 
   // Search BC products by keyword (Tools > BC Product Link)
-  app.get("/api/tools/bc/product-search", requireAdmin, async (req, res) => {
+  app.get("/api/tools/bc/product-search", requirePermission("tools_bc_link"), async (req, res) => {
     try {
       const q = (req.query.q as string) ?? "";
       if (q.trim().length < 2) return res.json([]);
@@ -2486,7 +2503,7 @@ export async function registerRoutes(
   });
 
   // Add cross-reference custom fields to linked BC products
-  app.post("/api/tools/bc/product-link", requireAdmin, async (req, res) => {
+  app.post("/api/tools/bc/product-link", requirePermission("tools_bc_link"), async (req, res) => {
     try {
       const { mainProductId, links } = req.body as {
         mainProductId: number;
