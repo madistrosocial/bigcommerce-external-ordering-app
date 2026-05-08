@@ -224,14 +224,14 @@ export default function Cart() {
     for (const item of cart) {
       const pid = item.product.bigcommerce_id;
       const maxQty = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity ?? null;
-      if (pid && maxQty != null && !uniqueMaxMap.has(pid)) {
+      if (pid && maxQty != null && maxQty > 0 && !uniqueMaxMap.has(pid)) {
         uniqueMaxMap.set(pid, maxQty);
       }
     }
     const limitedProducts = Array.from(uniqueMaxMap.entries()).map(([product_id, originalMax]) => ({ product_id, originalMax }));
     if (limitedProducts.length > 0) {
       try {
-        await api.setProductMaxQty(limitedProducts.map(({ product_id }) => ({ product_id, max_purchase_quantity: null })));
+        await api.setProductMaxQty(limitedProducts.map(({ product_id }) => ({ product_id, max_purchase_quantity: 0 })));
       } catch (err) {
         console.error("Failed to remove max qty limits before checkout:", err);
       }
@@ -667,7 +667,7 @@ export default function Cart() {
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => removeFromCartAtIndex(idx)}><Trash2 className="h-4 w-4"/></Button>
                   </div>
                 </div>
-                {maxPurchase != null && (
+                {maxPurchase != null && maxPurchase > 0 && (
                   <div className="flex items-start gap-1.5 mt-2 bg-amber-50 border border-amber-300 rounded px-2 py-1.5 text-xs text-amber-800" data-testid={`warning-max-purchase-${item.lineId}`}>
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px text-amber-500" />
                     <span>

@@ -259,11 +259,11 @@ function VariantPopupDialog({
     });
   };
 
-  // Warn about max purchase quantity (non-blocking) — fires whenever limit exists
+  // Warn about max purchase quantity (non-blocking) — fires whenever limit > 0
   const warnIfMaxExists = (v: any) => {
     const maxQty: number | null =
       v?.max_purchase_quantity ?? product?.max_purchase_quantity ?? null;
-    if (maxQty != null) {
+    if (maxQty != null && maxQty > 0) {
       toast({
         title: "Purchase limit detected",
         description: `This item has a maximum purchase limit of ${maxQty}. You can override at checkout.`,
@@ -463,7 +463,7 @@ function VariantPopupDialog({
                         product?.max_purchase_quantity ??
                         null;
 
-                      return maxQty != null ? (
+                      return maxQty != null && maxQty > 0 ? (
                         <div className="text-[10px] text-amber-600 mt-1">
                           Maximum Purchase: {maxQty}
                         </div>
@@ -1500,8 +1500,8 @@ export default function POSPage() {
       // Auto-adjust qty to minimum if below min
       let finalQty = Math.max(qty, minQty);
 
-      // Warn (non-blocking) whenever a max purchase limit exists
-      if (maxQty != null) {
+      // Warn (non-blocking) whenever a max purchase limit > 0 exists
+      if (maxQty != null && maxQty > 0) {
         toast({
           title: "Purchase limit detected",
           description: `This item has a maximum purchase limit of ${maxQty}. You can override at checkout.`,
@@ -1936,13 +1936,13 @@ export default function POSPage() {
 
   // ── Checkout – step 1: check for any items with max purchase limits ──────────
   const handleCheckoutClick = useCallback(() => {
-    // Trigger override modal for ANY item that has a max purchase quantity (not just exceeded ones)
+    // Trigger override modal for ANY item that has a max purchase quantity > 0
     const withMax = cart.filter((item) => {
       const maxQty =
         item.variant?.max_purchase_quantity ??
         item.product.max_purchase_quantity ??
         null;
-      return maxQty != null;
+      return maxQty != null && maxQty > 0;
     });
     if (withMax.length > 0) {
       setMaxOverrideItems(withMax);
@@ -1975,11 +1975,11 @@ export default function POSPage() {
     );
 
     try {
-      // Step 1: Remove product-level limits
+      // Step 1: Set product-level limits to 0 (BC treats 0 as no limit)
       await api.setProductMaxQty(
         productList.map(({ product_id }) => ({
           product_id,
-          max_purchase_quantity: null,
+          max_purchase_quantity: 0,
         })),
       );
       // Step 2: Proceed with checkout
@@ -1999,18 +1999,6 @@ export default function POSPage() {
 
       setIsOverriding(false);
       setMaxOverrideItems([]);
-
-      // Step 4: Open ONE tab per unique product for verification (after restore)
-      const openedProducts = new Set<number>();
-      for (const { product_id } of productList) {
-        if (!openedProducts.has(product_id) && storeHashRef.current) {
-          openedProducts.add(product_id);
-          window.open(
-            `https://store-${storeHashRef.current}.mybigcommerce.com/manage/products/${product_id}`,
-            "_blank",
-          );
-        }
-      }
     }
   };
 
@@ -2905,7 +2893,7 @@ export default function POSPage() {
                         item.variant?.max_purchase_quantity ??
                         item.product.max_purchase_quantity ??
                         null;
-                      return maxPurchase != null ? (
+                      return maxPurchase != null && maxPurchase > 0 ? (
                         <div
                           className="flex items-start gap-1.5 mt-1.5 bg-amber-50 border border-amber-300 rounded px-2 py-1.5 text-xs text-amber-800"
                           data-testid={`warning-max-purchase-${item.lineId}`}
@@ -3230,7 +3218,7 @@ export default function POSPage() {
             {(() => {
               const limitedItems = cart.filter(item => {
                 const m = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity ?? null;
-                return m != null;
+                return m != null && m > 0;
               });
               if (limitedItems.length === 0) return null;
               return (
