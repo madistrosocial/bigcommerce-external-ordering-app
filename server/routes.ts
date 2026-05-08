@@ -2648,6 +2648,39 @@ export async function registerRoutes(
     }
   });
 
+  // Fetch all BC customer groups
+  app.get("/api/bigcommerce/customer-groups", requireAuth, async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH || "";
+      let token = process.env.BC_TOKEN || "";
+      if (setting?.value) {
+        const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+        storeHash = cfg.storeHash || storeHash;
+        token = cfg.token || token;
+      }
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      const headers = { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" };
+      let all: any[] = [];
+      let page = 1;
+      while (true) {
+        const r = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v2/customer_groups?limit=250&page=${page}`,
+          { headers }
+        );
+        if (!r.ok) throw new Error(`BigCommerce API error: ${r.statusText}`);
+        const data = await r.json();
+        if (!Array.isArray(data) || data.length === 0) break;
+        all = all.concat(data);
+        if (data.length < 250) break;
+        page++;
+      }
+      res.json(all.map((g: any) => ({ id: g.id, name: g.name })));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Create a new BC customer and assign to group 8 (Verification Pending)
   app.post("/api/bigcommerce/customers/create", requireAuth, async (req, res) => {
     try {
