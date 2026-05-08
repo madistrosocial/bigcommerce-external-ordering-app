@@ -160,12 +160,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
       {/* Brand */}
-      <div className={cn("flex items-center gap-2.5 border-b border-slate-700 h-14 shrink-0", collapsed ? "justify-center px-2" : "px-4")}>
+      <div className={cn("flex border-b border-slate-700 shrink-0", collapsed ? "items-center justify-center px-2 h-14" : "flex-col items-center justify-center px-3 py-3 gap-1")}>
         {businessLogo ? (
           <img
             src={businessLogo}
             alt="Logo"
-            className={cn("object-contain shrink-0", collapsed ? "h-8 w-8" : "h-8 w-auto max-w-[120px]")}
+            className={cn("object-contain", collapsed ? "h-8 w-8 shrink-0" : "h-[120px] w-auto max-w-full")}
             data-testid="img-sidebar-logo"
           />
         ) : (
@@ -174,7 +174,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
           </div>
         )}
         {!collapsed && !businessLogo && <span className="font-bold text-[13px] text-white truncate">Midatlantic</span>}
-        <button onClick={() => setMobileOpen(false)} className="ml-auto text-slate-400 hover:text-white md:hidden">
+        <button onClick={() => setMobileOpen(false)} className={cn("text-slate-400 hover:text-white md:hidden", collapsed ? "ml-auto" : "absolute top-2 right-2")}>
           <X className="h-5 w-5" />
         </button>
       </div>

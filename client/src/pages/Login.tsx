@@ -78,7 +78,7 @@ export default function Login() {
               <img
                 src={businessLogo}
                 alt="Business Logo"
-                className="h-20 w-auto max-w-[180px] object-contain"
+                className="h-28 w-auto max-w-[220px] object-contain"
                 data-testid="img-business-logo"
               />
             ) : (
