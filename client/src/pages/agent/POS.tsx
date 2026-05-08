@@ -85,6 +85,10 @@ function variantLabel(variant: any): string {
   return variant.sku || "";
 }
 
+// ─── Price formatter (comma-separated) ────────────────────────────────────────
+const fmtPrice = (n: number) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 // ─── Suggestion types ─────────────────────────────────────────────────────────
 
 type SuggestionVariant = {
@@ -412,12 +416,12 @@ function VariantPopupDialog({
                         <p
                           className={`text-base font-bold ${isDiscounted ? "text-red-600" : "text-slate-900"}`}
                         >
-                          ${finalPrice.toFixed(2)}
+                          ${fmtPrice(finalPrice)}
                         </p>
                       </div>
                       {isDiscounted && (
                         <p className="text-xs text-slate-400 line-through">
-                          ${base.toFixed(2)}
+                          ${fmtPrice(base)}
                         </p>
                       )}
                     </div>
@@ -578,7 +582,7 @@ function VariantPopupDialog({
                                   data-testid={`popup-history-option-${k}-${hi}`}
                                 >
                                   <p className="text-sm font-bold text-green-600">
-                                    ${parseFloat(h.price).toFixed(2)}
+                                    ${fmtPrice(parseFloat(h.price))}
                                   </p>
                                   <p className="text-xs text-slate-400">
                                     {h.date
@@ -666,7 +670,7 @@ function VariantPopupDialog({
             data-testid="popup-bulk-add"
           >
             {selectedCount > 0
-              ? `Add ${selectedCount} variant${selectedCount !== 1 ? "s" : ""} — $${selectedTotal.toFixed(2)}`
+              ? `Add ${selectedCount} variant${selectedCount !== 1 ? "s" : ""} — $${fmtPrice(selectedTotal)}`
               : "Add Selected to Cart"}
           </Button>
           <Button
@@ -768,7 +772,7 @@ const PinnedProductRow = memo(function PinnedProductRow({
             {product.name}
           </p>
           <p className="text-xs text-slate-400">
-            ${parseFloat(product.price).toFixed(2)}
+            ${fmtPrice(parseFloat(product.price))}
             <span
               className={`ml-2 ${totalStock <= 0 ? "text-red-500" : "text-slate-400"}`}
             >
@@ -2455,9 +2459,9 @@ export default function POSPage() {
                       <div className="text-right shrink-0">
                         <p className="text-sm font-bold text-slate-900">
                           $
-                          {parseFloat(
+                          {fmtPrice(parseFloat(
                             s.variant?.price || s.product.price,
-                          ).toFixed(2)}
+                          ))}
                         </p>
                         <p
                           className={`text-[10px] ${(s.variant?.stock_level ?? s.product.stock_level) <= 0 ? "text-red-500 font-medium" : "text-slate-400"}`}
@@ -2722,7 +2726,7 @@ export default function POSPage() {
                         <p
                           className={`text-sm font-bold ${isDiscounted || isFree ? "text-red-600" : "text-slate-900"}`}
                         >
-                          ${(item.price_at_sale * item.quantity).toFixed(2)}
+                          ${fmtPrice(item.price_at_sale * item.quantity)}
                         </p>
                         {isFree && (
                           <span className="text-[9px] font-bold text-red-500">
@@ -2911,11 +2915,11 @@ export default function POSPage() {
                       <span
                         className={`text-xl font-bold ${isDiscounted || isFree ? "text-red-600" : "text-slate-900"}`}
                       >
-                        ${item.price_at_sale.toFixed(2)}
+                        ${fmtPrice(item.price_at_sale)}
                       </span>
                       {(isDiscounted || isFree) && (
                         <span className="text-xs text-slate-400 line-through">
-                          ${item.original_price.toFixed(2)}
+                          ${fmtPrice(item.original_price)}
                         </span>
                       )}
                       {isFree && (
@@ -3064,7 +3068,7 @@ export default function POSPage() {
                                         data-testid={`option-history-${item.lineId}-${hi}`}
                                       >
                                         <p className="text-sm font-bold text-green-600">
-                                          ${parseFloat(h.price).toFixed(2)}
+                                          ${fmtPrice(parseFloat(h.price))}
                                         </p>
                                         <p className="text-xs text-slate-400">
                                           {h.date
@@ -3145,7 +3149,7 @@ export default function POSPage() {
                     <div className="flex justify-between text-xs text-slate-600 pt-0.5">
                       <span>Line total</span>
                       <span className="font-bold text-slate-900 text-sm">
-                        ${(item.price_at_sale * item.quantity).toFixed(2)}
+                        ${fmtPrice(item.price_at_sale * item.quantity)}
                       </span>
                     </div>
                   </div>
@@ -3185,7 +3189,7 @@ export default function POSPage() {
                   className="text-sm text-red-500 font-medium"
                   data-testid="text-pos-discount"
                 >
-                  Discount: -${totalDiscount.toFixed(2)}
+                  Discount: -${fmtPrice(totalDiscount)}
                 </span>
               )}
             </div>
@@ -3197,7 +3201,7 @@ export default function POSPage() {
                 className="text-2xl font-bold text-slate-900"
                 data-testid="text-pos-total"
               >
-                ${finalTotal.toFixed(2)}
+                ${fmtPrice(finalTotal)}
               </span>
             </div>
 
