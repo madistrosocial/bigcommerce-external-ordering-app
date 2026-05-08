@@ -254,12 +254,14 @@ export async function registerRoutes(
     }
   });
 
-  // Get promotion products with live BC data
+  // Get promotion products with live BC data (legacy - kept for compatibility)
   app.get("/api/products/promotions/fresh", async (req, res) => {
-    try {
-      const promotionProducts = await storage.getPromotionProducts();
-      if (promotionProducts.length === 0) return res.json([]);
+    res.json([]);
+  });
 
+  // Fetch all products from the BC "Promotions" category (/promotions slug) live
+  app.get("/api/products/sale-category", async (req, res) => {
+    try {
       const setting = await storage.getSetting("bigcommerce_config");
       let storeHash = process.env.BC_STORE_HASH;
       let token = process.env.BC_TOKEN;
@@ -269,7 +271,9 @@ export async function registerRoutes(
         token = config.token || token;
       }
 
-      if (!token || !storeHash) return res.json(promotionProducts);
+      if (!token || !storeHash) {
+        return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      }
 
       const bcHeaders = {
         "X-Auth-Token": String(token),
@@ -277,47 +281,98 @@ export async function registerRoutes(
         Accept: "application/json",
       };
 
-      const results = await Promise.all(
-        promotionProducts.map(async (product) => {
-          try {
-            const bcRes = await fetch(
-              `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product.bigcommerce_id}?include=variants`,
-              { headers: bcHeaders }
-            );
-            if (!bcRes.ok) return product;
-            const { data: p } = await bcRes.json();
-            const variants =
-              p.variants && p.variants.length > 0
-                ? p.variants.map((v: any) => ({
-                    id: v.id,
-                    sku: v.sku,
-                    price: v.price?.toString() || p.price?.toString() || product.price,
-                    stock_level: v.inventory_level ?? 0,
-                    option_values: (v.option_values || []).map((ov: any) => ({
-                      id: ov.id,
-                      option_id: ov.option_id,
-                      label: ov.label,
-                      option_display_name: ov.option_display_name,
-                    })),
-                  }))
-                : product.variants;
-            return {
-              ...product,
-              name: p.name ?? product.name,
-              price: p.price?.toString() ?? product.price,
-              stock_level: p.inventory_level ?? product.stock_level,
-              sku: p.sku ?? product.sku,
-              image: p.primary_image?.url_standard ?? product.image,
-              description: p.description ? p.description.replace(/<[^>]*>?/gm, "") : product.description,
-              variants,
-            };
-          } catch {
-            return product;
-          }
-        })
+      // Step 1: Find category by URL path "/promotions"
+      const catRes = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/trees/categories?url_path=%2Fpromotions`,
+        { headers: bcHeaders }
       );
 
-      res.json(results);
+      let categoryId: number | null = null;
+
+      if (catRes.ok) {
+        const catData = await catRes.json();
+        const cats = catData.data ?? [];
+        if (cats.length > 0) categoryId = cats[0].category_id ?? cats[0].id ?? null;
+      }
+
+      // Fallback: search via v2 categories API
+      if (!categoryId) {
+        const v2Res = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v2/categories?url_path=%2Fpromotions&limit=10`,
+          { headers: bcHeaders }
+        );
+        if (v2Res.ok) {
+          const v2Cats = await v2Res.json();
+          if (Array.isArray(v2Cats) && v2Cats.length > 0) {
+            categoryId = v2Cats[0].id;
+          }
+        }
+      }
+
+      // Fallback: search by name "Promotions"
+      if (!categoryId) {
+        const nameRes = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/categories?name=Promotions&limit=10`,
+          { headers: bcHeaders }
+        );
+        if (nameRes.ok) {
+          const nameData = await nameRes.json();
+          const cats = nameData.data ?? [];
+          if (cats.length > 0) categoryId = cats[0].id;
+        }
+      }
+
+      if (!categoryId) {
+        return res.status(404).json({ error: "Promotions category not found in BigCommerce. Make sure a category named 'Promotions' exists." });
+      }
+
+      // Step 2: Fetch all products in that category with variants
+      let page = 1;
+      const allProducts: any[] = [];
+      while (true) {
+        const prodRes = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?categories:in=${categoryId}&include=variants,images&limit=50&page=${page}&is_visible=true`,
+          { headers: bcHeaders }
+        );
+        if (!prodRes.ok) break;
+        const prodData = await prodRes.json();
+        const items = prodData.data ?? [];
+        allProducts.push(...items);
+        if (items.length < 50 || !prodData.meta?.pagination?.total_pages || page >= prodData.meta.pagination.total_pages) break;
+        page++;
+      }
+
+      // Step 3: Shape into our Product format
+      const shaped = allProducts.map((p: any) => {
+        const primaryImage = (p.images ?? []).find((img: any) => img.is_thumbnail) ?? (p.images ?? [])[0];
+        const variants = (p.variants ?? []).map((v: any) => ({
+          id: v.id,
+          sku: v.sku,
+          price: v.price?.toString() || p.price?.toString() || "0",
+          stock_level: v.inventory_level ?? 0,
+          option_values: (v.option_values ?? []).map((ov: any) => ({
+            id: ov.id,
+            option_id: ov.option_id,
+            label: ov.label,
+            option_display_name: ov.option_display_name,
+          })),
+        }));
+        return {
+          id: p.id,
+          bigcommerce_id: p.id,
+          name: p.name,
+          sku: p.sku,
+          price: p.price?.toString() ?? "0",
+          image: primaryImage?.url_standard ?? "",
+          description: p.description ? p.description.replace(/<[^>]*>?/gm, "") : "",
+          stock_level: p.inventory_level ?? 0,
+          is_pinned: false,
+          is_promotion: false,
+          variants,
+        };
+      });
+
+      res.json(shaped);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

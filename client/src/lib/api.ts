@@ -137,6 +137,17 @@ export async function getFreshPromotionProducts(): Promise<Product[]> {
   return res.json();
 }
 
+export async function getBCSaleProducts(): Promise<Product[]> {
+  const res = await fetch(`${API_BASE}/products/sale-category`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? 'Failed to fetch Sale products');
+  }
+  return res.json();
+}
+
 export async function resyncProducts(): Promise<{ updated: number; errors: number }> {
   const res = await fetch(`${API_BASE}/products/resync`, {
     method: 'POST',

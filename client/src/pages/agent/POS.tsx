@@ -919,23 +919,24 @@ export default function POSPage() {
     refetchOnWindowFocus: false,
   });
 
-  // Always load promotion products — fetched live from BigCommerce on every page load
-  const { data: promotionProducts = [], isLoading: promotionLoading } = useQuery({
-    queryKey: ["products", "promotions", "fresh"],
-    queryFn: api.getFreshPromotionProducts,
+  // Sale tab — fetched live from BC "Promotions" category on every page load
+  const { data: saleProducts = [], isLoading: saleLoading, error: saleError } = useQuery({
+    queryKey: ["products", "sale-category"],
+    queryFn: api.getBCSaleProducts,
     staleTime: 0,
     gcTime: 0,
     refetchOnMount: "always",
     refetchOnWindowFocus: false,
+    retry: 1,
   });
 
   // Tab preference — persisted in localStorage
-  const [activeProductTab, setActiveProductTab] = useState<"pinned" | "promotions">(() => {
+  const [activeProductTab, setActiveProductTab] = useState<"favorites" | "sale">(() => {
     const stored = localStorage.getItem("pos_product_tab");
-    return stored === "promotions" ? "promotions" : "pinned";
+    return stored === "sale" ? "sale" : "favorites";
   });
 
-  const switchProductTab = (tab: "pinned" | "promotions") => {
+  const switchProductTab = (tab: "favorites" | "sale") => {
     setActiveProductTab(tab);
     localStorage.setItem("pos_product_tab", tab);
   };
@@ -2568,22 +2569,22 @@ export default function POSPage() {
               );
             })()}
 
-          {/* No suggestions / default: Pinned/Promotion tabs */}
+          {/* No suggestions / default: Favorites / Sale tabs */}
           {!showSuggestions && (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Tab bar */}
               <div className="flex shrink-0 border-b bg-slate-50">
                 <button
                   className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold transition-colors border-b-2 ${
-                    activeProductTab === "pinned"
+                    activeProductTab === "favorites"
                       ? "border-blue-600 text-blue-700 bg-white"
                       : "border-transparent text-slate-500 hover:text-slate-700"
                   }`}
-                  onClick={() => switchProductTab("pinned")}
-                  data-testid="pos-tab-pinned"
+                  onClick={() => switchProductTab("favorites")}
+                  data-testid="pos-tab-favorites"
                 >
                   <Package className="h-3.5 w-3.5" />
-                  Pinned Products
+                  Favorites
                   {pinnedProducts.length > 0 && (
                     <span className="ml-0.5 rounded-full bg-blue-100 text-blue-700 px-1.5 py-0 text-[10px] font-bold">
                       {pinnedProducts.length}
@@ -2592,18 +2593,18 @@ export default function POSPage() {
                 </button>
                 <button
                   className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold transition-colors border-b-2 ${
-                    activeProductTab === "promotions"
+                    activeProductTab === "sale"
                       ? "border-orange-500 text-orange-700 bg-white"
                       : "border-transparent text-slate-500 hover:text-slate-700"
                   }`}
-                  onClick={() => switchProductTab("promotions")}
-                  data-testid="pos-tab-promotions"
+                  onClick={() => switchProductTab("sale")}
+                  data-testid="pos-tab-sale"
                 >
                   <Tag className="h-3.5 w-3.5" />
-                  Promotions
-                  {promotionProducts.length > 0 && (
+                  Sale
+                  {saleProducts.length > 0 && (
                     <span className="ml-0.5 rounded-full bg-orange-100 text-orange-700 px-1.5 py-0 text-[10px] font-bold">
-                      {promotionProducts.length}
+                      {saleProducts.length}
                     </span>
                   )}
                 </button>
@@ -2611,29 +2612,34 @@ export default function POSPage() {
 
               {/* Tab content */}
               <div className="flex-1 overflow-y-auto">
-                {activeProductTab === "pinned" ? (
+                {activeProductTab === "favorites" ? (
                   pinnedLoading ? (
-                    <ProductTabSkeleton label="Syncing Pinned with BigCommerce…" />
+                    <ProductTabSkeleton label="Loading Favorites from BigCommerce…" />
                   ) : pinnedProducts.length === 0 ? (
-                    <ProductTabEmpty message="No pinned products" sub="Ask your admin to pin products for quick access." />
+                    <ProductTabEmpty message="No favorites yet" sub="Ask your admin to pin products for quick access." />
                   ) : (
                     <ProductTabList
-                      label="Pinned Products"
+                      label="Favorites"
                       products={pinnedProducts}
                       onOpen={(p) => openPopupWithFreshStock(p, matchedTier)}
                       onDirectAdd={(p) => handleDirectAddPinned(p)}
                     />
                   )
                 ) : (
-                  promotionLoading ? (
-                    <ProductTabSkeleton label="Syncing Promotions with BigCommerce…" />
-                  ) : promotionProducts.length === 0 ? (
-                    <ProductTabEmpty message="No promotions active" sub="Ask your admin to add products to the Promotions tab." />
+                  saleLoading ? (
+                    <ProductTabSkeleton label="Loading Sale items from BigCommerce…" />
+                  ) : saleError ? (
+                    <ProductTabEmpty
+                      message="Sale products unavailable"
+                      sub={(saleError as Error).message ?? "Could not load the Promotions category from BigCommerce."}
+                    />
+                  ) : saleProducts.length === 0 ? (
+                    <ProductTabEmpty message="No sale items right now" sub="Products in your BigCommerce 'Promotions' category will appear here." />
                   ) : (
                     <ProductTabList
-                      label="Promotions"
+                      label="Sale"
                       labelColor="orange"
-                      products={promotionProducts}
+                      products={saleProducts}
                       onOpen={(p) => openPopupWithFreshStock(p, matchedTier)}
                       onDirectAdd={(p) => handleDirectAddPinned(p)}
                     />
