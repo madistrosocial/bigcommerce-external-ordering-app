@@ -225,9 +225,99 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const { is_pinned } = req.body;
-
       await storage.updateProductPin(id, is_pinned);
       res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Toggle product promotion status
+  app.patch("/api/products/:id/promotion", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { is_promotion } = req.body;
+      await storage.updateProductPromotion(id, is_promotion);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get promotion products (DB cache)
+  app.get("/api/products/promotions", async (req, res) => {
+    try {
+      const prods = await storage.getPromotionProducts();
+      res.json(prods);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get promotion products with live BC data
+  app.get("/api/products/promotions/fresh", async (req, res) => {
+    try {
+      const promotionProducts = await storage.getPromotionProducts();
+      if (promotionProducts.length === 0) return res.json([]);
+
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+      if (setting?.value) {
+        const config = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+        storeHash = config.storeHash || storeHash;
+        token = config.token || token;
+      }
+
+      if (!token || !storeHash) return res.json(promotionProducts);
+
+      const bcHeaders = {
+        "X-Auth-Token": String(token),
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      };
+
+      const results = await Promise.all(
+        promotionProducts.map(async (product) => {
+          try {
+            const bcRes = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product.bigcommerce_id}?include=variants`,
+              { headers: bcHeaders }
+            );
+            if (!bcRes.ok) return product;
+            const { data: p } = await bcRes.json();
+            const variants =
+              p.variants && p.variants.length > 0
+                ? p.variants.map((v: any) => ({
+                    id: v.id,
+                    sku: v.sku,
+                    price: v.price?.toString() || p.price?.toString() || product.price,
+                    stock_level: v.inventory_level ?? 0,
+                    option_values: (v.option_values || []).map((ov: any) => ({
+                      id: ov.id,
+                      option_id: ov.option_id,
+                      label: ov.label,
+                      option_display_name: ov.option_display_name,
+                    })),
+                  }))
+                : product.variants;
+            return {
+              ...product,
+              name: p.name ?? product.name,
+              price: p.price?.toString() ?? product.price,
+              stock_level: p.inventory_level ?? product.stock_level,
+              sku: p.sku ?? product.sku,
+              image: p.primary_image?.url_standard ?? product.image,
+              description: p.description ? p.description.replace(/<[^>]*>?/gm, "") : product.description,
+              variants,
+            };
+          } catch {
+            return product;
+          }
+        })
+      );
+
+      res.json(results);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

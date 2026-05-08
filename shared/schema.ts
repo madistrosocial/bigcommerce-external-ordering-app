@@ -53,6 +53,7 @@ export const products = pgTable("products", {
   description: text("description").notNull(),
   stock_level: integer("stock_level").notNull().default(0),
   is_pinned: boolean("is_pinned").notNull().default(false),
+  is_promotion: boolean("is_promotion").notNull().default(false),
   variants: jsonb("variants").notNull().default([]), // Array of variants
 });
 

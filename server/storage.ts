@@ -17,9 +17,11 @@ export interface IStorage {
   // Product operations
   getAllProducts(): Promise<Product[]>;
   getPinnedProducts(): Promise<Product[]>;
+  getPromotionProducts(): Promise<Product[]>;
   getProductByBigCommerceId(bcId: number): Promise<Product | undefined>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProductPin(id: number, is_pinned: boolean): Promise<void>;
+  updateProductPromotion(id: number, is_promotion: boolean): Promise<void>;
   updateProduct(id: number, updates: Partial<InsertProduct>): Promise<void>;
   updateProductByBigCommerceId(bcId: number, updates: Partial<InsertProduct>): Promise<void>;
 
@@ -123,6 +125,10 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(products).where(eq(products.is_pinned, true));
   }
 
+  async getPromotionProducts(): Promise<Product[]> {
+    return db.select().from(products).where(eq(products.is_promotion, true));
+  }
+
   async getProductByBigCommerceId(bcId: number): Promise<Product | undefined> {
     const result = await db.select().from(products).where(eq(products.bigcommerce_id, bcId));
     return result[0];
@@ -135,6 +141,10 @@ export class DatabaseStorage implements IStorage {
 
   async updateProductPin(id: number, is_pinned: boolean): Promise<void> {
     await db.update(products).set({ is_pinned }).where(eq(products.id, id));
+  }
+
+  async updateProductPromotion(id: number, is_promotion: boolean): Promise<void> {
+    await db.update(products).set({ is_promotion }).where(eq(products.id, id));
   }
 
   async updateProduct(id: number, updates: Partial<InsertProduct>): Promise<void> {

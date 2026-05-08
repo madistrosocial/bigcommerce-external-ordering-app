@@ -120,6 +120,23 @@ export async function toggleProductPin(id: number, is_pinned: boolean): Promise<
   if (!res.ok) throw new Error('Failed to update product pin');
 }
 
+export async function toggleProductPromotion(id: number, is_promotion: boolean): Promise<void> {
+  const res = await fetch(`${API_BASE}/products/${id}/promotion`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ is_promotion })
+  });
+  if (!res.ok) throw new Error('Failed to update product promotion');
+}
+
+export async function getFreshPromotionProducts(): Promise<Product[]> {
+  const res = await fetch(`${API_BASE}/products/promotions/fresh`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) throw new Error('Failed to fetch fresh promotion products');
+  return res.json();
+}
+
 export async function resyncProducts(): Promise<{ updated: number; errors: number }> {
   const res = await fetch(`${API_BASE}/products/resync`, {
     method: 'POST',

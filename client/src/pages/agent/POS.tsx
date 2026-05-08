@@ -52,6 +52,7 @@ import {
   Monitor,
   FileText,
   RotateCw,
+  Tag,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
@@ -788,6 +789,72 @@ const PinnedProductRow = memo(function PinnedProductRow({
   );
 });
 
+// ─── Product Tab Helpers ──────────────────────────────────────────────────────
+
+function ProductTabSkeleton({ label }: { label: string }) {
+  return (
+    <div className="mx-4 my-2">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 px-1 flex items-center gap-1.5">
+        <RotateCw className="h-3 w-3 animate-spin" /> {label}
+      </p>
+      <div className="border rounded-lg overflow-hidden divide-y">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="flex items-center gap-3 px-3 py-2 bg-white">
+            <div className="w-10 h-10 rounded border bg-slate-100 animate-pulse shrink-0" />
+            <div className="flex-1 space-y-1.5">
+              <div className="h-3 bg-slate-100 rounded animate-pulse w-3/4" />
+              <div className="h-2.5 bg-slate-100 rounded animate-pulse w-1/3" />
+            </div>
+            <div className="h-7 w-16 bg-slate-100 rounded animate-pulse shrink-0" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProductTabEmpty({ message, sub }: { message: string; sub: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full text-slate-300 py-12 pointer-events-none">
+      <ShoppingCart className="h-16 w-16 mb-3 opacity-30" />
+      <p className="text-base font-medium text-slate-400">{message}</p>
+      <p className="text-sm mt-1 text-slate-400 text-center px-6">{sub}</p>
+    </div>
+  );
+}
+
+function ProductTabList({
+  label,
+  labelColor = "slate",
+  products,
+  onOpen,
+  onDirectAdd,
+}: {
+  label: string;
+  labelColor?: "slate" | "orange";
+  products: api.Product[];
+  onOpen: (p: api.Product) => void;
+  onDirectAdd: (p: api.Product) => void;
+}) {
+  return (
+    <div className="mx-4 my-2">
+      <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 px-1 ${labelColor === "orange" ? "text-orange-500" : "text-slate-400"}`}>
+        {label}
+      </p>
+      <div className="border rounded-lg overflow-hidden">
+        {products.map((p) => (
+          <PinnedProductRow
+            key={p.id}
+            product={p}
+            onOpen={() => onOpen(p)}
+            onDirectAdd={() => onDirectAdd(p)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main POS Page ────────────────────────────────────────────────────────────
 
 export default function POSPage() {
@@ -851,6 +918,27 @@ export default function POSPage() {
     refetchOnMount: "always",
     refetchOnWindowFocus: false,
   });
+
+  // Always load promotion products — fetched live from BigCommerce on every page load
+  const { data: promotionProducts = [], isLoading: promotionLoading } = useQuery({
+    queryKey: ["products", "promotions", "fresh"],
+    queryFn: api.getFreshPromotionProducts,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+  });
+
+  // Tab preference — persisted in localStorage
+  const [activeProductTab, setActiveProductTab] = useState<"pinned" | "promotions">(() => {
+    const stored = localStorage.getItem("pos_product_tab");
+    return stored === "promotions" ? "promotions" : "pinned";
+  });
+
+  const switchProductTab = (tab: "pinned" | "promotions") => {
+    setActiveProductTab(tab);
+    localStorage.setItem("pos_product_tab", tab);
+  };
 
   // ── Search ────────────────────────────────────────────────────────────────
   const searchRef = useRef<HTMLInputElement>(null);
@@ -2480,54 +2568,78 @@ export default function POSPage() {
               );
             })()}
 
-          {/* No suggestions / default: Pinned products rows */}
+          {/* No suggestions / default: Pinned/Promotion tabs */}
           {!showSuggestions && (
-            <div className="flex-1 overflow-y-auto">
-              {pinnedLoading ? (
-                <div className="mx-4 my-2">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 px-1 flex items-center gap-1.5">
-                    <RotateCw className="h-3 w-3 animate-spin" /> Syncing with BigCommerce…
-                  </p>
-                  <div className="border rounded-lg overflow-hidden divide-y">
-                    {[1, 2, 3].map((i) => (
-                      <div key={i} className="flex items-center gap-3 px-3 py-2 bg-white">
-                        <div className="w-10 h-10 rounded border bg-slate-100 animate-pulse shrink-0" />
-                        <div className="flex-1 space-y-1.5">
-                          <div className="h-3 bg-slate-100 rounded animate-pulse w-3/4" />
-                          <div className="h-2.5 bg-slate-100 rounded animate-pulse w-1/3" />
-                        </div>
-                        <div className="h-7 w-7 bg-slate-100 rounded animate-pulse shrink-0" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : pinnedProducts.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-slate-300 py-12 pointer-events-none">
-                  <ShoppingCart className="h-16 w-16 mb-3 opacity-30" />
-                  <p className="text-base font-medium text-slate-400">
-                    Ready to scan
-                  </p>
-                  <p className="text-sm mt-1 text-slate-400">
-                    Scan a barcode or type to search
-                  </p>
-                </div>
-              ) : (
-                <div className="mx-4 my-2">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 px-1">
-                    Pinned Products
-                  </p>
-                  <div className="border rounded-lg overflow-hidden">
-                    {pinnedProducts.map((p) => (
-                      <PinnedProductRow
-                        key={p.id}
-                        product={p}
-                        onOpen={() => openPopupWithFreshStock(p, matchedTier)}
-                        onDirectAdd={() => handleDirectAddPinned(p)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Tab bar */}
+              <div className="flex shrink-0 border-b bg-slate-50">
+                <button
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold transition-colors border-b-2 ${
+                    activeProductTab === "pinned"
+                      ? "border-blue-600 text-blue-700 bg-white"
+                      : "border-transparent text-slate-500 hover:text-slate-700"
+                  }`}
+                  onClick={() => switchProductTab("pinned")}
+                  data-testid="pos-tab-pinned"
+                >
+                  <Package className="h-3.5 w-3.5" />
+                  Pinned Products
+                  {pinnedProducts.length > 0 && (
+                    <span className="ml-0.5 rounded-full bg-blue-100 text-blue-700 px-1.5 py-0 text-[10px] font-bold">
+                      {pinnedProducts.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold transition-colors border-b-2 ${
+                    activeProductTab === "promotions"
+                      ? "border-orange-500 text-orange-700 bg-white"
+                      : "border-transparent text-slate-500 hover:text-slate-700"
+                  }`}
+                  onClick={() => switchProductTab("promotions")}
+                  data-testid="pos-tab-promotions"
+                >
+                  <Tag className="h-3.5 w-3.5" />
+                  Promotions
+                  {promotionProducts.length > 0 && (
+                    <span className="ml-0.5 rounded-full bg-orange-100 text-orange-700 px-1.5 py-0 text-[10px] font-bold">
+                      {promotionProducts.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Tab content */}
+              <div className="flex-1 overflow-y-auto">
+                {activeProductTab === "pinned" ? (
+                  pinnedLoading ? (
+                    <ProductTabSkeleton label="Syncing Pinned with BigCommerce…" />
+                  ) : pinnedProducts.length === 0 ? (
+                    <ProductTabEmpty message="No pinned products" sub="Ask your admin to pin products for quick access." />
+                  ) : (
+                    <ProductTabList
+                      label="Pinned Products"
+                      products={pinnedProducts}
+                      onOpen={(p) => openPopupWithFreshStock(p, matchedTier)}
+                      onDirectAdd={(p) => handleDirectAddPinned(p)}
+                    />
+                  )
+                ) : (
+                  promotionLoading ? (
+                    <ProductTabSkeleton label="Syncing Promotions with BigCommerce…" />
+                  ) : promotionProducts.length === 0 ? (
+                    <ProductTabEmpty message="No promotions active" sub="Ask your admin to add products to the Promotions tab." />
+                  ) : (
+                    <ProductTabList
+                      label="Promotions"
+                      labelColor="orange"
+                      products={promotionProducts}
+                      onOpen={(p) => openPopupWithFreshStock(p, matchedTier)}
+                      onDirectAdd={(p) => handleDirectAddPinned(p)}
+                    />
+                  )
+                )}
+              </div>
             </div>
           )}
         </div>

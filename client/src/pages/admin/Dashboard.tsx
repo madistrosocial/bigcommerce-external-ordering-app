@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus, Shield, UserCog, Globe, Layers, Trash2 } from "lucide-react";
+import { Pin, PinOff, UserX, UserCheck, Search, Cloud, Settings, Plus, Shield, UserCog, Globe, Layers, Trash2, Tag } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -63,6 +63,14 @@ export default function AdminDashboard() {
   const togglePinMutation = useMutation({
     mutationFn: ({ id, is_pinned }: { id: number; is_pinned: boolean }) => 
       api.toggleProductPin(id, is_pinned),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    }
+  });
+
+  const togglePromotionMutation = useMutation({
+    mutationFn: ({ id, is_promotion }: { id: number; is_promotion: boolean }) =>
+      api.toggleProductPromotion(id, is_promotion),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
     }
@@ -138,6 +146,14 @@ export default function AdminDashboard() {
     });
   };
 
+  const togglePromotion = async (product: Product) => {
+    await togglePromotionMutation.mutateAsync({ id: product.id, is_promotion: !product.is_promotion });
+    toast({
+      title: product.is_promotion ? "Removed from Promotions" : "Added to Promotions",
+      description: `${product.name} is now ${product.is_promotion ? "removed from" : "visible in"} the POS Promotions tab.`,
+    });
+  };
+
   const importAndPinProduct = async (product: any) => {
     try {
       await createProductMutation.mutateAsync({
@@ -154,6 +170,27 @@ export default function AdminDashboard() {
       setSearchResults(prev => prev.filter((p: any) => p.bigcommerce_id !== product.bigcommerce_id));
     } catch (e) {
       toast({ title: "Product Pinned", description: "Product was already in database, now pinned." });
+    }
+  };
+
+  const importAndPromoteProduct = async (product: any) => {
+    try {
+      const created = await createProductMutation.mutateAsync({
+        bigcommerce_id: product.bigcommerce_id,
+        name: product.name,
+        sku: product.sku,
+        price: product.price,
+        image: product.image,
+        description: product.description,
+        stock_level: product.stock_level,
+        is_pinned: false,
+        variants: product.variants || []
+      });
+      await togglePromotionMutation.mutateAsync({ id: created.id, is_promotion: true });
+      setSearchResults(prev => prev.filter((p: any) => p.bigcommerce_id !== product.bigcommerce_id));
+      toast({ title: "Added to Promotions", description: `${product.name} added to the POS Promotions tab.` });
+    } catch (e) {
+      toast({ title: "Note", description: "Product already exists. Use the list below to toggle its Promotion status." });
     }
   };
 
@@ -249,6 +286,7 @@ export default function AdminDashboard() {
   };
 
   const pinnedProducts = products.filter(p => p.is_pinned);
+  const promotionProducts = products.filter(p => p.is_promotion);
 
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto">
@@ -483,9 +521,14 @@ export default function AdminDashboard() {
                             <div className="text-xs text-slate-500">{p.sku} • Stock: {p.stock_level}</div>
                           </div>
                         </div>
-                        <Button size="sm" variant="secondary" onClick={() => importAndPinProduct(p)} className="gap-1" data-testid={`button-pin-${p.bigcommerce_id}`}>
-                          <Plus className="h-3 w-3" /> Pin
-                        </Button>
+                        <div className="flex gap-1.5">
+                          <Button size="sm" variant="secondary" onClick={() => importAndPinProduct(p)} className="gap-1" data-testid={`button-pin-${p.bigcommerce_id}`}>
+                            <Plus className="h-3 w-3" /> Pin
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => importAndPromoteProduct(p)} className="gap-1 border-orange-300 text-orange-700 hover:bg-orange-50" data-testid={`button-promote-${p.bigcommerce_id}`}>
+                            <Tag className="h-3 w-3" /> Promote
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -544,8 +587,62 @@ export default function AdminDashboard() {
                 </div>
               )}
             </div>
-            
+
           </div>
+
+          {/* ── Promotions Section ── */}
+          <div className="space-y-4 mt-8">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold font-heading flex items-center gap-2">
+                <Tag className="h-5 w-5 text-orange-500" />
+                Promotion Products
+              </h3>
+              <Badge variant="outline" className="border-orange-300 text-orange-700" data-testid="text-promotion-count">
+                {promotionProducts.length} in POS Promotions tab
+              </Badge>
+            </div>
+            <p className="text-xs text-slate-500 -mt-2">
+              Products here appear in the <strong>Promotions</strong> tab of the POS for agents. Use the search above and click <strong>Promote</strong>, or toggle any existing product below.
+            </p>
+
+            <div className="grid gap-4">
+              {/* All products that are already in DB get a promotion toggle */}
+              {products.map((product) => (
+                <Card
+                  key={product.id}
+                  className={`overflow-hidden border-l-4 ${product.is_promotion ? "border-l-orange-400" : "border-l-transparent opacity-60"}`}
+                  data-testid={`product-promotion-${product.id}`}
+                >
+                  <div className="flex items-center p-4 gap-4">
+                    <img src={product.image} alt={product.name} className="h-14 w-14 object-cover rounded-md bg-slate-100 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-bold text-sm leading-tight mb-1 truncate">{product.name}</h3>
+                      <p className="text-xs text-slate-500 mb-2">SKU: {product.sku} • ${parseFloat(product.price).toFixed(2)}</p>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={product.is_promotion ?? false}
+                          onCheckedChange={() => togglePromotion(product)}
+                          data-testid={`switch-promotion-${product.id}`}
+                        />
+                        <span className="text-xs font-medium text-slate-600">
+                          {product.is_promotion ? "In Promotions" : "Add to Promotions"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+
+              {products.length === 0 && (
+                <div className="text-center py-8 text-slate-500 border-2 border-dashed rounded-lg" data-testid="text-no-promotion">
+                  <Tag className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  No products in database yet.
+                  <p className="text-xs mt-1">Search above and click "Promote" to add products.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
         </TabsContent>
 
         <TabsContent value="users">
