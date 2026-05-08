@@ -336,7 +336,7 @@ function VariantPopupDialog({
       }}
     >
       <DialogContent
-        className="w-[95vw] max-w-[95vw] max-h-[95vh] flex flex-col p-0 gap-0"
+        className="w-[95vw] max-w-[95vw] h-[95vh] max-h-[95vh] flex flex-col p-0 gap-0"
         onInteractOutside={(e) => e.preventDefault()}
         data-testid="dialog-variant-picker"
       >
@@ -658,7 +658,7 @@ function VariantPopupDialog({
         </div>
 
         {/* Footer: Add Selected + Done */}
-        <div className="px-5 py-3 border-t shrink-0 flex items-center gap-3">
+        <div className="px-5 py-3 border-t shrink-0 flex items-center justify-center gap-3">
           <Button
             className="font-semibold px-6"
             onClick={handleBulkAdd}
