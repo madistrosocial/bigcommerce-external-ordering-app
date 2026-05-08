@@ -2620,7 +2620,7 @@ export default function POSPage() {
                   ) : (
                     <ProductTabList
                       label="Favorites"
-                      products={pinnedProducts}
+                      products={[...pinnedProducts].sort((a, b) => a.name.localeCompare(b.name))}
                       onOpen={(p) => openPopupWithFreshStock(p, matchedTier)}
                       onDirectAdd={(p) => handleDirectAddPinned(p)}
                     />
@@ -2639,7 +2639,7 @@ export default function POSPage() {
                     <ProductTabList
                       label="Sale"
                       labelColor="orange"
-                      products={saleProducts}
+                      products={[...saleProducts].sort((a, b) => a.name.localeCompare(b.name))}
                       onOpen={(p) => openPopupWithFreshStock(p, matchedTier)}
                       onDirectAdd={(p) => handleDirectAddPinned(p)}
                     />
