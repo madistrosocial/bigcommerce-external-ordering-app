@@ -42,7 +42,24 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const [businessLogo, setBusinessLogo] = useState<string | null>(() => {
+    try { return localStorage.getItem("vansales_business_logo") || null; } catch { return null; }
+  });
   const prevLocation = useRef(location);
+
+  useEffect(() => {
+    fetch("/api/public/business-logo")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        const logo = data?.value ?? null;
+        setBusinessLogo(logo);
+        try {
+          if (logo) localStorage.setItem("vansales_business_logo", logo);
+          else localStorage.removeItem("vansales_business_logo");
+        } catch {}
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (location !== prevLocation.current) {
@@ -144,10 +161,19 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     <div className="flex flex-col h-full">
       {/* Brand */}
       <div className={cn("flex items-center gap-2.5 border-b border-slate-700 h-14 shrink-0", collapsed ? "justify-center px-2" : "px-4")}>
-        <div className="shrink-0 h-7 w-7 rounded-md bg-blue-500 flex items-center justify-center">
-          <Truck className="h-4 w-4 text-white" />
-        </div>
-        {!collapsed && <span className="font-bold text-[13px] text-white truncate">Midatlantic</span>}
+        {businessLogo ? (
+          <img
+            src={businessLogo}
+            alt="Logo"
+            className={cn("object-contain shrink-0", collapsed ? "h-8 w-8" : "h-8 w-auto max-w-[120px]")}
+            data-testid="img-sidebar-logo"
+          />
+        ) : (
+          <div className="shrink-0 h-7 w-7 rounded-md bg-blue-500 flex items-center justify-center">
+            <Truck className="h-4 w-4 text-white" />
+          </div>
+        )}
+        {!collapsed && !businessLogo && <span className="font-bold text-[13px] text-white truncate">Midatlantic</span>}
         <button onClick={() => setMobileOpen(false)} className="ml-auto text-slate-400 hover:text-white md:hidden">
           <X className="h-5 w-5" />
         </button>

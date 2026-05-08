@@ -9,6 +9,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Truck, ShieldCheck, UserCircle } from "lucide-react";
 import { login as apiLogin } from "@/lib/api";
 
+async function fetchBusinessLogo(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/public/business-logo");
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -16,6 +27,11 @@ export default function Login() {
   const [, setLocation] = useLocation();
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [businessLogo, setBusinessLogo] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchBusinessLogo().then(setBusinessLogo);
+  }, []);
 
   useEffect(() => {
     if (currentUser) {
@@ -57,8 +73,19 @@ export default function Login() {
     <div className="login-page bg-slate-100 dark:bg-slate-900 p-4">
       <Card className="w-full max-w-md shadow-lg border-t-4 border-t-primary">
         <CardHeader className="text-center pb-2">
-          <div className="mx-auto bg-slate-900 text-white p-3 rounded-full w-fit mb-4">
-            <Truck className="h-8 w-8" />
+          <div className="mx-auto mb-4 w-fit">
+            {businessLogo ? (
+              <img
+                src={businessLogo}
+                alt="Business Logo"
+                className="h-20 w-auto max-w-[180px] object-contain"
+                data-testid="img-business-logo"
+              />
+            ) : (
+              <div className="bg-slate-900 text-white p-3 rounded-full">
+                <Truck className="h-8 w-8" />
+              </div>
+            )}
           </div>
           <CardTitle className="text-2xl font-heading uppercase tracking-wide">Sales | Midatlantic Distribution</CardTitle>
           <CardDescription>Enter your credentials to access the system</CardDescription>

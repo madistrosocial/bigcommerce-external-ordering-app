@@ -1,29 +1,34 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getSetting, saveSetting } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, CheckCircle2, AlertCircle, Plug, ExternalLink, CalendarClock } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Plug, ExternalLink, CalendarClock, ImageIcon, Trash2, Upload } from "lucide-react";
 
 export default function AdminIntegrationPage() {
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingCutoff, setSavingCutoff] = useState(false);
+  const [savingLogo, setSavingLogo] = useState(false);
   const [storeHash, setStoreHash] = useState("");
   const [token, setToken] = useState("");
   const [channelId, setChannelId] = useState("1");
   const [storefrontUrl, setStorefrontUrl] = useState("");
   const [cutoffDate, setCutoffDate] = useState("");
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [logoFile, setLogoFile] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
     Promise.all([
       getSetting("bigcommerce_config").catch(() => null),
       getSetting("bc_scan_cutoff_date").catch(() => null),
-    ]).then(([cfg, cutoff]) => {
+      getSetting("business_logo").catch(() => null),
+    ]).then(([cfg, cutoff, logo]) => {
       if (cfg?.value) {
         setStoreHash(cfg.value.storeHash ?? "");
         setToken(cfg.value.token ?? "");
@@ -33,10 +38,61 @@ export default function AdminIntegrationPage() {
       if (cutoff?.value) {
         setCutoffDate(cutoff.value);
       }
+      if (logo?.value) {
+        setLogoPreview(logo.value);
+        setLogoFile(logo.value);
+      }
     }).finally(() => setLoading(false));
   }, []);
 
   const isConnected = !!(storeHash && token);
+
+  const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Invalid file", description: "Please select an image file.", variant: "destructive" });
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      toast({ title: "File too large", description: "Please choose an image under 1 MB.", variant: "destructive" });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setLogoPreview(dataUrl);
+      setLogoFile(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveLogo = async () => {
+    setSavingLogo(true);
+    try {
+      await saveSetting("business_logo", logoFile);
+      toast({ title: "Logo saved", description: "Business logo updated and will appear throughout the app." });
+    } catch (err: any) {
+      toast({ title: "Save failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingLogo(false);
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    setSavingLogo(true);
+    try {
+      await saveSetting("business_logo", null);
+      setLogoPreview(null);
+      setLogoFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      toast({ title: "Logo removed", description: "The default icon will be shown." });
+    } catch (err: any) {
+      toast({ title: "Remove failed", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingLogo(false);
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,6 +137,91 @@ export default function AdminIntegrationPage() {
         <h2 className="text-lg font-bold text-slate-800">Integration Settings</h2>
       </div>
       <p className="text-sm text-slate-500">Configure your BigCommerce connection for product sync and order submission.</p>
+
+      {/* Business Logo Upload */}
+      <Card className="shadow-sm">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <ImageIcon className="h-4 w-4 text-slate-500" />
+            <CardTitle className="text-sm">Business Logo</CardTitle>
+          </div>
+          <CardDescription className="text-xs">
+            Upload your business logo to display on the login page, sidebar, and throughout the app. Max 1 MB. PNG or SVG recommended.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Preview */}
+              <div className="flex items-center gap-4">
+                <div className="h-20 w-40 border-2 border-dashed border-slate-200 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden shrink-0">
+                  {logoPreview ? (
+                    <img
+                      src={logoPreview}
+                      alt="Logo preview"
+                      className="h-full w-full object-contain p-1"
+                      data-testid="img-logo-preview"
+                    />
+                  ) : (
+                    <div className="text-center text-slate-400">
+                      <ImageIcon className="h-7 w-7 mx-auto mb-1" />
+                      <p className="text-[10px]">No logo set</p>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2 flex-1">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleLogoFileChange}
+                    data-testid="input-logo-file"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => fileInputRef.current?.click()}
+                    data-testid="btn-choose-logo"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Choose Image
+                  </Button>
+                  {logoPreview && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full text-red-600 border-red-200 hover:bg-red-50"
+                      onClick={handleRemoveLogo}
+                      disabled={savingLogo}
+                      data-testid="btn-remove-logo"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Remove Logo
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {logoFile && (
+                <Button
+                  type="button"
+                  onClick={handleSaveLogo}
+                  disabled={savingLogo}
+                  className="w-full"
+                  data-testid="btn-save-logo"
+                >
+                  {savingLogo ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Saving…</> : "Save Logo"}
+                </Button>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Connection status */}
       <Card className="shadow-sm">

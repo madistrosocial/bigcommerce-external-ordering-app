@@ -2045,6 +2045,16 @@ export async function registerRoutes(
     }
   });
 
+  // ===== PUBLIC BUSINESS LOGO (no auth required for login page) =====
+  app.get("/api/public/business-logo", async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("business_logo");
+      res.json({ value: setting?.value ?? null });
+    } catch {
+      res.json({ value: null });
+    }
+  });
+
   // ===== SETTINGS ROUTES =====
   app.get("/api/settings/:key", requireAuth, async (req, res) => {
     try {
