@@ -2895,16 +2895,27 @@ export default function POSPage() {
                           <span className="text-xs text-slate-500 ml-1">
                             qty
                           </span>
-                          {maxPurchase != null && (
-                            <span
-                              className="text-xs text-amber-600 font-medium ml-1"
-                              data-testid={`text-max-purchase-${item.lineId}`}
-                            >
-                              Maximum Purchase: {maxPurchase}
-                            </span>
-                          )}
                         </div>
                       );
+                    })()}
+
+                    {/* Max purchase quantity warning note */}
+                    {(() => {
+                      const maxPurchase =
+                        item.variant?.max_purchase_quantity ??
+                        item.product.max_purchase_quantity ??
+                        null;
+                      return maxPurchase != null ? (
+                        <div
+                          className="flex items-start gap-1.5 mt-1.5 bg-amber-50 border border-amber-300 rounded px-2 py-1.5 text-xs text-amber-800"
+                          data-testid={`warning-max-purchase-${item.lineId}`}
+                        >
+                          <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-px text-amber-500" />
+                          <span>
+                            <strong>BC Max Purchase Limit: {maxPurchase}</strong> — limit will be automatically removed at checkout and restored after.
+                          </span>
+                        </div>
+                      ) : null;
                     })()}
 
                     {/* Price display */}
@@ -3214,6 +3225,34 @@ export default function POSPage() {
                 No address found for this customer
               </div>
             )}
+
+            {/* Max qty override log — shown when any cart item has a BC max purchase limit */}
+            {(() => {
+              const limitedItems = cart.filter(item => {
+                const m = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity ?? null;
+                return m != null;
+              });
+              if (limitedItems.length === 0) return null;
+              return (
+                <div className="mt-2 bg-amber-50 border border-amber-300 rounded p-2 space-y-1" data-testid="max-qty-override-log">
+                  <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-amber-700 mb-0.5">
+                    <AlertCircle className="h-3 w-3" />
+                    Max Qty Override Log
+                  </div>
+                  {limitedItems.map(item => {
+                    const maxQty = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity;
+                    return (
+                      <div key={item.lineId} className="flex justify-between text-[11px] text-amber-800" data-testid={`log-entry-${item.lineId}`}>
+                        <span className="truncate mr-2">{item.product.name}{item.variant ? ` (${item.variant.sku})` : ""}</span>
+                        <span className="shrink-0 font-semibold">Max: {maxQty}</span>
+                      </div>
+                    );
+                  })}
+                  <p className="text-[10px] text-amber-600 pt-0.5 border-t border-amber-200">Limits removed before checkout · restored after</p>
+                </div>
+              );
+            })()}
+
             <div className="flex gap-2 mt-2">
               <Button
                 variant="outline"
