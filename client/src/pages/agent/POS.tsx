@@ -336,7 +336,7 @@ function VariantPopupDialog({
       }}
     >
       <DialogContent
-        className="w-[95vw] max-w-[95vw] max-h-[85vh] flex flex-col p-0 gap-0"
+        className="w-[95vw] max-w-[95vw] max-h-[95vh] flex flex-col p-0 gap-0"
         onInteractOutside={(e) => e.preventDefault()}
         data-testid="dialog-variant-picker"
       >
@@ -428,7 +428,7 @@ function VariantPopupDialog({
                     {/* Qty stepper — default 0, disabled if out of stock */}
                     <div className="flex items-center gap-1 border rounded-md px-1 py-0.5 bg-slate-50 shrink-0">
                       <button
-                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200 disabled:opacity-40"
+                        className="w-7 h-7 flex items-center justify-center rounded bg-red-500 hover:bg-red-600 text-white disabled:opacity-40"
                         onClick={() => setQty(v, qty - 1)}
                         disabled={qty <= 0}
                         data-testid={`popup-minus-${k}`}
@@ -448,7 +448,7 @@ function VariantPopupDialog({
                         data-testid={`popup-qty-${k}`}
                       />
                       <button
-                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200 disabled:opacity-40"
+                        className="w-7 h-7 flex items-center justify-center rounded bg-red-500 hover:bg-red-600 text-white disabled:opacity-40"
                         onClick={() => setQty(v, qty + 1)}
                         disabled={outOfStock}
                         data-testid={`popup-plus-${k}`}
@@ -607,7 +607,7 @@ function VariantPopupDialog({
                       min="0"
                       max="100"
                       placeholder="Disc (%)"
-                      className="w-20 h-8 text-xs bg-white"
+                      className="w-28 h-8 text-xs bg-white"
                       value={pctInputs[k] ?? ""}
                       onChange={(e) => {
                         setPctInputs((p) => ({ ...p, [k]: e.target.value }));
@@ -632,7 +632,7 @@ function VariantPopupDialog({
                       min="0"
                       step="0.01"
                       placeholder="Price ($)"
-                      className="w-20 h-8 text-xs bg-white"
+                      className="w-28 h-8 text-xs bg-white"
                       value={priceInputs[k] ?? ""}
                       onChange={(e) => {
                         setPriceInputs((p) => ({ ...p, [k]: e.target.value }));
@@ -660,7 +660,7 @@ function VariantPopupDialog({
         {/* Footer: Add Selected + Done */}
         <div className="px-5 py-3 border-t shrink-0 flex items-center gap-3">
           <Button
-            className="flex-1 font-semibold"
+            className="font-semibold px-6"
             onClick={handleBulkAdd}
             disabled={selectedCount === 0}
             data-testid="popup-bulk-add"
