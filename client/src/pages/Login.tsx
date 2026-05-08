@@ -75,12 +75,14 @@ export default function Login() {
         <CardHeader className="text-center pb-2">
           <div className="mx-auto mb-4 w-fit">
             {businessLogo ? (
-              <img
-                src={businessLogo}
-                alt="Business Logo"
-                className="h-28 w-auto max-w-[220px] object-contain"
-                data-testid="img-business-logo"
-              />
+              <div className="rounded-full bg-black flex items-center justify-center" style={{width: 160, height: 160}}>
+                <img
+                  src={businessLogo}
+                  alt="Business Logo"
+                  className="h-28 w-28 object-contain"
+                  data-testid="img-business-logo"
+                />
+              </div>
             ) : (
               <div className="bg-slate-900 text-white p-3 rounded-full">
                 <Truck className="h-8 w-8" />
