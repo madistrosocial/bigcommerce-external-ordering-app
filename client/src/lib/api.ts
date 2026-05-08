@@ -93,6 +93,14 @@ export async function getPinnedProducts(): Promise<Product[]> {
   return res.json();
 }
 
+export async function getFreshPinnedProducts(): Promise<Product[]> {
+  const res = await fetch(`${API_BASE}/products/pinned/fresh`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) throw new Error('Failed to fetch fresh pinned products');
+  return res.json();
+}
+
 export async function createProduct(product: Omit<Product, 'id'>): Promise<Product> {
   const res = await fetch(`${API_BASE}/products`, {
     method: 'POST',

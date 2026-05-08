@@ -118,6 +118,84 @@ export async function registerRoutes(
     }
   });
 
+  // Get pinned products with live data fetched directly from BigCommerce
+  app.get("/api/products/pinned/fresh", async (req, res) => {
+    try {
+      const pinnedProducts = await storage.getPinnedProducts();
+      if (pinnedProducts.length === 0) return res.json([]);
+
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+      if (setting?.value) {
+        const config = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+        storeHash = config.storeHash || storeHash;
+        token = config.token || token;
+      }
+
+      if (!token || !storeHash) {
+        // No BC config — fall back to cached DB data
+        return res.json(pinnedProducts);
+      }
+
+      const bcHeaders = {
+        "X-Auth-Token": String(token),
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      };
+
+      // Fetch all products from BC in parallel
+      const results = await Promise.all(
+        pinnedProducts.map(async (product) => {
+          try {
+            const bcRes = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product.bigcommerce_id}?include=variants`,
+              { headers: bcHeaders }
+            );
+            if (!bcRes.ok) return product; // fall back to DB row on error
+
+            const { data: p } = await bcRes.json();
+
+            const variants =
+              p.variants && p.variants.length > 0
+                ? p.variants.map((v: any) => ({
+                    id: v.id,
+                    sku: v.sku,
+                    price: v.price?.toString() || p.price?.toString() || product.price,
+                    stock_level: v.inventory_level ?? 0,
+                    option_values: (v.option_values || []).map((ov: any) => ({
+                      id: ov.id,
+                      option_id: ov.option_id,
+                      label: ov.label,
+                      option_display_name: ov.option_display_name,
+                    })),
+                  }))
+                : product.variants;
+
+            return {
+              ...product,
+              name: p.name ?? product.name,
+              price: p.price?.toString() ?? product.price,
+              stock_level: p.inventory_level ?? product.stock_level,
+              sku: p.sku ?? product.sku,
+              image: p.primary_image?.url_standard ?? product.image,
+              description: p.description
+                ? p.description.replace(/<[^>]*>?/gm, "")
+                : product.description,
+              variants,
+            };
+          } catch {
+            return product; // fall back to DB row on any error
+          }
+        })
+      );
+
+      res.json(results);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Create/Import product from BigCommerce search
   app.post("/api/products", requireAdmin, async (req, res) => {
     try {

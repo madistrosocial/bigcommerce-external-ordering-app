@@ -842,10 +842,14 @@ export default function POSPage() {
       return next;
     });
 
-  // Always load pinned products (shown as rows in left panel for all agents)
-  const { data: pinnedProducts = [] } = useQuery({
-    queryKey: ["products", "pinned"],
-    queryFn: api.getPinnedProducts,
+  // Always load pinned products — fetched live from BigCommerce on every page load
+  const { data: pinnedProducts = [], isLoading: pinnedLoading } = useQuery({
+    queryKey: ["products", "pinned", "fresh"],
+    queryFn: api.getFreshPinnedProducts,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
   });
 
   // ── Search ────────────────────────────────────────────────────────────────
@@ -2479,7 +2483,25 @@ export default function POSPage() {
           {/* No suggestions / default: Pinned products rows */}
           {!showSuggestions && (
             <div className="flex-1 overflow-y-auto">
-              {pinnedProducts.length === 0 ? (
+              {pinnedLoading ? (
+                <div className="mx-4 my-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 px-1 flex items-center gap-1.5">
+                    <RotateCw className="h-3 w-3 animate-spin" /> Syncing with BigCommerce…
+                  </p>
+                  <div className="border rounded-lg overflow-hidden divide-y">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="flex items-center gap-3 px-3 py-2 bg-white">
+                        <div className="w-10 h-10 rounded border bg-slate-100 animate-pulse shrink-0" />
+                        <div className="flex-1 space-y-1.5">
+                          <div className="h-3 bg-slate-100 rounded animate-pulse w-3/4" />
+                          <div className="h-2.5 bg-slate-100 rounded animate-pulse w-1/3" />
+                        </div>
+                        <div className="h-7 w-7 bg-slate-100 rounded animate-pulse shrink-0" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : pinnedProducts.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-slate-300 py-12 pointer-events-none">
                   <ShoppingCart className="h-16 w-16 mb-3 opacity-30" />
                   <p className="text-base font-medium text-slate-400">
