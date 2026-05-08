@@ -163,6 +163,8 @@ export async function registerRoutes(
                     sku: v.sku,
                     price: v.price?.toString() || p.price?.toString() || product.price,
                     stock_level: v.inventory_level ?? 0,
+                    min_purchase_quantity: v.order_quantity_minimum ?? null,
+                    max_purchase_quantity: v.order_quantity_maximum ?? null,
                     option_values: (v.option_values || []).map((ov: any) => ({
                       id: ov.id,
                       option_id: ov.option_id,
@@ -177,6 +179,8 @@ export async function registerRoutes(
               name: p.name ?? product.name,
               price: p.price?.toString() ?? product.price,
               stock_level: p.inventory_level ?? product.stock_level,
+              min_purchase_quantity: p.order_quantity_minimum ?? product.min_purchase_quantity ?? null,
+              max_purchase_quantity: p.order_quantity_maximum ?? product.max_purchase_quantity ?? null,
               sku: p.sku ?? product.sku,
               image: p.primary_image?.url_standard ?? product.image,
               description: p.description
@@ -1563,8 +1567,8 @@ export async function registerRoutes(
           price: price.toString(),
           sale_price: v.sale_price != null && v.sale_price > 0 ? v.sale_price.toString() : undefined,
           stock_level: v.inventory_level || 0,
-          min_purchase_quantity: v.min_purchase_quantity ?? null,
-          max_purchase_quantity: v.max_purchase_quantity ?? null,
+          min_purchase_quantity: v.order_quantity_minimum ?? null,
+          max_purchase_quantity: v.order_quantity_maximum ?? null,
           option_values: (v.option_values || []).map((ov: any) => ({
             id: ov.id,
             option_id: ov.option_id,
@@ -1589,8 +1593,8 @@ export async function registerRoutes(
           ? p.description.replace(/<[^>]*>?/gm, "")
           : "",
         stock_level: p.inventory_level || 0,
-        min_purchase_quantity: p.min_purchase_quantity ?? null,
-        max_purchase_quantity: p.max_purchase_quantity ?? null,
+        min_purchase_quantity: p.order_quantity_minimum ?? null,
+        max_purchase_quantity: p.order_quantity_maximum ?? null,
         is_pinned: false,
         variants: [] as any[],
       });
@@ -1757,8 +1761,8 @@ export async function registerRoutes(
             sku: v.sku,
             price: v.price?.toString() || p.price.toString(),
             stock_level: v.inventory_level || 0,
-            min_purchase_quantity: v.min_purchase_quantity ?? null,
-            max_purchase_quantity: v.max_purchase_quantity ?? null,
+            min_purchase_quantity: v.order_quantity_minimum ?? null,
+            max_purchase_quantity: v.order_quantity_maximum ?? null,
             option_values: (v.option_values || []).map((ov: any) => ({
               id: ov.id, // option value ID - needed for BigCommerce order API
               option_id: ov.option_id, // option ID - needed for BigCommerce order API
@@ -2025,13 +2029,13 @@ export async function registerRoutes(
             return {
               bigcommerce_id: bcId,
               stock_level: p.inventory_level ?? 0,
-              min_purchase_quantity: p.min_purchase_quantity ?? null,
-              max_purchase_quantity: p.max_purchase_quantity ?? null,
+              min_purchase_quantity: p.order_quantity_minimum ?? null,
+              max_purchase_quantity: p.order_quantity_maximum ?? null,
               variants: (p.variants || []).map((v: any) => ({
                 id: v.id,
                 stock_level: v.inventory_level ?? 0,
-                min_purchase_quantity: v.min_purchase_quantity ?? null,
-                max_purchase_quantity: v.max_purchase_quantity ?? null,
+                min_purchase_quantity: v.order_quantity_minimum ?? null,
+                max_purchase_quantity: v.order_quantity_maximum ?? null,
               })),
             };
           } catch {
@@ -2110,7 +2114,7 @@ export async function registerRoutes(
                   "Content-Type": "application/json",
                   Accept: "application/json",
                 },
-                body: JSON.stringify({ max_purchase_quantity }),
+                body: JSON.stringify({ order_quantity_maximum: max_purchase_quantity }),
               }
             );
             return { product_id, ok: r.ok, status: r.status };
@@ -2157,7 +2161,7 @@ export async function registerRoutes(
                   "Content-Type": "application/json",
                   Accept: "application/json",
                 },
-                body: JSON.stringify({ max_purchase_quantity }),
+                body: JSON.stringify({ order_quantity_maximum: max_purchase_quantity }),
               }
             );
             return { product_id, variant_id, ok: r.ok, status: r.status };
