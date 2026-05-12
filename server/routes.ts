@@ -1820,15 +1820,26 @@ export async function registerRoutes(
         const data = await response.json();
 
         // Transform to simplified format
-        const customers = data.data.map((c: any) => ({
-          id: c.id,
-          first_name: c.first_name,
-          last_name: c.last_name,
-          email: c.email,
-          phone: c.phone || "",
-          company: c.company || "",
-          customer_group_id: c.customer_group_id ?? null,
-        }));
+        const customers = data.data.map((c: any) => {
+          // store_credit_amounts is an array [{amount, currency_code}]; sum all or use first
+          const creditAmounts: any[] = Array.isArray(c.store_credit_amounts)
+            ? c.store_credit_amounts
+            : [];
+          const storeCreditAmount = creditAmounts.reduce(
+            (sum: number, e: any) => sum + parseFloat(e.amount ?? "0"),
+            0,
+          );
+          return {
+            id: c.id,
+            first_name: c.first_name,
+            last_name: c.last_name,
+            email: c.email,
+            phone: c.phone || "",
+            company: c.company || "",
+            customer_group_id: c.customer_group_id ?? null,
+            store_credit_amount: storeCreditAmount,
+          };
+        });
 
         res.json(customers);
       } catch (error: any) {

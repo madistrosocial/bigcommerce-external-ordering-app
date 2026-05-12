@@ -392,6 +392,7 @@ export interface BigCommerceCustomer {
   customer_group_id?: number;
   customer_group_name?: string;
   price_list_id?: number | null;
+  store_credit_amount?: number;
 }
 
 export interface BigCommerceAddress {

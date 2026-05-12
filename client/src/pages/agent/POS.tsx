@@ -53,6 +53,9 @@ import {
   FileText,
   RotateCw,
   Tag,
+  Wallet,
+  Percent,
+  DollarSign,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
@@ -998,6 +1001,15 @@ export default function POSPage() {
 
   const [orderNote, setOrderNote] = useState("");
   const [staffNote, setStaffNote] = useState("");
+  const [cartDiscount, setCartDiscount] = useState<{
+    type: "store_credit" | "percent" | "dollar";
+    value: number;
+  } | null>(null);
+  const [discountOpen, setDiscountOpen] = useState(false);
+  const [discountTabInput, setDiscountTabInput] = useState("");
+  const [activeDiscountTab, setActiveDiscountTab] = useState<
+    "store_credit" | "percent" | "dollar"
+  >("store_credit");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [navTarget, setNavTarget] = useState<string | null>(null);
   const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
@@ -1404,10 +1416,35 @@ export default function POSPage() {
     [],
   );
 
+  // ── Cart-level discount helper ─────────────────────────────────────────────
+  const computeDiscountAmount = (subtotal: number): number => {
+    if (!cartDiscount) return 0;
+    const credit =
+      parseFloat(String(selectedCustomer?.store_credit_amount ?? 0)) || 0;
+    if (cartDiscount.type === "store_credit") return Math.min(credit, subtotal);
+    if (cartDiscount.type === "percent")
+      return Math.max(0, subtotal * (cartDiscount.value / 100));
+    return Math.min(cartDiscount.value, subtotal);
+  };
+
   // ── Build structured checkout note at submit time ─────────────────────────
   const buildCheckoutNote = (note: string) => {
-    return [`Checkout by: ${currentUser?.name || ""}`, `Notes: ${note}`]
-      .join("\n");
+    const subtotal = getCartTotal();
+    const discAmt = computeDiscountAmount(subtotal);
+    const lines = [
+      `Checkout by: ${currentUser?.name || ""}`,
+      `Notes: ${note}`,
+    ];
+    if (cartDiscount && discAmt > 0) {
+      if (cartDiscount.type === "store_credit") {
+        lines.push(`Store Credit Applied: $${discAmt.toFixed(2)}`);
+      } else if (cartDiscount.type === "percent") {
+        lines.push(`Discount Applied: ${cartDiscount.value}%`);
+      } else {
+        lines.push(`Discount Applied: $${discAmt.toFixed(2)}`);
+      }
+    }
+    return lines.join("\n");
   };
 
   // ── Navigation guard: refresh / tab close ─────────────────────────────────
@@ -1839,6 +1876,8 @@ export default function POSPage() {
     setCustomerSearch(`${c.first_name} ${c.last_name}`);
     setShowCustomerDrop(false);
     setCustomerResults([]);
+    setCartDiscount(null);
+    setDiscountTabInput("");
     try {
       const addrs = await api.getCustomerAddresses(c.id);
       setCustomerAddresses(addrs);
@@ -2057,7 +2096,10 @@ export default function POSPage() {
           sku: item.variant?.sku || item.product.sku,
           image: item.product.image,
         })),
-        total: getCartTotal().toFixed(2),
+        total: Math.max(
+          0,
+          getCartTotal() - computeDiscountAmount(getCartTotal()),
+        ).toFixed(2),
         created_by_user_id: currentUser?.id || 0,
       });
       if (response.bigcommerce?.success) {
@@ -2077,6 +2119,9 @@ export default function POSPage() {
         setCustomerSearch("");
         setOrderNote("");
         setStaffNote("");
+        setCartDiscount(null);
+        setDiscountTabInput("");
+        setDiscountOpen(false);
         focusSearch();
         if (response.bigcommerce.order_id) {
           window.open(buildInvoiceUrl(response.bigcommerce.order_id), "_blank");
@@ -2135,7 +2180,10 @@ export default function POSPage() {
           sku: item.variant?.sku || item.product.sku,
           image: item.product.image,
         })),
-        total: getCartTotal().toFixed(2),
+        total: Math.max(
+          0,
+          getCartTotal() - computeDiscountAmount(getCartTotal()),
+        ).toFixed(2),
         created_by_user_id: currentUser?.id || 0,
       });
       // Mark this draft as originating from POS
@@ -2162,6 +2210,9 @@ export default function POSPage() {
       setCustomerSearch("");
       setOrderNote("");
       setStaffNote("");
+      setCartDiscount(null);
+      setDiscountTabInput("");
+      setDiscountOpen(false);
       focusSearch();
     } catch (e: any) {
       toast({
@@ -2181,6 +2232,8 @@ export default function POSPage() {
     0,
   );
   const totalDiscount = Math.max(0, originalTotal - finalTotal);
+  const cartDiscountAmount = computeDiscountAmount(finalTotal);
+  const adjustedTotal = Math.max(0, finalTotal - cartDiscountAmount);
   const totalQty = cart.reduce((s, i) => s + i.quantity, 0);
   const visibleSuggestions = suggestions.slice(0, suggestionLimit);
 
@@ -2227,6 +2280,8 @@ export default function POSPage() {
                 setCustomerSearch("");
                 setCustomerResults([]);
                 setShowCustomerDrop(false);
+                setCartDiscount(null);
+                setDiscountTabInput("");
               }}
               data-testid="button-pos-clear-customer"
             >
@@ -2351,6 +2406,27 @@ export default function POSPage() {
               );
             }
             return null;
+          })()}
+
+        {/* Store credit badge */}
+        {selectedCustomer &&
+          (() => {
+            const credit =
+              parseFloat(
+                String(selectedCustomer.store_credit_amount ?? 0),
+              ) || 0;
+            if (credit <= 0) return null;
+            return (
+              <div
+                className="flex items-center gap-1 shrink-0 bg-green-50 border border-green-200 rounded px-2 py-0.5"
+                data-testid="badge-store-credit"
+              >
+                <Wallet className="h-3 w-3 text-green-600" />
+                <span className="text-[10px] font-bold text-green-700">
+                  ${fmtPrice(credit)}
+                </span>
+              </div>
+            );
           })()}
 
       </header>
@@ -3175,6 +3251,225 @@ export default function POSPage() {
                 onChange={setStaffNote}
                 testId="input-pos-staff-note"
               />
+
+              {/* ── Discount section ── */}
+              <div className="border rounded-md overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                  onClick={() => setDiscountOpen((o) => !o)}
+                  data-testid="btn-discount-toggle"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Tag className="h-3.5 w-3.5 text-slate-400" />
+                    Discount
+                    {cartDiscount && (
+                      <span className="text-[11px] font-bold text-red-500 ml-0.5">
+                        •{" "}
+                        {cartDiscount.type === "store_credit"
+                          ? "Credit"
+                          : cartDiscount.type === "percent"
+                            ? `${cartDiscount.value}%`
+                            : `$${fmtPrice(cartDiscount.value)}`}
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown
+                    className={`h-4 w-4 text-slate-400 transition-transform ${discountOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+
+                {discountOpen && (
+                  <div className="px-3 py-2 border-t space-y-2 bg-slate-50">
+                    {/* Tab row */}
+                    <div className="flex rounded border overflow-hidden text-xs font-semibold">
+                      {(
+                        [
+                          {
+                            key: "store_credit" as const,
+                            label: "Store Credit",
+                            Icon: Wallet,
+                          },
+                          {
+                            key: "percent" as const,
+                            label: "%",
+                            Icon: Percent,
+                          },
+                          {
+                            key: "dollar" as const,
+                            label: "$",
+                            Icon: DollarSign,
+                          },
+                        ]
+                      ).map(({ key, label, Icon }) => (
+                        <button
+                          key={key}
+                          className={`flex-1 py-1.5 flex items-center justify-center gap-1 transition-colors border-x first:border-l-0 last:border-r-0 ${
+                            activeDiscountTab === key
+                              ? "bg-slate-800 text-white"
+                              : "text-slate-600 hover:bg-slate-100"
+                          }`}
+                          onClick={() => {
+                            setActiveDiscountTab(key);
+                            setDiscountTabInput("");
+                          }}
+                          data-testid={`btn-discount-tab-${key}`}
+                        >
+                          <Icon className="h-3 w-3" />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Store Credit panel */}
+                    {activeDiscountTab === "store_credit" &&
+                      (() => {
+                        const credit =
+                          parseFloat(
+                            String(selectedCustomer?.store_credit_amount ?? 0),
+                          ) || 0;
+                        return (
+                          <div className="space-y-1.5">
+                            <p className="text-xs text-slate-500">
+                              Available:{" "}
+                              <span
+                                className={`font-bold ${credit > 0 ? "text-green-600" : "text-slate-400"}`}
+                              >
+                                ${fmtPrice(credit)}
+                              </span>
+                              {!selectedCustomer && (
+                                <span className="text-amber-500 ml-1">
+                                  — select a customer first
+                                </span>
+                              )}
+                            </p>
+                            {selectedCustomer && credit > 0 ? (
+                              <Button
+                                size="sm"
+                                className="w-full h-7 text-xs"
+                                variant={
+                                  cartDiscount?.type === "store_credit"
+                                    ? "destructive"
+                                    : "default"
+                                }
+                                onClick={() =>
+                                  setCartDiscount(
+                                    cartDiscount?.type === "store_credit"
+                                      ? null
+                                      : { type: "store_credit", value: credit },
+                                  )
+                                }
+                                data-testid="btn-apply-store-credit"
+                              >
+                                {cartDiscount?.type === "store_credit"
+                                  ? "Remove Store Credit"
+                                  : "Apply Store Credit"}
+                              </Button>
+                            ) : selectedCustomer && credit === 0 ? (
+                              <p className="text-xs text-slate-400 italic">
+                                No store credit available for this customer
+                              </p>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
+
+                    {/* % panel */}
+                    {activeDiscountTab === "percent" && (
+                      <div className="flex gap-1.5 items-center">
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          placeholder="0 – 100"
+                          value={discountTabInput}
+                          onChange={(e) => setDiscountTabInput(e.target.value)}
+                          className="h-7 text-xs flex-1"
+                          data-testid="input-discount-pct"
+                        />
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs shrink-0"
+                          onClick={() => {
+                            const v = parseFloat(discountTabInput);
+                            if (!isNaN(v) && v >= 0 && v <= 100) {
+                              setCartDiscount({ type: "percent", value: v });
+                            }
+                          }}
+                          data-testid="btn-apply-pct"
+                        >
+                          Apply
+                        </Button>
+                        {cartDiscount?.type === "percent" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs shrink-0 px-2"
+                            onClick={() => {
+                              setCartDiscount(null);
+                              setDiscountTabInput("");
+                            }}
+                            data-testid="btn-remove-pct"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* $ panel */}
+                    {activeDiscountTab === "dollar" && (
+                      <div className="flex gap-1.5 items-center">
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="Amount"
+                          value={discountTabInput}
+                          onChange={(e) => setDiscountTabInput(e.target.value)}
+                          className="h-7 text-xs flex-1"
+                          data-testid="input-discount-dollar"
+                        />
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs shrink-0"
+                          onClick={() => {
+                            const v = parseFloat(discountTabInput);
+                            if (!isNaN(v) && v >= 0) {
+                              setCartDiscount({ type: "dollar", value: v });
+                            }
+                          }}
+                          data-testid="btn-apply-dollar"
+                        >
+                          Apply
+                        </Button>
+                        {cartDiscount?.type === "dollar" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs shrink-0 px-2"
+                            onClick={() => {
+                              setCartDiscount(null);
+                              setDiscountTabInput("");
+                            }}
+                            data-testid="btn-remove-dollar"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Applied discount summary */}
+                    {cartDiscount && cartDiscountAmount > 0 && (
+                      <p
+                        className="text-xs font-semibold text-red-600"
+                        data-testid="text-discount-applied"
+                      >
+                        Applied: -${fmtPrice(cartDiscountAmount)}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -3189,10 +3484,25 @@ export default function POSPage() {
                   className="text-sm text-red-500 font-medium"
                   data-testid="text-pos-discount"
                 >
-                  Discount: -${fmtPrice(totalDiscount)}
+                  Item Discount: -${fmtPrice(totalDiscount)}
                 </span>
               )}
             </div>
+            {cartDiscountAmount > 0 && (
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500">
+                  {cartDiscount?.type === "store_credit"
+                    ? "Store Credit"
+                    : "Discount"}
+                </span>
+                <span
+                  className="text-sm font-semibold text-red-500"
+                  data-testid="text-pos-cart-discount"
+                >
+                  -${fmtPrice(cartDiscountAmount)}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between items-center">
               <span className="text-base font-semibold text-slate-700">
                 Total
@@ -3201,7 +3511,7 @@ export default function POSPage() {
                 className="text-2xl font-bold text-slate-900"
                 data-testid="text-pos-total"
               >
-                ${fmtPrice(finalTotal)}
+                ${fmtPrice(adjustedTotal)}
               </span>
             </div>
 
