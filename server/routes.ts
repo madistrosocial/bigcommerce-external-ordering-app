@@ -876,7 +876,9 @@ export async function registerRoutes(
         const DISPLAY_LIMIT = 20;
         const history: { price: string; date: string; orderId?: number }[] = [];
 
-        // ── Layer 1: Load Postgres cache (always, no early-return) ────────────
+        // ── Layer 1: App DB — Postgres price_history_cache (NO date restriction) ─
+        // This table holds all imported/synced history regardless of age.
+        // The bc_scan_cutoff_date setting NEVER applies here.
         if (bcProductId) {
           const cached = await storage.getCachedPriceHistory(
             bcCustomerId,
@@ -899,13 +901,14 @@ export async function registerRoutes(
             seenOrderIds.add(e.order_id);
           }
 
-          // ── Layer 2: BigCommerce scan — always runs to keep cache fresh ──────
-          // Load both BC config and the scan cutoff date in parallel
+          // ── Layer 2: BigCommerce scan — cutoff date applies HERE ONLY ─────────
+          // bc_scan_cutoff_date restricts BC API calls only — not Postgres or app orders.
+          // Orders before the cutoff are already in the DB (imported); only scan post-cutoff.
           const [bcCfg, cutoffSetting] = await Promise.all([
             storage.getSetting("bigcommerce_config"),
             storage.getSetting("bc_scan_cutoff_date"),
           ]);
-          // If a cutoff date is configured, stop scanning BC orders that predate it
+          // Cutoff is ONLY for BC API — skip BC orders that predate it (already in DB)
           const cutoffDate: Date | null = cutoffSetting?.value
             ? new Date(cutoffSetting.value)
             : null;
@@ -1043,7 +1046,9 @@ export async function registerRoutes(
           }
         }
 
-        // ── Fallback: app-stored synced orders (fill up to DISPLAY_LIMIT) ───────
+        // ── Layer 3: App synced orders (NO date restriction) ─────────────────────
+        // Fills any remaining slots from orders created via this app.
+        // The bc_scan_cutoff_date setting does NOT apply here.
         if (history.length < DISPLAY_LIMIT) {
           const appOrders = await storage.getOrdersByBcCustomerId(
             bcCustomerId,

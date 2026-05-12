@@ -1239,18 +1239,47 @@ export default function POSPage() {
       if (!selectedCustomer) return [];
       const key = `${selectedCustomer.id}-${item.product.bigcommerce_id}-${item.variant?.id ?? 0}`;
       if (priceHistoryCache.has(key)) return priceHistoryCache.get(key)!;
-      // Always call the server — it checks BC for fresh data and updates the Postgres cache.
-      // Local IndexedDB is only used as an offline fallback.
-      try {
-        const history = await api.getCustomerPriceHistory(
+
+      // Priority:
+      //   1. BigCommerce API  — post-cutoff only (cutoff enforced server-side, BC only)
+      //   2. Local Dexie DB   — ALL records, no date restriction (always queried)
+      //   3. App DB (Postgres)— ALL records, no date restriction (server fallback when Dexie empty)
+      // Run BC (server) and local Dexie in parallel; merge and deduplicate by orderId.
+      const [serverResult, localResult] = await Promise.allSettled([
+        api.getCustomerPriceHistory(
           selectedCustomer.id,
           item.product.bigcommerce_id,
           item.variant?.id,
-        );
-        // Persist fresh results to local IndexedDB so offline fallback stays current
-        if (history.length > 0) {
+        ),
+        getLocalPriceHistory(selectedCustomer.id, item.product.bigcommerce_id, 50),
+      ]);
+
+      // Build merged map keyed by orderId; Dexie loaded first (covers pre-cutoff imported
+      // history), then server results override/add (BC post-cutoff + Postgres app DB).
+      const byOrderId = new Map<number, api.PriceHistoryEntry>();
+      const noIdList: api.PriceHistoryEntry[] = [];
+
+      if (localResult.status === "fulfilled") {
+        for (const e of localResult.value) {
+          const entry: api.PriceHistoryEntry = {
+            price: e.price,
+            date: e.order_date || "",
+            orderId: e.order_id || undefined,
+          };
+          if (e.order_id) byOrderId.set(e.order_id, entry);
+          else noIdList.push(entry);
+        }
+      }
+
+      if (serverResult.status === "fulfilled") {
+        for (const h of serverResult.value) {
+          if (h.orderId) byOrderId.set(h.orderId, h);
+          else noIdList.push(h);
+        }
+        // Persist fresh BC results back to Dexie so offline fallback stays current
+        if (serverResult.value.length > 0) {
           saveLocalPriceHistoryBatch(
-            history.map((h) => ({
+            serverResult.value.map((h) => ({
               customer_id: selectedCustomer.id,
               product_id: item.product.bigcommerce_id,
               variant_id: item.variant?.id ?? null,
@@ -1261,23 +1290,17 @@ export default function POSPage() {
             })),
           ).catch(() => {});
         }
-        setPriceHistoryCache((prev) => new Map(prev).set(key, history));
-        return history;
-      } catch {
-        // Offline fallback: use local IndexedDB (up to 20 entries)
-        const local = await getLocalPriceHistory(
-          selectedCustomer.id,
-          item.product.bigcommerce_id,
-          20,
-        );
-        const mapped: api.PriceHistoryEntry[] = local.map((e) => ({
-          price: e.price,
-          date: e.order_date || "",
-          orderId: e.order_id,
-        }));
-        setPriceHistoryCache((prev) => new Map(prev).set(key, mapped));
-        return mapped;
       }
+
+      const merged = [...Array.from(byOrderId.values()), ...noIdList]
+        .sort(
+          (a, b) =>
+            new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
+        )
+        .slice(0, 20);
+
+      setPriceHistoryCache((prev) => new Map(prev).set(key, merged));
+      return merged;
     },
     [selectedCustomer, priceHistoryCache],
   );
@@ -1295,20 +1318,43 @@ export default function POSPage() {
       const cacheKey = `${selectedCustomer.id}-${popupProduct.bigcommerce_id ?? 0}-${variantId ?? 0}`;
       if (priceHistoryCache.has(cacheKey))
         return priceHistoryCache.get(cacheKey)!;
-      // Always call the server — it checks BC for fresh data and updates the Postgres cache.
-      // Local IndexedDB is only used as an offline fallback.
-      try {
-        const history = await api.getCustomerPriceHistory(
-          selectedCustomer.id,
-          popupProduct.bigcommerce_id ?? 0,
-          variantId,
-        );
-        // Persist fresh results to local IndexedDB so offline fallback stays current
-        if (history.length > 0) {
+
+      // Priority:
+      //   1. BigCommerce API  — post-cutoff only (cutoff enforced server-side, BC only)
+      //   2. Local Dexie DB   — ALL records, no date restriction (always queried)
+      //   3. App DB (Postgres)— ALL records, no date restriction (server fallback when Dexie empty)
+      // Run BC (server) and local Dexie in parallel; merge and deduplicate by orderId.
+      const productId = popupProduct.bigcommerce_id ?? 0;
+      const [serverResult, localResult] = await Promise.allSettled([
+        api.getCustomerPriceHistory(selectedCustomer.id, productId, variantId),
+        getLocalPriceHistory(selectedCustomer.id, productId, 50),
+      ]);
+
+      const byOrderId = new Map<number, api.PriceHistoryEntry>();
+      const noIdList: api.PriceHistoryEntry[] = [];
+
+      if (localResult.status === "fulfilled") {
+        for (const e of localResult.value) {
+          const entry: api.PriceHistoryEntry = {
+            price: e.price,
+            date: e.order_date || "",
+            orderId: e.order_id || undefined,
+          };
+          if (e.order_id) byOrderId.set(e.order_id, entry);
+          else noIdList.push(entry);
+        }
+      }
+
+      if (serverResult.status === "fulfilled") {
+        for (const h of serverResult.value) {
+          if (h.orderId) byOrderId.set(h.orderId, h);
+          else noIdList.push(h);
+        }
+        if (serverResult.value.length > 0) {
           saveLocalPriceHistoryBatch(
-            history.map((h) => ({
+            serverResult.value.map((h) => ({
               customer_id: selectedCustomer.id,
-              product_id: popupProduct.bigcommerce_id ?? 0,
+              product_id: productId,
               variant_id: variantId ?? null,
               price: h.price,
               order_id: h.orderId ?? 0,
@@ -1317,23 +1363,17 @@ export default function POSPage() {
             })),
           ).catch(() => {});
         }
-        setPriceHistoryCache((prev) => new Map(prev).set(cacheKey, history));
-        return history;
-      } catch {
-        // Offline fallback: use local IndexedDB (up to 20 entries)
-        const local = await getLocalPriceHistory(
-          selectedCustomer.id,
-          popupProduct.bigcommerce_id ?? 0,
-          20,
-        );
-        const mapped: api.PriceHistoryEntry[] = local.map((e) => ({
-          price: e.price,
-          date: e.order_date || "",
-          orderId: e.order_id,
-        }));
-        setPriceHistoryCache((prev) => new Map(prev).set(cacheKey, mapped));
-        return mapped;
       }
+
+      const merged = [...Array.from(byOrderId.values()), ...noIdList]
+        .sort(
+          (a, b) =>
+            new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
+        )
+        .slice(0, 20);
+
+      setPriceHistoryCache((prev) => new Map(prev).set(cacheKey, merged));
+      return merged;
     },
     [selectedCustomer, popupProduct, priceHistoryCache],
   );
