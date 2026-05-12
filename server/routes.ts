@@ -1803,7 +1803,7 @@ export async function registerRoutes(
           ? `email:like=${encodeURIComponent(query as string)}`
           : `name:like=${encodeURIComponent(query as string)}`;
         const response = await fetch(
-          `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?${searchParam}&limit=10`,
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?${searchParam}&limit=10&include=store_credit_amounts`,
           {
             headers: {
               "X-Auth-Token": String(token),
@@ -1821,12 +1821,13 @@ export async function registerRoutes(
 
         // Transform to simplified format
         const customers = data.data.map((c: any) => {
-          // store_credit_amounts is an array [{amount, currency_code}]; sum all or use first
+          // store_credit_amounts is an array [{amount: number, currency_code: string}]
+          // BC v3 returns `amount` as a number; guard against string just in case
           const creditAmounts: any[] = Array.isArray(c.store_credit_amounts)
             ? c.store_credit_amounts
             : [];
           const storeCreditAmount = creditAmounts.reduce(
-            (sum: number, e: any) => sum + parseFloat(e.amount ?? "0"),
+            (sum: number, e: any) => sum + (Number(e.amount) || 0),
             0,
           );
           return {
