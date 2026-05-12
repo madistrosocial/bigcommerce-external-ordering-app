@@ -871,57 +871,54 @@ export async function registerRoutes(
 
         console.log("PRICE HISTORY REQUEST:", { customerId: bcCustomerId, productId: bcProductId, variantId });
 
-        // BC scan is always capped at 5 new entries for speed; display up to 20 total
+        // BC scans newest → cutoff date, stops at BC_FETCH_GOAL fresh results.
+        // • BC finds ≥5  → display those 5 only (BC-only mode).
+        // • BC finds <5  → supplement from local DB / app DB up to DISPLAY_LIMIT_SUPP (10).
+        // BC results are ALWAYS saved to Postgres cache regardless of display outcome.
         const BC_FETCH_GOAL = 5;
-        const DISPLAY_LIMIT = 20;
+        const DISPLAY_LIMIT_BC   = 5;   // shown when BC goal is met
+        const DISPLAY_LIMIT_SUPP = 10;  // shown when supplementing from DB
+
+        // BC results accumulate here; supplemental entries added below if needed.
         const history: { price: string; date: string; orderId?: number }[] = [];
 
-        // ── Layer 1: App DB — Postgres price_history_cache (NO date restriction) ─
-        // This table holds all imported/synced history regardless of age.
-        // The bc_scan_cutoff_date setting NEVER applies here.
+        // ── Layer 1: Postgres price_history_cache — loaded for dedup + supplement ─
+        // NO date restriction — holds all imported/synced history regardless of age.
+        // bc_scan_cutoff_date NEVER applies here.
+        let cachedEntries: { price: string; order_date: string | null; order_id: number }[] = [];
+        const seenOrderIds = new Set<number>();
         if (bcProductId) {
-          const cached = await storage.getCachedPriceHistory(
-            bcCustomerId,
-            bcProductId,
-          );
-          cached.sort(
+          const raw = await storage.getCachedPriceHistory(bcCustomerId, bcProductId);
+          raw.sort(
             (a, b) =>
               new Date(b.order_date || 0).getTime() -
               new Date(a.order_date || 0).getTime(),
           );
-          // Pre-fill from cache, track already-seen order IDs
-          // Always continue to BC even if cache is full — to keep cache fresh
-          const seenOrderIds = new Set<number>();
-          for (const e of cached) {
-            history.push({
-              price: e.price,
-              date: e.order_date || "",
-              orderId: e.order_id,
-            });
-            seenOrderIds.add(e.order_id);
-          }
+          cachedEntries = raw;
+          for (const e of raw) seenOrderIds.add(e.order_id);
+        }
 
-          // ── Layer 2: BigCommerce scan — cutoff date applies HERE ONLY ─────────
-          // bc_scan_cutoff_date restricts BC API calls only — not Postgres or app orders.
-          // Orders before the cutoff are already in the DB (imported); only scan post-cutoff.
+        // ── Layer 2: BigCommerce scan — cutoff date applies HERE ONLY ─────────────
+        // Scans orders newest-first and stops when it hits the cutoff date.
+        // bc_scan_cutoff_date restricts BC API calls only — not Postgres or app orders.
+        let newBcEntries = 0;
+        {
           const [bcCfg, cutoffSetting] = await Promise.all([
             storage.getSetting("bigcommerce_config"),
             storage.getSetting("bc_scan_cutoff_date"),
           ]);
-          // Cutoff is ONLY for BC API — skip BC orders that predate it (already in DB)
+          // Cutoff is ONLY for BC API — skip orders that predate it (already in DB)
           const cutoffDate: Date | null = cutoffSetting?.value
             ? new Date(cutoffSetting.value)
             : null;
-          // Shift cutoff to start-of-day UTC so date comparisons are inclusive
           if (cutoffDate) cutoffDate.setUTCHours(0, 0, 0, 0);
           let cfg: any = {};
           try {
             if (bcCfg?.value) {
               cfg = typeof bcCfg.value === "string" ? JSON.parse(bcCfg.value) : bcCfg.value;
             }
-          } catch (e) {
+          } catch {
             console.error("Invalid BigCommerce config: could not parse stored value");
-            cfg = {};
           }
           if (!cfg?.storeHash || !cfg?.token) {
             console.error("Missing or invalid BigCommerce config: storeHash or token not found");
@@ -929,142 +926,130 @@ export async function registerRoutes(
           const storeHash = cfg.storeHash;
           const token = cfg.token;
           if (storeHash && token) {
-              const newCacheEntries: InsertPriceHistoryCache[] = [];
-              // Track (productId-orderId) to prevent duplicate cache entries
-              const seenCacheKeys = new Set<string>();
-              try {
-                const bcHeaders = {
-                  "X-Auth-Token": String(token),
-                  "Content-Type": "application/json",
-                  Accept: "application/json",
-                };
-                const PAGE_SIZE = 25;
-                let page = 1;
-                let morePages = true;
-                let newBcEntries = 0; // tracks only freshly found BC entries (not from cache)
-                while (morePages && newBcEntries < BC_FETCH_GOAL) {
-                  const ordersRes = await fetch(
-                    `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?customer_id=${bcCustomerId}&sort=date_created:desc&limit=${PAGE_SIZE}&page=${page}`,
-                    { headers: bcHeaders },
-                  );
-                  if (!ordersRes.ok) {
-                    const text = await ordersRes.text().catch(() => "");
-                    console.error("BC API ERROR (orders):", ordersRes.status, text);
-                    break;
-                  }
-                  const bcOrders: any[] = await ordersRes.json();
-                  if (!Array.isArray(bcOrders) || bcOrders.length === 0) break;
-                  if (bcOrders.length < PAGE_SIZE) morePages = false;
-                  for (const bcOrder of bcOrders) {
-                    // Stop scanning once we've found BC_FETCH_GOAL new entries from BC
-                    if (newBcEntries >= BC_FETCH_GOAL) break;
-                    // Stop scanning orders that predate the cutoff date (orders are newest-first)
-                    if (cutoffDate && bcOrder.date_created) {
-                      const orderDate = new Date(bcOrder.date_created);
-                      if (orderDate < cutoffDate) {
-                        morePages = false; // all subsequent orders will also be older
-                        break;
-                      }
-                    }
-                    if (seenOrderIds.has(bcOrder.id)) continue;
-                    seenOrderIds.add(bcOrder.id);
-                    try {
-                      const itemsRes = await fetch(
-                        `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrder.id}/products?limit=250`,
-                        { headers: bcHeaders },
-                      );
-                      if (!itemsRes.ok) continue;
-                      const bcItems: any[] = await itemsRes.json();
-                      // Track exact and fallback matches for the target product
-                      let exactTargetItem: any | null = null;
-                      let fallbackTargetItem: any | null = null;
-                      for (const item of bcItems) {
-                        const itemProductId: number = item.product_id;
-                        const itemVariantId: number = item.variant_id || 0;
-                        const price = String(
-                          item.price_ex_tax ?? item.base_price ?? 0,
-                        );
-                        // Track target product match for results
-                        if (itemProductId === bcProductId) {
-                          const isExact = variantId
-                            ? itemVariantId === variantId
-                            : true;
-                          if (isExact && !exactTargetItem) {
-                            exactTargetItem = item;
-                          } else if (
-                            !isExact &&
-                            variantId &&
-                            !fallbackTargetItem
-                          ) {
-                            fallbackTargetItem = item;
-                          }
-                        }
-                        // Cache ALL products — deduplicate by (product_id, order_id)
-                        const cacheKey = `${itemProductId}-${bcOrder.id}`;
-                        if (!seenCacheKeys.has(cacheKey)) {
-                          seenCacheKeys.add(cacheKey);
-                          newCacheEntries.push({
-                            customer_id: bcCustomerId,
-                            product_id: itemProductId,
-                            variant_id: itemVariantId || null,
-                            price,
-                            order_id: bcOrder.id,
-                            order_date: bcOrder.date_created || null,
-                            sku: item.sku || item.variant_sku || null,
-                          });
-                        }
-                      }
-                      // Push result using best available match (exact preferred, fallback secondary)
-                      const resultItem = exactTargetItem ?? fallbackTargetItem;
-                      if (resultItem) {
-                        history.push({
-                          price: String(
-                            resultItem.price_ex_tax ??
-                              resultItem.base_price ??
-                              0,
-                          ),
-                          date: bcOrder.date_created || "",
-                          orderId: bcOrder.id,
-                        });
-                        newBcEntries++;
-                      }
-                    } catch (err) {
-                      console.error("BC FETCH FAILED (items):", err);
-                    }
-                  }
-                  page++;
+            const newCacheEntries: InsertPriceHistoryCache[] = [];
+            const seenCacheKeys = new Set<string>();
+            try {
+              const bcHeaders = {
+                "X-Auth-Token": String(token),
+                "Content-Type": "application/json",
+                Accept: "application/json",
+              };
+              const PAGE_SIZE = 25;
+              let page = 1;
+              let morePages = true;
+              while (morePages && newBcEntries < BC_FETCH_GOAL) {
+                const ordersRes = await fetch(
+                  `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?customer_id=${bcCustomerId}&sort=date_created:desc&limit=${PAGE_SIZE}&page=${page}`,
+                  { headers: bcHeaders },
+                );
+                if (!ordersRes.ok) {
+                  const text = await ordersRes.text().catch(() => "");
+                  console.error("BC API ERROR (orders):", ordersRes.status, text);
+                  break;
                 }
-              } catch (err) {
-                console.error("BC FETCH FAILED (orders loop):", err);
+                const bcOrders: any[] = await ordersRes.json();
+                if (!Array.isArray(bcOrders) || bcOrders.length === 0) break;
+                if (bcOrders.length < PAGE_SIZE) morePages = false;
+                for (const bcOrder of bcOrders) {
+                  if (newBcEntries >= BC_FETCH_GOAL) break;
+                  // Stop at cutoff — all subsequent orders will also be older
+                  if (cutoffDate && bcOrder.date_created) {
+                    if (new Date(bcOrder.date_created) < cutoffDate) {
+                      morePages = false;
+                      break;
+                    }
+                  }
+                  if (seenOrderIds.has(bcOrder.id)) continue;
+                  seenOrderIds.add(bcOrder.id);
+                  try {
+                    const itemsRes = await fetch(
+                      `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrder.id}/products?limit=250`,
+                      { headers: bcHeaders },
+                    );
+                    if (!itemsRes.ok) continue;
+                    const bcItems: any[] = await itemsRes.json();
+                    let exactTargetItem: any | null = null;
+                    let fallbackTargetItem: any | null = null;
+                    for (const item of bcItems) {
+                      const itemProductId: number = item.product_id;
+                      const itemVariantId: number = item.variant_id || 0;
+                      const price = String(item.price_ex_tax ?? item.base_price ?? 0);
+                      if (bcProductId && itemProductId === bcProductId) {
+                        const isExact = variantId ? itemVariantId === variantId : true;
+                        if (isExact && !exactTargetItem) exactTargetItem = item;
+                        else if (!isExact && variantId && !fallbackTargetItem) fallbackTargetItem = item;
+                      }
+                      // Cache ALL products in the order — deduplicate by (product_id, order_id)
+                      const cacheKey = `${itemProductId}-${bcOrder.id}`;
+                      if (!seenCacheKeys.has(cacheKey)) {
+                        seenCacheKeys.add(cacheKey);
+                        newCacheEntries.push({
+                          customer_id: bcCustomerId,
+                          product_id: itemProductId,
+                          variant_id: itemVariantId || null,
+                          price,
+                          order_id: bcOrder.id,
+                          order_date: bcOrder.date_created || null,
+                          sku: item.sku || item.variant_sku || null,
+                        });
+                      }
+                    }
+                    const resultItem = exactTargetItem ?? fallbackTargetItem;
+                    if (resultItem) {
+                      history.push({
+                        price: String(resultItem.price_ex_tax ?? resultItem.base_price ?? 0),
+                        date: bcOrder.date_created || "",
+                        orderId: bcOrder.id,
+                      });
+                      newBcEntries++;
+                    }
+                  } catch (err) {
+                    console.error("BC FETCH FAILED (items):", err);
+                  }
+                }
+                page++;
               }
-              // Save all scanned product prices to Postgres cache (non-blocking)
-              if (newCacheEntries.length > 0) {
-                storage
-                  .savePriceHistoryCacheEntries(newCacheEntries)
-                  .catch(() => {});
-              }
+            } catch (err) {
+              console.error("BC FETCH FAILED (orders loop):", err);
+            }
+            // Always save newly found BC prices to Postgres cache (non-blocking)
+            if (newCacheEntries.length > 0) {
+              storage.savePriceHistoryCacheEntries(newCacheEntries).catch(() => {});
+            }
           }
         }
 
-        // ── Layer 3: App synced orders (NO date restriction) ─────────────────────
-        // Fills any remaining slots from orders created via this app.
-        // The bc_scan_cutoff_date setting does NOT apply here.
-        if (history.length < DISPLAY_LIMIT) {
-          const appOrders = await storage.getOrdersByBcCustomerId(
-            bcCustomerId,
-            ["synced"],
+        // ── BC goal met → return only BC results (5), skip supplementing ──────────
+        if (newBcEntries >= BC_FETCH_GOAL) {
+          history.sort(
+            (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
           );
+          return res.json(history.slice(0, DISPLAY_LIMIT_BC));
+        }
+
+        // ── BC found <5 → supplement from Postgres cache (NO date restriction) ────
+        const historySeen = new Set<number>(
+          history.map((h) => h.orderId).filter((id): id is number => id != null),
+        );
+        for (const e of cachedEntries) {
+          if (history.length >= DISPLAY_LIMIT_SUPP) break;
+          if (historySeen.has(e.order_id)) continue;
+          historySeen.add(e.order_id);
+          history.push({ price: e.price, date: e.order_date || "", orderId: e.order_id });
+        }
+
+        // ── Layer 3: App synced orders (NO date restriction) ─────────────────────
+        // Fills remaining slots from orders created via this app.
+        // bc_scan_cutoff_date does NOT apply here.
+        if (history.length < DISPLAY_LIMIT_SUPP) {
+          const appOrders = await storage.getOrdersByBcCustomerId(bcCustomerId, ["synced"]);
           for (const o of appOrders) {
-            if (history.length >= DISPLAY_LIMIT) break;
+            if (history.length >= DISPLAY_LIMIT_SUPP) break;
             const items = Array.isArray(o.items) ? o.items : [];
             let matched = false;
             for (const item of items as any[]) {
-              const productMatch = bcProductId
-                ? item.bigcommerce_product_id === bcProductId
-                : true;
-              const variantMatch = variantId
-                ? item.variant_id === variantId
-                : true;
+              const productMatch = bcProductId ? item.bigcommerce_product_id === bcProductId : true;
+              const variantMatch = variantId ? item.variant_id === variantId : true;
               if (productMatch && variantMatch) {
                 history.push({
                   price: item.price_at_sale,
@@ -1091,10 +1076,9 @@ export async function registerRoutes(
         }
 
         history.sort(
-          (a, b) =>
-            new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
+          (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
         );
-        // Deduplicate by orderId (BC scan may overlap with cache entries)
+        // Deduplicate by orderId
         const seenIds = new Set<number | undefined>();
         const deduped = history.filter((h) => {
           if (h.orderId == null) return true;
@@ -1102,7 +1086,7 @@ export async function registerRoutes(
           seenIds.add(h.orderId);
           return true;
         });
-        res.json(deduped.slice(0, DISPLAY_LIMIT));
+        res.json(deduped.slice(0, DISPLAY_LIMIT_SUPP));
       } catch (error: any) {
         console.error("PRICE HISTORY ERROR:", error);
         res.status(500).json({
