@@ -1,7 +1,7 @@
 {
   "name": "Sales | Midatlantic Distribution",
   "short_name": "Sales",
-  "description": "Offline-first mobile van sales application",
+  "description": "Dedicated sales channel for Cash 'n Carry and On-site Sales Team.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

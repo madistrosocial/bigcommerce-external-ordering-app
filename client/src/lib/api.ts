@@ -435,6 +435,44 @@ export async function getCustomerByBcId(bcId: number): Promise<BigCommerceCustom
   return res.json();
 }
 
+// ── BigCommerce Categories ────────────────────────────────────────────────────
+
+export interface BcCategory {
+  id: number;
+  name: string;
+  parent_id: number;
+  is_visible: boolean;
+  sort_order: number;
+}
+
+export async function getBcCategories(): Promise<BcCategory[]> {
+  const res = await fetch(`${API_BASE}/bigcommerce/categories`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch categories");
+  return res.json();
+}
+
+export interface BcCategoryProductsResult {
+  products: Product[];
+  total: number;
+  total_pages: number;
+  current_page: number;
+}
+
+export async function getBcCategoryProducts(
+  categoryId: number,
+  page: number,
+  limit: number,
+): Promise<BcCategoryProductsResult> {
+  const res = await fetch(
+    `${API_BASE}/bigcommerce/category-products?categoryId=${categoryId}&page=${page}&limit=${limit}`,
+    { headers: getAuthHeaders() },
+  );
+  if (!res.ok) throw new Error("Failed to fetch category products");
+  return res.json();
+}
+
 export interface StockInfo {
   bigcommerce_id: number;
   stock_level: number;

@@ -1768,6 +1768,172 @@ export async function registerRoutes(
     },
   );
 
+  // BigCommerce categories (all visible, paginated fetch)
+  app.get("/api/bigcommerce/categories", requireAuth, async (req, res) => {
+    try {
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+      if (setting?.value) {
+        const cfg =
+          typeof setting.value === "string"
+            ? JSON.parse(setting.value)
+            : setting.value;
+        storeHash = cfg.storeHash || storeHash;
+        token = cfg.token || token;
+      }
+      if (!storeHash || !token)
+        return res.status(400).json({ error: "BigCommerce not configured" });
+
+      const headers = {
+        "X-Auth-Token": String(token),
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      };
+
+      let allCategories: any[] = [];
+      let page = 1;
+      while (true) {
+        const r = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/categories?is_visible=true&limit=250&page=${page}`,
+          { headers },
+        );
+        if (!r.ok) throw new Error(`BigCommerce API error: ${r.statusText}`);
+        const data = await r.json();
+        if (!Array.isArray(data.data) || data.data.length === 0) break;
+        allCategories = allCategories.concat(data.data);
+        if (
+          !data.meta?.pagination ||
+          data.meta.pagination.current_page >= data.meta.pagination.total_pages
+        )
+          break;
+        page++;
+      }
+
+      res.json(
+        allCategories.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          parent_id: c.parent_id ?? 0,
+          is_visible: c.is_visible,
+          sort_order: c.sort_order ?? 0,
+        })),
+      );
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // BigCommerce category products — paginated, loaded on demand
+  app.get(
+    "/api/bigcommerce/category-products",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const {
+          categoryId,
+          page = "1",
+          limit = "12",
+        } = req.query as Record<string, string>;
+        if (!categoryId)
+          return res.status(400).json({ error: "categoryId is required" });
+
+        const setting = await storage.getSetting("bigcommerce_config");
+        let storeHash = process.env.BC_STORE_HASH;
+        let token = process.env.BC_TOKEN;
+        if (setting?.value) {
+          const cfg =
+            typeof setting.value === "string"
+              ? JSON.parse(setting.value)
+              : setting.value;
+          storeHash = cfg.storeHash || storeHash;
+          token = cfg.token || token;
+        }
+        if (!storeHash || !token)
+          return res.status(400).json({ error: "BigCommerce not configured" });
+
+        const headers = {
+          "X-Auth-Token": String(token),
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        };
+
+        const r = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products` +
+            `?categories:in=${categoryId}&is_visible=true&include=variants,images` +
+            `&page=${page}&limit=${limit}`,
+          { headers },
+        );
+        if (!r.ok) throw new Error(`BigCommerce API error: ${r.statusText}`);
+        const data = await r.json();
+
+        const products = (data.data ?? []).map((p: any) => {
+          const primaryImage =
+            (p.images ?? []).find((img: any) => img.is_thumbnail) ??
+            (p.images ?? [])[0];
+          const salePrice =
+            p.sale_price != null &&
+            p.sale_price > 0 &&
+            p.sale_price < p.price
+              ? p.sale_price
+              : null;
+          const displayPrice = salePrice ?? p.price ?? 0;
+          const variants = (p.variants ?? []).map((v: any) => {
+            const vBase = v.price ?? p.price ?? 0;
+            const vSale =
+              v.sale_price != null && v.sale_price > 0 ? v.sale_price : null;
+            const vPrice =
+              vSale != null && vSale < vBase
+                ? vSale
+                : salePrice != null && salePrice < vBase
+                  ? salePrice
+                  : vBase;
+            return {
+              id: v.id,
+              sku: v.sku,
+              upc: v.upc || "",
+              price: vPrice.toString(),
+              stock_level: v.inventory_level ?? 0,
+              min_purchase_quantity: v.order_quantity_minimum ?? null,
+              max_purchase_quantity: v.order_quantity_maximum ?? null,
+              option_values: (v.option_values ?? []).map((ov: any) => ({
+                id: ov.id,
+                option_id: ov.option_id,
+                label: ov.label,
+                option_display_name: ov.option_display_name,
+              })),
+            };
+          });
+          return {
+            id: p.id,
+            bigcommerce_id: p.id,
+            name: p.name,
+            sku: p.sku,
+            price: displayPrice.toString(),
+            image: primaryImage?.url_standard ?? "",
+            description: p.description
+              ? p.description.replace(/<[^>]*>?/gm, "")
+              : "",
+            stock_level: p.inventory_level ?? 0,
+            min_purchase_quantity: p.order_quantity_minimum ?? null,
+            max_purchase_quantity: p.order_quantity_maximum ?? null,
+            is_pinned: false,
+            variants,
+          };
+        });
+
+        res.json({
+          products,
+          total: data.meta?.pagination?.total ?? 0,
+          total_pages: data.meta?.pagination?.total_pages ?? 1,
+          current_page: data.meta?.pagination?.current_page ?? 1,
+        });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
   // BigCommerce customer search
   app.get(
     "/api/bigcommerce/customers/search",
