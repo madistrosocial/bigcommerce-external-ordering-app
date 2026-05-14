@@ -2055,12 +2055,15 @@ export async function registerRoutes(
             .json({ error: "BigCommerce credentials not configured" });
         }
 
-        // Search customers by name or email (try both)
-        const searchParam = (query as string).includes("@")
-          ? `email:like=${encodeURIComponent(query as string)}`
-          : `name:like=${encodeURIComponent(query as string)}`;
+        // Use keyword search (works for name and email in BC v3)
+        const q = query as string;
+        const params = new URLSearchParams({
+          keyword: q,
+          limit: "10",
+          include: "store_credit_amounts",
+        });
         const response = await fetch(
-          `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?${searchParam}&limit=10&include=store_credit_amounts`,
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?${params.toString()}`,
           {
             headers: {
               "X-Auth-Token": String(token),
@@ -2070,16 +2073,18 @@ export async function registerRoutes(
           },
         );
 
-        if (!response.ok) {
-          throw new Error(`BigCommerce API error: ${response.statusText}`);
-        }
-
         const data = await response.json();
 
+        if (!response.ok) {
+          const bcMsg = data?.title || data?.detail || data?.message || response.statusText;
+          console.error("[BC customer search] API error:", response.status, bcMsg);
+          throw new Error(`BigCommerce API error: ${bcMsg}`);
+        }
+
+        const rows: any[] = Array.isArray(data?.data) ? data.data : [];
+
         // Transform to simplified format
-        const customers = data.data.map((c: any) => {
-          // store_credit_amounts is an array [{amount: number, currency_code: string}]
-          // BC v3 returns `amount` as a number; guard against string just in case
+        const customers = rows.map((c: any) => {
           const creditAmounts: any[] = Array.isArray(c.store_credit_amounts)
             ? c.store_credit_amounts
             : [];
@@ -2101,6 +2106,7 @@ export async function registerRoutes(
 
         res.json(customers);
       } catch (error: any) {
+        console.error("[BC customer search] Caught error:", error.message);
         res.status(500).json({ error: error.message });
       }
     },
