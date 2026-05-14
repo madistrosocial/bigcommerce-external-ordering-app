@@ -18,7 +18,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import * as api from "@/lib/api";
 
 function getStatusBadge(order: api.Order) {
@@ -74,18 +74,10 @@ export default function Orders() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ── Invoice ────────────────────────────────────────────────────────────────
-  const storeHashRef = useRef<string>("");
-  useEffect(() => {
-    api.getSetting('bigcommerce_config').then(s => {
-      if (s?.value?.storeHash) storeHashRef.current = s.value.storeHash;
-    }).catch(() => {});
-  }, []);
-  const buildInvoiceUrl = (orderId: number) =>
-    `https://store-${storeHashRef.current}.mybigcommerce.com/admin/index.php?ToDo=printOrderInvoice&orderId=${orderId}`;
   const handlePrintInvoice = (order: api.Order) => {
     const orderId = order.bigcommerce_order_id || order.id;
     if (!orderId) return;
-    window.open(buildInvoiceUrl(orderId), "_blank");
+    window.open(`/invoice/${orderId}`, "_blank");
   };
 
   const { data: orders = [] } = useQuery({ 

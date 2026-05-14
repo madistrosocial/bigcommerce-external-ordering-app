@@ -1,4 +1,4 @@
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { useEffect } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -14,6 +14,7 @@ import AdminDashboard from "@/pages/admin/Dashboard";
 import RBACPage from "@/pages/admin/RBAC";
 import AdminUsersPage from "@/pages/admin/AdminUsers";
 import AdminIntegrationPage from "@/pages/admin/AdminIntegration";
+import InvoiceSettingsPage from "@/pages/admin/InvoiceSettings";
 import Catalog from "@/pages/agent/Catalog";
 import Cart from "@/pages/agent/Cart";
 import Orders from "@/pages/agent/Orders";
@@ -30,6 +31,7 @@ import BCOrders from "@/pages/agent/BCOrders";
 import AdminGroups from "@/pages/admin/AdminGroups";
 import BCProductLink from "@/pages/tools/BCProductLink";
 import BCProductLinkLogs from "@/pages/tools/BCProductLinkLogs";
+import InvoicePrintPage from "@/pages/InvoicePrintPage";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -66,8 +68,14 @@ function AdminRoute({
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 function Router() {
-  return (
+  const [location] = useLocation();
+
+  // All routes (shared between layout and no-layout modes)
+  const routes = (
     <Switch>
+      {/* ── Standalone invoice page (no layout) ── */}
+      <Route path="/invoice/:orderId" component={InvoicePrintPage} />
+
       {/* Public */}
       <Route path="/" component={Login} />
 
@@ -98,7 +106,6 @@ function Router() {
       <Route path="/inventory-push-logs">
         {() => <ProtectedRoute component={InventoryPushLogs} role="agent" />}
       </Route>
-      {/* Inventory sub-pages */}
       <Route path="/inventory/push">
         {() => <ProtectedRoute component={InventoryPushPage} />}
       </Route>
@@ -123,31 +130,27 @@ function Router() {
       <Route path="/admin">
         {() => <ProtectedRoute component={AdminDashboard} role="admin" />}
       </Route>
-      {/* /admin/catalog → main admin console */}
       <Route path="/admin/catalog">
         {() => <ProtectedRoute component={AdminDashboard} role="admin" />}
       </Route>
-      {/* /admin/users → user module-toggle management */}
       <Route path="/admin/users">
         {() => <ProtectedRoute component={AdminUsersPage} role="admin" />}
       </Route>
-      {/* /admin/groups → user group management */}
       <Route path="/admin/groups">
         {() => <ProtectedRoute component={AdminGroups} role="admin" />}
       </Route>
-      {/* /admin/integration → BigCommerce settings page */}
       <Route path="/admin/integration">
         {() => <ProtectedRoute component={AdminIntegrationPage} role="admin" />}
       </Route>
-      {/* /admin/price-tiers → Price tier configuration */}
+      <Route path="/admin/invoice">
+        {() => <ProtectedRoute component={InvoiceSettingsPage} role="admin" />}
+      </Route>
       <Route path="/admin/price-tiers">
         {() => <ProtectedRoute component={PriceTiersPage} role="admin" />}
       </Route>
-      {/* Legacy RBAC tab */}
       <Route path="/admin/rbac">
         {() => <AdminRoute component={RBACPage} />}
       </Route>
-      {/* Admin orders view */}
       <Route path="/orders/admin">
         {() => <ProtectedRoute component={AdminDashboard} role="admin" />}
       </Route>
@@ -163,6 +166,13 @@ function Router() {
       <Route component={NotFound} />
     </Switch>
   );
+
+  // Invoice pages render without any layout wrapper
+  if (location.startsWith("/invoice/")) {
+    return routes;
+  }
+
+  return <SaaSLayout>{routes}</SaaSLayout>;
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -175,9 +185,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <SaaSLayout>
-          <Router />
-        </SaaSLayout>
+        <Router />
         <Toaster />
       </TooltipProvider>
     </QueryClientProvider>

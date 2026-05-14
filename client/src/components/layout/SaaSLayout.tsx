@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Monitor, ShoppingBag, Package, BookOpen,
   ShoppingCart, Settings, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, LogOut, Truck, Wifi, WifiOff, Menu, X,
-  Users, Layers, Pin, Plug, UsersRound, Wrench,
+  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -150,6 +150,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(role === "admin" ? [{ label: "User Groups", path: "/admin/groups", icon: UsersRound }] : []),
     { label: "BC Integration", path: "/admin/integration", icon: Plug },
     { label: "Price Tiers", path: "/admin/price-tiers", icon: Layers },
+    { label: "Invoice Settings", path: "/admin/invoice", icon: Receipt },
   ];
 
   function isActive(path: string) { return location === path; }

@@ -12,6 +12,97 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
+import nodemailer from "nodemailer";
+
+// ─── Default invoice HTML template ───────────────────────────────────────────
+const DEFAULT_INVOICE_TEMPLATE = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Invoice {{invoice_number}}</title><style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #222; background: #fff; padding: 28px 36px; max-width: 820px; margin: 0 auto; }
+.header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; }
+.company-name { font-size: 20px; font-weight: bold; }
+.logo-area img { max-height: 75px; max-width: 180px; object-fit: contain; }
+.parties { display: flex; justify-content: space-between; margin-bottom: 24px; gap: 24px; }
+.customer-block { font-size: 12px; line-height: 1.8; flex: 1; }
+.company-block { text-align: right; font-size: 12px; line-height: 1.8; }
+.invoice-center { text-align: center; margin: 24px 0; }
+.invoice-center h2 { font-size: 15px; font-weight: bold; letter-spacing: 1px; margin-bottom: 5px; }
+.invoice-center .inv-sub { font-size: 12px; margin-top: 3px; }
+.invoice-center .inv-date { font-size: 12px; color: #555; margin-top: 2px; }
+table.items { width: 100%; border-collapse: collapse; margin: 16px 0 12px; }
+table.items th { border-bottom: 2px solid #222; padding: 8px 6px; text-align: left; font-size: 12px; }
+table.items th:nth-child(2), table.items th:nth-child(3) { text-align: right; }
+table.items td { padding: 9px 6px; border-bottom: 1px solid #efefef; vertical-align: top; font-size: 12px; }
+table.items td:nth-child(2), table.items td:nth-child(3) { text-align: right; white-space: nowrap; }
+.item-name { font-size: 12px; line-height: 1.5; }
+.item-meta { font-size: 10px; color: #888; margin-top: 3px; }
+.price-strike { display: block; text-decoration: line-through; color: #aaa; font-size: 10px; margin-top: 2px; }
+.totals-wrap { display: flex; justify-content: flex-end; margin: 8px 0 18px; }
+table.totals { width: 275px; border-collapse: collapse; }
+table.totals td { padding: 4px 8px; font-size: 12px; }
+table.totals td:last-child { text-align: right; }
+.grand-total td { font-weight: bold; font-size: 13px; border-top: 2px solid #222; border-bottom: 2px solid #222; padding: 6px 8px; }
+.outstanding-row { display: flex; justify-content: space-between; align-items: baseline; padding: 9px 0; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; margin-bottom: 14px; }
+.outstanding-label { font-weight: bold; font-size: 13px; }
+.outstanding-amount { font-weight: bold; font-size: 13px; margin-left: 10px; }
+.items-count { font-size: 11px; color: #555; }
+.notes-section { font-size: 11px; color: #666; margin-bottom: 18px; }
+.barcode-section { text-align: center; margin: 22px 0 18px; }
+.barcode-number { font-size: 13px; margin-top: 7px; letter-spacing: 2px; }
+.barcode-meta { font-size: 11px; color: #666; margin-top: 4px; }
+.footer-terms { background: #2a2a2a; color: #ddd; font-size: 10px; padding: 14px 22px; margin: 20px -36px -28px; text-align: center; line-height: 1.7; }
+.footer-terms .thank-you { font-size: 14px; font-weight: bold; color: #fff; margin-top: 9px; }
+@media print { .no-print { display: none !important; } }
+</style></head><body>
+<div class="header">
+  <div><div class="company-name">{{company_name}}</div></div>
+  <div class="logo-area">{{logo_html}}</div>
+</div>
+<div class="parties">
+  <div class="customer-block">
+    <strong>Customer: : {{customer_name}}</strong><br>
+    {{customer_company}}<br>
+    {{customer_street}}<br>
+    {{customer_city_state}}<br>
+    Email : {{customer_email}}<br>
+    Phone : {{customer_phone}}
+  </div>
+  <div class="company-block">{{company_address}}</div>
+</div>
+<div class="invoice-center">
+  <h2>TAX INVOICE/RECEIPT</h2>
+  <div class="inv-sub">Invoice# {{invoice_number}}</div>
+  <div class="inv-date">{{order_date}}</div>
+</div>
+<table class="items">
+  <thead><tr><th>Item</th><th>Unit</th><th>Sales (ex. tax)</th></tr></thead>
+  <tbody>{{items_rows}}</tbody>
+</table>
+<div class="totals-wrap">
+  <table class="totals">
+    <tr><td>Subtotal</td><td>{{subtotal}}</td></tr>
+    <tr><td>Discount</td><td>{{discount}}</td></tr>
+    <tr><td>Tax(No Tax)</td><td>{{tax}}</td></tr>
+    <tr class="grand-total"><td>Total</td><td>{{total}}</td></tr>
+    <tr><td>Unpaid</td><td>{{unpaid}}</td></tr>
+  </table>
+</div>
+<div class="outstanding-row">
+  <div><span class="outstanding-label">Outstanding:</span> <span class="outstanding-amount">{{outstanding}}</span></div>
+  <span class="items-count">Total items in cart &nbsp;&nbsp; {{total_items}}</span>
+</div>
+{{notes_html}}
+<div class="barcode-section">
+  {{barcode_svg}}
+  <div class="barcode-number">{{invoice_number}}</div>
+  <div class="barcode-meta">Served by {{served_by}}</div>
+  <div class="barcode-meta">{{timestamp}}</div>
+</div>
+<div class="footer-terms">
+  <p>{{terms}}</p>
+  <div class="thank-you">Thank You for Your Business!</div>
+</div>
+</body></html>`;
 
 export async function registerRoutes(
   httpServer: Server,
@@ -3108,6 +3199,78 @@ export async function registerRoutes(
       const userId = (req as any).authUser.id as number;
       const perms = await storage.getUserPermissionStrings(userId);
       res.json({ permissions: perms });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Invoice Settings ────────────────────────────────────────────────────────
+
+  app.get("/api/invoice/default-template", requireAuth, (_req, res) => {
+    res.json({ template: DEFAULT_INVOICE_TEMPLATE });
+  });
+
+  app.get("/api/invoice/settings", requireAuth, async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("invoice_settings").catch(() => null);
+      const defaults = {
+        company_name: "MA Distro, Inc.",
+        company_address: "1000 Parliament Ct Ste. #300,\nDurham, NC, 27703",
+        company_phone: "",
+        company_email: "",
+        logo_base64: "",
+        terms: "By purchasing products from MID Atlantic Distribution, you acknowledge and agree that you are solely responsible for paying all applicable sales taxes, including, but not limited to, state, county, and municipal sales taxes, associated with your purchase",
+        html_template: DEFAULT_INVOICE_TEMPLATE,
+        smtp_host: "",
+        smtp_port: 587,
+        smtp_user: "",
+        smtp_pass: "",
+        smtp_from: "",
+      };
+      res.json({ ...defaults, ...(setting?.value ?? {}) });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/invoice/settings", requireAuth, async (req, res) => {
+    try {
+      await storage.setSetting("invoice_settings", req.body);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Invoice Email ────────────────────────────────────────────────────────────
+
+  app.post("/api/invoice/send-email", requireAuth, async (req, res) => {
+    try {
+      const { to, subject, html } = req.body as { to: string; subject: string; html: string };
+      if (!to || !subject || !html) return res.status(400).json({ error: "Missing required fields: to, subject, html" });
+
+      const setting = await storage.getSetting("invoice_settings").catch(() => null);
+      const cfg = setting?.value ?? {};
+
+      const smtpHost = cfg.smtp_host || "";
+      const smtpPort = Number(cfg.smtp_port) || 587;
+      const smtpUser = cfg.smtp_user || "";
+      const smtpPass = cfg.smtp_pass || "";
+      const smtpFrom = cfg.smtp_from || smtpUser;
+
+      if (!smtpHost || !smtpUser) {
+        return res.status(400).json({ error: "SMTP is not configured. Please set SMTP settings in Invoice Settings." });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: { user: smtpUser, pass: smtpPass },
+      });
+
+      await transporter.sendMail({ from: smtpFrom, to, subject, html });
+      res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

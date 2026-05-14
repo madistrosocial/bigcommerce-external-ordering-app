@@ -778,3 +778,54 @@ export async function getMyPermissions(): Promise<string[]> {
   const data = await res.json();
   return data.permissions || [];
 }
+
+// ─── Invoice ──────────────────────────────────────────────────────────────────
+
+export interface InvoiceSettings {
+  company_name: string;
+  company_address: string;
+  company_phone: string;
+  company_email: string;
+  logo_base64: string;
+  terms: string;
+  html_template: string;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_user: string;
+  smtp_pass: string;
+  smtp_from: string;
+}
+
+export async function getInvoiceSettings(): Promise<InvoiceSettings> {
+  const res = await fetch(`${API_BASE}/invoice/settings`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch invoice settings');
+  return res.json();
+}
+
+export async function saveInvoiceSettings(s: Partial<InvoiceSettings>): Promise<void> {
+  const res = await fetch(`${API_BASE}/invoice/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(s),
+  });
+  if (!res.ok) throw new Error('Failed to save invoice settings');
+}
+
+export async function getDefaultInvoiceTemplate(): Promise<string> {
+  const res = await fetch(`${API_BASE}/invoice/default-template`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch default template');
+  const data = await res.json();
+  return data.template;
+}
+
+export async function sendInvoiceEmail(data: { to: string; subject: string; html: string }): Promise<void> {
+  const res = await fetch(`${API_BASE}/invoice/send-email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Failed to send email' }));
+    throw new Error(err.error || 'Failed to send email');
+  }
+}

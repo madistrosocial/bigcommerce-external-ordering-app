@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import {
   Loader2, Search, ShoppingCart, ChevronLeft, ChevronRight,
-  Trash2, Plus, Minus, X, Package, History, ChevronDown,
+  Trash2, Plus, Minus, X, Package, History, ChevronDown, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -727,9 +727,9 @@ export default function BCOrders() {
         ) : (
           <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
             {filtered.map((order) => (
-              <button
+              <div
                 key={order.id}
-                className="w-full flex items-center gap-3 px-4 py-3 border-b last:border-0 text-left hover:bg-slate-50 transition-colors"
+                className="w-full flex items-center gap-3 px-4 py-3 border-b last:border-0 hover:bg-slate-50 transition-colors cursor-pointer"
                 onClick={() => setSelectedOrderId(order.id)}
                 data-testid={`bc-order-row-${order.id}`}
               >
@@ -747,10 +747,21 @@ export default function BCOrders() {
                     {order.items_total > 0 && <span className="ml-2">{order.items_total} item{order.items_total !== 1 ? "s" : ""}</span>}
                   </p>
                 </div>
-                <div className="text-right shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.open(`/invoice/${order.id}`, "_blank");
+                    }}
+                    className="h-7 w-7 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors"
+                    title="Print Invoice"
+                    data-testid={`btn-invoice-bc-${order.id}`}
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                  </button>
                   <p className="text-sm font-bold text-slate-900">${parseFloat(order.total_inc_tax).toFixed(2)}</p>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         )}
