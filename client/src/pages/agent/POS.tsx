@@ -1860,8 +1860,12 @@ export default function POSPage() {
         const r = await api.searchBigCommerceCustomers(customerSearch);
         setCustomerResults(r);
         setShowCustomerDrop(r.length > 0);
-      } catch {
+        if (r.length === 0) {
+          toast({ title: "No customers found", description: "Try a different name or email." });
+        }
+      } catch (e: any) {
         setCustomerResults([]);
+        toast({ title: "Customer search failed", description: e.message || "Could not reach the customer directory.", variant: "destructive" });
       } finally {
         setIsCustomerSearching(false);
       }

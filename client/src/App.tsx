@@ -17,7 +17,6 @@ import AdminIntegrationPage from "@/pages/admin/AdminIntegration";
 import InvoiceSettingsPage from "@/pages/admin/InvoiceSettings";
 import Catalog from "@/pages/agent/Catalog";
 import Cart from "@/pages/agent/Cart";
-import Orders from "@/pages/agent/Orders";
 import POSPage from "@/pages/agent/POS";
 import InventoryPushLogs from "@/pages/agent/InventoryPushLogs";
 import InventoryPushPage from "@/pages/agent/InventoryPush";

@@ -47,11 +47,8 @@ function OrderRow({ order, storeHash }: RowProps) {
 
   const printInvoice = () => {
     const id = order.bigcommerce_order_id || order.id;
-    if (!id || !storeHash) return;
-    window.open(
-      `https://store-${storeHash}.mybigcommerce.com/admin/index.php?ToDo=printOrderInvoice&orderId=${id}`,
-      "_blank",
-    );
+    if (!id) return;
+    window.open(`/invoice/${id}`, "_blank");
   };
 
   return (

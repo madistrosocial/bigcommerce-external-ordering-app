@@ -165,11 +165,17 @@ export default function Cart() {
         const results = await api.searchBigCommerceCustomers(query);
         setSearchResults(results);
         setShowResults(true);
+        if (results.length === 0) {
+          toast({ title: "No customers found", description: "Try a different name or email." });
+        }
       } catch (e: any) {
         console.error('Customer search error:', e);
+        setSearchResults([]);
         if (e.message?.includes('fetch') || e.message?.includes('network')) {
           setOfflineMode(true);
           toast({ title: "Connection lost", description: "Switched to offline mode", variant: "destructive" });
+        } else {
+          toast({ title: "Search failed", description: e.message || "Could not search customers.", variant: "destructive" });
         }
       } finally {
         setIsSearching(false);
