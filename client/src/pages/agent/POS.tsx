@@ -1023,17 +1023,6 @@ export default function POSPage() {
   const [showPushInventoryModal, setShowPushInventoryModal] = useState(false);
 
   // ── Invoice ───────────────────────────────────────────────────────────────
-  const storeHashRef = useRef<string>("");
-  useEffect(() => {
-    api
-      .getSetting("bigcommerce_config")
-      .then((s) => {
-        if (s?.value?.storeHash) storeHashRef.current = s.value.storeHash;
-      })
-      .catch(() => {});
-  }, []);
-  const buildInvoiceUrl = (orderId: number) =>
-    `https://store-${storeHashRef.current}.mybigcommerce.com/admin/index.php?ToDo=printOrderInvoice&orderId=${orderId}`;
 
   // ── Price history ─────────────────────────────────────────────────────────
   const [priceHistoryCache, setPriceHistoryCache] = useState<
@@ -2105,7 +2094,8 @@ export default function POSPage() {
           getCartTotal() - computeDiscountAmount(getCartTotal()),
         ).toFixed(2),
         created_by_user_id: currentUser?.id || 0,
-      });
+        cart_discount_amount: cartDiscountAmount > 0 ? cartDiscountAmount.toFixed(4) : undefined,
+      } as any);
       if (response.bigcommerce?.success) {
         toast({
           title: "Order Created",
@@ -2128,7 +2118,7 @@ export default function POSPage() {
         setDiscountOpen(false);
         focusSearch();
         if (response.bigcommerce.order_id) {
-          window.open(buildInvoiceUrl(response.bigcommerce.order_id), "_blank");
+          window.open(`/invoice/${response.bigcommerce.order_id}`, "_blank");
         }
       } else {
         const errMsg = response.bigcommerce?.error || "Sync failed";

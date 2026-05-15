@@ -67,10 +67,11 @@ function buildItemsRows(products: any[]): string {
       const lineTotal = salePrice * qty;
       const hasDiscount = origPrice > salePrice + 0.005;
 
+      const origLineTotal = origPrice * qty;
       const barcodeText = upc ? ` , Barcode: ${escHtml(upc)}` : "";
-      const unitPriceHtml = hasDiscount
-        ? `<span class="price-original">${fmt(origPrice)}</span><span class="price-sale">${fmt(salePrice)}</span>`
-        : `<span class="price-sale">${fmt(salePrice)}</span>`;
+      const lineTotalHtml = hasDiscount
+        ? `<span class="price-original">${fmt(origLineTotal)}</span><span class="price-sale">${fmt(lineTotal)}</span>`
+        : fmt(lineTotal);
 
       return `<tr>
   <td>
@@ -78,8 +79,8 @@ function buildItemsRows(products: any[]): string {
     <div class="item-meta">SKU: ${sku}${barcodeText}</div>
   </td>
   <td>${qty}</td>
-  <td>${unitPriceHtml}</td>
-  <td>${fmt(lineTotal)}</td>
+  <td>${fmt(salePrice)}</td>
+  <td>${lineTotalHtml}</td>
 </tr>`;
     })
     .join("\n");

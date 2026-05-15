@@ -165,8 +165,8 @@ export default function InvoiceSettingsPage() {
             <div class="item-meta">SKU: SAMPLE-001 , Barcode: 123456789012</div>
           </td>
           <td>2</td>
-          <td><span class="price-original">$59.99</span><span class="price-sale">$45.00</span></td>
-          <td>$90.00</td>
+          <td>$45.00</td>
+          <td><span class="price-original">$119.98</span><span class="price-sale">$90.00</span></td>
         </tr>
         <tr>
           <td>
@@ -174,7 +174,7 @@ export default function InvoiceSettingsPage() {
             <div class="item-meta">SKU: SAMPLE-002</div>
           </td>
           <td>1</td>
-          <td><span class="price-sale">$29.99</span></td>
+          <td>$29.99</td>
           <td>$29.99</td>
         </tr>`,
       subtotal: "$119.99",

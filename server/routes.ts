@@ -795,7 +795,8 @@ export async function registerRoutes(
             const firstName = nameParts[0] || "Customer";
             const lastName = nameParts.slice(1).join(" ") || "Customer";
 
-            const bcOrderData = {
+            const cartDiscountAmt = parseFloat((req.body as any).cart_discount_amount ?? "0") || 0;
+            const bcOrderData: any = {
               status_id: 1,
               customer_id: order.bigcommerce_customer_id || 0,
               billing_address: order.billing_address,
@@ -823,6 +824,9 @@ export async function registerRoutes(
                 return productData;
               }),
             };
+            if (cartDiscountAmt > 0) {
+              bcOrderData.discount_amount = cartDiscountAmt.toFixed(4);
+            }
 
             const response = await fetch(
               `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
