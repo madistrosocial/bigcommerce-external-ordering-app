@@ -57,9 +57,13 @@ function buildItemsRows(products: any[]): string {
       const name = escHtml(p.name || "");
       const sku = escHtml(p.sku || "");
       const upc = p.upc || "";
-      // BC v2 order products: base_price = catalogue list price, price_ex_tax = actual charged price
+      // BC overwrites base_price with any manually-adjusted price, so we use
+      // catalogue_price (fetched from the product catalogue) as the true original.
+      // Fall back to base_price if catalogue_price wasn't available.
       const salePrice = parseFloat(p.price_ex_tax ?? p.base_price ?? "0");
-      const origPrice = parseFloat(p.base_price ?? "0");
+      const origPrice = p.catalogue_price != null
+        ? parseFloat(p.catalogue_price)
+        : parseFloat(p.base_price ?? "0");
       const lineTotal = salePrice * qty;
       const hasDiscount = origPrice > salePrice + 0.005;
 

@@ -2784,8 +2784,49 @@ export async function registerRoutes(
       if (!orderRes.ok) throw new Error(`Order fetch failed: ${orderRes.statusText}`);
       if (!productsRes.ok) throw new Error(`Products fetch failed: ${productsRes.statusText}`);
       const order = await orderRes.json();
-      const products = await productsRes.json();
-      res.json({ order, products: Array.isArray(products) ? products : [] });
+      const rawProductsData = await productsRes.json();
+      const rawProducts: any[] = Array.isArray(rawProductsData) ? rawProductsData : [];
+
+      // Fetch catalogue prices for each unique product so we can detect manual discounts.
+      // BC overwrites base_price with the adjusted price on orders, so we must look up the
+      // original catalogue price separately.
+      const uniqueProductIds = [...new Set(rawProducts.map((p: any) => p.product_id).filter(Boolean))];
+      const cataloguePriceMap: Record<string, number> = {}; // key: `${productId}_${variantId}`
+
+      if (uniqueProductIds.length > 0) {
+        try {
+          const catRes = await fetch(
+            `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?id:in=${uniqueProductIds.join(",")}&include=variants&limit=50`,
+            { headers }
+          );
+          if (catRes.ok) {
+            const catData = await catRes.json();
+            const catProducts: any[] = catData?.data ?? [];
+            for (const cp of catProducts) {
+              // Store base product price (used when variant price is 0 / falls back to parent)
+              const basePrice = parseFloat(cp.price ?? "0");
+              cataloguePriceMap[`${cp.id}_0`] = basePrice;
+              for (const v of (cp.variants ?? [])) {
+                // Variant price of 0 means "use parent price"
+                const vPrice = parseFloat(v.price ?? "0");
+                cataloguePriceMap[`${cp.id}_${v.id}`] = vPrice > 0 ? vPrice : basePrice;
+              }
+            }
+          }
+        } catch {
+          // Catalogue lookup is best-effort; fail silently — invoice still renders
+        }
+      }
+
+      // Attach catalogue_price to each order product
+      const enrichedProducts = rawProducts.map((p: any) => {
+        const key = `${p.product_id}_${p.variant_id ?? 0}`;
+        const keyBase = `${p.product_id}_0`;
+        const cataloguePrice = cataloguePriceMap[key] ?? cataloguePriceMap[keyBase] ?? null;
+        return { ...p, catalogue_price: cataloguePrice };
+      });
+
+      res.json({ order, products: enrichedProducts });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
