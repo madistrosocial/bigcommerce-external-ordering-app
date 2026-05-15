@@ -794,6 +794,7 @@ export interface InvoiceSettings {
   smtp_user: string;
   smtp_pass: string;
   smtp_from: string;
+  email_body: string;
 }
 
 export async function getInvoiceSettings(): Promise<InvoiceSettings> {
@@ -818,7 +819,7 @@ export async function getDefaultInvoiceTemplate(): Promise<string> {
   return data.template;
 }
 
-export async function sendInvoiceEmail(data: { to: string; subject: string; html: string }): Promise<void> {
+export async function sendInvoiceEmail(data: { to: string; subject: string; pdf_base64: string }): Promise<void> {
   const res = await fetch(`${API_BASE}/invoice/send-email`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },

@@ -46,6 +46,7 @@ export default function InvoiceSettingsPage() {
   const [smtpUser, setSmtpUser] = useState("");
   const [smtpPass, setSmtpPass] = useState("");
   const [smtpFrom, setSmtpFrom] = useState("");
+  const [emailBody, setEmailBody] = useState("");
 
   // Template
   const [htmlTemplate, setHtmlTemplate] = useState("");
@@ -70,6 +71,7 @@ export default function InvoiceSettingsPage() {
       setSmtpUser(s.smtp_user || "");
       setSmtpPass(s.smtp_pass || "");
       setSmtpFrom(s.smtp_from || "");
+      setEmailBody(s.email_body || "");
       setHtmlTemplate(s.html_template || "");
     } catch (e: any) {
       toast({ title: "Failed to load settings", description: e.message, variant: "destructive" });
@@ -94,6 +96,7 @@ export default function InvoiceSettingsPage() {
         smtp_user: smtpUser,
         smtp_pass: smtpPass,
         smtp_from: smtpFrom,
+        email_body: emailBody,
       });
       toast({ title: "Invoice settings saved" });
     } catch (e: any) {
@@ -412,6 +415,20 @@ export default function InvoiceSettingsPage() {
               value={smtpFrom}
               onChange={(e) => setSmtpFrom(e.target.value)}
               data-testid="input-smtp-from"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="email-body">
+              Email Body Text{" "}
+              <span className="text-xs text-slate-400">(appears in the email; invoice is attached as PDF)</span>
+            </Label>
+            <textarea
+              id="email-body"
+              className="w-full min-h-[100px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+              placeholder={"Dear Customer,\n\nThank you for your order. Please find your invoice attached.\n\nIf you have any questions, please contact us."}
+              value={emailBody}
+              onChange={(e) => setEmailBody(e.target.value)}
+              data-testid="textarea-email-body"
             />
           </div>
         </CardContent>

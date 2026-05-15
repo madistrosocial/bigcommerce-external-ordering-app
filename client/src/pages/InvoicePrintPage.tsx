@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2, Printer, Mail, X, AlertCircle } from "lucide-react";
 import JsBarcode from "jsbarcode";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import * as api from "@/lib/api";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -73,9 +75,17 @@ function buildItemsRows(products: any[]): string {
         ? `<span class="price-original">${fmt(origLineTotal)}</span><span class="price-sale">${fmt(lineTotal)}</span>`
         : fmt(lineTotal);
 
+      // Build display name: append variant label(s) from product_options if present
+      const optionValues = Array.isArray(p.product_options)
+        ? (p.product_options as any[]).map((o) => o.display_value).filter(Boolean)
+        : [];
+      const displayName = optionValues.length > 0
+        ? `${name} | ${optionValues.map(escHtml).join(", ")}`
+        : name;
+
       return `<tr>
   <td>
-    <div class="item-name"><strong>${name}</strong></div>
+    <div class="item-name"><strong>${displayName}</strong></div>
     <div class="item-meta">SKU: ${sku}${barcodeText}</div>
   </td>
   <td>${qty}</td>
@@ -195,14 +205,12 @@ export default function InvoicePrintPage() {
     const unpaidAmt = order.payment_status !== "paid" ? fmt(order.total_inc_tax) : "$0.00";
     const outstanding = order.payment_status !== "paid" ? fmt(order.total_inc_tax) : "$0.00";
 
-    const notesText = [order.customer_message, order.staff_notes]
-      .filter(Boolean)
-      .join(" / ");
+    const notesText = order.staff_notes || "";
     const notesHtml = notesText
       ? `<div class="notes-section">Notes: ${escHtml(notesText)}</div>`
       : "";
 
-    const servedBy = currentUser?.username || currentUser?.email || "Agent";
+    const servedBy = (currentUser as any)?.name || currentUser?.username || currentUser?.email || "Agent";
     const now = new Date();
     const timestamp = `${now.toLocaleTimeString("en-US", {
       hour: "numeric",
@@ -252,6 +260,44 @@ export default function InvoicePrintPage() {
     }
   }
 
+  async function generatePdfBase64(): Promise<string> {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentDocument?.body) throw new Error("Invoice not ready");
+    const body = iframe.contentDocument.body;
+    const canvas = await html2canvas(body, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      logging: false,
+    });
+    // A4 width = 210mm; add 10mm margin each side → 190mm content
+    const A4_W = 210;
+    const A4_H = 297;
+    const MARGIN = 10;
+    const contentW = A4_W - MARGIN * 2;
+    const mmPerPx = contentW / canvas.width;
+    const contentH = A4_H - MARGIN * 2;
+    const pxPerPage = contentH / mmPerPx;
+    const pages = Math.ceil(canvas.height / pxPerPage);
+
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    for (let i = 0; i < pages; i++) {
+      if (i > 0) pdf.addPage();
+      const sy = Math.floor(i * pxPerPage);
+      const sh = Math.min(Math.ceil(pxPerPage), canvas.height - sy);
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sh;
+      const ctx = pageCanvas.getContext("2d")!;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      ctx.drawImage(canvas, 0, sy, canvas.width, sh, 0, 0, canvas.width, sh);
+      const pageImg = pageCanvas.toDataURL("image/jpeg", 0.92);
+      pdf.addImage(pageImg, "JPEG", MARGIN, MARGIN, contentW, sh * mmPerPx);
+    }
+    return pdf.output("datauristring");
+  }
+
   async function handleSendEmail() {
     if (!emailTo.trim()) {
       toast({
@@ -263,10 +309,12 @@ export default function InvoicePrintPage() {
     }
     setIsSending(true);
     try {
+      toast({ title: "Generating PDF…", description: "Please wait a moment." });
+      const pdfDataUri = await generatePdfBase64();
       await api.sendInvoiceEmail({
         to: emailTo.trim(),
         subject: `Invoice ${invoiceNumber}`,
-        html: invoiceHtml || "",
+        pdf_base64: pdfDataUri,
       });
       toast({
         title: "Email sent",

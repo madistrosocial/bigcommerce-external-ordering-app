@@ -3296,8 +3296,8 @@ export async function registerRoutes(
 
   app.post("/api/invoice/send-email", requireAuth, async (req, res) => {
     try {
-      const { to, subject, html } = req.body as { to: string; subject: string; html: string };
-      if (!to || !subject || !html) return res.status(400).json({ error: "Missing required fields: to, subject, html" });
+      const { to, subject, pdf_base64 } = req.body as { to: string; subject: string; pdf_base64: string };
+      if (!to || !subject || !pdf_base64) return res.status(400).json({ error: "Missing required fields: to, subject, pdf_base64" });
 
       const setting = await storage.getSetting("invoice_settings").catch(() => null);
       const cfg = setting?.value ?? {};
@@ -3307,10 +3307,16 @@ export async function registerRoutes(
       const smtpUser = cfg.smtp_user || "";
       const smtpPass = cfg.smtp_pass || "";
       const smtpFrom = cfg.smtp_from || smtpUser;
+      const emailBody: string = cfg.email_body || "Please find your invoice attached as a PDF.";
+      const companyName: string = cfg.company_name || "";
 
       if (!smtpHost || !smtpUser) {
         return res.status(400).json({ error: "SMTP is not configured. Please set SMTP settings in Invoice Settings." });
       }
+
+      // Convert data URI to buffer
+      const base64Data = pdf_base64.includes(",") ? pdf_base64.split(",")[1] : pdf_base64;
+      const pdfBuffer = Buffer.from(base64Data, "base64");
 
       const transporter = nodemailer.createTransport({
         host: smtpHost,
@@ -3319,7 +3325,16 @@ export async function registerRoutes(
         auth: { user: smtpUser, pass: smtpPass },
       });
 
-      await transporter.sendMail({ from: smtpFrom, to, subject, html });
+      const filename = `${subject.replace(/[^a-zA-Z0-9-]/g, "_")}.pdf`;
+      const textBody = [emailBody, companyName ? `\n— ${companyName}` : ""].filter(Boolean).join("\n");
+
+      await transporter.sendMail({
+        from: smtpFrom,
+        to,
+        subject,
+        text: textBody,
+        attachments: [{ filename, content: pdfBuffer, contentType: "application/pdf" }],
+      });
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
