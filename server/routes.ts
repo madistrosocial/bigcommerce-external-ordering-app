@@ -31,12 +31,15 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #222; 
 .invoice-center .inv-date { font-size: 12px; color: #555; margin-top: 2px; }
 table.items { width: 100%; border-collapse: collapse; margin: 16px 0 12px; }
 table.items th { border-bottom: 2px solid #222; padding: 8px 6px; text-align: left; font-size: 12px; }
-table.items th:nth-child(2), table.items th:nth-child(3) { text-align: right; }
+table.items th:nth-child(2) { text-align: center; width: 40px; }
+table.items th:nth-child(3), table.items th:nth-child(4) { text-align: right; }
 table.items td { padding: 9px 6px; border-bottom: 1px solid #efefef; vertical-align: top; font-size: 12px; }
-table.items td:nth-child(2), table.items td:nth-child(3) { text-align: right; white-space: nowrap; }
+table.items td:nth-child(2) { text-align: center; white-space: nowrap; }
+table.items td:nth-child(3), table.items td:nth-child(4) { text-align: right; white-space: nowrap; }
 .item-name { font-size: 12px; line-height: 1.5; }
 .item-meta { font-size: 10px; color: #888; margin-top: 3px; }
-.price-strike { display: block; text-decoration: line-through; color: #aaa; font-size: 10px; margin-top: 2px; }
+.price-original { display: block; text-decoration: line-through; color: #bbb; font-size: 10px; }
+.price-sale { display: block; font-weight: 600; }
 .totals-wrap { display: flex; justify-content: flex-end; margin: 8px 0 18px; }
 table.totals { width: 275px; border-collapse: collapse; }
 table.totals td { padding: 4px 8px; font-size: 12px; }
@@ -60,7 +63,7 @@ table.totals td:last-child { text-align: right; }
 </div>
 <div class="parties">
   <div class="customer-block">
-    <strong>Customer: : {{customer_name}}</strong><br>
+    <strong>Customer: {{customer_name}}</strong><br>
     {{customer_company}}<br>
     {{customer_street}}<br>
     {{customer_city_state}}<br>
@@ -75,21 +78,21 @@ table.totals td:last-child { text-align: right; }
   <div class="inv-date">{{order_date}}</div>
 </div>
 <table class="items">
-  <thead><tr><th>Item</th><th>Unit</th><th>Sales (ex. tax)</th></tr></thead>
+  <thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Line Total</th></tr></thead>
   <tbody>{{items_rows}}</tbody>
 </table>
 <div class="totals-wrap">
   <table class="totals">
     <tr><td>Subtotal</td><td>{{subtotal}}</td></tr>
     <tr><td>Discount</td><td>{{discount}}</td></tr>
-    <tr><td>Tax(No Tax)</td><td>{{tax}}</td></tr>
+    <tr><td>Tax</td><td>{{tax}}</td></tr>
     <tr class="grand-total"><td>Total</td><td>{{total}}</td></tr>
     <tr><td>Unpaid</td><td>{{unpaid}}</td></tr>
   </table>
 </div>
 <div class="outstanding-row">
   <div><span class="outstanding-label">Outstanding:</span> <span class="outstanding-amount">{{outstanding}}</span></div>
-  <span class="items-count">Total items in cart &nbsp;&nbsp; {{total_items}}</span>
+  <span class="items-count">Total items: {{total_items}}</span>
 </div>
 {{notes_html}}
 <div class="barcode-section">

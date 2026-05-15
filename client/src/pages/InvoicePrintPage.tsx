@@ -49,30 +49,33 @@ function generateBarcodeSvg(text: string): string {
 
 function buildItemsRows(products: any[]): string {
   if (!products || products.length === 0) {
-    return `<tr><td colspan="3" style="text-align:center;color:#aaa;padding:20px">No items</td></tr>`;
+    return `<tr><td colspan="4" style="text-align:center;color:#aaa;padding:20px">No items</td></tr>`;
   }
   return products
     .map((p) => {
-      const qty = p.quantity || 1;
+      const qty = Number(p.quantity) || 1;
       const name = escHtml(p.name || "");
       const sku = escHtml(p.sku || "");
       const upc = p.upc || "";
-      const salePrice = parseFloat(p.price_ex_tax ?? p.base_price_ex_tax ?? "0");
-      const origPrice = parseFloat(p.base_price_ex_tax ?? "0");
+      // BC v2 order products: base_price = catalogue list price, price_ex_tax = actual charged price
+      const salePrice = parseFloat(p.price_ex_tax ?? p.base_price ?? "0");
+      const origPrice = parseFloat(p.base_price ?? "0");
+      const lineTotal = salePrice * qty;
       const hasDiscount = origPrice > salePrice + 0.005;
 
       const barcodeText = upc ? ` , Barcode: ${escHtml(upc)}` : "";
-      const strikeHtml = hasDiscount
-        ? `<span class="price-strike">${fmt(origPrice)}</span>`
-        : "";
+      const unitPriceHtml = hasDiscount
+        ? `<span class="price-original">${fmt(origPrice)}</span><span class="price-sale">${fmt(salePrice)}</span>`
+        : `<span class="price-sale">${fmt(salePrice)}</span>`;
 
       return `<tr>
   <td>
-    <div class="item-name"><strong>${qty} X ${name}</strong></div>
+    <div class="item-name"><strong>${name}</strong></div>
     <div class="item-meta">SKU: ${sku}${barcodeText}</div>
   </td>
-  <td>${fmt(salePrice)}</td>
-  <td>${fmt(salePrice)}${strikeHtml}</td>
+  <td>${qty}</td>
+  <td>${unitPriceHtml}</td>
+  <td>${fmt(lineTotal)}</td>
 </tr>`;
     })
     .join("\n");
