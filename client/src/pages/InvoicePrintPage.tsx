@@ -205,7 +205,11 @@ export default function InvoicePrintPage() {
     const unpaidAmt = order.payment_status !== "paid" ? fmt(order.total_inc_tax) : "$0.00";
     const outstanding = order.payment_status !== "paid" ? fmt(order.total_inc_tax) : "$0.00";
 
-    const notesText = order.staff_notes || "";
+    // Extract only the manually typed note from staff_notes.
+    // buildCheckoutNote format: "Checkout by: {name}\nNotes: {staffNote}\n[Discount ...]"
+    const rawStaffNotes: string = order.staff_notes || "";
+    const notesLine = rawStaffNotes.split("\n").find((l: string) => l.startsWith("Notes: "));
+    const notesText = notesLine ? notesLine.replace(/^Notes:\s*/, "").trim() : "";
     const notesHtml = notesText
       ? `<div class="notes-section">Notes: ${escHtml(notesText)}</div>`
       : "";

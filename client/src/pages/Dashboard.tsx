@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useStore } from "@/lib/store";
 import { useLocation } from "wouter";
-import { getOrdersByUser, getAllAdminOrders, getInventoryPushLogs } from "@/lib/api";
+import { getAllOrders, getUsersSummary, getInventoryPushLogs, UserSummary } from "@/lib/api";
 import { Order } from "@shared/schema";
 import {
   startOfDay, startOfWeek, startOfMonth, startOfYear,
@@ -138,11 +138,16 @@ export default function DashboardPage() {
   const isAdmin = currentUser?.role === "admin";
 
   const { data: allOrders = [], isLoading: ordersLoading } = useQuery<Order[]>({
-    queryKey: isAdmin ? ["admin", "orders"] : ["orders", currentUser?.id],
-    queryFn: isAdmin
-      ? getAllAdminOrders
-      : () => getOrdersByUser(currentUser!.id),
+    queryKey: ["orders", "all"],
+    queryFn: getAllOrders,
     enabled: !!currentUser,
+  });
+
+  const { data: usersSummary = [] } = useQuery<UserSummary[]>({
+    queryKey: ["users", "summary"],
+    queryFn: getUsersSummary,
+    enabled: !!currentUser,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: allPushLogs = [], isLoading: logsLoading } = useQuery({
@@ -164,12 +169,22 @@ export default function DashboardPage() {
   const failed = orders.filter((o) => o.status === "failed").length;
   const totalPushes = pushLogs.length;
 
+  // Revenue: use stored order total for synced orders
   const revenue = orders
     .filter((o) => o.status === "synced")
-    .reduce((sum, o) => {
-      const lines = (o.items as any[]) ?? [];
-      return sum + lines.reduce((s: number, l: any) => s + (parseFloat(l.price_ex_tax ?? l.price ?? "0") * (l.quantity ?? 1)), 0);
-    }, 0);
+    .reduce((sum, o) => sum + parseFloat(String((o as any).total ?? "0")), 0);
+
+  // Group breakdown: map userId → group name (or role as fallback)
+  const userGroupMap = new Map<number, string>(
+    usersSummary.map((u) => [u.id, u.group_name ?? u.role])
+  );
+  const groupCounts: Record<string, number> = {};
+  for (const order of orders) {
+    const uid = (order as any).created_by_user_id ?? (order as any).user_id;
+    const group = uid ? (userGroupMap.get(uid) ?? "Unknown") : "Unknown";
+    groupCounts[group] = (groupCounts[group] ?? 0) + 1;
+  }
+  const groupBreakdown = Object.entries(groupCounts).sort((a, b) => b[1] - a[1]);
 
   const recentOrders = [...orders]
     .sort((a, b) => new Date(b.date!).getTime() - new Date(a.date!).getTime())
@@ -226,15 +241,33 @@ export default function DashboardPage() {
         </DropdownMenu>
       </div>
 
-      {/* Row 1: Total Orders, Synced Revenue, Pending Sync, Drafts */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard
-          title="Total Orders"
-          value={isLoading ? "—" : totalOrders}
-          icon={ShoppingBag}
-          iconBg="bg-blue-50"
-          iconColor="text-blue-500"
-        />
+      {/* Row 1: Total Orders (with group breakdown), Synced Revenue, Pending Sync, Drafts */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        {/* Total Orders — expanded card with group breakdown */}
+        <Card className="shadow-sm md:col-span-2">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-blue-50 text-blue-500 shrink-0">
+                <ShoppingBag className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Total Orders</p>
+                <p className="text-2xl font-bold text-slate-800 leading-tight" data-testid="stat-total-orders">
+                  {isLoading ? "—" : totalOrders}
+                </p>
+                {!isLoading && groupBreakdown.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-1">
+                    {groupBreakdown.map(([group, count]) => (
+                      <span key={group} className="text-[11px] text-slate-500 capitalize">
+                        <span className="font-semibold text-slate-700">{count}</span> {group}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
         <StatCard
           title="Synced Revenue"
           value={isLoading ? "—" : `$${revenue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
@@ -250,23 +283,16 @@ export default function DashboardPage() {
           iconBg="bg-amber-50"
           iconColor="text-amber-500"
         />
+      </div>
+
+      {/* Row 2: Drafts, Successful Sync, Failed Sync, Inventory Pushes */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
           title="Drafts"
           value={isLoading ? "—" : drafts}
           icon={FileText}
           iconBg="bg-slate-100"
           iconColor="text-slate-500"
-        />
-      </div>
-
-      {/* Row 2: Inventory Pushes, Successful Sync, Failed Sync */}
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard
-          title="Inventory Pushes"
-          value={isLoading ? "—" : totalPushes}
-          icon={Package2}
-          iconBg="bg-violet-50"
-          iconColor="text-violet-500"
         />
         <StatCard
           title="Successful Sync"
@@ -281,6 +307,13 @@ export default function DashboardPage() {
           icon={AlertCircle}
           iconBg="bg-red-50"
           iconColor="text-red-500"
+        />
+        <StatCard
+          title="Inventory Pushes"
+          value={isLoading ? "—" : totalPushes}
+          icon={Package2}
+          iconBg="bg-violet-50"
+          iconColor="text-violet-500"
         />
       </div>
 

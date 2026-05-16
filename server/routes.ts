@@ -2561,6 +2561,27 @@ export async function registerRoutes(
     }
   });
 
+  // User summary — userId, name, role, group_name — accessible to any authenticated user
+  app.get("/api/users/summary", requireAuth, async (_req, res) => {
+    try {
+      const [allUsers, allRoles] = await Promise.all([
+        storage.getAllUsers(),
+        storage.getAllRoles(),
+      ]);
+      const roleMap = new Map(allRoles.map((r) => [r.id, r.name]));
+      res.json(
+        allUsers.map((u) => ({
+          id: u.id,
+          name: u.name,
+          role: u.role,
+          group_name: u.role_id ? (roleMap.get(u.role_id) ?? null) : null,
+        })),
+      );
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ===== RBAC ROUTES (admin-protected new routes only) ======================
 
   // Roles

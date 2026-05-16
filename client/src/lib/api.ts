@@ -627,6 +627,25 @@ export async function getInventoryPushLogs(): Promise<InventoryPushLog[]> {
   return res.json();
 }
 
+export async function getAllOrders(): Promise<Order[]> {
+  const res = await fetch(`${API_BASE}/orders/all`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch all orders');
+  return res.json();
+}
+
+export interface UserSummary {
+  id: number;
+  name: string;
+  role: string;
+  group_name: string | null;
+}
+
+export async function getUsersSummary(): Promise<UserSummary[]> {
+  const res = await fetch(`${API_BASE}/users/summary`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch users summary');
+  return res.json();
+}
+
 export async function getAllAdminOrders(): Promise<Order[]> {
   const res = await fetch(`${API_BASE}/orders/all`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch all orders');

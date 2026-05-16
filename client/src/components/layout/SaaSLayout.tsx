@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getUsersSummary } from "@/lib/api";
 import { useLocation } from "wouter";
 import { useStore } from "@/lib/store";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -96,6 +98,16 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const navigate = (path: string) => { setLocation(path); setMobileOpen(false); };
 
   const isChromeless = CHROMELESS_PATHS.includes(location) || !currentUser;
+
+  const { data: usersSummary = [] } = useQuery({
+    queryKey: ["users", "summary"],
+    queryFn: getUsersSummary,
+    enabled: !!currentUser && !isChromeless,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const myGroupName = usersSummary.find((u) => u.id === currentUser?.id)?.group_name ?? null;
+
   if (isChromeless) return <>{children}</>;
 
   const role = currentUser.role as "admin" | "agent";
@@ -184,7 +196,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
       {!collapsed && (
         <div className="px-4 py-3 border-b border-slate-800">
           <p className="text-xs font-semibold text-slate-100 truncate">{currentUser.name}</p>
-          <p className="text-[11px] text-slate-400 capitalize">{currentUser.role}</p>
+          <p className="text-[11px] text-slate-400 capitalize">{myGroupName ?? currentUser.role}</p>
         </div>
       )}
 
