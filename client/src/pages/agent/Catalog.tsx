@@ -482,7 +482,7 @@ export default function Catalog() {
                 >FREE</Button>
                 <Input
                   type="number" min="0" max="100" placeholder="%"
-                  className="w-10 h-6 text-[10px] text-center bg-white shrink-0"
+                  className="w-14 h-6 text-[10px] text-center bg-white shrink-0"
                   value={discountInputs[qtyKey] || ""}
                   disabled={isOutOfStock}
                   onChange={(e) => handleDiscountInputChange(qtyKey, e.target.value)}
@@ -491,26 +491,26 @@ export default function Catalog() {
                 />
               </div>
               <div className="flex items-center gap-1 mt-0.5">
-                <Button variant="outline" size="icon" className="h-7 w-7 shrink-0"
+                <Button variant="destructive" size="icon" className="h-7 w-7 shrink-0"
                   disabled={isOutOfStock || qty <= 1}
                   onClick={() => handleQtyChange(qtyKey, String(Math.max(1, qty - 1)), maxQty)}
                   data-testid={`button-minus-grid-${product.id}`}
                 ><Minus className="h-3 w-3" /></Button>
                 <Input
                   type="number" min="1" max={maxQty}
-                  className="h-7 text-xs text-center flex-1 min-w-0"
+                  className="h-7 text-xs text-center w-10 shrink-0"
                   value={quantities[qtyKey] || ""}
                   placeholder="1"
                   disabled={isOutOfStock}
                   onChange={(e) => handleQtyChange(qtyKey, e.target.value, maxQty)}
                   data-testid={`input-qty-grid-${product.id}`}
                 />
-                <Button variant="outline" size="icon" className="h-7 w-7 shrink-0"
+                <Button variant="destructive" size="icon" className="h-7 w-7 shrink-0"
                   disabled={isOutOfStock || qty >= maxQty}
                   onClick={() => handleQtyChange(qtyKey, String(Math.min(qty + 1, maxQty)), maxQty)}
                   data-testid={`button-plus-grid-${product.id}`}
                 ><Plus className="h-3 w-3" /></Button>
-                <Button size="sm" className="h-7 px-2 text-xs shrink-0"
+                <Button size="sm" className="h-7 px-4 text-xs shrink-0"
                   disabled={isOutOfStock}
                   onClick={() => handleAdd(product, undefined, qtyKey)}
                   data-testid={`button-add-grid-${product.id}`}
@@ -587,7 +587,7 @@ export default function Catalog() {
             )}
           </div>
           <div className="flex items-center gap-3 justify-center">
-            <Button variant="outline" size="icon" className="h-11 w-11 sm:h-12 sm:w-12 rounded-xl"
+            <Button variant="destructive" size="icon" className="h-11 w-11 sm:h-12 sm:w-12 rounded-xl"
               disabled={isOutOfStock || currentQty <= 1}
               onClick={() => handleQtyChange(qtyKey, String(Math.max(1, currentQty - 1)), maxQty)}
               data-testid={`button-minus-direct-${variant.id}`}
@@ -598,7 +598,7 @@ export default function Catalog() {
               onChange={(e) => handleQtyChange(qtyKey, e.target.value, maxQty)}
               data-testid={`input-qty-direct-${variant.id}`}
             />
-            <Button variant="outline" size="icon" className="h-11 w-11 sm:h-12 sm:w-12 rounded-xl"
+            <Button variant="destructive" size="icon" className="h-11 w-11 sm:h-12 sm:w-12 rounded-xl"
               disabled={isOutOfStock || currentQty >= maxQty}
               onClick={() => handleQtyChange(qtyKey, String(Math.min(currentQty + 1, maxQty)), maxQty)}
               data-testid={`button-plus-direct-${variant.id}`}
