@@ -107,6 +107,81 @@ table.totals td:last-child { text-align: right; }
 </div>
 </body></html>`;
 
+// ─── BC pre-flight stock validator ────────────────────────────────────────────
+// BigCommerce v2 order creation is NOT atomic: it deducts inventory per line
+// item sequentially and, if it hits an out-of-stock variant, it returns 409
+// but does NOT roll back the decrements that already happened. For large carts
+// (300+ items) this silently corrupts inventory. We fetch fresh stock from BC
+// BEFORE submitting and block the order early so nothing is ever deducted.
+async function checkBcStock(
+  storeHash: string,
+  token: string,
+  cartItems: any[],
+): Promise<string[]> {
+  const allBcProductIds = [
+    ...new Set(
+      cartItems
+        .filter((i) => i.bigcommerce_product_id)
+        .map((i) => Number(i.bigcommerce_product_id)),
+    ),
+  ];
+  if (allBcProductIds.length === 0) return [];
+
+  // Map productId → { inventory_tracking, inventory_level, variants: Map<variantId, inventory_level> }
+  type PInfo = {
+    inventory_tracking: string;
+    inventory_level: number;
+    variants: Map<number, number>;
+  };
+  const productStockInfo = new Map<number, PInfo>();
+
+  // Batch fetch products+variants from BC v3 (100 products per request)
+  for (let ci = 0; ci < allBcProductIds.length; ci += 100) {
+    const chunk = allBcProductIds.slice(ci, ci + 100);
+    try {
+      const pr = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?id:in=${chunk.join(",")}&include=variants&limit=250`,
+        { headers: { "X-Auth-Token": String(token), Accept: "application/json" } },
+      );
+      if (!pr.ok) continue;
+      const pj = await pr.json();
+      for (const p of pj.data ?? []) {
+        const variantMap = new Map<number, number>();
+        for (const v of p.variants ?? []) {
+          variantMap.set(v.id, v.inventory_level ?? 0);
+        }
+        productStockInfo.set(p.id, {
+          inventory_tracking: p.inventory_tracking ?? "none",
+          inventory_level: p.inventory_level ?? 0,
+          variants: variantMap,
+        });
+      }
+    } catch {
+      // If we can't reach BC for the stock check, skip validation for this chunk
+    }
+  }
+
+  const stockErrors: string[] = [];
+  for (const item of cartItems) {
+    const needed = Number(item.quantity) || 1;
+    const bcPid = Number(item.bigcommerce_product_id);
+    const bcVid = item.variant_id ? Number(item.variant_id) : null;
+    const pInfo = productStockInfo.get(bcPid);
+    if (!pInfo || pInfo.inventory_tracking === "none") continue;
+    const available =
+      pInfo.inventory_tracking === "variant" && bcVid
+        ? (pInfo.variants.get(bcVid) ?? 0)
+        : pInfo.inventory_level;
+    if (available < needed) {
+      stockErrors.push(
+        `${item.name || item.sku || `Product ${bcPid}`}: need ${needed}, available ${available}`,
+      );
+    }
+  }
+  return stockErrors;
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express,
@@ -828,28 +903,45 @@ export async function registerRoutes(
               bcOrderData.discount_amount = cartDiscountAmt.toFixed(4);
             }
 
-            const response = await fetch(
-              `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
-              {
-                method: "POST",
-                headers: {
-                  "X-Auth-Token": String(token),
-                  "Content-Type": "application/json",
-                  Accept: "application/json",
-                },
-                body: JSON.stringify(bcOrderData),
-              },
+            // ── Pre-flight stock check (prevents BC partial inventory deduction) ──
+            const stockErrors = await checkBcStock(
+              storeHash,
+              token,
+              order.items as any[],
             );
 
-            if (response.ok) {
-              const data = await response.json();
-              bcOrderId = data.id;
-              bcSuccess = true;
-              await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
-            } else {
-              const errorText = await response.text();
-              bcError = `BigCommerce sync failed: ${errorText}`;
+            if (stockErrors.length > 0) {
+              const preview = stockErrors.slice(0, 5).join("; ");
+              const suffix =
+                stockErrors.length > 5
+                  ? ` …and ${stockErrors.length - 5} more`
+                  : "";
+              bcError = `[{"status":409,"message":"Quantities of one or more products are out of stock or did not meet quantity requirements.","details":{"errors":[{"type":"OutOfStock","message":"Pre-validation: ${stockErrors.length} item(s) with insufficient stock: ${preview}${suffix}"}]}}]`;
               await storage.updateOrderSyncError(order.id!, bcError);
+            } else {
+              const response = await fetch(
+                `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
+                {
+                  method: "POST",
+                  headers: {
+                    "X-Auth-Token": String(token),
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                  },
+                  body: JSON.stringify(bcOrderData),
+                },
+              );
+
+              if (response.ok) {
+                const data = await response.json();
+                bcOrderId = data.id;
+                bcSuccess = true;
+                await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
+              } else {
+                const errorText = await response.text();
+                bcError = `BigCommerce sync failed: ${errorText}`;
+                await storage.updateOrderSyncError(order.id!, bcError);
+              }
             }
           } catch (e: any) {
             bcError = `BigCommerce sync error: ${e.message}`;
@@ -1362,28 +1454,45 @@ export async function registerRoutes(
               }),
             };
 
-            const response = await fetch(
-              `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
-              {
-                method: "POST",
-                headers: {
-                  "X-Auth-Token": String(token),
-                  "Content-Type": "application/json",
-                  Accept: "application/json",
-                },
-                body: JSON.stringify(bcOrderData),
-              },
+            // ── Pre-flight stock check (prevents BC partial inventory deduction) ──
+            const stockErrors = await checkBcStock(
+              storeHash,
+              token,
+              updatedOrder!.items as any[],
             );
 
-            if (response.ok) {
-              const data = await response.json();
-              bcOrderId = data.id;
-              bcSuccess = true;
-              await storage.updateOrderStatus(id, "synced", bcOrderId);
-            } else {
-              const errorText = await response.text();
-              bcError = `BigCommerce sync failed: ${errorText}`;
+            if (stockErrors.length > 0) {
+              const preview = stockErrors.slice(0, 5).join("; ");
+              const suffix =
+                stockErrors.length > 5
+                  ? ` …and ${stockErrors.length - 5} more`
+                  : "";
+              bcError = `[{"status":409,"message":"Quantities of one or more products are out of stock or did not meet quantity requirements.","details":{"errors":[{"type":"OutOfStock","message":"Pre-validation: ${stockErrors.length} item(s) with insufficient stock: ${preview}${suffix}"}]}}]`;
               await storage.updateOrderSyncError(id, bcError);
+            } else {
+              const response = await fetch(
+                `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
+                {
+                  method: "POST",
+                  headers: {
+                    "X-Auth-Token": String(token),
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                  },
+                  body: JSON.stringify(bcOrderData),
+                },
+              );
+
+              if (response.ok) {
+                const data = await response.json();
+                bcOrderId = data.id;
+                bcSuccess = true;
+                await storage.updateOrderStatus(id, "synced", bcOrderId);
+              } else {
+                const errorText = await response.text();
+                bcError = `BigCommerce sync failed: ${errorText}`;
+                await storage.updateOrderSyncError(id, bcError);
+              }
             }
           } catch (e: any) {
             bcError = `BigCommerce sync error: ${e.message}`;
