@@ -133,7 +133,7 @@ function QuickAction({ label, icon: Icon, path, description, color = "bg-blue-50
 export default function DashboardPage() {
   const { currentUser } = useStore();
   const [, setLocation] = useLocation();
-  const [period, setPeriod] = useState<Period>("all");
+  const [period, setPeriod] = useState<Period>("month");
 
   const isAdmin = currentUser?.role === "admin";
 
@@ -179,12 +179,17 @@ export default function DashboardPage() {
     usersSummary.map((u) => [u.id, u.group_name ?? u.role])
   );
   const groupCounts: Record<string, number> = {};
+  const groupRevenue: Record<string, number> = {};
   for (const order of orders) {
     const uid = (order as any).created_by_user_id ?? (order as any).user_id;
     const group = uid ? (userGroupMap.get(uid) ?? "Unknown") : "Unknown";
     groupCounts[group] = (groupCounts[group] ?? 0) + 1;
+    if ((order as any).status === "synced") {
+      groupRevenue[group] = (groupRevenue[group] ?? 0) + parseFloat(String((order as any).total ?? "0"));
+    }
   }
   const groupBreakdown = Object.entries(groupCounts).sort((a, b) => b[1] - a[1]);
+  const groupRevenueBreakdown = Object.entries(groupRevenue).sort((a, b) => b[1] - a[1]);
 
   const recentOrders = [...orders]
     .sort((a, b) => new Date(b.date!).getTime() - new Date(a.date!).getTime())
@@ -241,10 +246,10 @@ export default function DashboardPage() {
         </DropdownMenu>
       </div>
 
-      {/* Row 1: Total Orders (with group breakdown), Synced Revenue, Pending Sync, Drafts */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        {/* Total Orders — expanded card with group breakdown */}
-        <Card className="shadow-sm md:col-span-2">
+      {/* Row 1: Total Orders (with group count breakdown) | Synced Revenue (with group amount breakdown) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* Total Orders */}
+        <Card className="shadow-sm">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
               <div className="p-2.5 rounded-xl bg-blue-50 text-blue-500 shrink-0">
@@ -268,21 +273,32 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
-        <StatCard
-          title="Synced Revenue"
-          value={isLoading ? "—" : `$${revenue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-          icon={DollarSign}
-          iconBg="bg-emerald-50"
-          iconColor="text-emerald-500"
-          subtitle="Synced orders only"
-        />
-        <StatCard
-          title="Pending Sync"
-          value={isLoading ? "—" : pending}
-          icon={Clock}
-          iconBg="bg-amber-50"
-          iconColor="text-amber-500"
-        />
+
+        {/* Synced Revenue */}
+        <Card className="shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-500 shrink-0">
+                <DollarSign className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Synced Revenue</p>
+                <p className="text-2xl font-bold text-slate-800 leading-tight" data-testid="stat-revenue">
+                  {isLoading ? "—" : `$${revenue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                </p>
+                {!isLoading && groupRevenueBreakdown.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-1">
+                    {groupRevenueBreakdown.map(([group, amt]) => (
+                      <span key={group} className="text-[11px] text-slate-500 capitalize">
+                        <span className="font-semibold text-slate-700">${amt.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> {group}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Row 2: Drafts, Successful Sync, Failed Sync, Inventory Pushes */}
