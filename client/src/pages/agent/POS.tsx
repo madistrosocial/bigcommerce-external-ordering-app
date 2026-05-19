@@ -1016,6 +1016,7 @@ export default function POSPage() {
 
   // ── Max purchase quantity override ────────────────  �───────────────────────
   const [showMaxOverrideModal, setShowMaxOverrideModal] = useState(false);
+  const [showOverrideLog, setShowOverrideLog] = useState(false);
   const [maxOverrideItems, setMaxOverrideItems] = useState<CartItem[]>([]);
   const [isOverriding, setIsOverriding] = useState(false);
 
@@ -3522,7 +3523,7 @@ export default function POSPage() {
               </div>
             )}
 
-            {/* Max qty override log — shown when any cart item has a BC max purchase limit */}
+            {/* Max qty override log — collapsible summary */}
             {(() => {
               const limitedItems = cart.filter(item => {
                 const m = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity ?? null;
@@ -3530,21 +3531,35 @@ export default function POSPage() {
               });
               if (limitedItems.length === 0) return null;
               return (
-                <div className="mt-2 bg-amber-50 border border-amber-300 rounded p-2 space-y-1" data-testid="max-qty-override-log">
-                  <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-amber-700 mb-0.5">
-                    <AlertCircle className="h-3 w-3" />
-                    Max Qty Override Log
-                  </div>
-                  {limitedItems.map(item => {
-                    const maxQty = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity;
-                    return (
-                      <div key={item.lineId} className="flex justify-between text-[11px] text-amber-800" data-testid={`log-entry-${item.lineId}`}>
-                        <span className="truncate mr-2">{item.product.name}{item.variant ? ` (${item.variant.sku})` : ""}</span>
-                        <span className="shrink-0 font-semibold">Max: {maxQty}</span>
+                <div className="mt-2 bg-amber-50 border border-amber-300 rounded" data-testid="max-qty-override-log">
+                  <button
+                    type="button"
+                    className="w-full flex items-center justify-between px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 hover:bg-amber-100 rounded transition-colors"
+                    onClick={() => setShowOverrideLog(v => !v)}
+                    data-testid="button-toggle-override-log"
+                  >
+                    <span className="flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3 shrink-0" />
+                      Max Qty Override — {limitedItems.length} item{limitedItems.length !== 1 ? "s" : ""} · Limits removed before checkout
+                    </span>
+                    <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${showOverrideLog ? "rotate-180" : ""}`} />
+                  </button>
+                  {showOverrideLog && (
+                    <div className="px-2 pb-2 space-y-1 border-t border-amber-200">
+                      <div className="pt-1 space-y-0.5">
+                        {limitedItems.map(item => {
+                          const maxQty = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity;
+                          return (
+                            <div key={item.lineId} className="flex justify-between text-[11px] text-amber-800" data-testid={`log-entry-${item.lineId}`}>
+                              <span className="truncate mr-2">{item.product.name}{item.variant ? ` (${item.variant.sku})` : ""}</span>
+                              <span className="shrink-0 font-semibold">Max: {maxQty}</span>
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                  <p className="text-[10px] text-amber-600 pt-0.5 border-t border-amber-200">Limits removed before checkout · restored after</p>
+                      <p className="text-[10px] text-amber-600 pt-0.5 border-t border-amber-200">Limits removed before checkout · restored after</p>
+                    </div>
+                  )}
                 </div>
               );
             })()}
