@@ -214,6 +214,7 @@ export default function InvoicePrintPage() {
 
     // Extract the original checkout agent from staff_notes ("Checkout by: {name}").
     // Falls back to the current viewer only if the field is absent (e.g. legacy orders).
+    const rawStaffNotes: string = order.staff_notes || "";
     const checkoutLine = rawStaffNotes.split("\n").find((l: string) => l.startsWith("Checkout by: "));
     const servedBy = checkoutLine
       ? checkoutLine.replace(/^Checkout by:\s*/, "").trim()
