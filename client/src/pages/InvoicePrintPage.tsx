@@ -30,7 +30,7 @@ function escHtml(str: string): string {
 
 function fmt(amount: string | number | null | undefined): string {
   const n = parseFloat(String(amount ?? "0"));
-  return `$${isNaN(n) ? "0.00" : n.toFixed(2)}`;
+  return `$${isNaN(n) ? "0.00" : n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function generateBarcodeSvg(text: string): string {
