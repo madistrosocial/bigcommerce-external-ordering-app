@@ -3344,7 +3344,16 @@ export async function registerRoutes(
         port: smtpPort,
         secure: smtpPort === 465,
         auth: { user: smtpUser, pass: smtpPass },
+        // Explicit timeouts so a blocked/unreachable SMTP server fails fast
+        // instead of hanging the request indefinitely (common in cloud hosts).
+        connectionTimeout: 15000,
+        greetingTimeout: 10000,
+        socketTimeout: 20000,
       });
+
+      // Verify connectivity before attempting to send — gives a clear error message
+      // if SMTP credentials or host are wrong in this environment.
+      await transporter.verify();
 
       const filename = `${subject.replace(/[^a-zA-Z0-9-]/g, "_")}.pdf`;
       const textBody = [emailBody, companyName ? `\n— ${companyName}` : ""].filter(Boolean).join("\n");

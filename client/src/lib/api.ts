@@ -839,13 +839,25 @@ export async function getDefaultInvoiceTemplate(): Promise<string> {
 }
 
 export async function sendInvoiceEmail(data: { to: string; subject: string; pdf_base64: string }): Promise<void> {
-  const res = await fetch(`${API_BASE}/invoice/send-email`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Failed to send email' }));
-    throw new Error(err.error || 'Failed to send email');
+  const controller = new AbortController();
+  // 60-second client-side timeout — prevents the spinner hanging forever if the
+  // server stalls (e.g. SMTP connection blocked in the hosting environment).
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  try {
+    const res = await fetch(`${API_BASE}/invoice/send-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(data),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to send email' }));
+      throw new Error(err.error || 'Failed to send email');
+    }
+  } catch (e: any) {
+    if (e.name === 'AbortError') throw new Error('Email request timed out. Check that your SMTP settings are reachable from the server.');
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
 }
