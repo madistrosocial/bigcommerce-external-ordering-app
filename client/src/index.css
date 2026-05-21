@@ -118,7 +118,9 @@
 }
 
 .app-root {
-  height: 100vh;
+  /* dvh = dynamic viewport height — excludes browser chrome on mobile,
+     correctly accounts for the safe area when viewport-fit=cover is set */
+  height: 100dvh;
   width: 100%;
   overflow: hidden;
   display: flex;
@@ -126,10 +128,22 @@
 }
 
 .login-page {
-  height: 100vh;
+  height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* ── PWA safe-area: prevent fixed overlays from overlapping the status bar ──
+   Applies to any Radix UI / shadcn modal/sheet/drawer that uses role=dialog
+   or role=alertdialog. Individual components also set marginTop via style prop
+   for precise positioning, but this CSS acts as a safety-net for anything
+   rendered via portals that we may have missed. */
+@supports (padding-top: env(safe-area-inset-top)) {
+  [role="dialog"],
+  [role="alertdialog"] {
+    padding-top: max(0px, env(safe-area-inset-top));
+  }
 }
 
 .scroll-area {
