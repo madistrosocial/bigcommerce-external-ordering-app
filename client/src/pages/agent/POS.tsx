@@ -3747,7 +3747,7 @@ export default function POSPage() {
         open={showMaxOverrideModal}
         onOpenChange={setShowMaxOverrideModal}
       >
-        <AlertDialogContent data-testid="dialog-max-override">
+        <AlertDialogContent data-testid="dialog-max-override" className="w-[95vw] max-w-[95vw]">
           <AlertDialogHeader>
             <AlertDialogTitle>
               Maximum Purchase Limits Detected
@@ -3758,7 +3758,7 @@ export default function POSPage() {
                   Some items in your cart have maximum purchase limits.
                   Temporarily disable limits to proceed with checkout?
                 </p>
-                <ul className="text-xs bg-amber-50 border border-amber-200 rounded p-2 space-y-1 mt-2">
+                <ul className="text-xs bg-amber-50 border border-amber-200 rounded p-2 space-y-1 mt-2 max-h-48 overflow-y-auto">
                   {maxOverrideItems.map((item) => {
                     const maxQty =
                       item.variant?.max_purchase_quantity ??
@@ -3779,8 +3779,7 @@ export default function POSPage() {
                 </ul>
                 <p className="text-xs text-slate-500 mt-1">
                   Limits are removed at the product level and restored
-                  automatically after checkout. BC product pages will open for
-                  verification.
+                  automatically after checkout.
                 </p>
               </div>
             </AlertDialogDescription>
