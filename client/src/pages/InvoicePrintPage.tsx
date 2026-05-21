@@ -337,7 +337,7 @@ export default function InvoicePrintPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
+    <div className="h-full bg-slate-100 flex flex-col overflow-hidden">
       {/* Toolbar */}
       <div
         className="bg-slate-800 text-white flex items-center gap-3 px-4 py-2.5 shrink-0 no-print"
