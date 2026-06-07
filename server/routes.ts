@@ -2068,7 +2068,7 @@ export async function registerRoutes(
         const r = await fetch(
           `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products` +
             `?categories:in=${categoryId}&is_visible=true&include=variants,images` +
-            `&page=${page}&limit=${limit}`,
+            `&sort=id&direction=desc&page=${page}&limit=${limit}`,
           { headers },
         );
         if (!r.ok) throw new Error(`BigCommerce API error: ${r.statusText}`);

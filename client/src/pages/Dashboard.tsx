@@ -183,8 +183,8 @@ export default function DashboardPage() {
   for (const order of orders) {
     const uid = (order as any).created_by_user_id ?? (order as any).user_id;
     const group = uid ? (userGroupMap.get(uid) ?? "Unknown") : "Unknown";
-    groupCounts[group] = (groupCounts[group] ?? 0) + 1;
     if ((order as any).status === "synced") {
+      groupCounts[group] = (groupCounts[group] ?? 0) + 1;
       groupRevenue[group] = (groupRevenue[group] ?? 0) + parseFloat(String((order as any).total ?? "0"));
     }
   }
@@ -258,7 +258,7 @@ export default function DashboardPage() {
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Total Orders</p>
                 <p className="text-2xl font-bold text-slate-800 leading-tight" data-testid="stat-total-orders">
-                  {isLoading ? "—" : totalOrders}
+                  {isLoading ? "—" : synced}
                 </p>
                 {!isLoading && groupBreakdown.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-1">

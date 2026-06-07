@@ -3751,7 +3751,7 @@ export default function POSPage() {
       {/* ── Inventory Shortfall Push Dialog ── */}
       <Dialog open={showInvPushDialog} onOpenChange={setShowInvPushDialog}>
         <DialogContent
-          className="max-w-lg w-[95vw] flex flex-col p-0 gap-0"
+          className="w-[95%] max-w-[95%] flex flex-col p-0 gap-0"
           style={{
             maxHeight: "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 2rem)",
             marginTop: "env(safe-area-inset-top)",
