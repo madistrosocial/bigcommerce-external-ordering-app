@@ -68,6 +68,22 @@ import {
 } from "@/lib/db";
 import { usePriceHistorySync } from "@/lib/usePriceHistorySync";
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface InvPushItem {
+  lineId: string;
+  sku: string;
+  productName: string;
+  variantName?: string;
+  cartQty: number;
+  bcStock: number;
+  pushQty: number;
+  reason: string;
+  variantId?: number;
+  bcProductId?: number;
+  productDbId?: number;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getVariants(product: api.Product): any[] {
@@ -1048,6 +1064,14 @@ export default function POSPage() {
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [errorDialogMsg, setErrorDialogMsg] = useState("");
 
+  // ── Inventory Shortfall Push Dialog state ─────────────────────────────────
+  const [showInvPushDialog, setShowInvPushDialog] = useState(false);
+  const [invPushItems, setInvPushItems] = useState<InvPushItem[]>([]);
+  const [invPushPendingOrders, setInvPushPendingOrders] = useState<Record<string, api.PendingOrderEntry[]>>({});
+  const [invPushLoadingOrders, setInvPushLoadingOrders] = useState(false);
+  const [invPushingIds, setInvPushingIds] = useState<Set<string>>(new Set());
+  const [invPushedIds, setInvPushedIds] = useState<Set<string>>(new Set());
+
   const isInventoryErr = (msg: string) =>
     /409|stock|inventory|quantity|available/i.test(msg);
 
@@ -1971,9 +1995,8 @@ export default function POSPage() {
     });
   };
 
-  // ── Checkout – step 1: check for any items with max purchase limits ──────────
-  const handleCheckoutClick = useCallback(() => {
-    // Trigger override modal for ANY item that has a max purchase quantity > 0
+  // ── Checkout – step 2: check max-purchase limits then show confirm ───────────
+  const proceedToCheckoutConfirm = useCallback(() => {
     const withMax = cart.filter((item) => {
       const maxQty =
         item.variant?.max_purchase_quantity ??
@@ -1988,6 +2011,81 @@ export default function POSPage() {
       setShowCheckoutConfirm(true);
     }
   }, [cart]);
+
+  // ── Checkout – step 1: pre-flight inventory shortfall check ─────────────────
+  const handleCheckoutClick = useCallback(async () => {
+    const bcIds = [...new Set(cart.map((i) => i.product.bigcommerce_id).filter(Boolean))];
+    if (bcIds.length > 0) {
+      let stockData: api.StockInfo[] = [];
+      try {
+        stockData = await api.refreshProductStock(bcIds);
+      } catch {}
+
+      if (stockData.length > 0) {
+        const stockMap = new Map<number, api.StockInfo>(stockData.map((s) => [s.bigcommerce_id, s]));
+
+        // Update freshStockByLineId so highlights stay current
+        const newFresh = new Map<string, number>();
+        cart.forEach((item) => {
+          const info = stockMap.get(item.product.bigcommerce_id);
+          if (!info) return;
+          const stock = item.variant?.id
+            ? (info.variants.find((v) => v.id === item.variant.id)?.stock_level ?? info.stock_level)
+            : info.stock_level;
+          newFresh.set(item.lineId, stock);
+        });
+        setFreshStockByLineId(newFresh);
+
+        // Collect items where cart qty exceeds current BC stock
+        const shortfallItems: InvPushItem[] = [];
+        for (const item of cart) {
+          const info = stockMap.get(item.product.bigcommerce_id);
+          if (!info) continue;
+          const stock = item.variant?.id
+            ? (info.variants.find((v) => v.id === item.variant.id)?.stock_level ?? info.stock_level)
+            : info.stock_level;
+          if (stock < item.quantity) {
+            const sku = item.variant?.sku || item.product.sku;
+            const variantLabel = item.variant?.option_values
+              ?.map((ov: any) => ov.label)
+              .filter(Boolean)
+              .join(" / ") || item.variant?.sku;
+            shortfallItems.push({
+              lineId: item.lineId,
+              sku,
+              productName: item.product.name,
+              variantName: variantLabel || undefined,
+              cartQty: item.quantity,
+              bcStock: stock,
+              pushQty: item.quantity - stock,
+              reason: `CNC Order for ${selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : ""}`,
+              variantId: item.variant?.id,
+              bcProductId: item.product.bigcommerce_id,
+              productDbId: item.product.id,
+            });
+          }
+        }
+
+        if (shortfallItems.length > 0) {
+          setInvPushItems(shortfallItems);
+          setInvPushingIds(new Set());
+          setInvPushedIds(new Set());
+          setInvPushPendingOrders({});
+          setShowInvPushDialog(true);
+          // Fetch pending BC orders for affected SKUs in background
+          const skus = [...new Set(shortfallItems.map((i) => i.sku))];
+          setInvPushLoadingOrders(true);
+          api.getPendingOrdersBySku(skus)
+            .then((result) => setInvPushPendingOrders(result))
+            .catch(() => setInvPushPendingOrders({}))
+            .finally(() => setInvPushLoadingOrders(false));
+          return;
+        }
+      }
+    }
+    // No shortfall — proceed directly to max-qty check and confirm
+    proceedToCheckoutConfirm();
+  }, [cart, selectedCustomer, proceedToCheckoutConfirm]);
 
   // ── Checkout with max override (variant-aware, deduplicated) ─────────────────
   const handleCheckoutWithOverride = async () => {
@@ -3649,6 +3747,212 @@ export default function POSPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── Inventory Shortfall Push Dialog ── */}
+      <Dialog open={showInvPushDialog} onOpenChange={setShowInvPushDialog}>
+        <DialogContent
+          className="max-w-lg w-[95vw] flex flex-col p-0 gap-0"
+          style={{
+            maxHeight: "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 2rem)",
+            marginTop: "env(safe-area-inset-top)",
+          }}
+          data-testid="dialog-inv-shortfall"
+        >
+          <DialogHeader className="px-4 pt-4 pb-3 border-b shrink-0">
+            <DialogTitle className="flex items-center gap-2 text-amber-700 text-base">
+              <AlertCircle className="h-5 w-5 text-amber-500 shrink-0" />
+              Inventory Shortfall Detected
+            </DialogTitle>
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+              The items below have less stock in BigCommerce than the quantity in your cart.
+              Push inventory for each item as needed, then continue to checkout.
+            </p>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0">
+            {invPushItems.map((item, idx) => {
+              const pendingForSku = invPushPendingOrders[(item.sku || "").toLowerCase()] || [];
+              const isPushing = invPushingIds.has(item.lineId);
+              const isPushed = invPushedIds.has(item.lineId);
+
+              return (
+                <div
+                  key={item.lineId}
+                  className={`border rounded-lg p-3 space-y-2.5 ${isPushed ? "border-green-300 bg-green-50" : "border-amber-200 bg-amber-50/60"}`}
+                  data-testid={`inv-shortfall-item-${item.lineId}`}
+                >
+                  {/* Product header */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-sm text-slate-800 leading-tight truncate">{item.productName}</p>
+                      {item.variantName && (
+                        <p className="text-xs text-slate-500 truncate">{item.variantName}</p>
+                      )}
+                      <p className="text-xs font-mono text-slate-500 mt-0.5">SKU: {item.sku}</p>
+                    </div>
+                    {isPushed && (
+                      <Badge className="bg-green-100 text-green-700 border-green-200 shrink-0 text-[10px]">
+                        <CheckCircle2 className="h-3 w-3 mr-1" />Pushed
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Stock summary */}
+                  <div className="grid grid-cols-3 gap-1.5 text-center">
+                    <div className="bg-white rounded p-1.5 border">
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wide">Cart Qty</p>
+                      <p className="font-bold text-slate-800 text-sm">{item.cartQty}</p>
+                    </div>
+                    <div className="bg-white rounded p-1.5 border">
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wide">In Stock</p>
+                      <p className={`font-bold text-sm ${item.bcStock < item.cartQty ? "text-red-600" : "text-slate-800"}`}>{item.bcStock}</p>
+                    </div>
+                    <div className="bg-white rounded p-1.5 border border-amber-300">
+                      <p className="text-[10px] text-amber-600 uppercase tracking-wide">Shortfall</p>
+                      <p className="font-bold text-amber-700 text-sm">{item.cartQty - item.bcStock}</p>
+                    </div>
+                  </div>
+
+                  {/* Push quantity (editable) */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-slate-600 shrink-0 w-20">Push Qty</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={item.pushQty}
+                      onChange={(e) => {
+                        const val = Math.max(1, parseInt(e.target.value) || 1);
+                        setInvPushItems((prev) =>
+                          prev.map((it, i) => (i === idx ? { ...it, pushQty: val } : it))
+                        );
+                      }}
+                      className="h-8 w-24 text-sm"
+                      disabled={isPushing || isPushed}
+                      data-testid={`input-inv-push-qty-${item.lineId}`}
+                    />
+                  </div>
+
+                  {/* Reason */}
+                  <div>
+                    <label className="text-xs text-slate-600 block mb-1">Reason</label>
+                    <Input
+                      value={item.reason}
+                      onChange={(e) =>
+                        setInvPushItems((prev) =>
+                          prev.map((it, i) => (i === idx ? { ...it, reason: e.target.value } : it))
+                        )
+                      }
+                      className="h-8 text-sm"
+                      placeholder="Reason for pushing inventory"
+                      disabled={isPushing || isPushed}
+                      data-testid={`input-inv-push-reason-${item.lineId}`}
+                    />
+                  </div>
+
+                  {/* Pending unfulfilled BC orders for this SKU */}
+                  <div>
+                    <p className="text-xs font-medium text-slate-600 mb-1">
+                      Pending Fulfillment Orders
+                      {!invPushLoadingOrders && pendingForSku.length > 0 && (
+                        <span className="ml-1 text-amber-600">({pendingForSku.length})</span>
+                      )}
+                    </p>
+                    {invPushLoadingOrders ? (
+                      <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Loading…
+                      </div>
+                    ) : pendingForSku.length > 0 ? (
+                      <div className="max-h-28 overflow-y-auto space-y-1 rounded border bg-white p-1">
+                        {pendingForSku.map((po) => (
+                          <div
+                            key={po.order_id}
+                            className="flex items-center justify-between text-xs px-2 py-1 rounded hover:bg-slate-50"
+                          >
+                            <span className="font-semibold text-slate-700">#{po.order_id}</span>
+                            <span className="text-slate-500 truncate max-w-[90px] mx-1">{po.customer}</span>
+                            <span className="text-slate-600 shrink-0">×{po.quantity}</span>
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 ml-1">{po.status}</Badge>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic">No pending orders found for this SKU</p>
+                    )}
+                  </div>
+
+                  {/* Per-item push button */}
+                  <Button
+                    size="sm"
+                    disabled={isPushing || isPushed}
+                    className={`w-full ${isPushed ? "bg-green-600 hover:bg-green-700" : ""}`}
+                    onClick={async () => {
+                      setInvPushingIds((prev) => new Set(prev).add(item.lineId));
+                      try {
+                        await api.pushInventory({
+                          product_id: item.productDbId ?? 0,
+                          variant_id: item.variantId ?? 0,
+                          sku: item.sku,
+                          quantity_added: item.pushQty,
+                          reason: item.reason || undefined,
+                          product_name: item.productName,
+                          variant_name: item.variantName,
+                        });
+                        setInvPushedIds((prev) => new Set(prev).add(item.lineId));
+                        toast({
+                          title: `Inventory pushed for ${item.sku}`,
+                          description: `+${item.pushQty} unit${item.pushQty !== 1 ? "s" : ""} added to BigCommerce`,
+                        });
+                      } catch (err: any) {
+                        toast({
+                          title: "Push failed",
+                          description: err.message,
+                          variant: "destructive",
+                        });
+                      } finally {
+                        setInvPushingIds((prev) => {
+                          const n = new Set(prev);
+                          n.delete(item.lineId);
+                          return n;
+                        });
+                      }
+                    }}
+                    data-testid={`button-inv-push-${item.lineId}`}
+                  >
+                    {isPushing ? (
+                      <><Loader2 className="h-3 w-3 animate-spin mr-1.5" />Pushing…</>
+                    ) : isPushed ? (
+                      <><CheckCircle2 className="h-3 w-3 mr-1.5" />Pushed</>
+                    ) : (
+                      `Push +${item.pushQty} unit${item.pushQty !== 1 ? "s" : ""}`
+                    )}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Footer */}
+          <div className="px-4 py-3 border-t shrink-0 flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setShowInvPushDialog(false)}
+              data-testid="button-inv-shortfall-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setShowInvPushDialog(false);
+                proceedToCheckoutConfirm();
+              }}
+              data-testid="button-inv-shortfall-continue"
+            >
+              Continue to Checkout
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Inventory error dialog ── */}
       <AlertDialog

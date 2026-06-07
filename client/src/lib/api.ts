@@ -627,6 +627,25 @@ export async function getInventoryPushLogs(): Promise<InventoryPushLog[]> {
   return res.json();
 }
 
+export interface PendingOrderEntry {
+  order_id: number;
+  status: string;
+  status_id: number;
+  quantity: number;
+  customer: string;
+  date: string;
+}
+
+export async function getPendingOrdersBySku(skus: string[]): Promise<Record<string, PendingOrderEntry[]>> {
+  if (skus.length === 0) return {};
+  const res = await fetch(
+    `${API_BASE}/bigcommerce/orders/pending-by-sku?skus=${encodeURIComponent(skus.join(","))}`,
+    { headers: getAuthHeaders() }
+  );
+  if (!res.ok) throw new Error('Failed to fetch pending orders by SKU');
+  return res.json();
+}
+
 export async function getAllOrders(): Promise<Order[]> {
   const res = await fetch(`${API_BASE}/orders/all`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch all orders');

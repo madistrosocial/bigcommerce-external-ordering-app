@@ -2906,6 +2906,74 @@ export async function registerRoutes(
     }
   });
 
+  // Get pending (unfulfilled) BC orders by SKU — used by POS inventory shortfall dialog
+  app.get("/api/bigcommerce/orders/pending-by-sku", requireAuth, async (req, res) => {
+    try {
+      const { storeHash, headers } = await getBcCreds();
+      const skusParam = req.query.skus as string;
+      if (!skusParam) return res.json({});
+      const targetSkus = new Set(skusParam.split(",").map((s: string) => s.trim().toLowerCase()).filter(Boolean));
+      if (targetSkus.size === 0) return res.json({});
+
+      // Exclude: shipped(7), cancelled(8), declined(9), refunded(10), partially_refunded(13)
+      const EXCLUDED = new Set([7, 8, 9, 10, 13]);
+
+      // Fetch last 50 BC orders, newest first
+      const ordersRes = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?limit=50&sort=date_created:desc`,
+        { headers }
+      );
+      const empty: Record<string, any[]> = {};
+      targetSkus.forEach(s => { empty[s] = []; });
+      if (!ordersRes.ok || ordersRes.status === 204) return res.json(empty);
+
+      const allOrders: any[] = await ordersRes.json();
+      const openOrders = Array.isArray(allOrders) ? allOrders.filter((o: any) => !EXCLUDED.has(o.status_id)) : [];
+
+      // Fetch products for each open order (cap at 25 to limit BC API load)
+      const toCheck = openOrders.slice(0, 25);
+      const productLists = await Promise.all(
+        toCheck.map(async (order: any) => {
+          try {
+            const r = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${order.id}/products?limit=250`,
+              { headers }
+            );
+            if (!r.ok) return { order, products: [] as any[] };
+            const products = await r.json();
+            return { order, products: Array.isArray(products) ? products : [] };
+          } catch {
+            return { order, products: [] as any[] };
+          }
+        })
+      );
+
+      // Build result keyed by lowercase SKU
+      const result: Record<string, any[]> = {};
+      targetSkus.forEach(s => { result[s] = []; });
+
+      for (const { order, products } of productLists) {
+        for (const product of (products as any[])) {
+          const sku = (product.sku || "").toLowerCase().trim();
+          if (Object.prototype.hasOwnProperty.call(result, sku)) {
+            result[sku].push({
+              order_id: order.id,
+              status: order.status,
+              status_id: order.status_id,
+              quantity: product.quantity,
+              customer: `${order.billing_address?.first_name || ""} ${order.billing_address?.last_name || ""}`.trim(),
+              date: order.date_created,
+            });
+          }
+        }
+      }
+
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Get a single BC order detail with line items
   app.get("/api/bigcommerce/orders/:orderId/detail", requireAuth, async (req, res) => {
     try {
