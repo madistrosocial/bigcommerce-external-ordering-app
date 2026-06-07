@@ -309,17 +309,33 @@ export default function DraftOrders() {
     }
   };
 
-  const loadDraftToCart = (order: api.Order) => {
+  const loadDraftToCart = async (order: api.Order) => {
     clearCart();
+    // Fetch fresh stock so max_purchase_quantity is populated on every item —
+    // without this, the max-qty override bypass is skipped for drafted carts.
+    const bcIds = [...new Set(order.items.map(i => i.bigcommerce_product_id).filter((id): id is number => !!id))];
+    const stockMap = new Map<number, api.StockInfo>();
+    if (bcIds.length > 0) {
+      try {
+        const stockData = await api.refreshProductStock(bcIds);
+        stockData.forEach(s => stockMap.set(s.bigcommerce_id, s));
+      } catch {}
+    }
     order.items.forEach((item) => {
+      const info = item.bigcommerce_product_id ? stockMap.get(item.bigcommerce_product_id) : undefined;
+      const freshVariantInfo = item.variant_id ? info?.variants.find(v => v.id === item.variant_id) : undefined;
       const product: any = {
         id: item.product_id ?? 0, name: item.name, sku: item.sku,
         price: parseFloat(item.price_at_sale), image: item.image || "",
-        description: "", stock_level: 0, is_pinned: false, bigcommerce_id: item.bigcommerce_product_id ?? 0, variants: [],
+        description: "", stock_level: info?.stock_level ?? 0, is_pinned: false,
+        bigcommerce_id: item.bigcommerce_product_id ?? 0, variants: [],
+        max_purchase_quantity: info?.max_purchase_quantity ?? null,
       };
       const variant = item.variant_id ? {
         id: item.variant_id, sku: item.sku, price: parseFloat(item.price_at_sale),
-        option_values: item.variant_option_values || [], stock_level: 0,
+        option_values: item.variant_option_values || [],
+        stock_level: freshVariantInfo?.stock_level ?? 0,
+        max_purchase_quantity: freshVariantInfo?.max_purchase_quantity ?? null,
       } : undefined;
       addToCart(product, item.quantity, variant, parseFloat(item.price_at_sale), parseFloat(item.price_at_sale), null, null);
     });

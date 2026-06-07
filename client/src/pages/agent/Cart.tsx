@@ -225,22 +225,32 @@ export default function Cart() {
     setIsSubmitting(true);
 
     // ── Max purchase qty override ────────────────────────────────────────────
-    // Collect products that have a BC max_purchase_quantity limit and temporarily remove it
-    const uniqueMaxMap = new Map<number, number | null>();
+    // BC supports limits at variant level AND product level — handle both.
+    const variantLimitMap = new Map<string, { product_id: number; variant_id: number; originalMax: number | null }>();
+    const productLimitMap = new Map<number, number | null>();
     for (const item of cart) {
       const pid = item.product.bigcommerce_id;
-      const maxQty = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity ?? null;
-      if (pid && maxQty != null && maxQty > 0 && !uniqueMaxMap.has(pid)) {
-        uniqueMaxMap.set(pid, maxQty);
+      if (!pid) continue;
+      const vMax = item.variant?.max_purchase_quantity ?? null;
+      if (item.variant?.id != null && vMax != null && vMax > 0) {
+        const key = `${pid}-${item.variant.id}`;
+        if (!variantLimitMap.has(key))
+          variantLimitMap.set(key, { product_id: pid, variant_id: item.variant.id, originalMax: vMax });
+      } else {
+        const pMax = item.product.max_purchase_quantity ?? null;
+        if (pMax != null && pMax > 0 && !productLimitMap.has(pid))
+          productLimitMap.set(pid, pMax);
       }
     }
-    const limitedProducts = Array.from(uniqueMaxMap.entries()).map(([product_id, originalMax]) => ({ product_id, originalMax }));
-    if (limitedProducts.length > 0) {
-      try {
-        await api.setProductMaxQty(limitedProducts.map(({ product_id }) => ({ product_id, max_purchase_quantity: 0 })));
-      } catch (err) {
-        console.error("Failed to remove max qty limits before checkout:", err);
-      }
+    const variantLimitList = Array.from(variantLimitMap.values());
+    const productLimitList = Array.from(productLimitMap.entries()).map(([product_id, originalMax]) => ({ product_id, originalMax }));
+    try {
+      if (variantLimitList.length > 0)
+        await api.setVariantMaxQty(variantLimitList.map(({ product_id, variant_id }) => ({ product_id, variant_id, max_purchase_quantity: 0 })));
+      if (productLimitList.length > 0)
+        await api.setProductMaxQty(productLimitList.map(({ product_id }) => ({ product_id, max_purchase_quantity: 0 })));
+    } catch (err) {
+      console.error("Failed to remove max qty limits before checkout:", err);
     }
     // ────────────────────────────────────────────────────────────────────────
 
@@ -321,14 +331,12 @@ export default function Cart() {
     } finally {
       setIsSubmitting(false);
       // ── Restore max purchase qty limits ────────────────────────────────────
-      if (limitedProducts.length > 0) {
-        api.setProductMaxQty(
-          limitedProducts.map(({ product_id, originalMax }) => ({
-            product_id,
-            max_purchase_quantity: originalMax,
-          }))
-        ).catch(err => console.error("Failed to restore max qty limits:", err));
-      }
+      if (variantLimitList.length > 0)
+        api.setVariantMaxQty(variantLimitList.map(({ product_id, variant_id, originalMax }) => ({ product_id, variant_id, max_purchase_quantity: originalMax })))
+          .catch(err => console.error("Failed to restore variant max qty limits:", err));
+      if (productLimitList.length > 0)
+        api.setProductMaxQty(productLimitList.map(({ product_id, originalMax }) => ({ product_id, max_purchase_quantity: originalMax })))
+          .catch(err => console.error("Failed to restore product max qty limits:", err));
       // ────────────────────────────────────────────────────────────────────────
     }
   };
