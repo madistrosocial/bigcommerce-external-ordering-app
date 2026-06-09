@@ -31,6 +31,7 @@ import AdminGroups from "@/pages/admin/AdminGroups";
 import BCProductLink from "@/pages/tools/BCProductLink";
 import BCProductLinkLogs from "@/pages/tools/BCProductLinkLogs";
 import InvoicePrintPage from "@/pages/InvoicePrintPage";
+import ShipStationExportPage from "@/pages/admin/ShipStationExport";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -146,6 +147,9 @@ function Router() {
       </Route>
       <Route path="/admin/price-tiers">
         {() => <ProtectedRoute component={PriceTiersPage} role="admin" />}
+      </Route>
+      <Route path="/admin/shipstation">
+        {() => <ProtectedRoute component={ShipStationExportPage} role="admin" />}
       </Route>
       <Route path="/admin/rbac">
         {() => <AdminRoute component={RBACPage} />}

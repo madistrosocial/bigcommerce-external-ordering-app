@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory } from "@shared/schema";
 import { eq, desc, and, inArray, gt, asc } from "drizzle-orm";
 
 export interface IStorage {
@@ -72,6 +72,11 @@ export interface IStorage {
   getUserPermissionStrings(userId: number): Promise<string[]>;
   setUserRole(userId: number, roleId: number | null): Promise<void>;
   updateRole(id: number, data: Partial<{ name: string; description: string | null }>): Promise<Role>;
+
+  // ShipStation export history
+  createShipstationExportHistory(entry: InsertShipstationExportHistory): Promise<ShipstationExportHistory>;
+  getShipstationExportHistory(limit?: number): Promise<ShipstationExportHistory[]>;
+  getShipstationExportHistoryById(id: number): Promise<ShipstationExportHistory | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -377,6 +382,21 @@ export class DatabaseStorage implements IStorage {
 
   async updateRole(id: number, data: Partial<{ name: string; description: string | null }>): Promise<Role> {
     const result = await db.update(roles).set(data).where(eq(roles.id, id)).returning();
+    return result[0];
+  }
+
+  // ShipStation export history
+  async createShipstationExportHistory(entry: InsertShipstationExportHistory): Promise<ShipstationExportHistory> {
+    const result = await db.insert(shipstationExportHistory).values([entry]).returning();
+    return result[0];
+  }
+
+  async getShipstationExportHistory(limit = 100): Promise<ShipstationExportHistory[]> {
+    return db.select().from(shipstationExportHistory).orderBy(desc(shipstationExportHistory.created_at)).limit(limit);
+  }
+
+  async getShipstationExportHistoryById(id: number): Promise<ShipstationExportHistory | undefined> {
+    const result = await db.select().from(shipstationExportHistory).where(eq(shipstationExportHistory.id, id));
     return result[0];
   }
 }

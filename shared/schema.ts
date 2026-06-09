@@ -123,6 +123,17 @@ export const inventoryPushLogs = pgTable("inventory_push_logs", {
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const shipstationExportHistory = pgTable("shipstation_export_history", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  export_date: timestamp("export_date").notNull().defaultNow(),
+  file_name: text("file_name").notNull(),
+  record_count: integer("record_count").notNull().default(0),
+  status: text("status").notNull(), // 'success' | 'failed'
+  error_message: text("error_message"),
+  file_content: text("file_content"), // CSV/TXT content for download
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Insert schemas — RBAC
 export const insertRoleSchema = createInsertSchema(roles).omit({ id: true, created_at: true });
 export const insertPermissionSchema = createInsertSchema(permissions).omit({ id: true });
@@ -136,6 +147,7 @@ export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, dat
 export const insertPriceHistoryCacheSchema = createInsertSchema(priceHistoryCache).omit({ id: true, created_at: true });
 export const insertInventoryPushLogSchema = createInsertSchema(inventoryPushLogs).omit({ id: true, created_at: true });
 export const insertProductLinkLogSchema = createInsertSchema(productLinkLogs).omit({ id: true, created_at: true });
+export const insertShipstationExportHistorySchema = createInsertSchema(shipstationExportHistory).omit({ id: true, created_at: true, export_date: true });
 
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -155,6 +167,9 @@ export type InventoryPushLog = typeof inventoryPushLogs.$inferSelect;
 
 export type InsertProductLinkLog = z.infer<typeof insertProductLinkLogSchema>;
 export type ProductLinkLog = typeof productLinkLogs.$inferSelect;
+
+export type InsertShipstationExportHistory = z.infer<typeof insertShipstationExportHistorySchema>;
+export type ShipstationExportHistory = typeof shipstationExportHistory.$inferSelect;
 
 // RBAC types
 export type InsertRole = z.infer<typeof insertRoleSchema>;

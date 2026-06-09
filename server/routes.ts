@@ -13,6 +13,10 @@ import {
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import nodemailer from "nodemailer";
+import cron from "node-cron";
+import * as FtpClientLib from "basic-ftp";
+import SftpClient from "ssh2-sftp-client";
+import { Readable } from "stream";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
 const DEFAULT_INVOICE_TEMPLATE = `<!DOCTYPE html>
@@ -3546,6 +3550,411 @@ export async function registerRoutes(
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
+  });
+
+  // ── ShipStation Export ──────────────────────────────────────────────────────
+
+  let ssExportCronJob: cron.ScheduledTask | null = null;
+
+  // ── Helpers ──
+  async function getShipstationCreds(): Promise<{ apiKey: string; apiSecret: string } | null> {
+    const s = await storage.getSetting("shipstation_config");
+    if (!s?.value) return null;
+    const cfg = typeof s.value === "string" ? JSON.parse(s.value) : s.value;
+    if (!cfg.apiKey || !cfg.apiSecret) return null;
+    return cfg;
+  }
+
+  async function ssApiGet(apiKey: string, apiSecret: string, path: string): Promise<any> {
+    const auth = Buffer.from(`${apiKey}:${apiSecret}`).toString("base64");
+    const res = await fetch(`https://ssapi.shipstation.com${path}`, {
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`ShipStation API error ${res.status}: ${text}`);
+    }
+    return res.json();
+  }
+
+  const SS_FIELD_MAP: Record<string, (s: any) => string> = {
+    order_number:    (s) => s.orderNumber ?? "",
+    tracking_number: (s) => s.trackingNumber ?? "",
+    shipping_cost:   (s) => (s.shipmentCost != null ? String(s.shipmentCost) : ""),
+    ship_date:       (s) => s.shipDate ? s.shipDate.split("T")[0] : "",
+    carrier:         (s) => s.carrierCode ?? "",
+    service:         (s) => s.serviceCode ?? "",
+    customer_name:   (s) => s.shipTo?.name ?? "",
+    order_date:      (s) => s.createDate ? s.createDate.split("T")[0] : "",
+    shipment_id:     (s) => String(s.shipmentId ?? ""),
+  };
+
+  const SS_FIELD_LABELS: Record<string, string> = {
+    order_number:    "Order Number",
+    tracking_number: "Tracking Number",
+    shipping_cost:   "Shipping Cost",
+    ship_date:       "Ship Date",
+    carrier:         "Carrier",
+    service:         "Service",
+    customer_name:   "Customer Name",
+    order_date:      "Order Date",
+    shipment_id:     "Shipment ID",
+  };
+
+  function buildFileContent(shipments: any[], fields: string[], format: "csv" | "txt"): string {
+    const sep = format === "csv" ? "," : "\t";
+    const header = fields.map((f) => SS_FIELD_LABELS[f] ?? f).join(sep);
+    const rows = shipments.map((s) =>
+      fields.map((f) => {
+        const val = SS_FIELD_MAP[f] ? SS_FIELD_MAP[f](s) : "";
+        if (format === "csv") {
+          const escaped = val.replace(/"/g, '""');
+          return escaped.includes(",") || escaped.includes('"') || escaped.includes("\n") ? `"${escaped}"` : escaped;
+        }
+        return val;
+      }).join(sep)
+    );
+    return [header, ...rows].join("\n");
+  }
+
+  function buildFileName(base: string, stamp: string, format: "csv" | "txt"): string {
+    const ext = `.${format}`;
+    if (!stamp || stamp === "none") return `${base}${ext}`;
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const y = now.getFullYear();
+    const m = pad(now.getMonth() + 1);
+    const d = pad(now.getDate());
+    const H = pad(now.getHours());
+    const M = pad(now.getMinutes());
+    if (stamp === "YYYY-MM-DD") return `${base}_${y}-${m}-${d}${ext}`;
+    if (stamp === "YYYYMMDD") return `${base}_${y}${m}${d}${ext}`;
+    if (stamp === "YYYYMMDD_HHmm") return `${base}_${y}${m}${d}_${H}${M}${ext}`;
+    return `${base}${ext}`;
+  }
+
+  function buildDateRange(window: string, customStart?: string, customEnd?: string, lastExport?: string | null): { start: string; end: string } {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} 00:00:00`;
+    const fmtEnd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} 23:59:59`;
+    const today = new Date();
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    if (window === "today") return { start: fmt(today), end: fmtEnd(today) };
+    if (window === "yesterday") return { start: fmt(yesterday), end: fmtEnd(yesterday) };
+    if (window === "since_last_export") {
+      const start = lastExport ? lastExport : fmt(yesterday);
+      return { start, end: fmtEnd(today) };
+    }
+    if (window === "custom" && customStart && customEnd) {
+      return { start: `${customStart} 00:00:00`, end: `${customEnd} 23:59:59` };
+    }
+    return { start: fmt(yesterday), end: fmtEnd(today) };
+  }
+
+  async function fetchAllShipments(apiKey: string, apiSecret: string, status: string, dateStart: string, dateEnd: string): Promise<any[]> {
+    const pageSize = 500;
+    let page = 1;
+    const all: any[] = [];
+    while (true) {
+      const statusParam = status === "all" ? "" : `&shipmentStatus=${status === "shipped" ? "shipped" : "delivered"}`;
+      const data = await ssApiGet(apiKey, apiSecret,
+        `/shipments?shipDateStart=${encodeURIComponent(dateStart)}&shipDateEnd=${encodeURIComponent(dateEnd)}${statusParam}&pageSize=${pageSize}&page=${page}`
+      );
+      const items: any[] = data.shipments ?? [];
+      all.push(...items);
+      if (all.length >= (data.total ?? items.length) || items.length < pageSize) break;
+      page++;
+    }
+    return all;
+  }
+
+  async function uploadFile(ftpCfg: any, fileName: string, content: string): Promise<void> {
+    const host = ftpCfg.host ?? "";
+    const port = parseInt(ftpCfg.port ?? "21");
+    const username = ftpCfg.username ?? "";
+    const password = ftpCfg.password ?? "";
+    const remoteFolder = ftpCfg.remote_folder ?? "/";
+    const remotePath = `${remoteFolder.replace(/\/+$/, "")}/${fileName}`;
+
+    if (ftpCfg.protocol === "sftp") {
+      const sftp = new SftpClient();
+      try {
+        await sftp.connect({ host, port: parseInt(ftpCfg.port ?? "22"), username, password });
+        await sftp.put(Buffer.from(content, "utf-8"), remotePath);
+      } finally {
+        await sftp.end();
+      }
+    } else {
+      const client = new FtpClientLib.Client();
+      client.ftp.verbose = false;
+      try {
+        await client.access({ host, port, user: username, password, secure: false });
+        const buf = Buffer.from(content, "utf-8");
+        const readable = Readable.from(buf);
+        await client.uploadFrom(readable, remotePath);
+      } finally {
+        client.close();
+      }
+    }
+  }
+
+  async function runShipstationExport(): Promise<void> {
+    const creds = await getShipstationCreds();
+    if (!creds) throw new Error("ShipStation not configured");
+
+    const exportCfgSetting = await storage.getSetting("shipstation_export_config");
+    const exportCfg = exportCfgSetting?.value
+      ? (typeof exportCfgSetting.value === "string" ? JSON.parse(exportCfgSetting.value) : exportCfgSetting.value)
+      : {};
+
+    const ftpCfgSetting = await storage.getSetting("shipstation_ftp_config");
+    const ftpCfg = ftpCfgSetting?.value
+      ? (typeof ftpCfgSetting.value === "string" ? JSON.parse(ftpCfgSetting.value) : ftpCfgSetting.value)
+      : null;
+
+    const fields: string[] = exportCfg.fields ?? ["order_number", "tracking_number", "shipping_cost", "ship_date"];
+    const format: "csv" | "txt" = exportCfg.format ?? "csv";
+    const baseName: string = exportCfg.base_file_name ?? "shipping_feed";
+    const dateStamp: string = exportCfg.date_stamp ?? "YYYYMMDD";
+    const shipmentStatus: string = exportCfg.shipment_status ?? "shipped";
+    const exportWindow: string = exportCfg.export_window ?? "since_last_export";
+    const customStart: string = exportCfg.custom_start ?? "";
+    const customEnd: string = exportCfg.custom_end ?? "";
+
+    const lastExportSetting = await storage.getSetting("shipstation_last_export");
+    const lastExport: string | null = lastExportSetting?.value?.timestamp ?? null;
+
+    const { start, end } = buildDateRange(exportWindow, customStart, customEnd, lastExport);
+
+    let shipments: any[] = [];
+    let historyEntry: any;
+    const fileName = buildFileName(baseName, dateStamp, format);
+
+    try {
+      shipments = await fetchAllShipments(creds.apiKey, creds.apiSecret, shipmentStatus, start, end);
+      const content = buildFileContent(shipments, fields, format);
+
+      if (ftpCfg?.host) {
+        await uploadFile(ftpCfg, fileName, content);
+      }
+
+      historyEntry = {
+        file_name: fileName,
+        record_count: shipments.length,
+        status: "success",
+        file_content: content,
+      };
+
+      await storage.setSetting("shipstation_last_export", {
+        timestamp: new Date().toISOString().replace("T", " ").replace(/\.\d+Z$/, ""),
+      });
+    } catch (err: any) {
+      historyEntry = {
+        file_name: fileName,
+        record_count: 0,
+        status: "failed",
+        error_message: err.message,
+        file_content: null,
+      };
+      throw err;
+    } finally {
+      await storage.createShipstationExportHistory(historyEntry);
+    }
+  }
+
+  async function initShipstationScheduler(): Promise<void> {
+    if (ssExportCronJob) { ssExportCronJob.stop(); ssExportCronJob = null; }
+    const exportCfgSetting = await storage.getSetting("shipstation_export_config");
+    if (!exportCfgSetting?.value) return;
+    const cfg = typeof exportCfgSetting.value === "string" ? JSON.parse(exportCfgSetting.value) : exportCfgSetting.value;
+    const schedule: string = cfg.schedule ?? "manual_only";
+    if (schedule === "manual_only") return;
+
+    let cronExpr = "0 * * * *";
+    if (schedule === "every_2h")  cronExpr = "0 */2 * * *";
+    else if (schedule === "every_4h") cronExpr = "0 */4 * * *";
+    else if (schedule === "every_6h") cronExpr = "0 */6 * * *";
+    else if (schedule === "daily") {
+      const time: string = cfg.daily_time ?? "18:00";
+      const [hStr, mStr] = time.split(":");
+      const h = parseInt(hStr ?? "18");
+      const m = parseInt(mStr ?? "0");
+      cronExpr = `${m} ${h} * * *`;
+    }
+
+    ssExportCronJob = cron.schedule(cronExpr, async () => {
+      try { await runShipstationExport(); } catch {}
+    });
+  }
+
+  // Initialise scheduler on startup
+  initShipstationScheduler().catch(() => {});
+
+  // GET shipstation config (masked)
+  app.get("/api/shipstation/config", requireAuth, async (req, res) => {
+    try {
+      const s = await storage.getSetting("shipstation_config");
+      const val = s?.value ? (typeof s.value === "string" ? JSON.parse(s.value) : s.value) : {};
+      const lastSyncSetting = await storage.getSetting("shipstation_last_sync");
+      const lastExportSetting = await storage.getSetting("shipstation_last_export");
+      res.json({
+        apiKey: val.apiKey ?? "",
+        apiSecret: val.apiSecret ? "••••••••" : "",
+        hasSecret: !!(val.apiSecret),
+        lastSync: lastSyncSetting?.value?.timestamp ?? null,
+        lastExport: lastExportSetting?.value?.timestamp ?? null,
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST save shipstation config
+  app.post("/api/shipstation/config", requireAuth, async (req, res) => {
+    try {
+      const { apiKey, apiSecret } = req.body as { apiKey: string; apiSecret: string };
+      const existing = await storage.getSetting("shipstation_config");
+      const existingVal = existing?.value ? (typeof existing.value === "string" ? JSON.parse(existing.value) : existing.value) : {};
+      const newSecret = apiSecret === "••••••••" ? (existingVal.apiSecret ?? "") : apiSecret;
+      await storage.setSetting("shipstation_config", { apiKey: apiKey?.trim(), apiSecret: newSecret?.trim() });
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST test ShipStation connection
+  app.post("/api/shipstation/test-connection", requireAuth, async (req, res) => {
+    try {
+      const { apiKey, apiSecret } = req.body as { apiKey: string; apiSecret: string };
+      let resolvedSecret = apiSecret;
+      if (apiSecret === "••••••••") {
+        const existing = await storage.getSetting("shipstation_config");
+        const val = existing?.value ? (typeof existing.value === "string" ? JSON.parse(existing.value) : existing.value) : {};
+        resolvedSecret = val.apiSecret ?? "";
+      }
+      const data = await ssApiGet(apiKey, resolvedSecret, "/accounts/listtags");
+      await storage.setSetting("shipstation_last_sync", { timestamp: new Date().toISOString().replace("T", " ").replace(/\.\d+Z$/, "") });
+      res.json({ success: true, message: "Connection successful" });
+    } catch (e: any) { res.status(400).json({ success: false, error: e.message }); }
+  });
+
+  // GET export config
+  app.get("/api/shipstation/export-config", requireAuth, async (req, res) => {
+    try {
+      const s = await storage.getSetting("shipstation_export_config");
+      const val = s?.value ? (typeof s.value === "string" ? JSON.parse(s.value) : s.value) : {};
+      res.json({
+        fields: val.fields ?? ["order_number", "tracking_number", "shipping_cost", "ship_date"],
+        schedule: val.schedule ?? "manual_only",
+        daily_time: val.daily_time ?? "18:00",
+        shipment_status: val.shipment_status ?? "shipped",
+        export_window: val.export_window ?? "since_last_export",
+        custom_start: val.custom_start ?? "",
+        custom_end: val.custom_end ?? "",
+        base_file_name: val.base_file_name ?? "shipping_feed",
+        date_stamp: val.date_stamp ?? "YYYYMMDD",
+        format: val.format ?? "csv",
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST save export config
+  app.post("/api/shipstation/export-config", requireAuth, async (req, res) => {
+    try {
+      await storage.setSetting("shipstation_export_config", req.body);
+      await initShipstationScheduler();
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET FTP config (password masked)
+  app.get("/api/shipstation/ftp-config", requireAuth, async (req, res) => {
+    try {
+      const s = await storage.getSetting("shipstation_ftp_config");
+      const val = s?.value ? (typeof s.value === "string" ? JSON.parse(s.value) : s.value) : {};
+      res.json({
+        protocol: val.protocol ?? "ftp",
+        host: val.host ?? "",
+        port: val.port ?? (val.protocol === "sftp" ? "22" : "21"),
+        username: val.username ?? "",
+        password: val.password ? "••••••••" : "",
+        hasPassword: !!(val.password),
+        remote_folder: val.remote_folder ?? "/",
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST save FTP config
+  app.post("/api/shipstation/ftp-config", requireAuth, async (req, res) => {
+    try {
+      const { protocol, host, port, username, password, remote_folder } = req.body;
+      const existing = await storage.getSetting("shipstation_ftp_config");
+      const existingVal = existing?.value ? (typeof existing.value === "string" ? JSON.parse(existing.value) : existing.value) : {};
+      const newPassword = password === "••••••••" ? (existingVal.password ?? "") : password;
+      await storage.setSetting("shipstation_ftp_config", { protocol, host, port, username, password: newPassword, remote_folder });
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST test FTP connection
+  app.post("/api/shipstation/ftp-test", requireAuth, async (req, res) => {
+    try {
+      const { protocol, host, port, username, password, remote_folder } = req.body;
+      let resolvedPassword = password;
+      if (password === "••••••••") {
+        const existing = await storage.getSetting("shipstation_ftp_config");
+        const val = existing?.value ? (typeof existing.value === "string" ? JSON.parse(existing.value) : existing.value) : {};
+        resolvedPassword = val.password ?? "";
+      }
+      if (!host) return res.status(400).json({ success: false, error: "Host is required" });
+
+      if (protocol === "sftp") {
+        const sftp = new SftpClient();
+        try {
+          await sftp.connect({ host, port: parseInt(port ?? "22"), username, password: resolvedPassword });
+          await sftp.end();
+        } catch (e: any) { return res.status(400).json({ success: false, error: e.message }); }
+      } else {
+        const client = new FtpClientLib.Client();
+        client.ftp.verbose = false;
+        try {
+          await client.access({ host, port: parseInt(port ?? "21"), user: username, password: resolvedPassword, secure: false });
+          client.close();
+        } catch (e: any) { return res.status(400).json({ success: false, error: e.message }); }
+      }
+      res.json({ success: true, message: "Connection successful" });
+    } catch (e: any) { res.status(500).json({ success: false, error: e.message }); }
+  });
+
+  // POST run export
+  app.post("/api/shipstation/export/run", requireAuth, async (req, res) => {
+    try {
+      await runShipstationExport();
+      res.json({ success: true, message: "Export completed successfully" });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // GET export history
+  app.get("/api/shipstation/export/history", requireAuth, async (req, res) => {
+    try {
+      const limit = parseInt(String(req.query.limit ?? "50"));
+      const history = await storage.getShipstationExportHistory(limit);
+      res.json(history.map((h) => ({ ...h, file_content: undefined })));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET download export file
+  app.get("/api/shipstation/export/history/:id/download", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const entry = await storage.getShipstationExportHistoryById(id);
+      if (!entry) return res.status(404).json({ error: "Not found" });
+      if (!entry.file_content) return res.status(404).json({ error: "No file content stored" });
+      const ext = entry.file_name.endsWith(".txt") ? "txt" : "csv";
+      const ct = ext === "csv" ? "text/csv" : "text/plain";
+      res.setHeader("Content-Type", ct);
+      res.setHeader("Content-Disposition", `attachment; filename="${entry.file_name}"`);
+      res.send(entry.file_content);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   return httpServer;

@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Monitor, ShoppingBag, Package, BookOpen,
   ShoppingCart, Settings, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, LogOut, Truck, Wifi, WifiOff, Menu, X,
-  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt,
+  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -163,6 +163,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     { label: "BC Integration", path: "/admin/integration", icon: Plug },
     { label: "Price Tiers", path: "/admin/price-tiers", icon: Layers },
     { label: "Invoice Settings", path: "/admin/invoice", icon: Receipt },
+    { label: "ShipStation Export", path: "/admin/shipstation", icon: Ship },
   ];
 
   function isActive(path: string) { return location === path; }
