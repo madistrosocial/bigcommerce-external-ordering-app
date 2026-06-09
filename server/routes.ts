@@ -3552,6 +3552,176 @@ export async function registerRoutes(
     }
   });
 
+  // ── Promo SKU Tracker ────────────────────────────────────────────────────────
+
+  async function getBcCredentials(): Promise<{ storeHash: string; token: string } | null> {
+    const setting = await storage.getSetting("bigcommerce_config");
+    let storeHash = process.env.BC_STORE_HASH;
+    let token = process.env.BC_TOKEN;
+    if (setting?.value) {
+      const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+      storeHash = cfg.storeHash || storeHash;
+      token = cfg.token || token;
+    }
+    if (!storeHash || !token) return null;
+    return { storeHash, token };
+  }
+
+  async function bcFetch(storeHash: string, token: string, path: string): Promise<any> {
+    const res = await fetch(`https://api.bigcommerce.com/stores/${storeHash}${path}`, {
+      headers: { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`BC API error ${res.status}: ${res.statusText}`);
+    return res.json();
+  }
+
+  // GET all promo SKUs
+  app.get("/api/promo-skus", requireAuth, async (req, res) => {
+    try {
+      const skus = await storage.getAllPromoSkus();
+      res.json(skus);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST add promo SKU (validates against BC)
+  app.post("/api/promo-skus", requireAuth, async (req, res) => {
+    try {
+      const { sku, promo_note } = req.body as { sku: string; promo_note?: string };
+      if (!sku?.trim()) return res.status(400).json({ error: "SKU is required" });
+      const upperSku = sku.trim().toUpperCase();
+
+      // Check duplicate
+      const existing = await storage.getPromoSkuBySku(upperSku);
+      if (existing) return res.status(409).json({ error: `SKU ${upperSku} is already being tracked` });
+
+      // Validate against BigCommerce
+      const creds = await getBcCredentials();
+      if (!creds) return res.status(400).json({ error: "BigCommerce not configured" });
+
+      const data = await bcFetch(creds.storeHash, creds.token,
+        `/v3/catalog/products?sku=${encodeURIComponent(upperSku)}&include=variants&limit=1`
+      );
+
+      let product: any = null;
+      let variant: any = null;
+      let productName = "";
+      let variantName: string | null = null;
+      let productId = 0;
+      let variantId: number | null = null;
+
+      if (data.data?.length) {
+        // Direct product SKU match
+        product = data.data[0];
+        productId = product.id;
+        productName = product.name;
+
+        // Check if SKU matches a variant
+        const matchedVariant = (product.variants ?? []).find((v: any) => v.sku?.toUpperCase() === upperSku);
+        if (matchedVariant) {
+          variant = matchedVariant;
+          variantId = matchedVariant.id;
+          variantName = matchedVariant.option_values?.map((o: any) => o.label).join(" / ") || null;
+        }
+      } else {
+        // Try variant search
+        const vData = await bcFetch(creds.storeHash, creds.token,
+          `/v3/catalog/variants?sku=${encodeURIComponent(upperSku)}&include_fields=id,product_id,sku,option_values&limit=1`
+        );
+        if (!vData.data?.length) {
+          return res.status(404).json({ error: `SKU "${upperSku}" not found in BigCommerce` });
+        }
+        variant = vData.data[0];
+        variantId = variant.id;
+        productId = variant.product_id;
+
+        const pData = await bcFetch(creds.storeHash, creds.token, `/v3/catalog/products/${productId}`);
+        productName = pData.data?.name ?? `Product #${productId}`;
+        variantName = variant.option_values?.map((o: any) => o.label).join(" / ") || null;
+      }
+
+      const userId = (req as any).user?.id ?? null;
+      const entry = await storage.createPromoSku({
+        sku: upperSku,
+        product_id: productId,
+        variant_id: variantId,
+        product_name: productName,
+        variant_name: variantName,
+        promo_note: promo_note?.trim() || null,
+        created_by: userId,
+        is_active: true,
+      });
+      res.json(entry);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT update promo SKU (note only)
+  app.put("/api/promo-skus/:id", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { promo_note } = req.body as { promo_note?: string };
+      const updated = await storage.updatePromoSku(id, { promo_note: promo_note?.trim() || null });
+      res.json(updated);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE promo SKU
+  app.delete("/api/promo-skus/:id", requireAuth, async (req, res) => {
+    try {
+      await storage.deletePromoSku(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET live inventory for all promo SKUs
+  app.get("/api/promo-skus/inventory", requireAuth, async (req, res) => {
+    try {
+      const skus = await storage.getAllPromoSkus();
+      if (!skus.length) return res.json([]);
+
+      const creds = await getBcCredentials();
+      if (!creds) return res.json(skus.map((s) => ({ id: s.id, inventory: null })));
+
+      const result: { id: number; inventory: number | null }[] = [];
+
+      for (const s of skus) {
+        try {
+          if (s.variant_id) {
+            const d = await bcFetch(creds.storeHash, creds.token,
+              `/v3/catalog/products/${s.product_id}/variants/${s.variant_id}`
+            );
+            result.push({ id: s.id, inventory: d.data?.inventory_level ?? null });
+          } else {
+            const d = await bcFetch(creds.storeHash, creds.token,
+              `/v3/catalog/products/${s.product_id}`
+            );
+            result.push({ id: s.id, inventory: d.data?.inventory_level ?? null });
+          }
+        } catch {
+          result.push({ id: s.id, inventory: null });
+        }
+      }
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET thresholds
+  app.get("/api/promo-skus/thresholds", requireAuth, async (req, res) => {
+    try {
+      const s = await storage.getSetting("promo_sku_thresholds");
+      const val = s?.value ? (typeof s.value === "string" ? JSON.parse(s.value) : s.value) : { red: 2, yellow: 5 };
+      res.json(val);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST save thresholds
+  app.post("/api/promo-skus/thresholds", requireAuth, async (req, res) => {
+    try {
+      const { red, yellow } = req.body as { red: number; yellow: number };
+      await storage.setSetting("promo_sku_thresholds", { red, yellow });
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // ── ShipStation Export ──────────────────────────────────────────────────────
 
   let ssExportCronJob: cron.ScheduledTask | null = null;

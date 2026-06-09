@@ -30,6 +30,7 @@ import BCOrders from "@/pages/agent/BCOrders";
 import AdminGroups from "@/pages/admin/AdminGroups";
 import BCProductLink from "@/pages/tools/BCProductLink";
 import BCProductLinkLogs from "@/pages/tools/BCProductLinkLogs";
+import PromoSkuTracker from "@/pages/tools/PromoSkuTracker";
 import InvoicePrintPage from "@/pages/InvoicePrintPage";
 import ShipStationExportPage from "@/pages/admin/ShipStationExport";
 import NotFound from "@/pages/not-found";
@@ -164,6 +165,9 @@ function Router() {
       </Route>
       <Route path="/tools/bc-product-link-logs">
         {() => <ProtectedRoute component={BCProductLinkLogs} />}
+      </Route>
+      <Route path="/tools/promo-sku-tracker">
+        {() => <ProtectedRoute component={PromoSkuTracker} />}
       </Route>
 
       <Route component={NotFound} />

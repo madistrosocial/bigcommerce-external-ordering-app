@@ -123,6 +123,20 @@ export const inventoryPushLogs = pgTable("inventory_push_logs", {
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const promoFreeSkuTracker = pgTable("promo_free_sku_tracker", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  sku: text("sku").notNull().unique(),
+  product_id: integer("product_id").notNull(),
+  variant_id: integer("variant_id"),
+  product_name: text("product_name").notNull(),
+  variant_name: text("variant_name"),
+  promo_note: text("promo_note"),
+  created_by: integer("created_by"),
+  is_active: boolean("is_active").notNull().default(true),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const shipstationExportHistory = pgTable("shipstation_export_history", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   export_date: timestamp("export_date").notNull().defaultNow(),
@@ -147,6 +161,7 @@ export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, dat
 export const insertPriceHistoryCacheSchema = createInsertSchema(priceHistoryCache).omit({ id: true, created_at: true });
 export const insertInventoryPushLogSchema = createInsertSchema(inventoryPushLogs).omit({ id: true, created_at: true });
 export const insertProductLinkLogSchema = createInsertSchema(productLinkLogs).omit({ id: true, created_at: true });
+export const insertPromoFreeSkuTrackerSchema = createInsertSchema(promoFreeSkuTracker).omit({ id: true, created_at: true, updated_at: true });
 export const insertShipstationExportHistorySchema = createInsertSchema(shipstationExportHistory).omit({ id: true, created_at: true, export_date: true });
 
 // Types
@@ -167,6 +182,9 @@ export type InventoryPushLog = typeof inventoryPushLogs.$inferSelect;
 
 export type InsertProductLinkLog = z.infer<typeof insertProductLinkLogSchema>;
 export type ProductLinkLog = typeof productLinkLogs.$inferSelect;
+
+export type InsertPromoFreeSkuTracker = z.infer<typeof insertPromoFreeSkuTrackerSchema>;
+export type PromoFreeSkuTracker = typeof promoFreeSkuTracker.$inferSelect;
 
 export type InsertShipstationExportHistory = z.infer<typeof insertShipstationExportHistorySchema>;
 export type ShipstationExportHistory = typeof shipstationExportHistory.$inferSelect;

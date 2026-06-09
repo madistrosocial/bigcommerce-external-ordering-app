@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker } from "@shared/schema";
 import { eq, desc, and, inArray, gt, asc } from "drizzle-orm";
 
 export interface IStorage {
@@ -77,6 +77,14 @@ export interface IStorage {
   createShipstationExportHistory(entry: InsertShipstationExportHistory): Promise<ShipstationExportHistory>;
   getShipstationExportHistory(limit?: number): Promise<ShipstationExportHistory[]>;
   getShipstationExportHistoryById(id: number): Promise<ShipstationExportHistory | undefined>;
+
+  // Promo SKU tracker
+  getAllPromoSkus(): Promise<PromoFreeSkuTracker[]>;
+  getPromoSkuById(id: number): Promise<PromoFreeSkuTracker | undefined>;
+  getPromoSkuBySku(sku: string): Promise<PromoFreeSkuTracker | undefined>;
+  createPromoSku(entry: InsertPromoFreeSkuTracker): Promise<PromoFreeSkuTracker>;
+  updatePromoSku(id: number, data: Partial<InsertPromoFreeSkuTracker>): Promise<PromoFreeSkuTracker>;
+  deletePromoSku(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -398,6 +406,35 @@ export class DatabaseStorage implements IStorage {
   async getShipstationExportHistoryById(id: number): Promise<ShipstationExportHistory | undefined> {
     const result = await db.select().from(shipstationExportHistory).where(eq(shipstationExportHistory.id, id));
     return result[0];
+  }
+
+  // Promo SKU tracker
+  async getAllPromoSkus(): Promise<PromoFreeSkuTracker[]> {
+    return db.select().from(promoFreeSkuTracker).where(eq(promoFreeSkuTracker.is_active, true)).orderBy(asc(promoFreeSkuTracker.product_name));
+  }
+
+  async getPromoSkuById(id: number): Promise<PromoFreeSkuTracker | undefined> {
+    const result = await db.select().from(promoFreeSkuTracker).where(eq(promoFreeSkuTracker.id, id));
+    return result[0];
+  }
+
+  async getPromoSkuBySku(sku: string): Promise<PromoFreeSkuTracker | undefined> {
+    const result = await db.select().from(promoFreeSkuTracker).where(eq(promoFreeSkuTracker.sku, sku));
+    return result[0];
+  }
+
+  async createPromoSku(entry: InsertPromoFreeSkuTracker): Promise<PromoFreeSkuTracker> {
+    const result = await db.insert(promoFreeSkuTracker).values([entry]).returning();
+    return result[0];
+  }
+
+  async updatePromoSku(id: number, data: Partial<InsertPromoFreeSkuTracker>): Promise<PromoFreeSkuTracker> {
+    const result = await db.update(promoFreeSkuTracker).set({ ...data, updated_at: new Date() }).where(eq(promoFreeSkuTracker.id, id)).returning();
+    return result[0];
+  }
+
+  async deletePromoSku(id: number): Promise<void> {
+    await db.delete(promoFreeSkuTracker).where(eq(promoFreeSkuTracker.id, id));
   }
 }
 

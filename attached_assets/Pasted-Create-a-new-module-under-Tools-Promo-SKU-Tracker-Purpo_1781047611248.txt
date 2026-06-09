@@ -1,0 +1,237 @@
+Create a new module under:
+
+Tools
+└── Promo SKU Tracker
+
+Purpose:
+Monitor inventory levels of SKUs used as free promotional items in BigCommerce automations (Buy X Get Y Free, Free Gift With Purchase, etc.) so the team can proactively replace free gift SKUs before inventory runs out and promotions begin failing.
+
+Requirements:
+
+1. New Module
+
+Add a new page:
+
+Tools
+└── Promo SKU Tracker
+
+Visible to users with appropriate permissions.
+
+Use the existing app layout and design standards.
+
+---
+
+2. Monitored Promo SKU List
+
+Allow users to add a SKU to the monitored list.
+
+Input methods:
+
+* SKU
+
+When a SKU is added:
+
+* Validate it exists in BigCommerce
+* Retrieve product details
+* Save to database
+* Display immediately in the monitored list
+
+Users can:
+
+* Add monitored SKU
+* Remove monitored SKU
+* Edit monitored SKU settings
+
+---
+
+3. Inventory Monitoring Dashboard
+
+Display all monitored SKUs in a dashboard view.
+
+For each monitored SKU display:
+
+* SKU
+* Product Name
+* Variant Name (if applicable)
+* Current BigCommerce Inventory
+* Inventory Status
+* Last Inventory Refresh
+* Promo Note
+
+Example:
+
+SKU: GB-PULSE-BR
+Product: Geek Bar Pulse | Blue Razz
+Inventory: 8
+Status: LOW STOCK
+
+---
+
+4. Inventory Status Indicators
+
+Default thresholds:
+
+Red:
+Inventory <= 2
+
+Yellow:
+Inventory 3-5
+
+Green:
+Inventory > 5
+
+Display color-coded inventory cards.
+
+Allow thresholds to be configured 
+
+---
+
+5. Promo Notes
+
+Each monitored SKU should support a note field.
+
+Examples:
+
+"Buy 10 Geek Bars Get 1 Free"
+
+"Free Gift for Lost Mary Promo"
+
+"Summer Promotion"
+
+Display the note directly on the inventory card.
+
+Editable by authorized users.
+
+---
+
+6. Inventory Refresh
+
+Provide:
+
+Refresh Inventory button
+
+The system should pull current inventory directly from BigCommerce.
+
+Display:
+
+It should pull live inventory count from bigcommerce each time the page is loaded or reloaded
+
+---
+
+7. Sorting
+
+Default sorting:
+
+Lowest Inventory First
+
+Secondary sort:
+
+Product Name
+
+This ensures at-risk promo SKUs are always displayed first.
+
+---
+
+8. Search & Filter
+
+Add:
+
+Search by SKU
+Search by Product Name
+
+Filters:
+
+All
+Low Stock
+Warning
+Healthy
+
+---
+
+9. Database
+
+Create tables as needed.
+
+Suggested table:
+
+promo_free_sku_tracker
+
+Fields:
+
+id
+sku
+product_id
+variant_id
+product_name
+variant_name
+promo_note
+created_by
+created_at
+updated_at
+is_active
+
+Do not store inventory counts permanently.
+
+Always pull current inventory from BigCommerce when loading or refreshing.
+
+---
+
+10. Dashboard Summary
+
+Display summary cards:
+
+Total Monitored SKUs
+Low Stock SKUs
+Warning SKUs
+Healthy SKUs
+
+Example:
+
+Monitored: 15
+Low Stock: 2
+Warning: 4
+Healthy: 9
+
+---
+
+11. Permissions
+
+Follow existing permission system.
+
+Suggested permissions:
+
+View Promo SKU Tracker
+Manage Promo SKU Tracker
+
+---
+
+12. Future Ready Design
+
+Design the module so future enhancements can be added easily:
+
+* Inventory threshold configuration
+* Email alerts
+* Dashboard alerts
+* Scheduled notifications
+* Multiple promo categories
+* Inventory trend history
+
+Do not implement future enhancements now.
+
+---
+
+13. MVP Goal
+
+Primary goal:
+
+Provide a simple dashboard where users can pin free promotional SKUs and immediately see which free gift items are approaching low inventory so marketing and operations can update BigCommerce promotion automations before customers begin receiving promotions with unavailable free items.
+
+Focus on:
+
+* Monitored SKU list
+* Live BigCommerce inventory display
+* Low stock visibility
+* Promo notes
+* Inventory refresh
+
+Keep the implementation simple, fast, and operationally focused.
