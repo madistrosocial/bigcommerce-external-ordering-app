@@ -4186,19 +4186,6 @@ export async function registerRoutes(
     return Buffer.concat([...localParts, cdBuf, eocd]);
   }
 
-  // ─── CRM BC config helper ───────────────────────────────────────────────────
-  async function getCrmBcConfig() {
-    let storeHash = process.env.BC_STORE_HASH;
-    let token = process.env.BC_TOKEN;
-    const setting = await storage.getSetting("bigcommerce_config");
-    if (setting?.value) {
-      const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
-      storeHash = cfg.storeHash || storeHash;
-      token = cfg.token || token;
-    }
-    return { storeHash, token };
-  }
-
   // GET /api/crm/status
   app.get("/api/crm/status", requireAuth, async (_req, res) => {
     try {
@@ -4208,14 +4195,21 @@ export async function registerRoutes(
         storage.getSetting("crm_last_customer_sync"),
         storage.getSetting("crm_last_order_sync"),
       ]);
-      res.json({ customer_count, order_count, last_customer_sync: lastCustSync ?? null, last_order_sync: lastOrderSync ?? null });
+      res.json({ customer_count, order_count, last_customer_sync: lastCustSync?.value ?? null, last_order_sync: lastOrderSync?.value ?? null });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   // POST /api/crm/sync/customers
   app.post("/api/crm/sync/customers", requireAuth, async (_req, res) => {
     try {
-      const { storeHash, token } = await getCrmBcConfig();
+      const bcSetting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+      if (bcSetting?.value) {
+        const cfg = typeof bcSetting.value === "string" ? JSON.parse(bcSetting.value) : bcSetting.value;
+        storeHash = cfg.storeHash || storeHash;
+        token = cfg.token || token;
+      }
       if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
       let page = 1;
       let synced = 0;
@@ -4256,7 +4250,14 @@ export async function registerRoutes(
   // POST /api/crm/sync/orders
   app.post("/api/crm/sync/orders", requireAuth, async (_req, res) => {
     try {
-      const { storeHash, token } = await getCrmBcConfig();
+      const bcSetting2 = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH;
+      let token = process.env.BC_TOKEN;
+      if (bcSetting2?.value) {
+        const cfg = typeof bcSetting2.value === "string" ? JSON.parse(bcSetting2.value) : bcSetting2.value;
+        storeHash = cfg.storeHash || storeHash;
+        token = cfg.token || token;
+      }
       if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
       let page = 1;
       let synced = 0;
