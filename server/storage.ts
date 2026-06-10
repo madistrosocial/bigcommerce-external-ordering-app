@@ -1,6 +1,6 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker } from "@shared/schema";
-import { eq, desc, and, inArray, gt, asc } from "drizzle-orm";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep } from "@shared/schema";
+import { eq, desc, and, inArray, gt, asc, or, ilike, sql } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -85,6 +85,22 @@ export interface IStorage {
   createPromoSku(entry: InsertPromoFreeSkuTracker): Promise<PromoFreeSkuTracker>;
   updatePromoSku(id: number, data: Partial<InsertPromoFreeSkuTracker>): Promise<PromoFreeSkuTracker>;
   deletePromoSku(id: number): Promise<void>;
+
+  // CRM operations
+  getCrmCustomers(opts: { search?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }>;
+  getCrmCustomerById(id: number): Promise<(CrmCustomer & { sales_rep_name?: string | null }) | undefined>;
+  getCrmCustomerByBcId(bcId: number): Promise<CrmCustomer | undefined>;
+  upsertCrmCustomer(data: InsertCrmCustomer): Promise<CrmCustomer>;
+  getCrmCustomerCount(): Promise<number>;
+  getAllCrmCustomersForExport(opts: { search?: string; sortBy?: string; sortDir?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null })[]>;
+  getCrmOrdersByBcCustomerId(bcCustomerId: number, limit?: number): Promise<CrmOrder[]>;
+  upsertCrmOrder(data: InsertCrmOrder): Promise<CrmOrder>;
+  getCrmOrderCount(): Promise<number>;
+  updateCrmCustomerStats(bcCustomerId: number, stats: { lifetime_orders: number; lifetime_revenue: string; last_order_date: Date | null }): Promise<void>;
+  recalculateCrmCustomerStats(): Promise<number>;
+  getCrmSalesRep(customerId: number): Promise<CrmSalesRep | undefined>;
+  setCrmSalesRep(data: InsertCrmSalesRep): Promise<CrmSalesRep>;
+  removeCrmSalesRep(customerId: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -435,6 +451,185 @@ export class DatabaseStorage implements IStorage {
 
   async deletePromoSku(id: number): Promise<void> {
     await db.delete(promoFreeSkuTracker).where(eq(promoFreeSkuTracker.id, id));
+  }
+
+  // ─── CRM operations ──────────────────────────────────────────────────────────
+
+  private buildCrmWhereClause(search?: string) {
+    if (!search || !search.trim()) return undefined;
+    const s = `%${search.trim()}%`;
+    return or(
+      ilike(customersMirror.company, s),
+      ilike(customersMirror.first_name, s),
+      ilike(customersMirror.last_name, s),
+      ilike(customersMirror.email, s),
+      ilike(customersMirror.phone, s),
+    );
+  }
+
+  private buildCrmOrderBy(sortBy?: string, sortDir?: string) {
+    const dir = sortDir === "asc" ? asc : desc;
+    switch (sortBy) {
+      case "lifetime_revenue": return dir(customersMirror.lifetime_revenue);
+      case "lifetime_orders": return dir(customersMirror.lifetime_orders);
+      case "days_since_order":
+        return sortDir === "asc"
+          ? sql`${customersMirror.last_order_date} DESC NULLS LAST`
+          : sql`${customersMirror.last_order_date} ASC NULLS LAST`;
+      default:
+        return sortDir === "asc"
+          ? sql`${customersMirror.last_order_date} ASC NULLS LAST`
+          : sql`${customersMirror.last_order_date} DESC NULLS LAST`;
+    }
+  }
+
+  async getCrmCustomers(opts: { search?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }> {
+    const { search, sortBy = "last_order_date", sortDir = "desc", limit = 50, offset = 0 } = opts;
+    const where = this.buildCrmWhereClause(search);
+    const orderExpr = this.buildCrmOrderBy(sortBy, sortDir);
+    const countRows = await db.select({ count: sql<number>`count(*)::int` }).from(customersMirror).where(where);
+    const total = countRows[0]?.count ?? 0;
+    const rows = await db.select({ c: customersMirror, rep_name: users.name })
+      .from(customersMirror)
+      .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+      .leftJoin(users, eq(users.id, customerSalesRep.assigned_user_id))
+      .where(where)
+      .orderBy(orderExpr as any)
+      .limit(limit)
+      .offset(offset);
+    return { customers: rows.map(r => ({ ...r.c, sales_rep_name: r.rep_name ?? null })), total };
+  }
+
+  async getCrmCustomerById(id: number): Promise<(CrmCustomer & { sales_rep_name?: string | null }) | undefined> {
+    const rows = await db.select({ c: customersMirror, rep_name: users.name })
+      .from(customersMirror)
+      .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+      .leftJoin(users, eq(users.id, customerSalesRep.assigned_user_id))
+      .where(eq(customersMirror.id, id));
+    if (!rows[0]) return undefined;
+    return { ...rows[0].c, sales_rep_name: rows[0].rep_name ?? null };
+  }
+
+  async getCrmCustomerByBcId(bcId: number): Promise<CrmCustomer | undefined> {
+    const result = await db.select().from(customersMirror).where(eq(customersMirror.bigcommerce_customer_id, bcId));
+    return result[0];
+  }
+
+  async upsertCrmCustomer(data: InsertCrmCustomer): Promise<CrmCustomer> {
+    const result = await db.insert(customersMirror).values(data)
+      .onConflictDoUpdate({
+        target: customersMirror.bigcommerce_customer_id,
+        set: {
+          company: data.company,
+          first_name: data.first_name,
+          last_name: data.last_name,
+          email: data.email,
+          phone: data.phone,
+          customer_group_id: data.customer_group_id,
+          customer_group_name: data.customer_group_name,
+          billing_address: data.billing_address,
+          shipping_address: data.shipping_address,
+          created_date: data.created_date,
+          is_active: data.is_active,
+          updated_at: new Date(),
+        },
+      }).returning();
+    return result[0];
+  }
+
+  async getCrmCustomerCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)::int` }).from(customersMirror);
+    return result[0]?.count ?? 0;
+  }
+
+  async getAllCrmCustomersForExport(opts: { search?: string; sortBy?: string; sortDir?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null })[]> {
+    const { search, sortBy = "last_order_date", sortDir = "desc" } = opts;
+    const where = this.buildCrmWhereClause(search);
+    const orderExpr = this.buildCrmOrderBy(sortBy, sortDir);
+    const rows = await db.select({ c: customersMirror, rep_name: users.name })
+      .from(customersMirror)
+      .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+      .leftJoin(users, eq(users.id, customerSalesRep.assigned_user_id))
+      .where(where)
+      .orderBy(orderExpr as any);
+    return rows.map(r => ({ ...r.c, sales_rep_name: r.rep_name ?? null }));
+  }
+
+  async getCrmOrdersByBcCustomerId(bcCustomerId: number, limit = 20): Promise<CrmOrder[]> {
+    return db.select().from(customerOrdersMirror)
+      .where(eq(customerOrdersMirror.bigcommerce_customer_id, bcCustomerId))
+      .orderBy(sql`${customerOrdersMirror.order_date} DESC NULLS LAST`)
+      .limit(limit);
+  }
+
+  async upsertCrmOrder(data: InsertCrmOrder): Promise<CrmOrder> {
+    const result = await db.insert(customerOrdersMirror).values(data)
+      .onConflictDoUpdate({
+        target: customerOrdersMirror.bigcommerce_order_id,
+        set: {
+          bigcommerce_customer_id: data.bigcommerce_customer_id,
+          order_number: data.order_number,
+          order_date: data.order_date,
+          order_total: data.order_total,
+          status: data.status,
+          payment_status: data.payment_status,
+          customer_name: data.customer_name,
+          customer_email: data.customer_email,
+          updated_at: new Date(),
+        },
+      }).returning();
+    return result[0];
+  }
+
+  async getCrmOrderCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)::int` }).from(customerOrdersMirror);
+    return result[0]?.count ?? 0;
+  }
+
+  async updateCrmCustomerStats(bcCustomerId: number, stats: { lifetime_orders: number; lifetime_revenue: string; last_order_date: Date | null }): Promise<void> {
+    await db.update(customersMirror).set({
+      lifetime_orders: stats.lifetime_orders,
+      lifetime_revenue: stats.lifetime_revenue,
+      last_order_date: stats.last_order_date,
+      updated_at: new Date(),
+    }).where(eq(customersMirror.bigcommerce_customer_id, bcCustomerId));
+  }
+
+  async getCrmSalesRep(customerId: number): Promise<CrmSalesRep | undefined> {
+    const result = await db.select().from(customerSalesRep).where(eq(customerSalesRep.customer_id, customerId));
+    return result[0];
+  }
+
+  async setCrmSalesRep(data: InsertCrmSalesRep): Promise<CrmSalesRep> {
+    await db.delete(customerSalesRep).where(eq(customerSalesRep.customer_id, data.customer_id));
+    const result = await db.insert(customerSalesRep).values(data).returning();
+    return result[0];
+  }
+
+  async removeCrmSalesRep(customerId: number): Promise<void> {
+    await db.delete(customerSalesRep).where(eq(customerSalesRep.customer_id, customerId));
+  }
+
+  async recalculateCrmCustomerStats(): Promise<number> {
+    const result = await db.execute(sql`
+      UPDATE customers_mirror cm
+      SET
+        lifetime_orders = COALESCE(agg.order_count, 0),
+        lifetime_revenue = COALESCE(agg.total_revenue, '0'),
+        last_order_date = agg.last_date,
+        updated_at = NOW()
+      FROM (
+        SELECT
+          bigcommerce_customer_id,
+          COUNT(*)::int AS order_count,
+          COALESCE(SUM(order_total::numeric), 0)::text AS total_revenue,
+          MAX(order_date) AS last_date
+        FROM customer_orders_mirror
+        GROUP BY bigcommerce_customer_id
+      ) agg
+      WHERE cm.bigcommerce_customer_id = agg.bigcommerce_customer_id
+    `);
+    return (result as any).rowCount ?? 0;
   }
 }
 

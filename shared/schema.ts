@@ -148,6 +148,52 @@ export const shipstationExportHistory = pgTable("shipstation_export_history", {
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── CRM ──────────────────────────────────────────────────────────────────────
+
+export const customersMirror = pgTable("customers_mirror", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  bigcommerce_customer_id: integer("bigcommerce_customer_id").notNull().unique(),
+  company: text("company"),
+  first_name: text("first_name").notNull().default(""),
+  last_name: text("last_name").notNull().default(""),
+  email: text("email").notNull().default(""),
+  phone: text("phone"),
+  customer_group_id: integer("customer_group_id"),
+  customer_group_name: text("customer_group_name"),
+  billing_address: jsonb("billing_address"),
+  shipping_address: jsonb("shipping_address"),
+  created_date: timestamp("created_date"),
+  last_order_date: timestamp("last_order_date"),
+  lifetime_orders: integer("lifetime_orders").notNull().default(0),
+  lifetime_revenue: decimal("lifetime_revenue", { precision: 14, scale: 2 }).notNull().default("0"),
+  is_active: boolean("is_active").notNull().default(true),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const customerOrdersMirror = pgTable("customer_orders_mirror", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  bigcommerce_order_id: integer("bigcommerce_order_id").notNull().unique(),
+  bigcommerce_customer_id: integer("bigcommerce_customer_id").notNull(),
+  order_number: integer("order_number"),
+  order_date: timestamp("order_date"),
+  order_total: decimal("order_total", { precision: 14, scale: 2 }).notNull().default("0"),
+  status: text("status"),
+  payment_status: text("payment_status"),
+  customer_name: text("customer_name"),
+  customer_email: text("customer_email"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const customerSalesRep = pgTable("customer_sales_rep", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  assigned_user_id: integer("assigned_user_id").notNull().references(() => users.id),
+  assigned_at: timestamp("assigned_at").notNull().defaultNow(),
+  assigned_by: integer("assigned_by"),
+});
+
 // Insert schemas — RBAC
 export const insertRoleSchema = createInsertSchema(roles).omit({ id: true, created_at: true });
 export const insertPermissionSchema = createInsertSchema(permissions).omit({ id: true });
@@ -163,6 +209,11 @@ export const insertInventoryPushLogSchema = createInsertSchema(inventoryPushLogs
 export const insertProductLinkLogSchema = createInsertSchema(productLinkLogs).omit({ id: true, created_at: true });
 export const insertPromoFreeSkuTrackerSchema = createInsertSchema(promoFreeSkuTracker).omit({ id: true, created_at: true, updated_at: true });
 export const insertShipstationExportHistorySchema = createInsertSchema(shipstationExportHistory).omit({ id: true, created_at: true, export_date: true });
+
+// Insert schemas — CRM
+export const insertCrmCustomerSchema = createInsertSchema(customersMirror).omit({ id: true, created_at: true, updated_at: true });
+export const insertCrmOrderSchema = createInsertSchema(customerOrdersMirror).omit({ id: true, created_at: true, updated_at: true });
+export const insertCrmSalesRepSchema = createInsertSchema(customerSalesRep).omit({ id: true, assigned_at: true });
 
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -188,6 +239,14 @@ export type PromoFreeSkuTracker = typeof promoFreeSkuTracker.$inferSelect;
 
 export type InsertShipstationExportHistory = z.infer<typeof insertShipstationExportHistorySchema>;
 export type ShipstationExportHistory = typeof shipstationExportHistory.$inferSelect;
+
+// CRM types
+export type InsertCrmCustomer = z.infer<typeof insertCrmCustomerSchema>;
+export type CrmCustomer = typeof customersMirror.$inferSelect;
+export type InsertCrmOrder = z.infer<typeof insertCrmOrderSchema>;
+export type CrmOrder = typeof customerOrdersMirror.$inferSelect;
+export type InsertCrmSalesRep = z.infer<typeof insertCrmSalesRepSchema>;
+export type CrmSalesRep = typeof customerSalesRep.$inferSelect;
 
 // RBAC types
 export type InsertRole = z.infer<typeof insertRoleSchema>;

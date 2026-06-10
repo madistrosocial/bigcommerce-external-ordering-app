@@ -1,0 +1,374 @@
+Create Phase 1 of the Customer CRM.
+
+IMPORTANT:
+This phase is ONLY for building the Customer Mirror, Order Mirror, Customer Profile foundation, and Customer Export functionality.
+
+Do NOT build:
+- Customer Timeline
+- Store Credits
+- Claims Tracking
+- Customer Intelligence
+- Pricing Intelligence
+- Zoho Sync
+- Commission Tracking
+
+Those will be implemented in later phases.
+
+====================================
+PHASE 1 GOAL
+====================================
+
+Create a Customer CRM foundation that mirrors BigCommerce customers and orders into the app database so future CRM features can be built without repeatedly querying BigCommerce.
+
+This should become the central customer record for future CRM development.
+
+====================================
+DATABASE
+====================================
+
+Create tables as needed.
+
+Suggested tables:
+
+customers_mirror
+
+Fields:
+
+id
+bigcommerce_customer_id
+company
+first_name
+last_name
+email
+phone
+customer_group_id
+customer_group_name
+billing_address
+shipping_address
+created_date
+last_order_date
+lifetime_orders
+lifetime_revenue
+is_active
+created_at
+updated_at
+
+------------------------------------
+
+customer_orders_mirror
+
+Fields:
+
+id
+bigcommerce_order_id
+bigcommerce_customer_id
+order_number
+order_date
+order_total
+status
+payment_status
+customer_name
+customer_email
+created_at
+updated_at
+
+------------------------------------
+
+customer_sales_rep
+
+Fields:
+
+id
+customer_id
+assigned_user_id
+assigned_at
+assigned_by
+
+NOTE:
+
+Assigned sales rep functionality will be expanded later.
+
+For now only create the structure.
+
+====================================
+BIGCOMMERCE SYNC
+====================================
+
+Create Customer CRM sync process.
+
+Add admin controls under:
+
+Admin
+└── CRM Settings
+
+Functions:
+
+Sync Customers
+Sync Orders
+
+Buttons:
+
+- Sync Customers Now
+- Sync Orders Now
+
+Display:
+
+- Last Customer Sync
+- Last Order Sync
+- Customer Count
+- Order Count
+
+Initial implementation can be manual.
+
+Future automation will be added later.
+
+====================================
+CRM MODULE
+====================================
+
+Create:
+
+CRM
+└── Customers
+
+This should become the foundation of all future customer management functionality.
+
+====================================
+CUSTOMER LIST PAGE
+====================================
+
+Table View
+
+Columns:
+
+Company
+Customer Name
+Email
+Phone
+Last Order Date
+Days Since Last Order
+Lifetime Orders
+Lifetime Revenue
+Assigned Sales Rep
+
+Features:
+
+Search:
+
+- Company
+- Customer Name
+- Email
+- Phone
+
+Sorting:
+
+- Last Order Date
+- Lifetime Revenue
+- Lifetime Orders
+- Days Since Last Order
+
+Default Sort:
+
+Last Order Date Descending
+
+Most recently ordering customers first.
+
+====================================
+CUSTOMER PROFILE PAGE
+====================================
+
+Create:
+
+CRM
+└── Customers
+    └── Customer Profile
+
+Header Section:
+
+Company Name
+Customer Name
+Email
+Phone
+Assigned Sales Rep
+BigCommerce Customer ID
+
+------------------------------------
+
+Customer Summary Cards
+
+Lifetime Revenue
+Lifetime Orders
+Average Order Value
+Last Order Date
+
+------------------------------------
+
+Recent Orders Section
+
+Display last 20 orders
+
+Columns:
+
+Order Number
+Order Date
+Status
+Order Total
+
+Order Number should link to existing order view if available.
+
+====================================
+CUSTOMER SEARCH
+====================================
+
+Global search within CRM.
+
+Allow search by:
+
+Company
+Customer Name
+Email
+Phone
+
+Must use local mirrored database.
+
+Do not call BigCommerce during searches.
+
+====================================
+CUSTOMER EXPORTS
+====================================
+
+Purpose:
+
+Allow management and sales teams to manually analyze customers while Customer Intelligence features are still being developed.
+
+Add export functionality directly to the Customer List page.
+
+Export Formats:
+
+- Excel (.xlsx)
+- CSV
+
+Export should respect:
+
+- Current search filters
+- Current sorting
+- Current date filters
+
+------------------------------------
+
+Customer Export Columns
+
+Company Name
+Customer Name
+Email
+Phone
+Assigned Sales Rep
+Last Order Date
+Days Since Last Order
+Lifetime Orders
+Lifetime Revenue
+
+------------------------------------
+
+Export Controls
+
+Buttons:
+
+Export CSV
+Export Excel
+
+Place above the Customer List table.
+
+------------------------------------
+
+Performance
+
+Exports must use local mirrored customer/order tables.
+
+Do not query BigCommerce during exports.
+
+------------------------------------
+
+Future Ready
+
+Design exports so future columns can easily be added:
+
+- Account Health
+- RouteIQ Visit Status
+- Open Store Credits
+- Open Claims
+- Customer Notes Count
+- Lifetime Margin
+- Sales Rep Performance Metrics
+
+Do not implement future columns now.
+
+====================================
+PERMISSIONS
+====================================
+
+Integrate with existing permissions system.
+
+Create permissions:
+
+View Customers
+Manage Customers
+Sync CRM Data
+
+====================================
+PERFORMANCE
+====================================
+
+IMPORTANT
+
+The purpose of this phase is to reduce dependence on BigCommerce API calls.
+
+Customer listing pages must read from local mirrored tables.
+
+Customer profile pages must read from local mirrored tables.
+
+Customer exports must read from local mirrored tables.
+
+BigCommerce should only be called during sync operations.
+
+====================================
+FUTURE READY
+====================================
+
+Design database and UI so future phases can easily add:
+
+- Customer Timeline
+- Store Credits
+- Claims Tracking
+- Notes
+- Customer Intelligence
+- Pricing Intelligence
+- Zoho CRM Sync
+- RouteIQ Integration
+- Commission Tracking
+
+Do NOT implement those features now.
+
+Only build the foundation.
+
+====================================
+SUCCESS CRITERIA
+====================================
+
+At completion:
+
+- Customer records are mirrored locally
+- Orders are mirrored locally
+- Customer search is local
+- Customer profile page exists
+- Lifetime revenue is calculated
+- Lifetime orders are calculated
+- Days since last order is calculated
+- Recent orders are visible
+- CRM permissions exist
+- Manual sync controls exist
+- Customer exports work
+- Exports support CSV and Excel
+- Exports use local mirrored data only
+
+Keep this phase focused on building the CRM foundation only.

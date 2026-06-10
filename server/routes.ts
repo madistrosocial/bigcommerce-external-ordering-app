@@ -4127,5 +4127,251 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CRM — Customer Mirror Routes
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ─── Minimal XLSX generator (ZIP/OOXML, no external deps) ──────────────────
+  function crmCrc32(buf: Buffer): number {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) { let c = i; for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[i] = c; }
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < buf.length; i++) crc = t[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  function buildXlsx(headers: string[], rows: string[][]): Buffer {
+    const xe = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const colLetter = (i: number) => i < 26 ? String.fromCharCode(65 + i) : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + (i % 26));
+    const allRows = [headers, ...rows];
+    const rowsXml = allRows.map((row, ri) =>
+      `<row r="${ri + 1}">${row.map((cell, ci) => `<c r="${colLetter(ci)}${ri + 1}" t="inlineStr"><is><t>${xe(cell)}</t></is></c>`).join("")}</row>`
+    ).join("");
+    const sheetXml = `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rowsXml}</sheetData></worksheet>`;
+    const files = new Map<string, string>([
+      ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`],
+      ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+      ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Customers" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+      ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`],
+      ["xl/worksheets/sheet1.xml", sheetXml],
+    ]);
+    const localParts: Buffer[] = [];
+    const centralParts: Buffer[] = [];
+    let offset = 0;
+    let count = 0;
+    for (const [name, content] of files) {
+      const nb = Buffer.from(name, "utf8");
+      const db2 = Buffer.from(content, "utf8");
+      const crc = crmCrc32(db2);
+      const lh = Buffer.allocUnsafe(30 + nb.length);
+      lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0, 6); lh.writeUInt16LE(0, 8);
+      lh.writeUInt16LE(0, 10); lh.writeUInt16LE(0, 12); lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(db2.length, 18);
+      lh.writeUInt32LE(db2.length, 22); lh.writeUInt16LE(nb.length, 26); lh.writeUInt16LE(0, 28); nb.copy(lh, 30);
+      localParts.push(lh, db2);
+      const cd = Buffer.allocUnsafe(46 + nb.length);
+      cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(0, 8);
+      cd.writeUInt16LE(0, 10); cd.writeUInt16LE(0, 12); cd.writeUInt16LE(0, 14); cd.writeUInt32LE(crc, 16);
+      cd.writeUInt32LE(db2.length, 20); cd.writeUInt32LE(db2.length, 24); cd.writeUInt16LE(nb.length, 28);
+      cd.writeUInt16LE(0, 30); cd.writeUInt16LE(0, 32); cd.writeUInt16LE(0, 34); cd.writeUInt16LE(0, 36);
+      cd.writeUInt32LE(0, 38); cd.writeUInt32LE(offset, 42); nb.copy(cd, 46);
+      centralParts.push(cd);
+      offset += 30 + nb.length + db2.length;
+      count++;
+    }
+    const cdBuf = Buffer.concat(centralParts);
+    const eocd = Buffer.allocUnsafe(22);
+    eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(0, 4); eocd.writeUInt16LE(0, 6);
+    eocd.writeUInt16LE(count, 8); eocd.writeUInt16LE(count, 10);
+    eocd.writeUInt32LE(cdBuf.length, 12); eocd.writeUInt32LE(offset, 16); eocd.writeUInt16LE(0, 20);
+    return Buffer.concat([...localParts, cdBuf, eocd]);
+  }
+
+  // ─── CRM BC config helper ───────────────────────────────────────────────────
+  async function getCrmBcConfig() {
+    let storeHash = process.env.BC_STORE_HASH;
+    let token = process.env.BC_TOKEN;
+    const cfg = await storage.getSetting("bigcommerce_config");
+    if (cfg?.storeHash) storeHash = cfg.storeHash;
+    if (cfg?.token) token = cfg.token;
+    return { storeHash, token };
+  }
+
+  // GET /api/crm/status
+  app.get("/api/crm/status", requireAuth, async (_req, res) => {
+    try {
+      const [customer_count, order_count, lastCustSync, lastOrderSync] = await Promise.all([
+        storage.getCrmCustomerCount(),
+        storage.getCrmOrderCount(),
+        storage.getSetting("crm_last_customer_sync"),
+        storage.getSetting("crm_last_order_sync"),
+      ]);
+      res.json({ customer_count, order_count, last_customer_sync: lastCustSync ?? null, last_order_sync: lastOrderSync ?? null });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/crm/sync/customers
+  app.post("/api/crm/sync/customers", requireAuth, async (_req, res) => {
+    try {
+      const { storeHash, token } = await getCrmBcConfig();
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
+      let page = 1;
+      let synced = 0;
+      while (true) {
+        const url = `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?include=addresses&limit=250&page=${page}`;
+        const r = await fetch(url, { headers: { "X-Auth-Token": String(token), Accept: "application/json" } });
+        if (!r.ok) break;
+        const json = await r.json();
+        const bcCustomers: any[] = json.data ?? [];
+        if (bcCustomers.length === 0) break;
+        for (const bc of bcCustomers) {
+          const billing = bc.addresses?.find((a: any) => a.address_type === "commercial") ?? bc.addresses?.[0] ?? null;
+          const shipping = bc.addresses?.find((a: any) => a.address_type === "residential") ?? null;
+          await storage.upsertCrmCustomer({
+            bigcommerce_customer_id: bc.id,
+            company: bc.company || null,
+            first_name: bc.first_name || "",
+            last_name: bc.last_name || "",
+            email: bc.email || "",
+            phone: bc.phone || null,
+            customer_group_id: bc.customer_group_id || null,
+            customer_group_name: null,
+            billing_address: billing ? { street1: billing.address1, street2: billing.address2, city: billing.city, state: billing.state_or_province, zip: billing.postal_code, country: billing.country } : null,
+            shipping_address: shipping ? { street1: shipping.address1, street2: shipping.address2, city: shipping.city, state: shipping.state_or_province, zip: shipping.postal_code, country: shipping.country } : null,
+            created_date: bc.date_created ? new Date(bc.date_created) : null,
+            is_active: true,
+          });
+          synced++;
+        }
+        if (bcCustomers.length < 250) break;
+        page++;
+      }
+      await storage.setSetting("crm_last_customer_sync", new Date().toISOString());
+      res.json({ success: true, synced });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/crm/sync/orders
+  app.post("/api/crm/sync/orders", requireAuth, async (_req, res) => {
+    try {
+      const { storeHash, token } = await getCrmBcConfig();
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
+      let page = 1;
+      let synced = 0;
+      while (true) {
+        const url = `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?limit=250&page=${page}&sort=id:desc`;
+        const r = await fetch(url, { headers: { "X-Auth-Token": String(token), Accept: "application/json" } });
+        if (!r.ok || r.status === 204) break;
+        const bcOrders: any[] = await r.json();
+        if (!Array.isArray(bcOrders) || bcOrders.length === 0) break;
+        for (const o of bcOrders) {
+          if (!o.customer_id || o.customer_id === 0) continue;
+          const customerName = [o.billing_address?.first_name, o.billing_address?.last_name].filter(Boolean).join(" ");
+          await storage.upsertCrmOrder({
+            bigcommerce_order_id: o.id,
+            bigcommerce_customer_id: o.customer_id,
+            order_number: o.id,
+            order_date: o.date_created ? new Date(o.date_created) : null,
+            order_total: String(o.total_inc_tax || "0"),
+            status: o.status || null,
+            payment_status: o.payment_status || null,
+            customer_name: customerName || null,
+            customer_email: o.billing_address?.email || null,
+          });
+          synced++;
+        }
+        if (bcOrders.length < 250) break;
+        page++;
+      }
+      await storage.recalculateCrmCustomerStats();
+      await storage.setSetting("crm_last_order_sync", new Date().toISOString());
+      res.json({ success: true, synced });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/customers/export — registered BEFORE /:id to avoid route conflict
+  app.get("/api/crm/customers/export", requireAuth, async (req, res) => {
+    try {
+      const { search = "", sortBy = "last_order_date", sortDir = "desc", format = "csv" } = req.query as any;
+      const customers = await storage.getAllCrmCustomersForExport({ search, sortBy, sortDir });
+      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "Customer Group", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Sales Rep"];
+      const rows = customers.map(c => [
+        String(c.bigcommerce_customer_id),
+        c.company ?? "",
+        c.first_name,
+        c.last_name,
+        c.email,
+        c.phone ?? "",
+        c.customer_group_name ?? "",
+        c.last_order_date ? new Date(c.last_order_date).toISOString().split("T")[0] : "",
+        String(c.lifetime_orders ?? 0),
+        String(c.lifetime_revenue ?? "0"),
+        (c as any).sales_rep_name ?? "",
+      ]);
+      const dateSuffix = new Date().toISOString().split("T")[0];
+      if (String(format) === "xlsx") {
+        const buf = buildXlsx(headers, rows);
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition", `attachment; filename="crm-customers-${dateSuffix}.xlsx"`);
+        return res.send(buf);
+      }
+      const esc = (s: string) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+      const csv = [headers, ...rows].map(r => r.map(esc).join(",")).join("\r\n");
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="crm-customers-${dateSuffix}.csv"`);
+      res.send(csv);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/customers
+  app.get("/api/crm/customers", requireAuth, async (req, res) => {
+    try {
+      const { search = "", sortBy = "last_order_date", sortDir = "desc" } = req.query as any;
+      const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
+      const offset = parseInt(String(req.query.offset ?? "0"));
+      const result = await storage.getCrmCustomers({ search, sortBy, sortDir, limit, offset });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/customers/:id
+  app.get("/api/crm/customers/:id", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const customer = await storage.getCrmCustomerById(id);
+      if (!customer) return res.status(404).json({ error: "Customer not found" });
+      res.json(customer);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/customers/:id/orders
+  app.get("/api/crm/customers/:id/orders", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const customer = await storage.getCrmCustomerById(id);
+      if (!customer) return res.status(404).json({ error: "Customer not found" });
+      const orders = await storage.getCrmOrdersByBcCustomerId(customer.bigcommerce_customer_id, 20);
+      res.json(orders);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/crm/customers/:id/sales-rep
+  app.put("/api/crm/customers/:id/sales-rep", requireAuth, async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.id);
+      const { assigned_user_id } = req.body;
+      if (!assigned_user_id) return res.status(400).json({ error: "assigned_user_id required" });
+      const rep = await storage.setCrmSalesRep({ customer_id: customerId, assigned_user_id: parseInt(assigned_user_id), assigned_by: (req as any).userId ?? null });
+      res.json(rep);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/crm/customers/:id/sales-rep
+  app.delete("/api/crm/customers/:id/sales-rep", requireAuth, async (req, res) => {
+    try {
+      await storage.removeCrmSalesRep(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   return httpServer;
 }

@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Monitor, ShoppingBag, Package, BookOpen,
   ShoppingCart, Settings, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, LogOut, Truck, Wifi, WifiOff, Menu, X,
-  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship,
+  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -141,6 +141,11 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("promo_sku_tracker") ? [{ label: "Promo SKU Tracker", path: "/tools/promo-sku-tracker" }] : []),
   ];
 
+  // CRM children
+  const crmChildren: NavLeaf[] = [
+    ...(hasPermission("crm_customers") ? [{ label: "Customers", path: "/crm/customers" }] : []),
+  ];
+
   // Build final nav list — only include items the user can access
   const navItems: NavGroup[] = [
     ...(hasPermission("dashboard") ? [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" }] : []),
@@ -151,6 +156,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("catalog") ? [{ id: "catalog", label: "Catalog", icon: BookOpen, path: "/catalog" }] : []),
     ...(hasPermission("cart") ? [{ id: "cart", label: "Cart", icon: ShoppingCart, path: "/cart" }] : []),
     ...(toolsChildren.length > 0 ? [{ id: "tools", label: "Tools", icon: Wrench, children: toolsChildren }] : []),
+    ...(crmChildren.length > 0 ? [{ id: "crm", label: "CRM", icon: ContactRound, children: crmChildren }] : []),
   ];
 
   // Settings section: system admins always; agents with admin:view permission
@@ -165,6 +171,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     { label: "Price Tiers", path: "/admin/price-tiers", icon: Layers },
     { label: "Invoice Settings", path: "/admin/invoice", icon: Receipt },
     { label: "ShipStation Export", path: "/admin/shipstation", icon: Ship },
+    { label: "CRM Settings", path: "/admin/crm", icon: ContactRound },
   ];
 
   function isActive(path: string) { return location === path; }

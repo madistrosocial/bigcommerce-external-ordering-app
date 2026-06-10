@@ -33,6 +33,9 @@ import BCProductLinkLogs from "@/pages/tools/BCProductLinkLogs";
 import PromoSkuTracker from "@/pages/tools/PromoSkuTracker";
 import InvoicePrintPage from "@/pages/InvoicePrintPage";
 import ShipStationExportPage from "@/pages/admin/ShipStationExport";
+import CRMSettings from "@/pages/admin/CRMSettings";
+import CRMCustomers from "@/pages/crm/Customers";
+import CustomerProfile from "@/pages/crm/CustomerProfile";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -168,6 +171,17 @@ function Router() {
       </Route>
       <Route path="/tools/promo-sku-tracker">
         {() => <ProtectedRoute component={PromoSkuTracker} />}
+      </Route>
+
+      {/* ── CRM routes ── */}
+      <Route path="/crm/customers">
+        {() => <ProtectedRoute component={CRMCustomers} />}
+      </Route>
+      <Route path="/crm/customers/:id">
+        {() => <ProtectedRoute component={CustomerProfile} />}
+      </Route>
+      <Route path="/admin/crm">
+        {() => <ProtectedRoute component={CRMSettings} role="admin" />}
       </Route>
 
       <Route component={NotFound} />
