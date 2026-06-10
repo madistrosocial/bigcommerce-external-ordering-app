@@ -611,25 +611,31 @@ export class DatabaseStorage implements IStorage {
   }
 
   async recalculateCrmCustomerStats(): Promise<number> {
-    const result = await db.execute(sql`
-      UPDATE customers_mirror cm
-      SET
-        lifetime_orders = COALESCE(agg.order_count, 0),
-        lifetime_revenue = COALESCE(agg.total_revenue, '0'),
-        last_order_date = agg.last_date,
-        updated_at = NOW()
-      FROM (
-        SELECT
-          bigcommerce_customer_id,
-          COUNT(*)::int AS order_count,
-          COALESCE(SUM(order_total::numeric), 0)::text AS total_revenue,
-          MAX(order_date) AS last_date
-        FROM customer_orders_mirror
-        GROUP BY bigcommerce_customer_id
-      ) agg
-      WHERE cm.bigcommerce_customer_id = agg.bigcommerce_customer_id
-    `);
-    return (result as any).rowCount ?? 0;
+    // Aggregate per-customer stats from the orders mirror
+    const agg = await db
+      .select({
+        bigcommerce_customer_id: customerOrdersMirror.bigcommerce_customer_id,
+        order_count: sql<number>`count(*)::int`,
+        total_revenue: sql<string>`coalesce(sum(${customerOrdersMirror.order_total}), 0)`,
+        last_date: sql<Date | null>`max(${customerOrdersMirror.order_date})`,
+      })
+      .from(customerOrdersMirror)
+      .groupBy(customerOrdersMirror.bigcommerce_customer_id);
+
+    let updated = 0;
+    for (const row of agg) {
+      await db
+        .update(customersMirror)
+        .set({
+          lifetime_orders: row.order_count,
+          lifetime_revenue: row.total_revenue,
+          last_order_date: row.last_date,
+          updated_at: new Date(),
+        })
+        .where(eq(customersMirror.bigcommerce_customer_id, row.bigcommerce_customer_id));
+      updated++;
+    }
+    return updated;
   }
 }
 

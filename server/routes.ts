@@ -4211,6 +4211,15 @@ export async function registerRoutes(
         token = cfg.token || token;
       }
       if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
+
+      // Prefetch all customer groups for name resolution
+      const cgRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customer_groups?limit=200`, {
+        headers: { "X-Auth-Token": String(token), Accept: "application/json" },
+      });
+      const cgData: any[] = cgRes.ok ? await cgRes.json() : [];
+      const groupNameMap: Record<number, string> = {};
+      for (const g of cgData) groupNameMap[g.id] = g.name;
+
       let page = 1;
       let synced = 0;
       while (true) {
@@ -4231,7 +4240,7 @@ export async function registerRoutes(
             email: bc.email || "",
             phone: bc.phone || null,
             customer_group_id: bc.customer_group_id || null,
-            customer_group_name: null,
+            customer_group_name: groupNameMap[bc.customer_group_id] ?? null,
             billing_address: billing ? { street1: billing.address1, street2: billing.address2, city: billing.city, state: billing.state_or_province, zip: billing.postal_code, country: billing.country } : null,
             shipping_address: shipping ? { street1: shipping.address1, street2: shipping.address2, city: shipping.city, state: shipping.state_or_province, zip: shipping.postal_code, country: shipping.country } : null,
             created_date: bc.date_created ? new Date(bc.date_created) : null,

@@ -4,26 +4,27 @@ import { getAuthHeaders } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, Building2, User, Mail, Phone, Hash, TrendingUp, ShoppingBag, Calendar, DollarSign } from "lucide-react";
+import { ArrowLeft, Building2, User, Mail, Phone, Hash, TrendingUp, ShoppingBag, Calendar, DollarSign, Users } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 
 function fmtCurrency(v: string | number | null): string {
-  if (v == null) return "$0.00";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(v));
+  if (v == null || v === "") return "$0.00";
+  const n = Number(v);
+  if (isNaN(n)) return "$0.00";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 }
 
 function fmtDate(d: string | null): string {
   if (!d) return "—";
-  return format(new Date(d), "MMM d, yyyy");
+  try { return format(new Date(d), "MMM d, yyyy"); } catch { return "—"; }
 }
 
-function statusColor(status: string | null): string {
+function statusColor(status: string | null): "default" | "destructive" | "secondary" | "outline" {
   if (!status) return "secondary";
   const s = status.toLowerCase();
   if (s.includes("complete") || s.includes("shipped")) return "default";
   if (s.includes("cancel") || s.includes("refund")) return "destructive";
-  if (s.includes("pending") || s.includes("awaiting")) return "secondary";
-  return "outline";
+  return "secondary";
 }
 
 export default function CustomerProfile() {
@@ -52,11 +53,8 @@ export default function CustomerProfile() {
   });
 
   if (loadingCustomer) {
-    return (
-      <div className="flex items-center justify-center h-48 text-slate-400 text-sm">Loading customer…</div>
-    );
+    return <div className="flex items-center justify-center h-48 text-slate-400 text-sm">Loading customer…</div>;
   }
-
   if (!customer) {
     return (
       <div className="p-6">
@@ -68,9 +66,9 @@ export default function CustomerProfile() {
     );
   }
 
-  const avgOrderValue = customer.lifetime_orders > 0
-    ? Number(customer.lifetime_revenue) / customer.lifetime_orders
-    : 0;
+  const lifetimeOrders = Number(customer.lifetime_orders ?? 0);
+  const lifetimeRevenue = Number(customer.lifetime_revenue ?? 0);
+  const avgOrderValue = lifetimeOrders > 0 ? lifetimeRevenue / lifetimeOrders : 0;
 
   const daysSince = customer.last_order_date
     ? Math.floor((Date.now() - new Date(customer.last_order_date).getTime()) / 86_400_000)
@@ -78,7 +76,7 @@ export default function CustomerProfile() {
 
   return (
     <div className="p-4 md:p-6 space-y-5 max-w-5xl mx-auto">
-      {/* Back button */}
+      {/* Back */}
       <Button variant="ghost" size="sm" className="-ml-1" onClick={() => setLocation("/crm/customers")} data-testid="btn-back-customers">
         <ArrowLeft className="h-4 w-4 mr-1.5" /> All Customers
       </Button>
@@ -99,6 +97,8 @@ export default function CustomerProfile() {
             <h1 className="text-xl font-bold text-slate-900">
               {[customer.first_name, customer.last_name].filter(Boolean).join(" ") || "—"}
             </h1>
+
+            {/* Contact row */}
             <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-500">
               {customer.email && (
                 <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />{customer.email}</span>
@@ -110,12 +110,32 @@ export default function CustomerProfile() {
                 <Hash className="h-3.5 w-3.5" />BC ID: {customer.bigcommerce_customer_id}
               </span>
             </div>
+
+            {/* Meta row — Joined Date + Customer Group */}
+            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-500">
+              {customer.created_date && (
+                <span className="flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5 text-slate-400" />
+                  Joined {fmtDate(customer.created_date)}
+                </span>
+              )}
+              {(customer.customer_group_id || customer.customer_group_name) && (
+                <span className="flex items-center gap-1.5">
+                  <Users className="h-3.5 w-3.5 text-slate-400" />
+                  {customer.customer_group_name
+                    ? `${customer.customer_group_name} (ID: ${customer.customer_group_id})`
+                    : `Group ID: ${customer.customer_group_id}`}
+                </span>
+              )}
+            </div>
+
             {customer.sales_rep_name && (
               <div className="mt-2">
                 <Badge variant="secondary">Assigned: {customer.sales_rep_name}</Badge>
               </div>
             )}
           </div>
+
           {daysSince != null && (
             <div className={`text-right text-sm shrink-0 ${daysSince > 90 ? "text-red-500" : daysSince > 30 ? "text-amber-500" : "text-green-600"}`}>
               <p className="text-2xl font-bold">{daysSince}d</p>
@@ -142,7 +162,7 @@ export default function CustomerProfile() {
               <ShoppingBag className="h-4 w-4 text-blue-500" />
               <span className="text-xs text-slate-500">Lifetime Orders</span>
             </div>
-            <p className="text-xl font-bold text-slate-900" data-testid="text-lifetime-orders">{(customer.lifetime_orders ?? 0).toLocaleString()}</p>
+            <p className="text-xl font-bold text-slate-900" data-testid="text-lifetime-orders">{lifetimeOrders.toLocaleString()}</p>
           </CardContent>
         </Card>
         <Card>
@@ -160,7 +180,9 @@ export default function CustomerProfile() {
               <Calendar className="h-4 w-4 text-amber-500" />
               <span className="text-xs text-slate-500">Last Order</span>
             </div>
-            <p className="text-sm font-bold text-slate-900" data-testid="text-last-order-date">{fmtDate(customer.last_order_date)}</p>
+            <p className="text-sm font-bold text-slate-900" data-testid="text-last-order-date">
+              {customer.last_order_date ? fmtDate(customer.last_order_date) : "—"}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -188,19 +210,10 @@ export default function CustomerProfile() {
               <tbody>
                 {orders.map((o: any) => (
                   <tr key={o.id} data-testid={`row-order-${o.bigcommerce_order_id}`} className="border-b last:border-0 hover:bg-slate-50">
-                    <td className="px-4 py-2.5">
-                      <button
-                        className="text-blue-600 hover:underline font-mono text-xs"
-                        onClick={() => window.open(`/orders/bc`, "_blank")}
-                      >
-                        #{o.order_number ?? o.bigcommerce_order_id}
-                      </button>
-                    </td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-blue-600">#{o.order_number ?? o.bigcommerce_order_id}</td>
                     <td className="px-4 py-2.5 text-slate-600">{fmtDate(o.order_date)}</td>
                     <td className="px-4 py-2.5">
-                      <Badge variant={statusColor(o.status) as any} className="text-xs capitalize">
-                        {o.status ?? "—"}
-                      </Badge>
+                      <Badge variant={statusColor(o.status)} className="text-xs capitalize">{o.status ?? "—"}</Badge>
                     </td>
                     <td className="px-4 py-2.5 text-right font-medium text-slate-800">{fmtCurrency(o.order_total)}</td>
                   </tr>
