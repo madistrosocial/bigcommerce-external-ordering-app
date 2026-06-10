@@ -4190,9 +4190,12 @@ export async function registerRoutes(
   async function getCrmBcConfig() {
     let storeHash = process.env.BC_STORE_HASH;
     let token = process.env.BC_TOKEN;
-    const cfg = await storage.getSetting("bigcommerce_config");
-    if (cfg?.storeHash) storeHash = cfg.storeHash;
-    if (cfg?.token) token = cfg.token;
+    const setting = await storage.getSetting("bigcommerce_config");
+    if (setting?.value) {
+      const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+      storeHash = cfg.storeHash || storeHash;
+      token = cfg.token || token;
+    }
     return { storeHash, token };
   }
 
