@@ -79,15 +79,21 @@ export default function CRMSettings() {
   const recalculateStats = async () => {
     setRecalculating(true);
     setRecalcLog(null);
+    const t0 = Date.now();
     try {
       const r = await fetch("/api/crm/recalculate-stats", { method: "POST", headers: getAuthHeaders() });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "Recalculation failed");
-      setRecalcLog(`✓ Updated ${data.updated} customer records`);
-      toast({ title: "Stats Recalculated", description: `${data.updated} customer records updated` });
+      const lines = [
+        `✓ Customers with orders : ${(data.customers_in_orders ?? 0).toLocaleString()}`,
+        `✓ Customer rows updated : ${(data.updated ?? 0).toLocaleString()}`,
+        `✓ Duration              : ${(data.duration_ms ?? (Date.now() - t0)).toLocaleString()} ms`,
+      ];
+      setRecalcLog(lines.join("\n"));
+      toast({ title: "Stats Recalculated", description: `${data.updated ?? 0} customer records updated in ${data.duration_ms ?? 0} ms` });
       qc.invalidateQueries({ queryKey: ["crm"] });
     } catch (e: any) {
-      setRecalcLog(`✗ ${e.message}`);
+      setRecalcLog(`✗ Error: ${e.message}`);
       toast({ title: "Recalculation Failed", description: e.message, variant: "destructive" });
     } finally {
       setRecalculating(false);

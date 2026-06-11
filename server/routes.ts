@@ -4209,10 +4209,13 @@ export async function registerRoutes(
   // POST /api/crm/recalculate-stats
   app.post("/api/crm/recalculate-stats", requireAuth, async (_req, res) => {
     try {
-      const updated = await storage.recalculateCrmCustomerStats();
+      const { updated, customers_in_orders, duration_ms } = await storage.recalculateCrmCustomerStats();
       await storage.setSetting("crm_last_stats_recalc", new Date().toISOString());
-      res.json({ success: true, updated });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+      res.json({ success: true, updated, customers_in_orders, duration_ms });
+    } catch (e: any) {
+      console.error("[CRM] recalculate-stats error:", e);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // POST /api/crm/sync/customers

@@ -610,32 +610,38 @@ export class DatabaseStorage implements IStorage {
     await db.delete(customerSalesRep).where(eq(customerSalesRep.customer_id, customerId));
   }
 
-  async recalculateCrmCustomerStats(): Promise<number> {
-    // Aggregate per-customer stats from the orders mirror
-    const agg = await db
-      .select({
-        bigcommerce_customer_id: customerOrdersMirror.bigcommerce_customer_id,
-        order_count: sql<number>`count(*)::int`,
-        total_revenue: sql<string>`coalesce(sum(${customerOrdersMirror.order_total}), 0)`,
-        last_date: sql<string | null>`max(${customerOrdersMirror.order_date})`,
-      })
-      .from(customerOrdersMirror)
-      .groupBy(customerOrdersMirror.bigcommerce_customer_id);
+  async recalculateCrmCustomerStats(): Promise<{ updated: number; customers_in_orders: number; duration_ms: number }> {
+    const start = Date.now();
 
-    let updated = 0;
-    for (const row of agg) {
-      await db
-        .update(customersMirror)
-        .set({
-          lifetime_orders: row.order_count,
-          lifetime_revenue: row.total_revenue,
-          last_order_date: row.last_date ? new Date(row.last_date) : null,
-          updated_at: new Date(),
-        })
-        .where(eq(customersMirror.bigcommerce_customer_id, row.bigcommerce_customer_id));
-      updated++;
-    }
-    return updated;
+    // Count distinct customers that have orders (for logging)
+    const countRes = await db
+      .select({ n: sql<number>`count(distinct ${customerOrdersMirror.bigcommerce_customer_id})::int` })
+      .from(customerOrdersMirror);
+    const customers_in_orders = countRes[0]?.n ?? 0;
+
+    // Single-pass UPDATE using proven raw SQL — avoids Drizzle timestamp serialization issues
+    const result = await db.execute(sql`
+      UPDATE customers_mirror cm
+      SET
+        lifetime_orders  = agg.order_count,
+        lifetime_revenue = agg.total_revenue,
+        last_order_date  = agg.last_order,
+        updated_at       = NOW()
+      FROM (
+        SELECT
+          bigcommerce_customer_id,
+          COUNT(*)::int                 AS order_count,
+          COALESCE(SUM(order_total), 0) AS total_revenue,
+          MAX(order_date)               AS last_order
+        FROM customer_orders_mirror
+        GROUP BY bigcommerce_customer_id
+      ) agg
+      WHERE cm.bigcommerce_customer_id = agg.bigcommerce_customer_id
+    `);
+
+    const updated = Number((result as any).count ?? (result as any).rowCount ?? 0);
+    const duration_ms = Date.now() - start;
+    return { updated, customers_in_orders, duration_ms };
   }
 }
 
