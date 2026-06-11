@@ -4189,13 +4189,29 @@ export async function registerRoutes(
   // GET /api/crm/status
   app.get("/api/crm/status", requireAuth, async (_req, res) => {
     try {
-      const [customer_count, order_count, lastCustSync, lastOrderSync] = await Promise.all([
+      const [customer_count, order_count, lastCustSync, lastOrderSync, lastStatsRecalc] = await Promise.all([
         storage.getCrmCustomerCount(),
         storage.getCrmOrderCount(),
         storage.getSetting("crm_last_customer_sync"),
         storage.getSetting("crm_last_order_sync"),
+        storage.getSetting("crm_last_stats_recalc"),
       ]);
-      res.json({ customer_count, order_count, last_customer_sync: lastCustSync?.value ?? null, last_order_sync: lastOrderSync?.value ?? null });
+      res.json({
+        customer_count,
+        order_count,
+        last_customer_sync: lastCustSync?.value ?? null,
+        last_order_sync: lastOrderSync?.value ?? null,
+        last_stats_recalc: lastStatsRecalc?.value ?? null,
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/crm/recalculate-stats
+  app.post("/api/crm/recalculate-stats", requireAuth, async (_req, res) => {
+    try {
+      const updated = await storage.recalculateCrmCustomerStats();
+      await storage.setSetting("crm_last_stats_recalc", new Date().toISOString());
+      res.json({ success: true, updated });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
