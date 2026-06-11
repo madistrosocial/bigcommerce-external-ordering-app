@@ -328,6 +328,7 @@ export default function CustomerProfile() {
       return r.json();
     },
     enabled: !!id,
+    staleTime: 0,
   });
 
   const { data: notes = [], isLoading: loadingNotes } = useQuery({
