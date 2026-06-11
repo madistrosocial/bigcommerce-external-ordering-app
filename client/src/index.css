@@ -29,6 +29,12 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
 
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
   --radius-sm: 0.25rem;
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;
@@ -63,10 +69,22 @@
   --input: 214.3 31.8% 91.4%;
   --ring: 221 83% 53%;
 
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+
   --radius: 0.5rem;
 }
 
 .dark {
+  --popover: 222 47% 15%;
+  --popover-foreground: 210 40% 98%;
+
+  --card: 222 47% 15%;
+  --card-foreground: 210 40% 98%;
+
   --background: 222 47% 11%;
   --foreground: 210 40% 98%;
 
