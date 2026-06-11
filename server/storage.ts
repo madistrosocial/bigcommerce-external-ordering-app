@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep } from "@shared/schema";
-import { eq, desc, and, inArray, gt, asc, or, ilike, sql } from "drizzle-orm";
+import { eq, desc, and, inArray, gt, asc, or, ilike, sql, isNotNull } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -87,17 +87,18 @@ export interface IStorage {
   deletePromoSku(id: number): Promise<void>;
 
   // CRM operations
-  getCrmCustomers(opts: { search?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }>;
+  getCrmCustomers(opts: { search?: string; group?: string; state?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }>;
   getCrmCustomerById(id: number): Promise<(CrmCustomer & { sales_rep_name?: string | null }) | undefined>;
   getCrmCustomerByBcId(bcId: number): Promise<CrmCustomer | undefined>;
   upsertCrmCustomer(data: InsertCrmCustomer): Promise<CrmCustomer>;
   getCrmCustomerCount(): Promise<number>;
-  getAllCrmCustomersForExport(opts: { search?: string; sortBy?: string; sortDir?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null })[]>;
+  getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; sortBy?: string; sortDir?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null })[]>;
+  getCrmFilterOptions(): Promise<{ groups: string[]; states: string[] }>;
   getCrmOrdersByBcCustomerId(bcCustomerId: number, limit?: number): Promise<CrmOrder[]>;
   upsertCrmOrder(data: InsertCrmOrder): Promise<CrmOrder>;
   getCrmOrderCount(): Promise<number>;
   updateCrmCustomerStats(bcCustomerId: number, stats: { lifetime_orders: number; lifetime_revenue: string; last_order_date: Date | null }): Promise<void>;
-  recalculateCrmCustomerStats(): Promise<number>;
+  recalculateCrmCustomerStats(): Promise<{ updated: number; customers_in_orders: number; duration_ms: number }>;
   getCrmSalesRep(customerId: number): Promise<CrmSalesRep | undefined>;
   setCrmSalesRep(data: InsertCrmSalesRep): Promise<CrmSalesRep>;
   removeCrmSalesRep(customerId: number): Promise<void>;
@@ -455,21 +456,49 @@ export class DatabaseStorage implements IStorage {
 
   // ─── CRM operations ──────────────────────────────────────────────────────────
 
-  private buildCrmWhereClause(search?: string) {
-    if (!search || !search.trim()) return undefined;
-    const s = `%${search.trim()}%`;
-    return or(
-      ilike(customersMirror.company, s),
-      ilike(customersMirror.first_name, s),
-      ilike(customersMirror.last_name, s),
-      ilike(customersMirror.email, s),
-      ilike(customersMirror.phone, s),
-    );
+  private buildCrmWhereClause(search?: string, group?: string, state?: string) {
+    const conditions: any[] = [];
+    if (search?.trim()) {
+      const s = `%${search.trim()}%`;
+      conditions.push(or(
+        ilike(customersMirror.company, s),
+        ilike(customersMirror.first_name, s),
+        ilike(customersMirror.last_name, s),
+        ilike(customersMirror.email, s),
+        ilike(customersMirror.phone, s),
+      ));
+    }
+    if (group) {
+      conditions.push(eq(customersMirror.customer_group_name, group));
+    }
+    if (state) {
+      if (state === "Unknown") {
+        conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') IS NULL OR coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ''`);
+      } else {
+        conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${state}`);
+      }
+    }
+    if (conditions.length === 0) return undefined;
+    if (conditions.length === 1) return conditions[0];
+    return and(...conditions);
   }
 
   private buildCrmOrderBy(sortBy?: string, sortDir?: string) {
     const dir = sortDir === "asc" ? asc : desc;
     switch (sortBy) {
+      case "company":
+        return sortDir === "asc"
+          ? sql`${customersMirror.company} ASC NULLS LAST`
+          : sql`${customersMirror.company} DESC NULLS LAST`;
+      case "first_name": return dir(customersMirror.first_name);
+      case "state":
+        return sortDir === "asc"
+          ? sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') ASC NULLS LAST`
+          : sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') DESC NULLS LAST`;
+      case "customer_group_name":
+        return sortDir === "asc"
+          ? sql`${customersMirror.customer_group_name} ASC NULLS LAST`
+          : sql`${customersMirror.customer_group_name} DESC NULLS LAST`;
       case "lifetime_revenue": return dir(customersMirror.lifetime_revenue);
       case "lifetime_orders": return dir(customersMirror.lifetime_orders);
       case "days_since_order":
@@ -483,9 +512,9 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getCrmCustomers(opts: { search?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }> {
-    const { search, sortBy = "last_order_date", sortDir = "desc", limit = 50, offset = 0 } = opts;
-    const where = this.buildCrmWhereClause(search);
+  async getCrmCustomers(opts: { search?: string; group?: string; state?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }> {
+    const { search, group, state, sortBy = "last_order_date", sortDir = "desc", limit = 50, offset = 0 } = opts;
+    const where = this.buildCrmWhereClause(search, group, state);
     const orderExpr = this.buildCrmOrderBy(sortBy, sortDir);
     const countRows = await db.select({ count: sql<number>`count(*)::int` }).from(customersMirror).where(where);
     const total = countRows[0]?.count ?? 0;
@@ -542,9 +571,9 @@ export class DatabaseStorage implements IStorage {
     return result[0]?.count ?? 0;
   }
 
-  async getAllCrmCustomersForExport(opts: { search?: string; sortBy?: string; sortDir?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null })[]> {
-    const { search, sortBy = "last_order_date", sortDir = "desc" } = opts;
-    const where = this.buildCrmWhereClause(search);
+  async getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; sortBy?: string; sortDir?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null })[]> {
+    const { search, group, state, sortBy = "last_order_date", sortDir = "desc" } = opts;
+    const where = this.buildCrmWhereClause(search, group, state);
     const orderExpr = this.buildCrmOrderBy(sortBy, sortDir);
     const rows = await db.select({ c: customersMirror, rep_name: users.name })
       .from(customersMirror)
@@ -553,6 +582,25 @@ export class DatabaseStorage implements IStorage {
       .where(where)
       .orderBy(orderExpr as any);
     return rows.map(r => ({ ...r.c, sales_rep_name: r.rep_name ?? null }));
+  }
+
+  async getCrmFilterOptions(): Promise<{ groups: string[]; states: string[] }> {
+    const [groupRows, stateRows] = await Promise.all([
+      db.selectDistinct({ name: customersMirror.customer_group_name })
+        .from(customersMirror)
+        .where(isNotNull(customersMirror.customer_group_name))
+        .orderBy(asc(customersMirror.customer_group_name)),
+      db.selectDistinct({
+        state: sql<string>`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state')`,
+      })
+        .from(customersMirror)
+        .where(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') IS NOT NULL AND coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') != ''`)
+        .orderBy(sql`1`),
+    ]);
+    return {
+      groups: (groupRows.map(r => r.name).filter(Boolean) as string[]),
+      states: (stateRows.map(r => r.state).filter(Boolean) as string[]).sort(),
+    };
   }
 
   async getCrmOrdersByBcCustomerId(bcCustomerId: number, limit = 20): Promise<CrmOrder[]> {

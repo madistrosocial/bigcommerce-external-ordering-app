@@ -4320,25 +4320,37 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // GET /api/crm/filters
+  app.get("/api/crm/filters", requireAuth, async (_req, res) => {
+    try {
+      const opts = await storage.getCrmFilterOptions();
+      res.json(opts);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // GET /api/crm/customers/export — registered BEFORE /:id to avoid route conflict
   app.get("/api/crm/customers/export", requireAuth, async (req, res) => {
     try {
-      const { search = "", sortBy = "last_order_date", sortDir = "desc", format = "csv" } = req.query as any;
-      const customers = await storage.getAllCrmCustomersForExport({ search, sortBy, sortDir });
-      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "Customer Group", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Sales Rep"];
-      const rows = customers.map(c => [
-        String(c.bigcommerce_customer_id),
-        c.company ?? "",
-        c.first_name,
-        c.last_name,
-        c.email,
-        c.phone ?? "",
-        c.customer_group_name ?? "",
-        c.last_order_date ? new Date(c.last_order_date).toISOString().split("T")[0] : "",
-        String(c.lifetime_orders ?? 0),
-        String(c.lifetime_revenue ?? "0"),
-        (c as any).sales_rep_name ?? "",
-      ]);
+      const { search = "", sortBy = "last_order_date", sortDir = "desc", format = "csv", group = "", state = "" } = req.query as any;
+      const customers = await storage.getAllCrmCustomersForExport({ search, group: group || undefined, state: state || undefined, sortBy, sortDir });
+      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "State", "Customer Group", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Sales Rep"];
+      const rows = customers.map(c => {
+        const addr = (c.shipping_address as any) ?? (c.billing_address as any) ?? {};
+        return [
+          String(c.bigcommerce_customer_id),
+          c.company ?? "",
+          c.first_name,
+          c.last_name,
+          c.email,
+          c.phone ?? "",
+          addr.state ?? "",
+          c.customer_group_name ?? "",
+          c.last_order_date ? new Date(c.last_order_date).toISOString().split("T")[0] : "",
+          String(c.lifetime_orders ?? 0),
+          String(c.lifetime_revenue ?? "0"),
+          (c as any).sales_rep_name ?? "",
+        ];
+      });
       const dateSuffix = new Date().toISOString().split("T")[0];
       if (String(format) === "xlsx") {
         const buf = buildXlsx(headers, rows);
@@ -4357,10 +4369,10 @@ export async function registerRoutes(
   // GET /api/crm/customers
   app.get("/api/crm/customers", requireAuth, async (req, res) => {
     try {
-      const { search = "", sortBy = "last_order_date", sortDir = "desc" } = req.query as any;
+      const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "" } = req.query as any;
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
       const offset = parseInt(String(req.query.offset ?? "0"));
-      const result = await storage.getCrmCustomers({ search, sortBy, sortDir, limit, offset });
+      const result = await storage.getCrmCustomers({ search, group: group || undefined, state: state || undefined, sortBy, sortDir, limit, offset });
       res.json(result);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
