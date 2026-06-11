@@ -813,6 +813,7 @@ export class DatabaseStorage implements IStorage {
         date: row.a.created_at.toISOString(),
         action: row.a.action,
         detail: row.a.detail,
+        user_id: row.a.user_id,
         user_name: row.u?.name ?? null,
       })),
     ];

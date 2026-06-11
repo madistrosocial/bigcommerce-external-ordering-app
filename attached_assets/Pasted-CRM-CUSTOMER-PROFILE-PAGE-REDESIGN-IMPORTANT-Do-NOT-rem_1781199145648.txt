@@ -1,0 +1,313 @@
+CRM CUSTOMER PROFILE PAGE REDESIGN
+
+IMPORTANT:
+
+Do NOT remove any existing CRM functionality.
+
+Do NOT change database structure.
+
+Do NOT change notes, activities, rep assignment, customer health, order history, order notes, staff notes, timeline logic, or permissions.
+
+This task is UI/UX reorganization only.
+
+The goal is to make the Customer Profile page cleaner, more scalable, and closer to a modern CRM layout.
+
+--------------------------------------------------
+NEW CUSTOMER PROFILE LAYOUT
+--------------------------------------------------
+
+HEADER SECTION
+
+Keep the existing customer header card but reorganize it into a cleaner structure.
+
+LEFT SIDE
+
+Customer Avatar
+
+Company Name
+
+Customer Name
+
+Email
+
+Phone
+
+BC Customer ID
+
+Joined Date
+
+Customer Group Name + ID
+
+Assigned Sales Rep
+
+Account Health Badge
+
+RIGHT SIDE
+
+Days Since Last Order
+
+Display large and visually prominent.
+
+Example:
+
+3d
+since last order
+
+--------------------------------------------------
+SUMMARY CARDS ROW
+--------------------------------------------------
+
+Keep existing cards.
+
+Lifetime Revenue
+
+Lifetime Orders
+
+Average Order Value
+
+Last Order Date
+
+Future cards should be able to be added here without redesign.
+
+--------------------------------------------------
+TAB LAYOUT
+--------------------------------------------------
+
+Replace the current stacked layout with tabs.
+
+Tabs should appear directly below summary cards.
+
+Order:
+
+Overview
+Orders
+Notes
+Timeline
+
+Default tab = Overview
+
+--------------------------------------------------
+OVERVIEW TAB
+--------------------------------------------------
+
+This becomes the customer summary dashboard.
+
+Left side:
+
+Recent Notes (latest 5)
+
+Show:
+
+Note Type
+Created By
+Created Date
+Preview Text
+
+Button:
+
+View All Notes
+
+Right side:
+
+Recent Activity Timeline (latest 10)
+
+Show:
+
+Activity Type
+Created By
+Date
+Short Description
+
+Button:
+
+View Full Timeline
+
+Bottom section:
+
+Customer Summary Card
+
+Lifetime Revenue
+
+Lifetime Orders
+
+Average Order Value
+
+Last Order Date
+
+Assigned Rep
+
+Account Health
+
+Customer Group
+
+--------------------------------------------------
+ORDERS TAB
+--------------------------------------------------
+
+Move the entire order history into this tab.
+
+Display:
+
+Order Number
+
+Date
+
+Status
+
+Total
+
+Order Note Preview
+
+Staff Note Preview
+
+Example:
+
+Order #103251
+Completed
+$3012.19
+
+Order Note:
+Customer requested signature confirmation...
+
+Staff Note:
+Approved replacement shipment...
+
+--------------------------------------------------
+
+Order Note and Staff Note Requirements
+
+Show truncated preview in table.
+
+If content exceeds available width:
+
+Display first portion only.
+
+Example:
+
+Customer requested...
+Warehouse approved...
+
+When clicked:
+
+Open modal/dialog.
+
+Modal displays:
+
+Order Number
+
+Order Note (full)
+
+Staff Note (full)
+
+No text truncation inside modal.
+
+--------------------------------------------------
+NOTES TAB
+--------------------------------------------------
+
+Dedicated notes workspace.
+
+Full notes table.
+
+Columns:
+
+Date
+
+Type
+
+Note
+
+Created By
+
+Actions
+
+Retain Add Note functionality.
+
+Retain Edit functionality.
+
+Retain Delete functionality.
+
+Display actual user name responsible for note.
+
+Never display "Unknown" if user exists.
+
+--------------------------------------------------
+TIMELINE TAB
+--------------------------------------------------
+
+Dedicated activity timeline.
+
+Full height timeline.
+
+Display:
+
+Date
+
+Time
+
+Activity Type
+
+User
+
+Description
+
+Examples:
+
+Sales Rep Assigned
+
+Customer Note Added
+
+Issue Created
+
+Order Imported
+
+Order Synced
+
+Customer Synced
+
+Credit Issued
+
+Issue Resolved
+
+Show user names whenever available.
+
+--------------------------------------------------
+LAYOUT REQUIREMENTS
+--------------------------------------------------
+
+Remove the side-by-side Notes + Timeline layout currently used.
+
+Use tabs instead.
+
+Reduce visual clutter.
+
+Increase readability.
+
+Maintain responsive behavior.
+
+Desktop:
+Tabs with full content area.
+
+Tablet:
+Tabs remain usable.
+
+Mobile:
+Tabs become scrollable horizontally.
+
+--------------------------------------------------
+DO NOT CHANGE
+--------------------------------------------------
+
+Do not remove any Phase 2 functionality.
+
+Do not modify backend logic.
+
+Do not modify sync logic.
+
+Do not modify CRM metrics calculations.
+
+Do not modify rep assignment logic.
+
+Do not modify customer health calculations.
+
+This is a layout and usability improvement only.

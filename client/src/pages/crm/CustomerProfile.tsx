@@ -5,7 +5,6 @@ import { getAuthHeaders } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,31 +13,57 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Building2, User, Mail, Phone, Hash, TrendingUp, ShoppingBag,
   Calendar, DollarSign, Users, Plus, Pencil, Trash2, MessageSquare,
-  UserCheck, UserMinus, ChevronDown, ChevronRight, AlertTriangle,
+  UserCheck, UserMinus, AlertTriangle, ChevronRight, ChevronDown,
+  Clock, Package, Cpu, FileText,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtCurrency(v: string | number | null): string {
-  if (v == null || v === "") return "$0.00";
-  const n = Number(v);
+function fmtCurrency(v: string | number | null | undefined): string {
+  const n = Number(v ?? 0);
   if (isNaN(n)) return "$0.00";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 }
-function fmtDate(d: string | null): string {
+function fmtDate(d: string | Date | null | undefined): string {
   if (!d) return "—";
-  try { return format(new Date(d), "MMM d, yyyy"); } catch { return "—"; }
+  try { return format(new Date(d as any), "MMM d, yyyy"); } catch { return "—"; }
 }
-function statusColor(status: string | null): "default" | "destructive" | "secondary" | "outline" {
-  if (!status) return "secondary";
-  const s = status.toLowerCase();
-  if (s.includes("complete") || s.includes("shipped")) return "default";
-  if (s.includes("cancel") || s.includes("refund")) return "destructive";
+function fmtDateTime(d: string | Date | null | undefined): string {
+  if (!d) return "—";
+  try { return format(new Date(d as any), "MMM d, yyyy h:mm a"); } catch { return "—"; }
+}
+function fmtRelative(d: string | Date | null | undefined): string {
+  if (!d) return "—";
+  try { return formatDistanceToNow(new Date(d as any), { addSuffix: true }); } catch { return "—"; }
+}
+
+/**
+ * Resolve a display name for who performed an action.
+ * - If name is known → return name
+ * - If name missing and actor id is null/0 → "System" (auto-generated)
+ * - If name missing but actor id is present → "Unknown" (user record deleted)
+ */
+function createdBy(name: string | null | undefined, actorId: number | null | undefined): string {
+  if (name) return name;
+  if (!actorId) return "System";
+  return "Unknown";
+}
+
+function statusColor(s: string | null): "default" | "destructive" | "secondary" | "outline" {
+  if (!s) return "secondary";
+  const l = s.toLowerCase();
+  if (l.includes("complete") || l.includes("shipped")) return "default";
+  if (l.includes("cancel") || l.includes("refund")) return "destructive";
   return "secondary";
 }
 
-const NOTE_TYPES = ["General", "Follow Up", "Sales", "Issue", "Credit", "Replacement", "Visit", "Internal"];
+const HEALTH_COLORS: Record<string, string> = {
+  Healthy: "bg-green-100 text-green-700 border-green-200",
+  Watch:   "bg-yellow-100 text-yellow-700 border-yellow-200",
+  "At Risk": "bg-orange-100 text-orange-700 border-orange-200",
+  Lost:    "bg-red-100 text-red-700 border-red-200",
+};
 
 const NOTE_TYPE_COLORS: Record<string, string> = {
   "General":     "bg-slate-100 text-slate-700",
@@ -51,28 +76,69 @@ const NOTE_TYPE_COLORS: Record<string, string> = {
   "Internal":    "bg-yellow-100 text-yellow-700",
 };
 
-const HEALTH_COLORS: Record<string, string> = {
-  "Healthy": "bg-green-100 text-green-700",
-  "Watch":   "bg-yellow-100 text-yellow-700",
-  "At Risk": "bg-orange-100 text-orange-700",
-  "Lost":    "bg-red-100 text-red-700",
-};
+const NOTE_TYPES = ["General","Follow Up","Sales","Issue","Credit","Replacement","Visit","Internal"];
 
-function HealthBadge({ health }: { health: string | null }) {
+function HealthBadge({ health }: { health: string | null | undefined }) {
   if (!health) return null;
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${HEALTH_COLORS[health] ?? "bg-slate-100 text-slate-600"}`}>
-      <AlertTriangle className="h-3 w-3" />
-      {health}
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${HEALTH_COLORS[health] ?? "bg-slate-100 text-slate-600"}`}>
+      <AlertTriangle className="h-3 w-3" />{health}
     </span>
   );
 }
-
-function NoteTypeBadge({ type }: { type: string }) {
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${NOTE_TYPE_COLORS[type] ?? "bg-slate-100 text-slate-600"}`}>{type}</span>;
+function NoteTypePill({ type }: { type: string }) {
+  return <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${NOTE_TYPE_COLORS[type] ?? "bg-slate-100 text-slate-600"}`}>{type}</span>;
 }
 
-// ─── Note Modal ───────────────────────────────────────────────────────────────
+// ─── Timeline Icon ─────────────────────────────────────────────────────────────
+
+function TimelineIcon({ type }: { type: string }) {
+  if (type === "order")      return <ShoppingBag className="h-3.5 w-3.5 text-blue-600" />;
+  if (type === "note")       return <MessageSquare className="h-3.5 w-3.5 text-purple-600" />;
+  if (type === "assignment") return <UserCheck className="h-3.5 w-3.5 text-green-600" />;
+  return <Cpu className="h-3.5 w-3.5 text-slate-400" />;
+}
+function timelineIconBg(type: string) {
+  if (type === "order")      return "bg-blue-100";
+  if (type === "note")       return "bg-purple-100";
+  if (type === "assignment") return "bg-green-100";
+  return "bg-slate-100";
+}
+
+// ─── Timeline Entry text ───────────────────────────────────────────────────────
+
+function TimelineDescription({ entry }: { entry: any }) {
+  if (entry.type === "order") {
+    return (
+      <p className="text-sm text-slate-700">
+        <span className="font-medium">Order #{entry.order_number ?? entry.bc_order_id}</span>
+        {" — "}{fmtCurrency(entry.order_total)}
+        {entry.status && <span className="ml-1 text-xs text-slate-400">({entry.status})</span>}
+      </p>
+    );
+  }
+  if (entry.type === "note") {
+    return (
+      <div>
+        <p className="text-sm text-slate-700 flex items-center gap-1.5">
+          <NoteTypePill type={entry.note_type ?? "General"} />
+          <span className="text-xs text-slate-500">by {createdBy(entry.created_by_name, entry.created_by)}</span>
+        </p>
+        {entry.note_content && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{entry.note_content}</p>}
+      </div>
+    );
+  }
+  if (entry.type === "assignment") {
+    const who = createdBy(entry.user_name, entry.user_id);
+    if (entry.action === "sales_rep_assigned") {
+      return <p className="text-sm text-slate-700"><span className="font-medium">Rep assigned:</span> {(entry.detail as any)?.rep_name ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+    }
+    return <p className="text-sm text-slate-700"><span className="font-medium">Rep removed</span> <span className="text-xs text-slate-400">by {who}</span></p>;
+  }
+  return <p className="text-sm text-slate-500">Activity recorded</p>;
+}
+
+// ─── Add / Edit Note Modal ─────────────────────────────────────────────────────
 
 interface NoteModalProps {
   open: boolean;
@@ -82,42 +148,29 @@ interface NoteModalProps {
   initial?: { note: string; note_type: string };
   title: string;
 }
-
 function NoteModal({ open, onClose, onSave, saving, initial, title }: NoteModalProps) {
   const [note, setNote] = useState(initial?.note ?? "");
   const [noteType, setNoteType] = useState(initial?.note_type ?? "General");
-
-  const reset = () => { setNote(initial?.note ?? ""); setNoteType(initial?.note_type ?? "General"); };
-
+  const handleClose = () => { setNote(initial?.note ?? ""); setNoteType(initial?.note_type ?? "General"); onClose(); };
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) { reset(); onClose(); } }}>
+    <Dialog open={open} onOpenChange={v => { if (!v) handleClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div>
             <Label className="text-xs mb-1.5 block">Type</Label>
             <Select value={noteType} onValueChange={setNoteType}>
-              <SelectTrigger data-testid="select-note-type">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {NOTE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-              </SelectContent>
+              <SelectTrigger data-testid="select-note-type"><SelectValue /></SelectTrigger>
+              <SelectContent>{NOTE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div>
             <Label className="text-xs mb-1.5 block">Note</Label>
-            <Textarea
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              placeholder="Enter note…"
-              rows={4}
-              data-testid="textarea-note"
-            />
+            <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Enter note…" rows={4} data-testid="textarea-note" />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => { reset(); onClose(); }}>Cancel</Button>
+          <Button variant="outline" onClick={handleClose}>Cancel</Button>
           <Button onClick={() => onSave({ note, note_type: noteType })} disabled={!note.trim() || saving} data-testid="btn-save-note">
             {saving ? "Saving…" : "Save Note"}
           </Button>
@@ -127,7 +180,40 @@ function NoteModal({ open, onClose, onSave, saving, initial, title }: NoteModalP
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Order Notes Modal ─────────────────────────────────────────────────────────
+
+function OrderNotesModal({ order, onClose }: { order: any; onClose: () => void }) {
+  return (
+    <Dialog open={!!order} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Order #{order?.order_number ?? order?.bigcommerce_order_id} — Notes</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 text-sm">
+          <div>
+            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Customer Order Note</p>
+            <p className="text-slate-700 whitespace-pre-wrap">{order?.customer_order_notes || <span className="text-slate-400 italic">No customer note</span>}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Staff Note</p>
+            <p className="text-slate-700 whitespace-pre-wrap">{order?.staff_notes || <span className="text-slate-400 italic">No staff note</span>}</p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Tab types ─────────────────────────────────────────────────────────────────
+
+type Tab = "overview" | "orders" | "notes" | "timeline";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Main Component
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export default function CustomerProfile() {
   const params = useParams<{ id: string }>();
@@ -142,13 +228,14 @@ export default function CustomerProfile() {
   const canDeleteNote = hasPermission("crm", "notes_delete");
   const canAssignRep  = hasPermission("crm", "customer_assignment");
 
+  const [activeTab, setActiveTab]           = useState<Tab>("overview");
   const [showAddNote, setShowAddNote]       = useState(false);
   const [editingNote, setEditingNote]       = useState<any | null>(null);
   const [deletingNoteId, setDeletingNoteId] = useState<number | null>(null);
   const [showAssignRep, setShowAssignRep]   = useState(false);
   const [selectedRep, setSelectedRep]       = useState("");
   const [assignSaving, setAssignSaving]     = useState(false);
-  const [expandedOrder, setExpandedOrder]   = useState<number | null>(null);
+  const [orderModal, setOrderModal]         = useState<any | null>(null);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -203,7 +290,7 @@ export default function CustomerProfile() {
     staleTime: 60_000,
   });
 
-  // ── Mutations ─────────────────────────────────────────────────────────────────
+  // ── Mutations ──────────────────────────────────────────────────────────────
 
   const invalidateNotes = () => {
     queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "notes"] });
@@ -213,8 +300,7 @@ export default function CustomerProfile() {
   const createNoteMutation = useMutation({
     mutationFn: async (data: { note: string; note_type: string }) => {
       const r = await fetch(`/api/crm/customers/${id}/notes`, {
-        method: "POST", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        method: "POST", headers: { ...getAuthHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(data),
       });
       if (!r.ok) throw new Error((await r.json()).error ?? "Failed to create note");
       return r.json();
@@ -226,8 +312,7 @@ export default function CustomerProfile() {
   const updateNoteMutation = useMutation({
     mutationFn: async ({ noteId, data }: { noteId: number; data: { note: string; note_type: string } }) => {
       const r = await fetch(`/api/crm/customers/${id}/notes/${noteId}`, {
-        method: "PUT", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        method: "PUT", headers: { ...getAuthHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(data),
       });
       if (!r.ok) throw new Error((await r.json()).error ?? "Failed to update note");
       return r.json();
@@ -238,9 +323,7 @@ export default function CustomerProfile() {
 
   const deleteNoteMutation = useMutation({
     mutationFn: async (noteId: number) => {
-      const r = await fetch(`/api/crm/customers/${id}/notes/${noteId}`, {
-        method: "DELETE", headers: getAuthHeaders(),
-      });
+      const r = await fetch(`/api/crm/customers/${id}/notes/${noteId}`, { method: "DELETE", headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to delete note");
     },
     onSuccess: () => { invalidateNotes(); setDeletingNoteId(null); toast({ title: "Note deleted" }); },
@@ -277,7 +360,7 @@ export default function CustomerProfile() {
     }
   };
 
-  // ── Loading / Error states ────────────────────────────────────────────────────
+  // ── Loading ────────────────────────────────────────────────────────────────
 
   if (loadingCustomer) {
     return <div className="flex items-center justify-center h-48 text-slate-400 text-sm">Loading customer…</div>;
@@ -300,362 +383,460 @@ export default function CustomerProfile() {
     ? Math.floor((Date.now() - new Date(customer.last_order_date).getTime()) / 86_400_000)
     : null;
 
+  const recentNotes    = (notes as any[]).slice(0, 5);
+  const recentTimeline = (timeline as any[]).slice(0, 10);
+
+  // ─── Tab nav ───────────────────────────────────────────────────────────────
+
+  const TABS: { id: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
+    { id: "overview",  label: "Overview",  icon: <User className="h-3.5 w-3.5" /> },
+    { id: "orders",    label: "Orders",    icon: <ShoppingBag className="h-3.5 w-3.5" />, count: (orders as any[]).length || undefined },
+    { id: "notes",     label: "Notes",     icon: <MessageSquare className="h-3.5 w-3.5" />, count: (notes as any[]).length || undefined },
+    { id: "timeline",  label: "Timeline",  icon: <Clock className="h-3.5 w-3.5" /> },
+  ];
+
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-6xl mx-auto">
-      {/* Back */}
-      <Button variant="ghost" size="sm" className="-ml-1" onClick={() => setLocation("/crm/customers")} data-testid="btn-back-customers">
-        <ArrowLeft className="h-4 w-4 mr-1.5" /> All Customers
-      </Button>
+    <div className="flex flex-col min-h-full bg-slate-50">
 
-      {/* ── Header Card ─────────────────────────────────────────────────────────── */}
-      <div className="border rounded-xl p-5 bg-white shadow-sm">
+      {/* ══════════════════════════════════════════════════════════════════════
+          HEADER CARD
+      ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="bg-white border-b px-4 md:px-6 py-4">
+
+        {/* Back nav */}
+        <Button variant="ghost" size="sm" className="-ml-1 mb-3 text-slate-500 hover:text-slate-800" onClick={() => setLocation("/crm/customers")} data-testid="btn-back-customers">
+          <ArrowLeft className="h-4 w-4 mr-1.5" /> CRM Customers
+        </Button>
+
         <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-          <div className="h-14 w-14 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-            <User className="h-7 w-7 text-blue-600" />
-          </div>
-          <div className="flex-1 min-w-0">
-            {customer.company && (
-              <div className="flex items-center gap-1.5 text-slate-500 text-sm mb-0.5">
-                <Building2 className="h-3.5 w-3.5" />
-                <span className="font-medium text-slate-700">{customer.company}</span>
+
+          {/* Avatar + all info */}
+          <div className="flex gap-4 flex-1 min-w-0">
+            <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+              <User className="h-6 w-6 text-blue-600" />
+            </div>
+
+            <div className="flex-1 min-w-0">
+              {customer.company && (
+                <div className="flex items-center gap-1.5 text-slate-500 text-sm mb-0.5">
+                  <Building2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="font-semibold text-slate-700 truncate">{customer.company}</span>
+                </div>
+              )}
+              <div className="flex items-center flex-wrap gap-2 mb-2">
+                <h1 className="text-xl font-bold text-slate-900">
+                  {[customer.first_name, customer.last_name].filter(Boolean).join(" ") || "—"}
+                </h1>
+                <HealthBadge health={customer.account_health} />
               </div>
-            )}
-            <div className="flex items-center flex-wrap gap-2">
-              <h1 className="text-xl font-bold text-slate-900">
-                {[customer.first_name, customer.last_name].filter(Boolean).join(" ") || "—"}
-              </h1>
-              <HealthBadge health={customer.account_health} />
-            </div>
 
-            {/* Contact row */}
-            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-500">
-              {customer.email && <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />{customer.email}</span>}
-              {customer.phone && <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" />{customer.phone}</span>}
-              <span className="flex items-center gap-1.5"><Hash className="h-3.5 w-3.5" />BC ID: {customer.bigcommerce_customer_id}</span>
-            </div>
+              {/* Contact details */}
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500 mb-2">
+                {customer.email && <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 shrink-0" />{customer.email}</span>}
+                {customer.phone && <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" />{customer.phone}</span>}
+                <span className="flex items-center gap-1.5"><Hash className="h-3.5 w-3.5 shrink-0" />BC ID: {customer.bigcommerce_customer_id}</span>
+                {customer.created_date && <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 shrink-0" />Joined {fmtDate(customer.created_date)}</span>}
+                {customer.customer_group_name && (
+                  <span className="flex items-center gap-1.5">
+                    <Users className="h-3.5 w-3.5 shrink-0" />
+                    {customer.customer_group_name}
+                    {customer.customer_group_id && <span className="text-slate-400">({customer.customer_group_id})</span>}
+                  </span>
+                )}
+              </div>
 
-            {/* Meta row */}
-            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-500">
-              {customer.created_date && (
-                <span className="flex items-center gap-1.5">
-                  <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                  Joined {fmtDate(customer.created_date)}
-                </span>
-              )}
-              {(customer.customer_group_id || customer.customer_group_name) && (
-                <span className="flex items-center gap-1.5">
-                  <Users className="h-3.5 w-3.5 text-slate-400" />
-                  {customer.customer_group_name
-                    ? `${customer.customer_group_name} (ID: ${customer.customer_group_id})`
-                    : `Group ID: ${customer.customer_group_id}`}
-                </span>
-              )}
-            </div>
-
-            {/* Sales Rep row */}
-            <div className="mt-3 flex items-center flex-wrap gap-2">
-              {customer.sales_rep_name
-                ? <Badge variant="secondary" className="text-xs"><UserCheck className="h-3 w-3 mr-1" />Rep: {customer.sales_rep_name}</Badge>
-                : <span className="text-xs text-slate-400">No rep assigned</span>
-              }
-              {canAssignRep && (
-                <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setSelectedRep(""); setShowAssignRep(true); }} data-testid="btn-assign-rep">
-                  {customer.sales_rep_name ? "Change Rep" : "Assign Rep"}
-                </Button>
-              )}
-              {canAssignRep && customer.sales_rep_name && (
-                <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-red-500 hover:text-red-700" onClick={handleRemoveRep} data-testid="btn-remove-rep">
-                  <UserMinus className="h-3 w-3 mr-1" />Remove
-                </Button>
-              )}
+              {/* Sales rep row */}
+              <div className="flex items-center flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  {customer.sales_rep_name
+                    ? <Badge variant="secondary" className="text-xs gap-1"><UserCheck className="h-3 w-3" />Rep: {customer.sales_rep_name}</Badge>
+                    : <span className="text-xs text-slate-400">No rep assigned</span>}
+                </div>
+                {canAssignRep && (
+                  <>
+                    <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setSelectedRep(""); setShowAssignRep(true); }} data-testid="btn-assign-rep">
+                      {customer.sales_rep_name ? "Change Rep" : "Assign Rep"}
+                    </Button>
+                    {customer.sales_rep_name && (
+                      <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-red-500 hover:text-red-700" onClick={handleRemoveRep} data-testid="btn-remove-rep">
+                        <UserMinus className="h-3 w-3 mr-1" />Remove
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
+          {/* Days since last order — right side */}
           {daysSince != null && (
-            <div className={`text-right text-sm shrink-0 ${daysSince > 90 ? "text-red-500" : daysSince > 30 ? "text-amber-500" : "text-green-600"}`}>
-              <p className="text-2xl font-bold">{daysSince}d</p>
-              <p className="text-xs">since last order</p>
+            <div className="shrink-0 text-right sm:text-right sm:pl-4 border-t sm:border-t-0 sm:border-l pt-3 sm:pt-0 sm:pl-5">
+              <p className={`text-4xl font-extrabold leading-none ${daysSince > 90 ? "text-red-500" : daysSince > 30 ? "text-amber-500" : "text-green-600"}`}>
+                {daysSince}d
+              </p>
+              <p className="text-xs text-slate-400 mt-1">since last order</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* ── Summary Cards ───────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <DollarSign className="h-4 w-4 text-green-500" />
-              <span className="text-xs text-slate-500">Lifetime Revenue</span>
-            </div>
-            <p className="text-xl font-bold text-slate-900" data-testid="text-lifetime-revenue">{fmtCurrency(customer.lifetime_revenue)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <ShoppingBag className="h-4 w-4 text-blue-500" />
-              <span className="text-xs text-slate-500">Lifetime Orders</span>
-            </div>
-            <p className="text-xl font-bold text-slate-900" data-testid="text-lifetime-orders">{lifetimeOrders.toLocaleString()}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingUp className="h-4 w-4 text-purple-500" />
-              <span className="text-xs text-slate-500">Avg Order Value</span>
-            </div>
-            <p className="text-xl font-bold text-slate-900">{fmtCurrency(avgOrderValue)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Calendar className="h-4 w-4 text-amber-500" />
-              <span className="text-xs text-slate-500">Last Order</span>
-            </div>
-            <p className="text-sm font-bold text-slate-900" data-testid="text-last-order-date">
-              {customer.last_order_date ? fmtDate(customer.last_order_date) : "—"}
-            </p>
-          </CardContent>
-        </Card>
+      {/* ══════════════════════════════════════════════════════════════════════
+          SUMMARY CARDS ROW
+      ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="bg-white border-b px-4 md:px-6 py-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <SummaryCard icon={<DollarSign className="h-4 w-4 text-green-500" />} label="Lifetime Revenue" value={fmtCurrency(customer.lifetime_revenue)} testId="text-lifetime-revenue" />
+          <SummaryCard icon={<ShoppingBag className="h-4 w-4 text-blue-500" />} label="Lifetime Orders" value={lifetimeOrders.toLocaleString()} testId="text-lifetime-orders" />
+          <SummaryCard icon={<TrendingUp className="h-4 w-4 text-purple-500" />} label="Avg Order Value" value={fmtCurrency(avgOrderValue)} />
+          <SummaryCard icon={<Calendar className="h-4 w-4 text-amber-500" />} label="Last Order" value={customer.last_order_date ? fmtDate(customer.last_order_date) : "—"} testId="text-last-order-date" />
+        </div>
       </div>
 
-      {/* ── Notes + Timeline Grid ───────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB NAV
+      ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="bg-white border-b px-4 md:px-6 overflow-x-auto">
+        <div className="flex gap-0 min-w-max">
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              data-testid={`tab-${tab.id}`}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                activeTab === tab.id
+                  ? "border-blue-600 text-blue-700"
+                  : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
+              }`}
+            >
+              {tab.icon}
+              {tab.label}
+              {tab.count != null && (
+                <span className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                  activeTab === tab.id ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-500"
+                }`}>{tab.count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
 
-        {/* Notes Section */}
-        <div className="border rounded-xl bg-white shadow-sm overflow-hidden flex flex-col">
-          <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
-            <h2 className="font-semibold text-slate-700 text-sm flex items-center gap-1.5">
-              <MessageSquare className="h-4 w-4 text-slate-400" />
-              Notes {notes.length > 0 && <span className="text-xs font-normal text-slate-400">({notes.length})</span>}
-            </h2>
-            {canCreateNote && (
-              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowAddNote(true)} data-testid="btn-add-note">
-                <Plus className="h-3.5 w-3.5" /> Add Note
-              </Button>
-            )}
-          </div>
-          <div className="overflow-y-auto max-h-[380px]">
-            {loadingNotes ? (
-              <div className="flex items-center justify-center h-24 text-slate-400 text-sm">Loading…</div>
-            ) : notes.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-24 text-slate-400 text-xs">
-                <MessageSquare className="h-6 w-6 mb-1.5 opacity-30" />
-                No notes yet
-              </div>
-            ) : (
-              <div className="divide-y">
-                {(notes as any[]).map((note: any) => (
-                  <div key={note.id} className="px-4 py-3" data-testid={`note-${note.id}`}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 flex-wrap min-w-0">
-                        <NoteTypeBadge type={note.note_type} />
-                        <span className="text-[11px] text-slate-400">{note.created_by_name ?? "Unknown"}</span>
-                        <span className="text-[11px] text-slate-400">·</span>
-                        <span className="text-[11px] text-slate-400">{fmtDate(note.created_at)}</span>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {canEditNote && (
-                          <button
-                            className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-blue-600"
-                            onClick={() => setEditingNote(note)}
-                            data-testid={`btn-edit-note-${note.id}`}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        {canDeleteNote && (
-                          <button
-                            className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-red-600"
-                            onClick={() => setDeletingNoteId(note.id)}
-                            data-testid={`btn-delete-note-${note.id}`}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <p className="mt-1.5 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{note.note}</p>
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB CONTENT
+      ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="flex-1 p-4 md:p-6">
+
+        {/* ── OVERVIEW TAB ──────────────────────────────────────────────────── */}
+        {activeTab === "overview" && (
+          <div className="space-y-5">
+            {/* Two columns: Recent Notes + Recent Timeline */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+              {/* Recent Notes */}
+              <div className="bg-white border rounded-xl overflow-hidden">
+                <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                    <MessageSquare className="h-4 w-4 text-slate-400" /> Recent Notes
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    {canCreateNote && (
+                      <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={() => setShowAddNote(true)} data-testid="btn-add-note">
+                        <Plus className="h-3 w-3" /> Add
+                      </Button>
+                    )}
+                    {(notes as any[]).length > 5 && (
+                      <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-600" onClick={() => setActiveTab("notes")}>
+                        View all ({(notes as any[]).length})
+                      </Button>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Timeline Section */}
-        <div className="border rounded-xl bg-white shadow-sm overflow-hidden flex flex-col">
-          <div className="px-4 py-3 border-b bg-slate-50">
-            <h2 className="font-semibold text-slate-700 text-sm">Activity Timeline</h2>
-          </div>
-          <div className="overflow-y-auto max-h-[380px] p-4">
-            {loadingTimeline ? (
-              <div className="flex items-center justify-center h-24 text-slate-400 text-sm">Loading…</div>
-            ) : timeline.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-24 text-slate-400 text-xs">No activity yet</div>
-            ) : (
-              <div className="space-y-0">
-                {(timeline as any[]).map((entry: any, i: number) => {
-                  const isLast = i === timeline.length - 1;
-                  return (
-                    <div key={entry.id} className="flex gap-3">
-                      <div className="flex flex-col items-center">
-                        <div className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${
-                          entry.type === "order" ? "bg-blue-100" :
-                          entry.type === "note"  ? "bg-purple-100" : "bg-green-100"
-                        }`}>
-                          {entry.type === "order"      && <ShoppingBag className="h-3.5 w-3.5 text-blue-600" />}
-                          {entry.type === "note"       && <MessageSquare className="h-3.5 w-3.5 text-purple-600" />}
-                          {entry.type === "assignment" && <UserCheck className="h-3.5 w-3.5 text-green-600" />}
+                </div>
+                {loadingNotes ? (
+                  <div className="flex items-center justify-center h-20 text-slate-400 text-sm">Loading…</div>
+                ) : recentNotes.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-20 text-slate-400 text-xs">
+                    <MessageSquare className="h-5 w-5 mb-1 opacity-30" />No notes yet
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {recentNotes.map((note: any) => (
+                      <div key={note.id} className="px-4 py-3">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <NoteTypePill type={note.note_type} />
+                          <span className="text-[11px] text-slate-500 font-medium">{createdBy(note.created_by_name, note.created_by)}</span>
+                          <span className="text-[11px] text-slate-400">·</span>
+                          <span className="text-[11px] text-slate-400">{fmtDate(note.created_at)}</span>
                         </div>
-                        {!isLast && <div className="w-px flex-1 bg-slate-200 mt-1 mb-1" />}
+                        <p className="text-xs text-slate-600 line-clamp-2">{note.note}</p>
                       </div>
-                      <div className={`pb-3 flex-1 min-w-0 ${isLast ? "pb-0" : ""}`}>
-                        <p className="text-[11px] text-slate-400 mb-0.5">
-                          {entry.date ? formatDistanceToNow(new Date(entry.date), { addSuffix: true }) : "—"}
-                        </p>
-                        {entry.type === "order" && (
-                          <p className="text-sm text-slate-700">
-                            <span className="font-medium">Order #{entry.order_number ?? entry.bc_order_id}</span>
-                            {" — "}{fmtCurrency(entry.order_total)}
-                            {entry.status && <span className="ml-1.5 text-xs text-slate-500">({entry.status})</span>}
-                            {(entry.staff_notes || entry.customer_order_notes) && (
-                              <span className="ml-1.5 text-[11px] text-amber-600" title="Has notes">📝</span>
-                            )}
-                          </p>
-                        )}
-                        {entry.type === "note" && (
-                          <>
-                            <p className="text-sm font-medium text-slate-700">
-                              <NoteTypeBadge type={entry.note_type} />
-                              {entry.created_by_name && <span className="ml-1.5 text-xs font-normal text-slate-500">by {entry.created_by_name}</span>}
-                            </p>
-                            <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{entry.note_content}</p>
-                          </>
-                        )}
-                        {entry.type === "assignment" && (
-                          <p className="text-sm text-slate-700">
-                            {entry.action === "sales_rep_assigned"
-                              ? <><span className="font-medium">Rep assigned:</span> {(entry.detail as any)?.rep_name ?? "—"}</>
-                              : <span className="font-medium">Rep removed</span>
-                            }
-                            {entry.user_name && <span className="ml-1.5 text-xs text-slate-500">by {entry.user_name}</span>}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
-      </div>
 
-      {/* ── Recent Orders ───────────────────────────────────────────────────────── */}
-      <div className="border rounded-xl bg-white shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b bg-slate-50">
-          <h2 className="font-semibold text-slate-700 text-sm">Recent Orders (last 20)</h2>
-        </div>
-        {loadingOrders ? (
-          <div className="flex items-center justify-center h-24 text-slate-400 text-sm">Loading orders…</div>
-        ) : orders.length === 0 ? (
-          <div className="flex items-center justify-center h-24 text-slate-400 text-sm">No orders found in mirror.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[500px]">
-              <thead>
-                <tr className="border-b">
-                  <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-6"></th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Order #</th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Date</th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Status</th>
-                  <th className="px-4 py-2.5 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(orders as any[]).map((o: any) => {
-                  const hasNotes = !!(o.staff_notes || o.customer_order_notes);
-                  const isExpanded = expandedOrder === o.id;
-                  return (
-                    <>
-                      <tr
-                        key={o.id}
-                        data-testid={`row-order-${o.bigcommerce_order_id}`}
-                        className={`border-b last:border-0 hover:bg-slate-50 ${hasNotes ? "cursor-pointer" : ""}`}
-                        onClick={() => hasNotes && setExpandedOrder(isExpanded ? null : o.id)}
-                      >
-                        <td className="px-4 py-2.5 text-center">
-                          {hasNotes && (
-                            isExpanded
-                              ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
-                              : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 font-mono text-xs text-blue-600">
-                          #{o.order_number ?? o.bigcommerce_order_id}
-                          {hasNotes && <span className="ml-1.5 text-[10px] text-amber-500">📝</span>}
-                        </td>
-                        <td className="px-4 py-2.5 text-slate-600">{fmtDate(o.order_date)}</td>
-                        <td className="px-4 py-2.5">
-                          <Badge variant={statusColor(o.status)} className="text-xs capitalize">{o.status ?? "—"}</Badge>
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-medium text-slate-800">{fmtCurrency(o.order_total)}</td>
-                      </tr>
-                      {isExpanded && hasNotes && (
-                        <tr key={`${o.id}-notes`} className="bg-amber-50 border-b">
-                          <td colSpan={5} className="px-6 py-3 text-sm space-y-2">
-                            {o.staff_notes && (
-                              <div>
-                                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-0.5">Staff Notes</p>
-                                <p className="text-slate-700">{o.staff_notes}</p>
-                              </div>
-                            )}
-                            {o.customer_order_notes && (
-                              <div>
-                                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-0.5">Customer Note</p>
-                                <p className="text-slate-700">{o.customer_order_notes}</p>
-                              </div>
-                            )}
+              {/* Recent Activity Timeline */}
+              <div className="bg-white border rounded-xl overflow-hidden">
+                <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                    <Clock className="h-4 w-4 text-slate-400" /> Recent Activity
+                  </h2>
+                  {(timeline as any[]).length > 10 && (
+                    <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-600" onClick={() => setActiveTab("timeline")}>
+                      View all
+                    </Button>
+                  )}
+                </div>
+                {loadingTimeline ? (
+                  <div className="flex items-center justify-center h-20 text-slate-400 text-sm">Loading…</div>
+                ) : recentTimeline.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-20 text-slate-400 text-xs">No activity yet</div>
+                ) : (
+                  <div className="px-4 py-3 space-y-0">
+                    {recentTimeline.map((entry: any, i: number) => {
+                      const isLast = i === recentTimeline.length - 1;
+                      return (
+                        <div key={entry.id} className="flex gap-3">
+                          <div className="flex flex-col items-center">
+                            <div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${timelineIconBg(entry.type)}`}>
+                              <TimelineIcon type={entry.type} />
+                            </div>
+                            {!isLast && <div className="w-px flex-1 bg-slate-200 my-1" />}
+                          </div>
+                          <div className={`pb-3 flex-1 min-w-0 ${isLast ? "pb-0" : ""}`}>
+                            <p className="text-[10px] text-slate-400 mb-0.5">{fmtRelative(entry.date)}</p>
+                            <TimelineDescription entry={entry} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Customer Summary Card */}
+            <div className="bg-white border rounded-xl p-5">
+              <h2 className="text-sm font-semibold text-slate-700 mb-4">Customer Summary</h2>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
+                <SummaryRow label="Lifetime Revenue" value={fmtCurrency(customer.lifetime_revenue)} />
+                <SummaryRow label="Lifetime Orders" value={lifetimeOrders.toLocaleString()} />
+                <SummaryRow label="Average Order Value" value={fmtCurrency(avgOrderValue)} />
+                <SummaryRow label="Last Order Date" value={customer.last_order_date ? fmtDate(customer.last_order_date) : "—"} />
+                <SummaryRow label="Account Health" value={<HealthBadge health={customer.account_health} />} />
+                <SummaryRow label="Assigned Rep" value={customer.sales_rep_name || "—"} />
+                <SummaryRow label="Customer Group" value={customer.customer_group_name || "—"} />
+                <SummaryRow label="Days Since Last Order" value={daysSince != null ? `${daysSince} days` : "—"} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── ORDERS TAB ────────────────────────────────────────────────────── */}
+        {activeTab === "orders" && (
+          <div className="bg-white border rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b bg-slate-50">
+              <h2 className="text-sm font-semibold text-slate-700">Order History</h2>
+            </div>
+            {loadingOrders ? (
+              <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading orders…</div>
+            ) : (orders as any[]).length === 0 ? (
+              <div className="flex items-center justify-center h-32 text-slate-400 text-sm">No orders found.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[600px]">
+                  <thead>
+                    <tr className="border-b bg-slate-50">
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Order #</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Date</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Status</th>
+                      <th className="px-4 py-2.5 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Total</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Customer Note</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Staff Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(orders as any[]).map((o: any) => {
+                      const hasNotes = !!(o.staff_notes || o.customer_order_notes);
+                      return (
+                        <tr
+                          key={o.id}
+                          data-testid={`row-order-${o.bigcommerce_order_id}`}
+                          className={`border-b last:border-0 hover:bg-slate-50 transition-colors ${hasNotes ? "cursor-pointer" : ""}`}
+                          onClick={() => hasNotes && setOrderModal(o)}
+                        >
+                          <td className="px-4 py-2.5 font-mono text-xs text-blue-600 whitespace-nowrap">
+                            #{o.order_number ?? o.bigcommerce_order_id}
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{fmtDate(o.order_date)}</td>
+                          <td className="px-4 py-2.5">
+                            <Badge variant={statusColor(o.status)} className="text-xs capitalize">{o.status ?? "—"}</Badge>
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-medium text-slate-800 whitespace-nowrap">{fmtCurrency(o.order_total)}</td>
+                          <td className="px-4 py-2.5 text-slate-500 max-w-[180px]">
+                            {o.customer_order_notes
+                              ? <span className="block truncate text-xs">{o.customer_order_notes}</span>
+                              : <span className="text-slate-300 text-xs">—</span>}
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-500 max-w-[180px]">
+                            {o.staff_notes
+                              ? <span className="block truncate text-xs">{o.staff_notes}</span>
+                              : <span className="text-slate-300 text-xs">—</span>}
                           </td>
                         </tr>
-                      )}
-                    </>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── NOTES TAB ─────────────────────────────────────────────────────── */}
+        {activeTab === "notes" && (
+          <div className="bg-white border rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                <MessageSquare className="h-4 w-4 text-slate-400" />
+                Notes {(notes as any[]).length > 0 && <span className="text-xs font-normal text-slate-400">({(notes as any[]).length})</span>}
+              </h2>
+              {canCreateNote && (
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowAddNote(true)} data-testid="btn-add-note-tab">
+                  <Plus className="h-3.5 w-3.5" /> Add Note
+                </Button>
+              )}
+            </div>
+            {loadingNotes ? (
+              <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
+            ) : (notes as any[]).length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 text-slate-400">
+                <MessageSquare className="h-8 w-8 mb-2 opacity-20" />
+                <p className="text-sm">No notes yet</p>
+                {canCreateNote && <Button size="sm" variant="outline" className="mt-2 text-xs" onClick={() => setShowAddNote(true)}>Add first note</Button>}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[580px]">
+                  <thead>
+                    <tr className="border-b bg-slate-50">
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Date</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Type</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Note</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Created By</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(notes as any[]).map((note: any) => (
+                      <tr key={note.id} data-testid={`note-row-${note.id}`} className="border-b last:border-0 hover:bg-slate-50 align-top">
+                        <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmtDate(note.created_at)}</td>
+                        <td className="px-4 py-3"><NoteTypePill type={note.note_type} /></td>
+                        <td className="px-4 py-3 text-sm text-slate-700 max-w-[300px]">
+                          <p className="whitespace-pre-wrap break-words">{note.note}</p>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap font-medium">
+                          {createdBy(note.created_by_name, note.created_by)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                            {canEditNote && (
+                              <button
+                                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-blue-600"
+                                onClick={() => setEditingNote(note)}
+                                data-testid={`btn-edit-note-${note.id}`}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            {canDeleteNote && (
+                              <button
+                                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-red-600"
+                                onClick={() => setDeletingNoteId(note.id)}
+                                data-testid={`btn-delete-note-${note.id}`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── TIMELINE TAB ──────────────────────────────────────────────────── */}
+        {activeTab === "timeline" && (
+          <div className="bg-white border rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b bg-slate-50">
+              <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                <Clock className="h-4 w-4 text-slate-400" /> Activity Timeline
+              </h2>
+            </div>
+            {loadingTimeline ? (
+              <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
+            ) : (timeline as any[]).length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 text-slate-400 text-sm">No activity recorded.</div>
+            ) : (
+              <div className="p-5 space-y-0">
+                {(timeline as any[]).map((entry: any, i: number) => {
+                  const isLast = i === (timeline as any[]).length - 1;
+                  const actor = entry.type === "note"
+                    ? createdBy(entry.created_by_name, entry.created_by)
+                    : entry.type === "assignment"
+                    ? createdBy(entry.user_name, entry.user_id)
+                    : "System";
+                  const dateStr = entry.date ? format(new Date(entry.date), "MMM d, yyyy") : "—";
+                  const timeStr = entry.date ? format(new Date(entry.date), "h:mm a") : "";
+                  return (
+                    <div key={entry.id} className="flex gap-4">
+                      <div className="flex flex-col items-center">
+                        <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${timelineIconBg(entry.type)}`}>
+                          <TimelineIcon type={entry.type} />
+                        </div>
+                        {!isLast && <div className="w-px flex-1 bg-slate-200 my-1 min-h-[12px]" />}
+                      </div>
+                      <div className={`pb-5 flex-1 min-w-0 ${isLast ? "pb-0" : ""}`}>
+                        <div className="flex items-start justify-between gap-2 flex-wrap">
+                          <div>
+                            <TimelineDescription entry={entry} />
+                            <p className="text-[11px] text-slate-400 mt-0.5">
+                              <span className="font-medium text-slate-500">{actor}</span>
+                              {" · "}{dateStr}{timeStr && <span> {timeStr}</span>}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* ── Modals ──────────────────────────────────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════════════════════════
+          MODALS
+      ═══════════════════════════════════════════════════════════════════════ */}
 
-      {/* Add Note */}
       <NoteModal
-        open={showAddNote}
-        title="Add Note"
+        open={showAddNote} title="Add Note"
         onClose={() => setShowAddNote(false)}
         onSave={data => createNoteMutation.mutate(data)}
         saving={createNoteMutation.isPending}
       />
-
-      {/* Edit Note */}
       {editingNote && (
         <NoteModal
-          open={!!editingNote}
-          title="Edit Note"
+          open={!!editingNote} title="Edit Note"
           initial={{ note: editingNote.note, note_type: editingNote.note_type }}
           onClose={() => setEditingNote(null)}
           onSave={data => updateNoteMutation.mutate({ noteId: editingNote.id, data })}
           saving={updateNoteMutation.isPending}
         />
       )}
-
-      {/* Delete Note Confirmation */}
       <Dialog open={deletingNoteId !== null} onOpenChange={v => { if (!v) setDeletingNoteId(null); }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>Delete Note?</DialogTitle></DialogHeader>
@@ -668,17 +849,13 @@ export default function CustomerProfile() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Assign Rep Modal */}
       <Dialog open={showAssignRep} onOpenChange={v => { if (!v) setShowAssignRep(false); }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>Assign Sales Rep</DialogTitle></DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-2">
             <Label className="text-xs">Select Rep</Label>
             <Select value={selectedRep} onValueChange={setSelectedRep}>
-              <SelectTrigger data-testid="select-assign-rep">
-                <SelectValue placeholder="Choose a rep…" />
-              </SelectTrigger>
+              <SelectTrigger data-testid="select-assign-rep"><SelectValue placeholder="Choose a rep…" /></SelectTrigger>
               <SelectContent>
                 {(crmUsers as { id: number; name: string }[]).map(u => (
                   <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>
@@ -694,6 +871,27 @@ export default function CustomerProfile() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {orderModal && <OrderNotesModal order={orderModal} onClose={() => setOrderModal(null)} />}
+    </div>
+  );
+}
+
+// ─── Sub-components ────────────────────────────────────────────────────────────
+
+function SummaryCard({ icon, label, value, testId }: { icon: React.ReactNode; label: string; value: string; testId?: string }) {
+  return (
+    <div className="rounded-lg border px-3 py-2.5 bg-white">
+      <div className="flex items-center gap-1.5 mb-1">{icon}<span className="text-xs text-slate-500">{label}</span></div>
+      <p className="text-lg font-bold text-slate-900" data-testid={testId}>{value}</p>
+    </div>
+  );
+}
+function SummaryRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-xs text-slate-400 mb-0.5">{label}</p>
+      <p className="text-sm font-medium text-slate-800">{value}</p>
     </div>
   );
 }
