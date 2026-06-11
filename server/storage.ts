@@ -617,7 +617,7 @@ export class DatabaseStorage implements IStorage {
         bigcommerce_customer_id: customerOrdersMirror.bigcommerce_customer_id,
         order_count: sql<number>`count(*)::int`,
         total_revenue: sql<string>`coalesce(sum(${customerOrdersMirror.order_total}), 0)`,
-        last_date: sql<Date | null>`max(${customerOrdersMirror.order_date})`,
+        last_date: sql<string | null>`max(${customerOrdersMirror.order_date})`,
       })
       .from(customerOrdersMirror)
       .groupBy(customerOrdersMirror.bigcommerce_customer_id);
@@ -629,7 +629,7 @@ export class DatabaseStorage implements IStorage {
         .set({
           lifetime_orders: row.order_count,
           lifetime_revenue: row.total_revenue,
-          last_order_date: row.last_date,
+          last_order_date: row.last_date ? new Date(row.last_date) : null,
           updated_at: new Date(),
         })
         .where(eq(customersMirror.bigcommerce_customer_id, row.bigcommerce_customer_id));
