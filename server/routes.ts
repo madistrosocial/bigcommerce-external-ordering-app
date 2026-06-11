@@ -4395,7 +4395,7 @@ export async function registerRoutes(
       const id = parseInt(req.params.id);
       const customer = await storage.getCrmCustomerById(id);
       if (!customer) return res.status(404).json({ error: "Customer not found" });
-      const orders = await storage.getCrmOrdersByBcCustomerId(customer.bigcommerce_customer_id, 20);
+      const orders = await storage.getCrmOrdersByBcCustomerId(customer.bigcommerce_customer_id, 10000);
       res.json(orders);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });

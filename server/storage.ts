@@ -623,7 +623,7 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getCrmOrdersByBcCustomerId(bcCustomerId: number, limit = 20): Promise<CrmOrder[]> {
+  async getCrmOrdersByBcCustomerId(bcCustomerId: number, limit = 10000): Promise<CrmOrder[]> {
     return db.select().from(customerOrdersMirror)
       .where(eq(customerOrdersMirror.bigcommerce_customer_id, bcCustomerId))
       .orderBy(sql`${customerOrdersMirror.order_date} DESC NULLS LAST`)
