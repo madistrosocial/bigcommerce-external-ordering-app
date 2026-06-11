@@ -1,0 +1,196 @@
+CRM CUSTOMER PROFILE PAGE - ADDITIONAL PHASE 2 UI REFINEMENTS
+
+OVERVIEW TAB CHANGES
+
+1. Restore Customer Header Card Container
+
+The customer information section at the top must return to a full bordered card.
+
+Requirements:
+
+* Same border style as other CRM cards.
+* Same border radius used throughout CRM.
+* Consistent padding and spacing.
+* Days Since Last Order remains displayed on the far right.
+* Header card should visually match the card design used elsewhere in the CRM.
+
+---
+
+2. Replace Customer Summary Section
+
+Remove the current "Customer Summary" panel from the bottom of the Overview tab.
+
+Replace it with:
+
+ORDER HISTORY (LATEST 20)
+
+Purpose:
+
+Provide a quick snapshot of recent orders without requiring users to switch tabs.
+
+Display:
+
+* Order Number
+* Date + Time
+* Status
+* Total
+* Order Note Preview
+* Staff Note Preview
+
+Show only the latest 20 orders.
+
+Add:
+
+"View All Orders" button
+
+When clicked:
+
+Automatically switch user to Orders tab.
+
+Do NOT load all orders inside Overview.
+
+Overview should remain lightweight and fast.
+
+---
+
+3. Notes Display Format
+
+Current display only shows relative time.
+
+Update Notes sections to show:
+
+Created By
+Full Date
+Full Time
+
+Example:
+
+John Doe
+Jun 12, 2026 10:15 AM
+
+Use this format everywhere Notes are displayed.
+
+---
+
+4. Activity Timeline Date Logic
+
+Current format:
+
+about 2 hours ago
+
+New rules:
+
+If activity is less than 24 hours old:
+
+Display relative time.
+
+Examples:
+
+about 15 minutes ago
+about 2 hours ago
+about 10 hours ago
+
+If activity is 24 hours old or older:
+
+Display full timestamp.
+
+Examples:
+
+Jun 11, 2026 2:45 PM
+Jun 5, 2026 9:12 AM
+
+Apply this rule to:
+
+* Overview Recent Activity
+* Timeline Tab
+* Any future CRM activity widgets
+
+---
+
+ORDERS TAB CHANGES
+
+Orders Tab becomes the full order history view.
+
+Display:
+
+* Order Number
+* Date + Time
+* Status
+* Total
+* Order Note Preview
+* Staff Note Preview
+
+---
+
+Pagination
+
+Move all pagination controls into Orders Tab only.
+
+Do NOT display pagination anywhere inside Overview.
+
+Overview should never show:
+
+* Page numbers
+* Rows per page selectors
+* Pagination controls
+
+---
+
+Orders Tab Controls
+
+Add:
+
+Rows Per Page selector
+
+Options:
+
+25
+50
+100
+All Orders
+
+Default:
+
+25
+
+Add standard pagination:
+
+Previous
+Next
+Page Numbers
+
+Only Orders Tab should have pagination controls.
+
+---
+
+Order Notes / Staff Notes
+
+Keep current functionality.
+
+Display truncated preview in table.
+
+Click row or View button to open full modal.
+
+Modal displays:
+
+* Order Number
+* Order Date
+* Status
+* Order Note (full)
+* Staff Note (full)
+
+No truncation inside modal.
+
+---
+
+Created By Improvements
+
+Wherever possible display the actual user name.
+
+Examples:
+
+John Doe
+Jane Smith
+System
+
+Never display Unknown unless the user record truly cannot be found.

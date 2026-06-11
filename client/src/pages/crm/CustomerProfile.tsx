@@ -13,10 +13,10 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Building2, User, Mail, Phone, Hash, TrendingUp, ShoppingBag,
   Calendar, DollarSign, Users, Plus, Pencil, Trash2, MessageSquare,
-  UserCheck, UserMinus, AlertTriangle, ChevronRight, ChevronDown,
-  Clock, Package, Cpu, FileText,
+  UserCheck, UserMinus, AlertTriangle, Clock, ChevronLeft, ChevronRight,
+  FileText,
 } from "lucide-react";
-import { format, formatDistanceToNow } from "date-fns";
+import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -33,16 +33,24 @@ function fmtDateTime(d: string | Date | null | undefined): string {
   if (!d) return "—";
   try { return format(new Date(d as any), "MMM d, yyyy h:mm a"); } catch { return "—"; }
 }
-function fmtRelative(d: string | Date | null | undefined): string {
+
+/** < 24 h → relative; ≥ 24 h → full timestamp */
+function smartDate(d: string | Date | null | undefined): string {
   if (!d) return "—";
-  try { return formatDistanceToNow(new Date(d as any), { addSuffix: true }); } catch { return "—"; }
+  try {
+    const date = new Date(d as any);
+    if (differenceInHours(new Date(), date) < 24) {
+      return formatDistanceToNow(date, { addSuffix: true });
+    }
+    return format(date, "MMM d, yyyy h:mm a");
+  } catch { return "—"; }
 }
 
 /**
- * Resolve a display name for who performed an action.
- * - If name is known → return name
- * - If name missing and actor id is null/0 → "System" (auto-generated)
- * - If name missing but actor id is present → "Unknown" (user record deleted)
+ * Resolve display name for who performed an action.
+ * - name known          → name
+ * - name missing + no id → "System" (auto-generated)
+ * - name missing + id   → "Unknown" (user record deleted)
  */
 function createdBy(name: string | null | undefined, actorId: number | null | undefined): string {
   if (name) return name;
@@ -59,10 +67,10 @@ function statusColor(s: string | null): "default" | "destructive" | "secondary" 
 }
 
 const HEALTH_COLORS: Record<string, string> = {
-  Healthy: "bg-green-100 text-green-700 border-green-200",
-  Watch:   "bg-yellow-100 text-yellow-700 border-yellow-200",
-  "At Risk": "bg-orange-100 text-orange-700 border-orange-200",
-  Lost:    "bg-red-100 text-red-700 border-red-200",
+  Healthy:    "bg-green-100 text-green-700 border-green-200",
+  Watch:      "bg-yellow-100 text-yellow-700 border-yellow-200",
+  "At Risk":  "bg-orange-100 text-orange-700 border-orange-200",
+  Lost:       "bg-red-100 text-red-700 border-red-200",
 };
 
 const NOTE_TYPE_COLORS: Record<string, string> = {
@@ -90,23 +98,20 @@ function NoteTypePill({ type }: { type: string }) {
   return <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${NOTE_TYPE_COLORS[type] ?? "bg-slate-100 text-slate-600"}`}>{type}</span>;
 }
 
-// ─── Timeline Icon ─────────────────────────────────────────────────────────────
+// ─── Timeline helpers ─────────────────────────────────────────────────────────
 
-function TimelineIcon({ type }: { type: string }) {
-  if (type === "order")      return <ShoppingBag className="h-3.5 w-3.5 text-blue-600" />;
-  if (type === "note")       return <MessageSquare className="h-3.5 w-3.5 text-purple-600" />;
-  if (type === "assignment") return <UserCheck className="h-3.5 w-3.5 text-green-600" />;
-  return <Cpu className="h-3.5 w-3.5 text-slate-400" />;
-}
-function timelineIconBg(type: string) {
+function TimelineIconBg(type: string) {
   if (type === "order")      return "bg-blue-100";
   if (type === "note")       return "bg-purple-100";
   if (type === "assignment") return "bg-green-100";
   return "bg-slate-100";
 }
-
-// ─── Timeline Entry text ───────────────────────────────────────────────────────
-
+function TimelineIconEl({ type }: { type: string }) {
+  if (type === "order")      return <ShoppingBag className="h-3.5 w-3.5 text-blue-600" />;
+  if (type === "note")       return <MessageSquare className="h-3.5 w-3.5 text-purple-600" />;
+  if (type === "assignment") return <UserCheck className="h-3.5 w-3.5 text-green-600" />;
+  return <FileText className="h-3.5 w-3.5 text-slate-400" />;
+}
 function TimelineDescription({ entry }: { entry: any }) {
   if (entry.type === "order") {
     return (
@@ -138,7 +143,7 @@ function TimelineDescription({ entry }: { entry: any }) {
   return <p className="text-sm text-slate-500">Activity recorded</p>;
 }
 
-// ─── Add / Edit Note Modal ─────────────────────────────────────────────────────
+// ─── Note Modal ───────────────────────────────────────────────────────────────
 
 interface NoteModalProps {
   open: boolean;
@@ -149,7 +154,7 @@ interface NoteModalProps {
   title: string;
 }
 function NoteModal({ open, onClose, onSave, saving, initial, title }: NoteModalProps) {
-  const [note, setNote] = useState(initial?.note ?? "");
+  const [note, setNote]         = useState(initial?.note ?? "");
   const [noteType, setNoteType] = useState(initial?.note_type ?? "General");
   const handleClose = () => { setNote(initial?.note ?? ""); setNoteType(initial?.note_type ?? "General"); onClose(); };
   return (
@@ -180,15 +185,20 @@ function NoteModal({ open, onClose, onSave, saving, initial, title }: NoteModalP
   );
 }
 
-// ─── Order Notes Modal ─────────────────────────────────────────────────────────
+// ─── Order Notes Modal ────────────────────────────────────────────────────────
 
 function OrderNotesModal({ order, onClose }: { order: any; onClose: () => void }) {
   return (
     <Dialog open={!!order} onOpenChange={v => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Order #{order?.order_number ?? order?.bigcommerce_order_id} — Notes</DialogTitle>
+          <DialogTitle>Order #{order?.order_number ?? order?.bigcommerce_order_id}</DialogTitle>
         </DialogHeader>
+        <div className="space-y-1 text-sm text-slate-500 mb-3">
+          {order?.order_date && <p>{fmtDateTime(order.order_date)}</p>}
+          {order?.status && <Badge variant={statusColor(order.status)} className="capitalize text-xs">{order.status}</Badge>}
+          {order?.order_total && <p className="font-semibold text-slate-800">{fmtCurrency(order.order_total)}</p>}
+        </div>
         <div className="space-y-4 text-sm">
           <div>
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Customer Order Note</p>
@@ -207,7 +217,64 @@ function OrderNotesModal({ order, onClose }: { order: any; onClose: () => void }
   );
 }
 
-// ─── Tab types ─────────────────────────────────────────────────────────────────
+// ─── Orders Table ─────────────────────────────────────────────────────────────
+
+function OrdersTable({ orders, onRowClick }: { orders: any[]; onRowClick: (o: any) => void }) {
+  if (orders.length === 0) {
+    return <div className="flex items-center justify-center h-32 text-slate-400 text-sm">No orders found.</div>;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[680px]">
+        <thead>
+          <tr className="border-b bg-slate-50">
+            <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Order #</th>
+            <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Date & Time</th>
+            <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Status</th>
+            <th className="px-4 py-2.5 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Total</th>
+            <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Customer Note</th>
+            <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Staff Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {orders.map((o: any) => {
+            const hasNotes = !!(o.staff_notes || o.customer_order_notes);
+            return (
+              <tr
+                key={o.id}
+                data-testid={`row-order-${o.bigcommerce_order_id}`}
+                className="border-b last:border-0 hover:bg-slate-50 transition-colors cursor-pointer"
+                onClick={() => hasNotes && onRowClick(o)}
+              >
+                <td className="px-4 py-2.5 font-mono text-xs text-blue-600 whitespace-nowrap">
+                  #{o.order_number ?? o.bigcommerce_order_id}
+                  {hasNotes && <span className="ml-1 text-amber-500 text-[10px]">📝</span>}
+                </td>
+                <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap text-xs">{fmtDateTime(o.order_date)}</td>
+                <td className="px-4 py-2.5">
+                  <Badge variant={statusColor(o.status)} className="text-xs capitalize">{o.status ?? "—"}</Badge>
+                </td>
+                <td className="px-4 py-2.5 text-right font-medium text-slate-800 whitespace-nowrap">{fmtCurrency(o.order_total)}</td>
+                <td className="px-4 py-2.5 max-w-[160px]">
+                  {o.customer_order_notes
+                    ? <span className="block truncate text-xs text-slate-500">{o.customer_order_notes}</span>
+                    : <span className="text-slate-300 text-xs">—</span>}
+                </td>
+                <td className="px-4 py-2.5 max-w-[160px]">
+                  {o.staff_notes
+                    ? <span className="block truncate text-xs text-slate-500">{o.staff_notes}</span>
+                    : <span className="text-slate-300 text-xs">—</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Tab type ─────────────────────────────────────────────────────────────────
 
 type Tab = "overview" | "orders" | "notes" | "timeline";
 
@@ -236,6 +303,10 @@ export default function CustomerProfile() {
   const [selectedRep, setSelectedRep]       = useState("");
   const [assignSaving, setAssignSaving]     = useState(false);
   const [orderModal, setOrderModal]         = useState<any | null>(null);
+
+  // Orders tab pagination
+  const [ordersPage, setOrdersPage]         = useState(1);
+  const [ordersPageSize, setOrdersPageSize] = useState(25);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -290,7 +361,7 @@ export default function CustomerProfile() {
     staleTime: 60_000,
   });
 
-  // ── Mutations ──────────────────────────────────────────────────────────────
+  // ── Mutations ─────────────────────────────────────────────────────────────────
 
   const invalidateNotes = () => {
     queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "notes"] });
@@ -360,7 +431,7 @@ export default function CustomerProfile() {
     }
   };
 
-  // ── Loading ────────────────────────────────────────────────────────────────
+  // ── Loading / Error ───────────────────────────────────────────────────────────
 
   if (loadingCustomer) {
     return <div className="flex items-center justify-center h-48 text-slate-400 text-sm">Loading customer…</div>;
@@ -383,14 +454,29 @@ export default function CustomerProfile() {
     ? Math.floor((Date.now() - new Date(customer.last_order_date).getTime()) / 86_400_000)
     : null;
 
+  // Overview: latest 5 notes, latest 10 timeline, latest 20 orders
   const recentNotes    = (notes as any[]).slice(0, 5);
   const recentTimeline = (timeline as any[]).slice(0, 10);
+  const recentOrders   = (orders as any[]).slice(0, 20);
 
-  // ─── Tab nav ───────────────────────────────────────────────────────────────
+  // Orders tab pagination
+  const allOrders      = orders as any[];
+  const pageSize       = ordersPageSize === -1 ? allOrders.length : ordersPageSize;
+  const totalOrderPages = ordersPageSize === -1 ? 1 : Math.max(1, Math.ceil(allOrders.length / ordersPageSize));
+  const pagedOrders    = ordersPageSize === -1
+    ? allOrders
+    : allOrders.slice((ordersPage - 1) * pageSize, ordersPage * pageSize);
+
+  const handlePageSizeChange = (val: string) => {
+    setOrdersPageSize(val === "all" ? -1 : parseInt(val));
+    setOrdersPage(1);
+  };
+
+  // ── Tab nav ────────────────────────────────────────────────────────────────
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
     { id: "overview",  label: "Overview",  icon: <User className="h-3.5 w-3.5" /> },
-    { id: "orders",    label: "Orders",    icon: <ShoppingBag className="h-3.5 w-3.5" />, count: (orders as any[]).length || undefined },
+    { id: "orders",    label: "Orders",    icon: <ShoppingBag className="h-3.5 w-3.5" />, count: allOrders.length || undefined },
     { id: "notes",     label: "Notes",     icon: <MessageSquare className="h-3.5 w-3.5" />, count: (notes as any[]).length || undefined },
     { id: "timeline",  label: "Timeline",  icon: <Clock className="h-3.5 w-3.5" /> },
   ];
@@ -399,91 +485,91 @@ export default function CustomerProfile() {
     <div className="flex flex-col min-h-full bg-slate-50">
 
       {/* ══════════════════════════════════════════════════════════════════════
-          HEADER CARD
+          BACK NAV
       ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="bg-white border-b px-4 md:px-6 py-4">
-
-        {/* Back nav */}
-        <Button variant="ghost" size="sm" className="-ml-1 mb-3 text-slate-500 hover:text-slate-800" onClick={() => setLocation("/crm/customers")} data-testid="btn-back-customers">
+      <div className="bg-white border-b px-4 md:px-6 py-2">
+        <Button variant="ghost" size="sm" className="-ml-1 text-slate-500 hover:text-slate-800" onClick={() => setLocation("/crm/customers")} data-testid="btn-back-customers">
           <ArrowLeft className="h-4 w-4 mr-1.5" /> CRM Customers
         </Button>
+      </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+      {/* ══════════════════════════════════════════════════════════════════════
+          HEADER CARD (full bordered card)
+      ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 md:px-6 pt-4">
+        <div className="bg-white border rounded-xl p-5 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-start gap-4">
 
-          {/* Avatar + all info */}
-          <div className="flex gap-4 flex-1 min-w-0">
-            <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-              <User className="h-6 w-6 text-blue-600" />
-            </div>
-
-            <div className="flex-1 min-w-0">
-              {customer.company && (
-                <div className="flex items-center gap-1.5 text-slate-500 text-sm mb-0.5">
-                  <Building2 className="h-3.5 w-3.5 shrink-0" />
-                  <span className="font-semibold text-slate-700 truncate">{customer.company}</span>
-                </div>
-              )}
-              <div className="flex items-center flex-wrap gap-2 mb-2">
-                <h1 className="text-xl font-bold text-slate-900">
-                  {[customer.first_name, customer.last_name].filter(Boolean).join(" ") || "—"}
-                </h1>
-                <HealthBadge health={customer.account_health} />
+            {/* Avatar + info */}
+            <div className="flex gap-4 flex-1 min-w-0">
+              <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                <User className="h-6 w-6 text-blue-600" />
               </div>
-
-              {/* Contact details */}
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500 mb-2">
-                {customer.email && <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 shrink-0" />{customer.email}</span>}
-                {customer.phone && <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" />{customer.phone}</span>}
-                <span className="flex items-center gap-1.5"><Hash className="h-3.5 w-3.5 shrink-0" />BC ID: {customer.bigcommerce_customer_id}</span>
-                {customer.created_date && <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 shrink-0" />Joined {fmtDate(customer.created_date)}</span>}
-                {customer.customer_group_name && (
-                  <span className="flex items-center gap-1.5">
-                    <Users className="h-3.5 w-3.5 shrink-0" />
-                    {customer.customer_group_name}
-                    {customer.customer_group_id && <span className="text-slate-400">({customer.customer_group_id})</span>}
-                  </span>
+              <div className="flex-1 min-w-0">
+                {customer.company && (
+                  <div className="flex items-center gap-1.5 text-slate-500 text-sm mb-0.5">
+                    <Building2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="font-semibold text-slate-700 truncate">{customer.company}</span>
+                  </div>
                 )}
-              </div>
-
-              {/* Sales rep row */}
-              <div className="flex items-center flex-wrap gap-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center flex-wrap gap-2 mb-2">
+                  <h1 className="text-xl font-bold text-slate-900">
+                    {[customer.first_name, customer.last_name].filter(Boolean).join(" ") || "—"}
+                  </h1>
+                  <HealthBadge health={customer.account_health} />
+                </div>
+                {/* Contact */}
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500 mb-2">
+                  {customer.email && <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 shrink-0" />{customer.email}</span>}
+                  {customer.phone && <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" />{customer.phone}</span>}
+                  <span className="flex items-center gap-1.5"><Hash className="h-3.5 w-3.5 shrink-0" />BC ID: {customer.bigcommerce_customer_id}</span>
+                  {customer.created_date && <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 shrink-0" />Joined {fmtDate(customer.created_date)}</span>}
+                  {customer.customer_group_name && (
+                    <span className="flex items-center gap-1.5">
+                      <Users className="h-3.5 w-3.5 shrink-0" />
+                      {customer.customer_group_name}
+                      {customer.customer_group_id && <span className="text-slate-400 ml-0.5">({customer.customer_group_id})</span>}
+                    </span>
+                  )}
+                </div>
+                {/* Rep */}
+                <div className="flex items-center flex-wrap gap-2">
                   {customer.sales_rep_name
                     ? <Badge variant="secondary" className="text-xs gap-1"><UserCheck className="h-3 w-3" />Rep: {customer.sales_rep_name}</Badge>
                     : <span className="text-xs text-slate-400">No rep assigned</span>}
-                </div>
-                {canAssignRep && (
-                  <>
-                    <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setSelectedRep(""); setShowAssignRep(true); }} data-testid="btn-assign-rep">
-                      {customer.sales_rep_name ? "Change Rep" : "Assign Rep"}
-                    </Button>
-                    {customer.sales_rep_name && (
-                      <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-red-500 hover:text-red-700" onClick={handleRemoveRep} data-testid="btn-remove-rep">
-                        <UserMinus className="h-3 w-3 mr-1" />Remove
+                  {canAssignRep && (
+                    <>
+                      <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setSelectedRep(""); setShowAssignRep(true); }} data-testid="btn-assign-rep">
+                        {customer.sales_rep_name ? "Change Rep" : "Assign Rep"}
                       </Button>
-                    )}
-                  </>
-                )}
+                      {customer.sales_rep_name && (
+                        <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-red-500 hover:text-red-700" onClick={handleRemoveRep} data-testid="btn-remove-rep">
+                          <UserMinus className="h-3 w-3 mr-1" />Remove
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Days since last order — right side */}
-          {daysSince != null && (
-            <div className="shrink-0 text-right sm:text-right sm:pl-4 border-t sm:border-t-0 sm:border-l pt-3 sm:pt-0 sm:pl-5">
-              <p className={`text-4xl font-extrabold leading-none ${daysSince > 90 ? "text-red-500" : daysSince > 30 ? "text-amber-500" : "text-green-600"}`}>
-                {daysSince}d
-              </p>
-              <p className="text-xs text-slate-400 mt-1">since last order</p>
-            </div>
-          )}
+            {/* Days since last order — far right */}
+            {daysSince != null && (
+              <div className="shrink-0 text-right sm:border-l sm:pl-5 border-t sm:border-t-0 pt-3 sm:pt-0">
+                <p className={`text-4xl font-extrabold leading-none ${daysSince > 90 ? "text-red-500" : daysSince > 30 ? "text-amber-500" : "text-green-600"}`}>
+                  {daysSince}d
+                </p>
+                <p className="text-xs text-slate-400 mt-1">since last order</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
           SUMMARY CARDS ROW
       ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="bg-white border-b px-4 md:px-6 py-3">
+      <div className="px-4 md:px-6 pt-3">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <SummaryCard icon={<DollarSign className="h-4 w-4 text-green-500" />} label="Lifetime Revenue" value={fmtCurrency(customer.lifetime_revenue)} testId="text-lifetime-revenue" />
           <SummaryCard icon={<ShoppingBag className="h-4 w-4 text-blue-500" />} label="Lifetime Orders" value={lifetimeOrders.toLocaleString()} testId="text-lifetime-orders" />
@@ -495,327 +581,325 @@ export default function CustomerProfile() {
       {/* ══════════════════════════════════════════════════════════════════════
           TAB NAV
       ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="bg-white border-b px-4 md:px-6 overflow-x-auto">
-        <div className="flex gap-0 min-w-max">
-          {TABS.map(tab => (
-            <button
-              key={tab.id}
-              data-testid={`tab-${tab.id}`}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                activeTab === tab.id
-                  ? "border-blue-600 text-blue-700"
-                  : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
-              }`}
-            >
-              {tab.icon}
-              {tab.label}
-              {tab.count != null && (
-                <span className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                  activeTab === tab.id ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-500"
-                }`}>{tab.count}</span>
-              )}
-            </button>
-          ))}
+      <div className="px-4 md:px-6 pt-3">
+        <div className="bg-white border rounded-t-xl overflow-x-auto">
+          <div className="flex gap-0 min-w-max px-2">
+            {TABS.map(tab => (
+              <button
+                key={tab.id}
+                data-testid={`tab-${tab.id}`}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                  activeTab === tab.id
+                    ? "border-blue-600 text-blue-700"
+                    : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
+                }`}
+              >
+                {tab.icon}{tab.label}
+                {tab.count != null && (
+                  <span className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                    activeTab === tab.id ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-500"
+                  }`}>{tab.count}</span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
           TAB CONTENT
       ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="flex-1 p-4 md:p-6">
+      <div className="px-4 md:px-6 pb-6">
+        <div className="bg-white border border-t-0 rounded-b-xl overflow-hidden">
 
-        {/* ── OVERVIEW TAB ──────────────────────────────────────────────────── */}
-        {activeTab === "overview" && (
-          <div className="space-y-5">
-            {/* Two columns: Recent Notes + Recent Timeline */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {/* ── OVERVIEW TAB ──────────────────────────────────────────────── */}
+          {activeTab === "overview" && (
+            <div className="p-5 space-y-5">
 
-              {/* Recent Notes */}
-              <div className="bg-white border rounded-xl overflow-hidden">
-                <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                    <MessageSquare className="h-4 w-4 text-slate-400" /> Recent Notes
-                  </h2>
-                  <div className="flex items-center gap-2">
-                    {canCreateNote && (
-                      <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={() => setShowAddNote(true)} data-testid="btn-add-note">
-                        <Plus className="h-3 w-3" /> Add
-                      </Button>
-                    )}
-                    {(notes as any[]).length > 5 && (
-                      <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-600" onClick={() => setActiveTab("notes")}>
-                        View all ({(notes as any[]).length})
-                      </Button>
-                    )}
+              {/* Recent Notes + Recent Activity columns */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+                {/* Recent Notes */}
+                <div className="border rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                    <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                      <MessageSquare className="h-4 w-4 text-slate-400" />Recent Notes
+                    </h2>
+                    <div className="flex items-center gap-2">
+                      {canCreateNote && (
+                        <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={() => setShowAddNote(true)} data-testid="btn-add-note">
+                          <Plus className="h-3 w-3" />Add
+                        </Button>
+                      )}
+                      {(notes as any[]).length > 5 && (
+                        <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-600" onClick={() => setActiveTab("notes")}>
+                          View all ({(notes as any[]).length})
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
-                {loadingNotes ? (
-                  <div className="flex items-center justify-center h-20 text-slate-400 text-sm">Loading…</div>
-                ) : recentNotes.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-20 text-slate-400 text-xs">
-                    <MessageSquare className="h-5 w-5 mb-1 opacity-30" />No notes yet
-                  </div>
-                ) : (
-                  <div className="divide-y">
-                    {recentNotes.map((note: any) => (
-                      <div key={note.id} className="px-4 py-3">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <NoteTypePill type={note.note_type} />
-                          <span className="text-[11px] text-slate-500 font-medium">{createdBy(note.created_by_name, note.created_by)}</span>
-                          <span className="text-[11px] text-slate-400">·</span>
-                          <span className="text-[11px] text-slate-400">{fmtDate(note.created_at)}</span>
+                  {loadingNotes ? (
+                    <div className="flex items-center justify-center h-20 text-slate-400 text-sm">Loading…</div>
+                  ) : recentNotes.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-20 text-slate-400 text-xs">
+                      <MessageSquare className="h-5 w-5 mb-1 opacity-30" />No notes yet
+                    </div>
+                  ) : (
+                    <div className="divide-y">
+                      {recentNotes.map((note: any) => (
+                        <div key={note.id} className="px-4 py-3">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <NoteTypePill type={note.note_type} />
+                          </div>
+                          <p className="text-xs font-semibold text-slate-700 mb-0.5">{createdBy(note.created_by_name, note.created_by)}</p>
+                          <p className="text-[11px] text-slate-400 mb-1">{fmtDateTime(note.created_at)}</p>
+                          <p className="text-xs text-slate-600 line-clamp-2">{note.note}</p>
                         </div>
-                        <p className="text-xs text-slate-600 line-clamp-2">{note.note}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Recent Activity Timeline */}
-              <div className="bg-white border rounded-xl overflow-hidden">
-                <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                    <Clock className="h-4 w-4 text-slate-400" /> Recent Activity
-                  </h2>
-                  {(timeline as any[]).length > 10 && (
-                    <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-600" onClick={() => setActiveTab("timeline")}>
-                      View all
-                    </Button>
+                      ))}
+                    </div>
                   )}
                 </div>
-                {loadingTimeline ? (
-                  <div className="flex items-center justify-center h-20 text-slate-400 text-sm">Loading…</div>
-                ) : recentTimeline.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-20 text-slate-400 text-xs">No activity yet</div>
-                ) : (
-                  <div className="px-4 py-3 space-y-0">
-                    {recentTimeline.map((entry: any, i: number) => {
-                      const isLast = i === recentTimeline.length - 1;
-                      return (
-                        <div key={entry.id} className="flex gap-3">
-                          <div className="flex flex-col items-center">
-                            <div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${timelineIconBg(entry.type)}`}>
-                              <TimelineIcon type={entry.type} />
-                            </div>
-                            {!isLast && <div className="w-px flex-1 bg-slate-200 my-1" />}
-                          </div>
-                          <div className={`pb-3 flex-1 min-w-0 ${isLast ? "pb-0" : ""}`}>
-                            <p className="text-[10px] text-slate-400 mb-0.5">{fmtRelative(entry.date)}</p>
-                            <TimelineDescription entry={entry} />
-                          </div>
-                        </div>
-                      );
-                    })}
+
+                {/* Recent Activity */}
+                <div className="border rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                    <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Clock className="h-4 w-4 text-slate-400" />Recent Activity
+                    </h2>
+                    {(timeline as any[]).length > 10 && (
+                      <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-600" onClick={() => setActiveTab("timeline")}>
+                        View all
+                      </Button>
+                    )}
                   </div>
+                  {loadingTimeline ? (
+                    <div className="flex items-center justify-center h-20 text-slate-400 text-sm">Loading…</div>
+                  ) : recentTimeline.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-20 text-slate-400 text-xs">No activity yet</div>
+                  ) : (
+                    <div className="px-4 py-3 space-y-0">
+                      {recentTimeline.map((entry: any, i: number) => {
+                        const isLast = i === recentTimeline.length - 1;
+                        return (
+                          <div key={entry.id} className="flex gap-3">
+                            <div className="flex flex-col items-center">
+                              <div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${TimelineIconBg(entry.type)}`}>
+                                <TimelineIconEl type={entry.type} />
+                              </div>
+                              {!isLast && <div className="w-px flex-1 bg-slate-200 my-1" />}
+                            </div>
+                            <div className={`pb-3 flex-1 min-w-0 ${isLast ? "pb-0" : ""}`}>
+                              <p className="text-[10px] text-slate-400 mb-0.5">{smartDate(entry.date)}</p>
+                              <TimelineDescription entry={entry} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Recent Order History (latest 20) — replaces Customer Summary panel */}
+              <div className="border rounded-xl overflow-hidden">
+                <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                    <ShoppingBag className="h-4 w-4 text-slate-400" />Order History (Latest 20)
+                  </h2>
+                  <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-600" onClick={() => setActiveTab("orders")} data-testid="btn-view-all-orders">
+                    View All Orders →
+                  </Button>
+                </div>
+                {loadingOrders ? (
+                  <div className="flex items-center justify-center h-24 text-slate-400 text-sm">Loading orders…</div>
+                ) : (
+                  <OrdersTable orders={recentOrders} onRowClick={setOrderModal} />
                 )}
               </div>
             </div>
+          )}
 
-            {/* Customer Summary Card */}
-            <div className="bg-white border rounded-xl p-5">
-              <h2 className="text-sm font-semibold text-slate-700 mb-4">Customer Summary</h2>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
-                <SummaryRow label="Lifetime Revenue" value={fmtCurrency(customer.lifetime_revenue)} />
-                <SummaryRow label="Lifetime Orders" value={lifetimeOrders.toLocaleString()} />
-                <SummaryRow label="Average Order Value" value={fmtCurrency(avgOrderValue)} />
-                <SummaryRow label="Last Order Date" value={customer.last_order_date ? fmtDate(customer.last_order_date) : "—"} />
-                <SummaryRow label="Account Health" value={<HealthBadge health={customer.account_health} />} />
-                <SummaryRow label="Assigned Rep" value={customer.sales_rep_name || "—"} />
-                <SummaryRow label="Customer Group" value={customer.customer_group_name || "—"} />
-                <SummaryRow label="Days Since Last Order" value={daysSince != null ? `${daysSince} days` : "—"} />
+          {/* ── ORDERS TAB ────────────────────────────────────────────────── */}
+          {activeTab === "orders" && (
+            <div>
+              {/* Controls row */}
+              <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between gap-3 flex-wrap">
+                <h2 className="text-sm font-semibold text-slate-700">
+                  Order History
+                  {allOrders.length > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">({allOrders.length} total)</span>}
+                </h2>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">Rows per page</span>
+                  <Select value={ordersPageSize === -1 ? "all" : String(ordersPageSize)} onValueChange={handlePageSizeChange}>
+                    <SelectTrigger className="h-7 text-xs w-20" data-testid="select-orders-page-size">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="25">25</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                      <SelectItem value="all">All</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* ── ORDERS TAB ────────────────────────────────────────────────────── */}
-        {activeTab === "orders" && (
-          <div className="bg-white border rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b bg-slate-50">
-              <h2 className="text-sm font-semibold text-slate-700">Order History</h2>
-            </div>
-            {loadingOrders ? (
-              <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading orders…</div>
-            ) : (orders as any[]).length === 0 ? (
-              <div className="flex items-center justify-center h-32 text-slate-400 text-sm">No orders found.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[600px]">
-                  <thead>
-                    <tr className="border-b bg-slate-50">
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Order #</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Date</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Status</th>
-                      <th className="px-4 py-2.5 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Total</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Customer Note</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Staff Note</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(orders as any[]).map((o: any) => {
-                      const hasNotes = !!(o.staff_notes || o.customer_order_notes);
+              {loadingOrders ? (
+                <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading orders…</div>
+              ) : (
+                <OrdersTable orders={pagedOrders} onRowClick={setOrderModal} />
+              )}
+
+              {/* Pagination */}
+              {ordersPageSize !== -1 && totalOrderPages > 1 && (
+                <div className="px-4 py-3 border-t flex items-center justify-between bg-slate-50">
+                  <p className="text-xs text-slate-500">
+                    Page {ordersPage} of {totalOrderPages} &nbsp;·&nbsp; {allOrders.length} orders
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setOrdersPage(1)} disabled={ordersPage === 1} data-testid="btn-orders-first">
+                      «
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setOrdersPage(p => Math.max(1, p - 1))} disabled={ordersPage === 1} data-testid="btn-orders-prev">
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    {/* Page numbers */}
+                    {Array.from({ length: Math.min(5, totalOrderPages) }, (_, i) => {
+                      const start = Math.max(1, Math.min(ordersPage - 2, totalOrderPages - 4));
+                      const pg = start + i;
+                      if (pg > totalOrderPages) return null;
                       return (
-                        <tr
-                          key={o.id}
-                          data-testid={`row-order-${o.bigcommerce_order_id}`}
-                          className={`border-b last:border-0 hover:bg-slate-50 transition-colors ${hasNotes ? "cursor-pointer" : ""}`}
-                          onClick={() => hasNotes && setOrderModal(o)}
-                        >
-                          <td className="px-4 py-2.5 font-mono text-xs text-blue-600 whitespace-nowrap">
-                            #{o.order_number ?? o.bigcommerce_order_id}
-                          </td>
-                          <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{fmtDate(o.order_date)}</td>
-                          <td className="px-4 py-2.5">
-                            <Badge variant={statusColor(o.status)} className="text-xs capitalize">{o.status ?? "—"}</Badge>
-                          </td>
-                          <td className="px-4 py-2.5 text-right font-medium text-slate-800 whitespace-nowrap">{fmtCurrency(o.order_total)}</td>
-                          <td className="px-4 py-2.5 text-slate-500 max-w-[180px]">
-                            {o.customer_order_notes
-                              ? <span className="block truncate text-xs">{o.customer_order_notes}</span>
-                              : <span className="text-slate-300 text-xs">—</span>}
-                          </td>
-                          <td className="px-4 py-2.5 text-slate-500 max-w-[180px]">
-                            {o.staff_notes
-                              ? <span className="block truncate text-xs">{o.staff_notes}</span>
-                              : <span className="text-slate-300 text-xs">—</span>}
-                          </td>
-                        </tr>
+                        <Button key={pg} variant={pg === ordersPage ? "default" : "outline"} size="sm" className="h-7 min-w-[28px] px-2 text-xs" onClick={() => setOrdersPage(pg)}>
+                          {pg}
+                        </Button>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── NOTES TAB ─────────────────────────────────────────────────────── */}
-        {activeTab === "notes" && (
-          <div className="bg-white border rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                <MessageSquare className="h-4 w-4 text-slate-400" />
-                Notes {(notes as any[]).length > 0 && <span className="text-xs font-normal text-slate-400">({(notes as any[]).length})</span>}
-              </h2>
-              {canCreateNote && (
-                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowAddNote(true)} data-testid="btn-add-note-tab">
-                  <Plus className="h-3.5 w-3.5" /> Add Note
-                </Button>
+                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setOrdersPage(p => Math.min(totalOrderPages, p + 1))} disabled={ordersPage === totalOrderPages} data-testid="btn-orders-next">
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setOrdersPage(totalOrderPages)} disabled={ordersPage === totalOrderPages} data-testid="btn-orders-last">
+                      »
+                    </Button>
+                  </div>
+                </div>
               )}
             </div>
-            {loadingNotes ? (
-              <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
-            ) : (notes as any[]).length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-32 text-slate-400">
-                <MessageSquare className="h-8 w-8 mb-2 opacity-20" />
-                <p className="text-sm">No notes yet</p>
-                {canCreateNote && <Button size="sm" variant="outline" className="mt-2 text-xs" onClick={() => setShowAddNote(true)}>Add first note</Button>}
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[580px]">
-                  <thead>
-                    <tr className="border-b bg-slate-50">
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Date</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Type</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Note</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Created By</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(notes as any[]).map((note: any) => (
-                      <tr key={note.id} data-testid={`note-row-${note.id}`} className="border-b last:border-0 hover:bg-slate-50 align-top">
-                        <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmtDate(note.created_at)}</td>
-                        <td className="px-4 py-3"><NoteTypePill type={note.note_type} /></td>
-                        <td className="px-4 py-3 text-sm text-slate-700 max-w-[300px]">
-                          <p className="whitespace-pre-wrap break-words">{note.note}</p>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap font-medium">
-                          {createdBy(note.created_by_name, note.created_by)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1">
-                            {canEditNote && (
-                              <button
-                                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-blue-600"
-                                onClick={() => setEditingNote(note)}
-                                data-testid={`btn-edit-note-${note.id}`}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                            {canDeleteNote && (
-                              <button
-                                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-red-600"
-                                onClick={() => setDeletingNoteId(note.id)}
-                                data-testid={`btn-delete-note-${note.id}`}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
+          )}
 
-        {/* ── TIMELINE TAB ──────────────────────────────────────────────────── */}
-        {activeTab === "timeline" && (
-          <div className="bg-white border rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b bg-slate-50">
-              <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                <Clock className="h-4 w-4 text-slate-400" /> Activity Timeline
-              </h2>
-            </div>
-            {loadingTimeline ? (
-              <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
-            ) : (timeline as any[]).length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-32 text-slate-400 text-sm">No activity recorded.</div>
-            ) : (
-              <div className="p-5 space-y-0">
-                {(timeline as any[]).map((entry: any, i: number) => {
-                  const isLast = i === (timeline as any[]).length - 1;
-                  const actor = entry.type === "note"
-                    ? createdBy(entry.created_by_name, entry.created_by)
-                    : entry.type === "assignment"
-                    ? createdBy(entry.user_name, entry.user_id)
-                    : "System";
-                  const dateStr = entry.date ? format(new Date(entry.date), "MMM d, yyyy") : "—";
-                  const timeStr = entry.date ? format(new Date(entry.date), "h:mm a") : "";
-                  return (
-                    <div key={entry.id} className="flex gap-4">
-                      <div className="flex flex-col items-center">
-                        <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${timelineIconBg(entry.type)}`}>
-                          <TimelineIcon type={entry.type} />
-                        </div>
-                        {!isLast && <div className="w-px flex-1 bg-slate-200 my-1 min-h-[12px]" />}
-                      </div>
-                      <div className={`pb-5 flex-1 min-w-0 ${isLast ? "pb-0" : ""}`}>
-                        <div className="flex items-start justify-between gap-2 flex-wrap">
-                          <div>
-                            <TimelineDescription entry={entry} />
-                            <p className="text-[11px] text-slate-400 mt-0.5">
-                              <span className="font-medium text-slate-500">{actor}</span>
-                              {" · "}{dateStr}{timeStr && <span> {timeStr}</span>}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+          {/* ── NOTES TAB ─────────────────────────────────────────────────── */}
+          {activeTab === "notes" && (
+            <div>
+              <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                  <MessageSquare className="h-4 w-4 text-slate-400" />
+                  Notes {(notes as any[]).length > 0 && <span className="text-xs font-normal text-slate-400">({(notes as any[]).length})</span>}
+                </h2>
+                {canCreateNote && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowAddNote(true)} data-testid="btn-add-note-tab">
+                    <Plus className="h-3.5 w-3.5" />Add Note
+                  </Button>
+                )}
               </div>
-            )}
-          </div>
-        )}
+              {loadingNotes ? (
+                <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
+              ) : (notes as any[]).length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-32 text-slate-400">
+                  <MessageSquare className="h-8 w-8 mb-2 opacity-20" />
+                  <p className="text-sm">No notes yet</p>
+                  {canCreateNote && <Button size="sm" variant="outline" className="mt-2 text-xs" onClick={() => setShowAddNote(true)}>Add first note</Button>}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[600px]">
+                    <thead>
+                      <tr className="border-b bg-slate-50">
+                        <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Date & Time</th>
+                        <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Type</th>
+                        <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Note</th>
+                        <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Created By</th>
+                        <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(notes as any[]).map((note: any) => (
+                        <tr key={note.id} data-testid={`note-row-${note.id}`} className="border-b last:border-0 hover:bg-slate-50 align-top">
+                          <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmtDateTime(note.created_at)}</td>
+                          <td className="px-4 py-3"><NoteTypePill type={note.note_type} /></td>
+                          <td className="px-4 py-3 text-sm text-slate-700 max-w-[320px]">
+                            <p className="whitespace-pre-wrap break-words">{note.note}</p>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap font-medium">
+                            {createdBy(note.created_by_name, note.created_by)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1">
+                              {canEditNote && (
+                                <button className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-blue-600" onClick={() => setEditingNote(note)} data-testid={`btn-edit-note-${note.id}`}>
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                              {canDeleteNote && (
+                                <button className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-red-600" onClick={() => setDeletingNoteId(note.id)} data-testid={`btn-delete-note-${note.id}`}>
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── TIMELINE TAB ──────────────────────────────────────────────── */}
+          {activeTab === "timeline" && (
+            <div>
+              <div className="px-4 py-3 border-b bg-slate-50">
+                <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                  <Clock className="h-4 w-4 text-slate-400" />Activity Timeline
+                </h2>
+              </div>
+              {loadingTimeline ? (
+                <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
+              ) : (timeline as any[]).length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-32 text-slate-400 text-sm">No activity recorded.</div>
+              ) : (
+                <div className="p-5 space-y-0">
+                  {(timeline as any[]).map((entry: any, i: number) => {
+                    const isLast = i === (timeline as any[]).length - 1;
+                    const actor = entry.type === "note"
+                      ? createdBy(entry.created_by_name, entry.created_by)
+                      : entry.type === "assignment"
+                      ? createdBy(entry.user_name, entry.user_id)
+                      : "System";
+                    return (
+                      <div key={entry.id} className="flex gap-4">
+                        <div className="flex flex-col items-center">
+                          <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${TimelineIconBg(entry.type)}`}>
+                            <TimelineIconEl type={entry.type} />
+                          </div>
+                          {!isLast && <div className="w-px flex-1 bg-slate-200 my-1 min-h-[12px]" />}
+                        </div>
+                        <div className={`pb-5 flex-1 min-w-0 ${isLast ? "pb-0" : ""}`}>
+                          <TimelineDescription entry={entry} />
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            <span className="font-medium text-slate-500">{actor}</span>
+                            {" · "}{smartDate(entry.date)}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+        </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
@@ -881,17 +965,9 @@ export default function CustomerProfile() {
 
 function SummaryCard({ icon, label, value, testId }: { icon: React.ReactNode; label: string; value: string; testId?: string }) {
   return (
-    <div className="rounded-lg border px-3 py-2.5 bg-white">
+    <div className="rounded-xl border px-3 py-2.5 bg-white shadow-sm">
       <div className="flex items-center gap-1.5 mb-1">{icon}<span className="text-xs text-slate-500">{label}</span></div>
       <p className="text-lg font-bold text-slate-900" data-testid={testId}>{value}</p>
-    </div>
-  );
-}
-function SummaryRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div>
-      <p className="text-xs text-slate-400 mb-0.5">{label}</p>
-      <p className="text-sm font-medium text-slate-800">{value}</p>
     </div>
   );
 }
