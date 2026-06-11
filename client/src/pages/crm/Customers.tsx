@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, FileText, FileSpreadsheet, ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight, User, Settings2, X } from "lucide-react";
+import { Search, FileText, FileSpreadsheet, ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight, User, Settings2, X, Users, AlertTriangle, TrendingUp, HeartPulse } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
@@ -102,9 +102,22 @@ export default function CRMCustomers() {
     queryFn: async () => {
       const r = await fetch("/api/crm/filters", { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load filters");
-      return r.json() as Promise<{ groups: string[]; states: string[] }>;
+      return r.json() as Promise<{ groups: string[]; states: string[]; reps: { id: number; name: string }[] }>;
     },
     staleTime: 60_000,
+  });
+
+  const { data: metrics } = useQuery({
+    queryKey: ["crm", "metrics", debouncedSearch, group, stateFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams({ search: debouncedSearch });
+      if (group) params.set("group", group);
+      if (stateFilter) params.set("state", stateFilter);
+      const r = await fetch(`/api/crm/metrics?${params}`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load metrics");
+      return r.json() as Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }>;
+    },
+    staleTime: 30_000,
   });
 
   const { data, isLoading } = useQuery({
@@ -172,6 +185,34 @@ export default function CRMCustomers() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* ── Metrics Cards ──────────────────────────────────────────── */}
+      {metrics && (
+        <div className="border-b bg-white px-4 py-3 shrink-0">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2 bg-slate-50" data-testid="metric-total">
+              <Users className="h-4 w-4 text-slate-400 shrink-0" />
+              <div><p className="text-[11px] text-slate-400">Total</p><p className="text-base font-bold text-slate-800">{(metrics.total ?? 0).toLocaleString()}</p></div>
+            </div>
+            <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2 bg-green-50 border-green-200" data-testid="metric-healthy">
+              <HeartPulse className="h-4 w-4 text-green-500 shrink-0" />
+              <div><p className="text-[11px] text-green-600">Healthy</p><p className="text-base font-bold text-green-700">{(metrics.healthy ?? 0).toLocaleString()}</p></div>
+            </div>
+            <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2 bg-yellow-50 border-yellow-200" data-testid="metric-watch">
+              <TrendingUp className="h-4 w-4 text-yellow-500 shrink-0" />
+              <div><p className="text-[11px] text-yellow-600">Watch</p><p className="text-base font-bold text-yellow-700">{(metrics.watch ?? 0).toLocaleString()}</p></div>
+            </div>
+            <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2 bg-orange-50 border-orange-200" data-testid="metric-at-risk">
+              <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
+              <div><p className="text-[11px] text-orange-600">At Risk</p><p className="text-base font-bold text-orange-700">{(metrics.at_risk ?? 0).toLocaleString()}</p></div>
+            </div>
+            <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2 bg-red-50 border-red-200" data-testid="metric-lost">
+              <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
+              <div><p className="text-[11px] text-red-600">Lost</p><p className="text-base font-bold text-red-700">{(metrics.lost ?? 0).toLocaleString()}</p></div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Header ─────────────────────────────────────────────────── */}
       <div className="border-b bg-white px-4 py-3 shrink-0 space-y-2">
 

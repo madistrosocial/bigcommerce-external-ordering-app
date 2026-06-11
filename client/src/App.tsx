@@ -36,6 +36,7 @@ import ShipStationExportPage from "@/pages/admin/ShipStationExport";
 import CRMSettings from "@/pages/admin/CRMSettings";
 import CRMCustomers from "@/pages/crm/Customers";
 import CustomerProfile from "@/pages/crm/CustomerProfile";
+import CRMReactivation from "@/pages/crm/Reactivation";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -179,6 +180,9 @@ function Router() {
       </Route>
       <Route path="/crm/customers/:id">
         {() => <ProtectedRoute component={CustomerProfile} />}
+      </Route>
+      <Route path="/crm/reactivation">
+        {() => <ProtectedRoute component={CRMReactivation} />}
       </Route>
       <Route path="/admin/crm">
         {() => <ProtectedRoute component={CRMSettings} role="admin" />}

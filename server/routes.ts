@@ -4308,6 +4308,8 @@ export async function registerRoutes(
             payment_status: o.payment_status || null,
             customer_name: customerName || null,
             customer_email: o.billing_address?.email || null,
+            staff_notes: o.staff_notes || o.order_note || null,
+            customer_order_notes: o.customer_message || null,
           });
           synced++;
         }
@@ -4405,6 +4407,8 @@ export async function registerRoutes(
       const { assigned_user_id } = req.body;
       if (!assigned_user_id) return res.status(400).json({ error: "assigned_user_id required" });
       const rep = await storage.setCrmSalesRep({ customer_id: customerId, assigned_user_id: parseInt(assigned_user_id), assigned_by: (req as any).userId ?? null });
+      const repUser = await storage.getUser(parseInt(assigned_user_id));
+      await storage.createCrmAuditLog({ user_id: (req as any).userId ?? null, action: 'sales_rep_assigned', customer_id: customerId, detail: { rep_name: repUser?.name ?? null, assigned_user_id: parseInt(assigned_user_id) } });
       res.json(rep);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -4412,8 +4416,89 @@ export async function registerRoutes(
   // DELETE /api/crm/customers/:id/sales-rep
   app.delete("/api/crm/customers/:id/sales-rep", requireAuth, async (req, res) => {
     try {
-      await storage.removeCrmSalesRep(parseInt(req.params.id));
+      const customerId = parseInt(req.params.id);
+      await storage.removeCrmSalesRep(customerId);
+      await storage.createCrmAuditLog({ user_id: (req as any).userId ?? null, action: 'sales_rep_removed', customer_id: customerId, detail: {} });
       res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── CRM Notes ──────────────────────────────────────────────────────────────
+
+  // GET /api/crm/customers/:id/notes
+  app.get("/api/crm/customers/:id/notes", requireAuth, async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.id);
+      const notes = await storage.getCrmNotes(customerId);
+      res.json(notes);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/crm/customers/:id/notes
+  app.post("/api/crm/customers/:id/notes", requireAuth, async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.id);
+      const { note, note_type = "General" } = req.body;
+      if (!note?.trim()) return res.status(400).json({ error: "note is required" });
+      const created = await storage.createCrmNote({ customer_id: customerId, note: note.trim(), note_type, created_by: (req as any).userId ?? null });
+      await storage.createCrmAuditLog({ user_id: (req as any).userId ?? null, action: 'note_created', customer_id: customerId, detail: { note_type } });
+      res.status(201).json(created);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/crm/customers/:id/notes/:noteId
+  app.put("/api/crm/customers/:id/notes/:noteId", requireAuth, async (req, res) => {
+    try {
+      const noteId = parseInt(req.params.noteId);
+      const { note, note_type } = req.body;
+      const updated = await storage.updateCrmNote(noteId, { note: note?.trim(), note_type });
+      res.json(updated);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/crm/customers/:id/notes/:noteId
+  app.delete("/api/crm/customers/:id/notes/:noteId", requireAuth, async (req, res) => {
+    try {
+      const noteId = parseInt(req.params.noteId);
+      await storage.deleteCrmNote(noteId);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/customers/:id/timeline
+  app.get("/api/crm/customers/:id/timeline", requireAuth, async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.id);
+      const timeline = await storage.getCrmTimeline(customerId);
+      res.json(timeline);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/reactivation
+  app.get("/api/crm/reactivation", requireAuth, async (req, res) => {
+    try {
+      const { search = "", group = "", state = "", health = "", rep, sortBy = "last_order_date", sortDir = "asc" } = req.query as Record<string, string>;
+      const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
+      const offset = parseInt(String(req.query.offset ?? "0"));
+      const result = await storage.getReactivationCustomers({ search, group, state, health, rep: rep ? parseInt(rep) : undefined, sortBy, sortDir, limit, offset });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/metrics
+  app.get("/api/crm/metrics", requireAuth, async (req, res) => {
+    try {
+      const { search = "", group = "", state = "" } = req.query as Record<string, string>;
+      const metrics = await storage.getCrmMetrics({ search, group, state });
+      res.json(metrics);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/users
+  app.get("/api/crm/users", requireAuth, async (_req, res) => {
+    try {
+      const users = await storage.getCrmUsers();
+      res.json(users);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

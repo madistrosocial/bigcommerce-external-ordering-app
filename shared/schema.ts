@@ -167,6 +167,7 @@ export const customersMirror = pgTable("customers_mirror", {
   lifetime_orders: integer("lifetime_orders").notNull().default(0),
   lifetime_revenue: decimal("lifetime_revenue", { precision: 14, scale: 2 }).notNull().default("0"),
   is_active: boolean("is_active").notNull().default(true),
+  account_health: text("account_health"),
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -182,6 +183,8 @@ export const customerOrdersMirror = pgTable("customer_orders_mirror", {
   payment_status: text("payment_status"),
   customer_name: text("customer_name"),
   customer_email: text("customer_email"),
+  staff_notes: text("staff_notes"),
+  customer_order_notes: text("customer_order_notes"),
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -192,6 +195,25 @@ export const customerSalesRep = pgTable("customer_sales_rep", {
   assigned_user_id: integer("assigned_user_id").notNull().references(() => users.id),
   assigned_at: timestamp("assigned_at").notNull().defaultNow(),
   assigned_by: integer("assigned_by"),
+});
+
+export const crmCustomerNotes = pgTable("crm_customer_notes", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  note_type: text("note_type").notNull().default("General"),
+  note: text("note").notNull(),
+  created_by: integer("created_by").references(() => users.id),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const crmAuditLog = pgTable("crm_audit_log", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").references(() => users.id),
+  action: text("action").notNull(),
+  customer_id: integer("customer_id").references(() => customersMirror.id, { onDelete: "set null" }),
+  detail: jsonb("detail"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
 // Insert schemas — RBAC
@@ -214,6 +236,8 @@ export const insertShipstationExportHistorySchema = createInsertSchema(shipstati
 export const insertCrmCustomerSchema = createInsertSchema(customersMirror).omit({ id: true, created_at: true, updated_at: true });
 export const insertCrmOrderSchema = createInsertSchema(customerOrdersMirror).omit({ id: true, created_at: true, updated_at: true });
 export const insertCrmSalesRepSchema = createInsertSchema(customerSalesRep).omit({ id: true, assigned_at: true });
+export const insertCrmNoteSchema = createInsertSchema(crmCustomerNotes).omit({ id: true, created_at: true, updated_at: true });
+export const insertCrmAuditLogSchema = createInsertSchema(crmAuditLog).omit({ id: true, created_at: true });
 
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -247,6 +271,10 @@ export type InsertCrmOrder = z.infer<typeof insertCrmOrderSchema>;
 export type CrmOrder = typeof customerOrdersMirror.$inferSelect;
 export type InsertCrmSalesRep = z.infer<typeof insertCrmSalesRepSchema>;
 export type CrmSalesRep = typeof customerSalesRep.$inferSelect;
+export type InsertCrmNote = z.infer<typeof insertCrmNoteSchema>;
+export type CrmNote = typeof crmCustomerNotes.$inferSelect;
+export type InsertCrmAuditLog = z.infer<typeof insertCrmAuditLogSchema>;
+export type CrmAuditLogEntry = typeof crmAuditLog.$inferSelect;
 
 // RBAC types
 export type InsertRole = z.infer<typeof insertRoleSchema>;
