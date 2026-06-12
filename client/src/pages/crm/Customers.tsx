@@ -35,15 +35,18 @@ const ALL_COLUMNS = [
   { key: "orders",          label: "Orders",         required: false, defaultW: 100 },
   { key: "revenue",         label: "Revenue",        required: false, defaultW: 120 },
   { key: "sales_rep",       label: "Sales Rep",      required: false, defaultW: 140 },
+  { key: "store_credit",    label: "Store Credit",   required: false, defaultW: 130 },
 ] as const;
 
 type ColKey = typeof ALL_COLUMNS[number]["key"];
-const DEFAULT_VISIBLE = new Set<ColKey>(ALL_COLUMNS.map(c => c.key));
+const DEFAULT_VISIBLE = new Set<ColKey>(
+  ALL_COLUMNS.filter(c => c.key !== "store_credit").map(c => c.key)
+);
 const DEFAULT_WIDTHS: Record<ColKey, number> = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c.defaultW])) as Record<ColKey, number>;
 const COL_MIN_WIDTHS: Record<ColKey, number> = {
   company: 180, customer_name: 180, email: 220, phone: 120,
   state: 120, customer_group: 180, last_order: 120, days_since: 80,
-  orders: 80, revenue: 100, sales_rep: 120,
+  orders: 80, revenue: 100, sales_rep: 120, store_credit: 100,
 };
 
 const PAGE_SIZE = 50;
@@ -500,6 +503,7 @@ export default function CRMCustomers() {
               {vis("orders")         && <col style={{ width: colWidths.orders }} />}
               {vis("revenue")        && <col style={{ width: colWidths.revenue }} />}
               {vis("sales_rep")      && <col style={{ width: colWidths.sales_rep }} />}
+              {vis("store_credit")   && <col style={{ width: colWidths.store_credit }} />}
             </colgroup>
             <thead className="sticky top-0 bg-slate-50 border-b z-10">
               <tr>
@@ -514,6 +518,7 @@ export default function CRMCustomers() {
                 {vis("orders")         && sortTh("lifetime_orders",    "Orders",         "orders")}
                 {vis("revenue")        && sortTh("lifetime_revenue",   "Revenue",        "revenue")}
                 {vis("sales_rep")      && plainTh("Sales Rep",                            "sales_rep")}
+                {vis("store_credit")   && sortTh("store_credit_balance", "Store Credit", "store_credit")}
               </tr>
             </thead>
             <tbody>
@@ -558,6 +563,11 @@ export default function CRMCustomers() {
                     {vis("sales_rep")      && (
                       <td className="px-3 py-2.5 text-slate-500 text-xs">
                         {c.sales_rep_name ? <Badge variant="secondary" className="text-xs">{c.sales_rep_name}</Badge> : "—"}
+                      </td>
+                    )}
+                    {vis("store_credit")   && (
+                      <td className="px-3 py-2.5 text-right font-medium text-teal-700">
+                        {Number(c.store_credit_balance ?? 0) > 0 ? fmtCurrency(c.store_credit_balance) : <span className="text-slate-300">—</span>}
                       </td>
                     )}
                   </tr>

@@ -37,6 +37,7 @@ import CRMSettings from "@/pages/admin/CRMSettings";
 import CRMCustomers from "@/pages/crm/Customers";
 import CustomerProfile from "@/pages/crm/CustomerProfile";
 import CRMReactivation from "@/pages/crm/Reactivation";
+import CRMNotes from "@/pages/crm/CRMNotes";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -183,6 +184,9 @@ function Router() {
       </Route>
       <Route path="/crm/reactivation">
         {() => <ProtectedRoute component={CRMReactivation} />}
+      </Route>
+      <Route path="/crm/notes">
+        {() => <ProtectedRoute component={CRMNotes} />}
       </Route>
       <Route path="/admin/crm">
         {() => <ProtectedRoute component={CRMSettings} role="admin" />}

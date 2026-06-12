@@ -4447,6 +4447,43 @@ export async function registerRoutes(
 
   // ── CRM Notes ──────────────────────────────────────────────────────────────
 
+  // Shared helper: get BC credentials from settings / env
+  async function getBcCreds() {
+    const setting = await storage.getSetting("bigcommerce_config");
+    let storeHash = process.env.BC_STORE_HASH;
+    let token = process.env.BC_TOKEN;
+    if (setting?.value) {
+      const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+      storeHash = cfg.storeHash || storeHash;
+      token = cfg.token || token;
+    }
+    return { storeHash, token };
+  }
+
+  // GET /api/crm/notes  — global notes page
+  app.get("/api/crm/notes", requireAuth, async (req, res) => {
+    try {
+      const { search = "", type = "", createdBy, customerId, orderId, customerGroup = "", state = "", dateFrom = "", dateTo = "" } = req.query as Record<string, string>;
+      const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
+      const offset = parseInt(String(req.query.offset ?? "0"));
+      const result = await storage.getAllCrmNotes({
+        search, type: type || undefined, createdBy: createdBy ? parseInt(createdBy) : undefined,
+        customerId: customerId ? parseInt(customerId) : undefined, orderId: orderId ? parseInt(orderId) : undefined,
+        customerGroup: customerGroup || undefined, state: state || undefined,
+        dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, limit, offset,
+      });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/notes/kpis
+  app.get("/api/crm/notes/kpis", requireAuth, async (_req, res) => {
+    try {
+      const kpis = await storage.getCrmNotesKpis();
+      res.json(kpis);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // GET /api/crm/customers/:id/notes
   app.get("/api/crm/customers/:id/notes", requireAuth, async (req, res) => {
     try {
@@ -4460,10 +4497,44 @@ export async function registerRoutes(
   app.post("/api/crm/customers/:id/notes", requireAuth, async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
-      const { note, note_type = "General" } = req.body;
+      const { note, note_type = "General", order_id, bc_target = "crm" } = req.body;
       if (!note?.trim()) return res.status(400).json({ error: "note is required" });
-      const created = await storage.createCrmNote({ customer_id: customerId, note: note.trim(), note_type, created_by: (req as any).userId ?? null });
-      await storage.createCrmAuditLog({ user_id: (req as any).userId ?? null, action: 'note_created', customer_id: customerId, detail: { note_type } });
+
+      const created = await storage.createCrmNote({
+        customer_id: customerId, note: note.trim(), note_type,
+        order_id: order_id ? parseInt(String(order_id)) : null,
+        created_by: (req as any).userId ?? null,
+      });
+
+      const auditAction = note_type === "Order Note" ? "order_note_created" : "note_created";
+      await storage.createCrmAuditLog({
+        user_id: (req as any).userId ?? null, action: auditAction, customer_id: customerId,
+        detail: { note_type, note_preview: note.trim().slice(0, 120), order_id: order_id ?? null },
+      });
+
+      // Optional BC sync
+      if (order_id && (bc_target === "staff" || bc_target === "customer" || bc_target === "both")) {
+        try {
+          const { storeHash, token } = await getBcCreds();
+          if (storeHash && token) {
+            const body: Record<string, string> = {};
+            if (bc_target === "staff" || bc_target === "both") body.staff_notes = note.trim();
+            if (bc_target === "customer" || bc_target === "both") body.customer_message = note.trim();
+            const bcResp = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${order_id}`, {
+              method: "PUT",
+              headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify(body),
+            });
+            if (bcResp.ok) {
+              const updated: Record<string, string> = {};
+              if (body.staff_notes !== undefined) updated.staff_notes = body.staff_notes;
+              if (body.customer_message !== undefined) updated.customer_order_notes = body.customer_message;
+              await storage.updateCrmOrderNotes(parseInt(String(order_id)), updated);
+            }
+          }
+        } catch (_) { /* BC sync failure is non-fatal */ }
+      }
+
       res.status(201).json(created);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -4471,9 +4542,17 @@ export async function registerRoutes(
   // PUT /api/crm/customers/:id/notes/:noteId
   app.put("/api/crm/customers/:id/notes/:noteId", requireAuth, async (req, res) => {
     try {
+      const customerId = parseInt(req.params.id);
       const noteId = parseInt(req.params.noteId);
-      const { note, note_type } = req.body;
-      const updated = await storage.updateCrmNote(noteId, { note: note?.trim(), note_type });
+      const { note, note_type, order_id } = req.body;
+      const updated = await storage.updateCrmNote(noteId, {
+        note: note?.trim(), note_type,
+        order_id: order_id !== undefined ? (order_id ? parseInt(String(order_id)) : null) : undefined,
+      });
+      await storage.createCrmAuditLog({
+        user_id: (req as any).userId ?? null, action: 'note_edited', customer_id: customerId,
+        detail: { note_type: updated.note_type, note_preview: updated.note.slice(0, 120) },
+      });
       res.json(updated);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -4481,9 +4560,67 @@ export async function registerRoutes(
   // DELETE /api/crm/customers/:id/notes/:noteId
   app.delete("/api/crm/customers/:id/notes/:noteId", requireAuth, async (req, res) => {
     try {
+      const customerId = parseInt(req.params.id);
       const noteId = parseInt(req.params.noteId);
+      const existing = await storage.getCrmNoteById(noteId);
+      if (existing) {
+        await storage.createCrmAuditLog({
+          user_id: (req as any).userId ?? null, action: 'note_deleted', customer_id: customerId,
+          detail: { note_type: existing.note_type, note_preview: existing.note.slice(0, 120), order_id: existing.order_id ?? null },
+        });
+      }
       await storage.deleteCrmNote(noteId);
       res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/crm/customers/:id/orders/:orderId/notes  — editable order notes popup
+  app.put("/api/crm/customers/:id/orders/:orderId/notes", requireAuth, async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.id);
+      const bcOrderId = parseInt(req.params.orderId);
+      const { customer_note, staff_notes } = req.body;
+
+      // Update local mirror
+      await storage.updateCrmOrderNotes(bcOrderId, {
+        ...(staff_notes !== undefined ? { staff_notes } : {}),
+        ...(customer_note !== undefined ? { customer_order_notes: customer_note } : {}),
+      });
+
+      // Push to BC
+      let bcSuccess = false;
+      try {
+        const { storeHash, token } = await getBcCreds();
+        if (storeHash && token) {
+          const body: Record<string, string> = {};
+          if (staff_notes !== undefined) body.staff_notes = staff_notes;
+          if (customer_note !== undefined) body.customer_message = customer_note;
+          const bcResp = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`, {
+            method: "PUT",
+            headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify(body),
+          });
+          bcSuccess = bcResp.ok;
+        }
+      } catch (_) { /* BC failure is non-fatal */ }
+
+      // Audit log
+      const auditEntries: Promise<void>[] = [];
+      if (staff_notes !== undefined) {
+        auditEntries.push(storage.createCrmAuditLog({
+          user_id: (req as any).userId ?? null, action: 'staff_note_updated', customer_id: customerId,
+          detail: { bc_order_id: bcOrderId },
+        }));
+      }
+      if (customer_note !== undefined) {
+        auditEntries.push(storage.createCrmAuditLog({
+          user_id: (req as any).userId ?? null, action: 'customer_note_updated', customer_id: customerId,
+          detail: { bc_order_id: bcOrderId },
+        }));
+      }
+      await Promise.all(auditEntries);
+
+      res.json({ success: true, bc_synced: bcSuccess });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

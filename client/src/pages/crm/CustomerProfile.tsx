@@ -10,11 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   ArrowLeft, Building2, User, Mail, Phone, Hash, TrendingUp, ShoppingBag,
   Calendar, DollarSign, Users, Plus, Pencil, Trash2, MessageSquare,
   UserCheck, UserMinus, AlertTriangle, Clock, ChevronLeft, ChevronRight,
-  FileText,
+  FileText, CreditCard, Edit3,
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -82,9 +83,10 @@ const NOTE_TYPE_COLORS: Record<string, string> = {
   "Replacement": "bg-purple-100 text-purple-700",
   "Visit":       "bg-cyan-100 text-cyan-700",
   "Internal":    "bg-yellow-100 text-yellow-700",
+  "Order Note":  "bg-indigo-100 text-indigo-700",
 };
 
-const NOTE_TYPES = ["General","Follow Up","Sales","Issue","Credit","Replacement","Visit","Internal"];
+const NOTE_TYPES = ["General","Follow Up","Sales","Issue","Credit","Replacement","Visit","Internal","Order Note"];
 
 function HealthBadge({ health }: { health: string | null | undefined }) {
   if (!health) return null;
@@ -100,16 +102,27 @@ function NoteTypePill({ type }: { type: string }) {
 
 // ─── Timeline helpers ─────────────────────────────────────────────────────────
 
-function TimelineIconBg(type: string) {
-  if (type === "order")      return "bg-blue-100";
-  if (type === "note")       return "bg-purple-100";
-  if (type === "assignment") return "bg-green-100";
+function TimelineIconBg(type: string, action?: string) {
+  if (type === "order")  return "bg-blue-100";
+  if (type === "note")   return "bg-purple-100";
+  if (type === "audit") {
+    if (action === "note_deleted") return "bg-red-100";
+    if (action?.includes("rep")) return "bg-green-100";
+    if (action?.includes("note")) return "bg-purple-100";
+    if (action?.includes("staff_note") || action?.includes("customer_note")) return "bg-amber-100";
+  }
   return "bg-slate-100";
 }
-function TimelineIconEl({ type }: { type: string }) {
-  if (type === "order")      return <ShoppingBag className="h-3.5 w-3.5 text-blue-600" />;
-  if (type === "note")       return <MessageSquare className="h-3.5 w-3.5 text-purple-600" />;
-  if (type === "assignment") return <UserCheck className="h-3.5 w-3.5 text-green-600" />;
+function TimelineIconEl({ type, action }: { type: string; action?: string }) {
+  if (type === "order")  return <ShoppingBag className="h-3.5 w-3.5 text-blue-600" />;
+  if (type === "note")   return <MessageSquare className="h-3.5 w-3.5 text-purple-600" />;
+  if (type === "audit") {
+    if (action === "note_deleted")                                         return <Trash2 className="h-3.5 w-3.5 text-red-500" />;
+    if (action === "note_edited")                                          return <Pencil className="h-3.5 w-3.5 text-purple-600" />;
+    if (action === "note_created" || action === "order_note_created")      return <MessageSquare className="h-3.5 w-3.5 text-purple-600" />;
+    if (action === "staff_note_updated" || action === "customer_note_updated") return <Edit3 className="h-3.5 w-3.5 text-amber-600" />;
+    if (action?.includes("rep"))                                           return <UserCheck className="h-3.5 w-3.5 text-green-600" />;
+  }
   return <FileText className="h-3.5 w-3.5 text-slate-400" />;
 }
 function TimelineDescription({ entry }: { entry: any }) {
@@ -127,18 +140,36 @@ function TimelineDescription({ entry }: { entry: any }) {
       <div>
         <p className="text-sm text-slate-700 flex items-center gap-1.5">
           <NoteTypePill type={entry.note_type ?? "General"} />
+          {entry.order_id && <span className="text-xs text-indigo-500 font-medium">Order #{entry.order_id}</span>}
           <span className="text-xs text-slate-500">by {createdBy(entry.created_by_name, entry.created_by)}</span>
         </p>
         {entry.note_content && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{entry.note_content}</p>}
       </div>
     );
   }
-  if (entry.type === "assignment") {
+  if (entry.type === "audit") {
     const who = createdBy(entry.user_name, entry.user_id);
-    if (entry.action === "sales_rep_assigned") {
-      return <p className="text-sm text-slate-700"><span className="font-medium">Rep assigned:</span> {(entry.detail as any)?.rep_name ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+    const d = entry.detail as any ?? {};
+    switch (entry.action) {
+      case "note_created":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> created a <NoteTypePill type={d.note_type ?? "General"} /> note.</p>;
+      case "order_note_created":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> created an Order Note{d.order_id ? ` for Order #${d.order_id}` : ""}.</p>;
+      case "note_edited":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> updated a <NoteTypePill type={d.note_type ?? "General"} /> note.</p>;
+      case "note_deleted":
+        return <p className="text-sm text-red-700"><span className="font-medium">{who}</span> deleted a <NoteTypePill type={d.note_type ?? "General"} /> note.</p>;
+      case "staff_note_updated":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> updated Staff Note{d.bc_order_id ? ` for Order #${d.bc_order_id}` : ""}.</p>;
+      case "customer_note_updated":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> updated Customer Note{d.bc_order_id ? ` for Order #${d.bc_order_id}` : ""}.</p>;
+      case "sales_rep_assigned":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Rep assigned:</span> {d.rep_name ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "sales_rep_reassigned":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Rep changed</span> to {d.rep_name ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "sales_rep_removed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Rep removed</span> <span className="text-xs text-slate-400">by {who}</span></p>;
     }
-    return <p className="text-sm text-slate-700"><span className="font-medium">Rep removed</span> <span className="text-xs text-slate-400">by {who}</span></p>;
   }
   return <p className="text-sm text-slate-500">Activity recorded</p>;
 }
@@ -148,15 +179,28 @@ function TimelineDescription({ entry }: { entry: any }) {
 interface NoteModalProps {
   open: boolean;
   onClose: () => void;
-  onSave: (data: { note: string; note_type: string }) => void;
+  onSave: (data: { note: string; note_type: string; order_id?: number | null; bc_target: string }) => void;
   saving: boolean;
-  initial?: { note: string; note_type: string };
+  initial?: { note: string; note_type: string; order_id?: number | null };
   title: string;
+  orders?: any[];
 }
-function NoteModal({ open, onClose, onSave, saving, initial, title }: NoteModalProps) {
+function NoteModal({ open, onClose, onSave, saving, initial, title, orders = [] }: NoteModalProps) {
   const [note, setNote]         = useState(initial?.note ?? "");
   const [noteType, setNoteType] = useState(initial?.note_type ?? "General");
-  const handleClose = () => { setNote(initial?.note ?? ""); setNoteType(initial?.note_type ?? "General"); onClose(); };
+  const [orderId, setOrderId]   = useState<string>(String(initial?.order_id ?? ""));
+  const [bcStaff, setBcStaff]   = useState(false);
+  const [bcCustomer, setBcCustomer] = useState(false);
+
+  const handleClose = () => {
+    setNote(initial?.note ?? ""); setNoteType(initial?.note_type ?? "General");
+    setOrderId(String(initial?.order_id ?? "")); setBcStaff(false); setBcCustomer(false);
+    onClose();
+  };
+
+  const bcTarget   = bcStaff && bcCustomer ? "both" : bcStaff ? "staff" : bcCustomer ? "customer" : "crm";
+  const isOrderNote = noteType === "Order Note";
+
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) handleClose(); }}>
       <DialogContent className="sm:max-w-md">
@@ -169,14 +213,44 @@ function NoteModal({ open, onClose, onSave, saving, initial, title }: NoteModalP
               <SelectContent>{NOTE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+          {isOrderNote && orders.length > 0 && (
+            <div>
+              <Label className="text-xs mb-1.5 block">Associated Order</Label>
+              <Select value={orderId} onValueChange={setOrderId}>
+                <SelectTrigger data-testid="select-note-order"><SelectValue placeholder="Select order (optional)…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">No specific order</SelectItem>
+                  {orders.map((o: any) => (
+                    <SelectItem key={o.bigcommerce_order_id} value={String(o.bigcommerce_order_id)}>
+                      #{o.order_number ?? o.bigcommerce_order_id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div>
             <Label className="text-xs mb-1.5 block">Note</Label>
             <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Enter note…" rows={4} data-testid="textarea-note" />
           </div>
+          {isOrderNote && !!orderId && (
+            <div className="border rounded-lg p-3 space-y-2 bg-slate-50">
+              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">BigCommerce Sync</p>
+              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                <Checkbox checked={bcStaff} onCheckedChange={v => setBcStaff(!!v)} id="bc-staff" data-testid="check-bc-staff" />
+                <span>Staff Note (BigCommerce)</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                <Checkbox checked={bcCustomer} onCheckedChange={v => setBcCustomer(!!v)} id="bc-customer" data-testid="check-bc-customer" />
+                <span>Customer Note (BigCommerce)</span>
+              </label>
+              <p className="text-[11px] text-slate-400">Leave unchecked to store in CRM only.</p>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>Cancel</Button>
-          <Button onClick={() => onSave({ note, note_type: noteType })} disabled={!note.trim() || saving} data-testid="btn-save-note">
+          <Button onClick={() => onSave({ note, note_type: noteType, order_id: orderId ? parseInt(orderId) : null, bc_target: bcTarget })} disabled={!note.trim() || saving} data-testid="btn-save-note">
             {saving ? "Saving…" : "Save Note"}
           </Button>
         </DialogFooter>
@@ -185,32 +259,58 @@ function NoteModal({ open, onClose, onSave, saving, initial, title }: NoteModalP
   );
 }
 
-// ─── Order Notes Modal ────────────────────────────────────────────────────────
+// ─── Order Notes Modal (editable) ─────────────────────────────────────────────
 
-function OrderNotesModal({ order, onClose }: { order: any; onClose: () => void }) {
+function OrderNotesModal({ order, customerId, onClose, onSaved }: { order: any; customerId: number; onClose: () => void; onSaved: () => void }) {
+  const { toast } = useToast();
+  const [custNote, setCustNote]   = useState(order?.customer_order_notes ?? "");
+  const [staffNote, setStaffNote] = useState(order?.staff_notes ?? "");
+  const [saving, setSaving]       = useState(false);
+  const isDirty = custNote !== (order?.customer_order_notes ?? "") || staffNote !== (order?.staff_notes ?? "");
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/crm/customers/${customerId}/orders/${order.bigcommerce_order_id}/notes`, {
+        method: "PUT",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ customer_note: custNote, staff_notes: staffNote }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to save");
+      toast({ title: "Notes saved" });
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setSaving(false); }
+  };
+
   return (
     <Dialog open={!!order} onOpenChange={v => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Order #{order?.order_number ?? order?.bigcommerce_order_id}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-1 text-sm text-slate-500 mb-3">
-          {order?.order_date && <p>{fmtDateTime(order.order_date)}</p>}
+        <div className="flex flex-wrap gap-2 text-sm text-slate-500 mb-3">
+          {order?.order_date && <span>{fmtDateTime(order.order_date)}</span>}
           {order?.status && <Badge variant={statusColor(order.status)} className="capitalize text-xs">{order.status}</Badge>}
-          {order?.order_total && <p className="font-semibold text-slate-800">{fmtCurrency(order.order_total)}</p>}
+          {order?.order_total && <span className="font-semibold text-slate-800">{fmtCurrency(order.order_total)}</span>}
         </div>
-        <div className="space-y-4 text-sm">
+        <div className="space-y-4">
           <div>
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Customer Order Note</p>
-            <p className="text-slate-700 whitespace-pre-wrap">{order?.customer_order_notes || <span className="text-slate-400 italic">No customer note</span>}</p>
+            <Label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Customer Order Note</Label>
+            <Textarea value={custNote} onChange={e => setCustNote(e.target.value)} rows={3} placeholder="No customer note…" data-testid="textarea-customer-note" />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Staff Note</p>
-            <p className="text-slate-700 whitespace-pre-wrap">{order?.staff_notes || <span className="text-slate-400 italic">No staff note</span>}</p>
+            <Label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Staff Note</Label>
+            <Textarea value={staffNote} onChange={e => setStaffNote(e.target.value)} rows={3} placeholder="No staff note…" data-testid="textarea-staff-note" />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Close</Button>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleSave} disabled={!isDirty || saving} data-testid="btn-save-order-notes">
+            {saving ? "Saving…" : "Save"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -244,25 +344,25 @@ function OrdersTable({ orders, onRowClick }: { orders: any[]; onRowClick: (o: an
                 key={o.id}
                 data-testid={`row-order-${o.bigcommerce_order_id}`}
                 className="border-b last:border-0 hover:bg-slate-50 transition-colors cursor-pointer"
-                onClick={() => hasNotes && onRowClick(o)}
+                onClick={() => onRowClick(o)}
               >
-                <td className="px-4 py-2.5 font-mono text-xs text-blue-600 whitespace-nowrap">
+                <td className="px-3 py-2.5 font-mono text-xs text-blue-600 whitespace-nowrap w-24">
                   #{o.order_number ?? o.bigcommerce_order_id}
-                  {hasNotes && <span className="ml-1 text-amber-500 text-[10px]">📝</span>}
+                  {(o.staff_notes || o.customer_order_notes) && <span className="ml-1 text-amber-500 text-[10px]">📝</span>}
                 </td>
-                <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap text-xs">{fmtDateTime(o.order_date)}</td>
-                <td className="px-4 py-2.5">
+                <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap text-xs w-32">{fmtDateTime(o.order_date)}</td>
+                <td className="px-3 py-2.5 w-24">
                   <Badge variant={statusColor(o.status)} className="text-xs capitalize">{o.status ?? "—"}</Badge>
                 </td>
-                <td className="px-4 py-2.5 text-right font-medium text-slate-800 whitespace-nowrap">{fmtCurrency(o.order_total)}</td>
-                <td className="px-4 py-2.5 max-w-[160px]">
+                <td className="px-3 py-2.5 text-right font-medium text-slate-800 whitespace-nowrap w-24">{fmtCurrency(o.order_total)}</td>
+                <td className="px-3 py-2.5">
                   {o.customer_order_notes
-                    ? <span className="block truncate text-xs text-slate-500">{o.customer_order_notes}</span>
+                    ? <span className="block truncate text-xs text-slate-500 max-w-xs">{o.customer_order_notes}</span>
                     : <span className="text-slate-300 text-xs">—</span>}
                 </td>
-                <td className="px-4 py-2.5 max-w-[160px]">
+                <td className="px-3 py-2.5">
                   {o.staff_notes
-                    ? <span className="block truncate text-xs text-slate-500">{o.staff_notes}</span>
+                    ? <span className="block truncate text-xs text-slate-500 max-w-xs">{o.staff_notes}</span>
                     : <span className="text-slate-300 text-xs">—</span>}
                 </td>
               </tr>
@@ -370,7 +470,7 @@ export default function CustomerProfile() {
   };
 
   const createNoteMutation = useMutation({
-    mutationFn: async (data: { note: string; note_type: string }) => {
+    mutationFn: async (data: { note: string; note_type: string; order_id?: number | null; bc_target?: string }) => {
       const r = await fetch(`/api/crm/customers/${id}/notes`, {
         method: "POST", headers: { ...getAuthHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(data),
       });
@@ -382,7 +482,7 @@ export default function CustomerProfile() {
   });
 
   const updateNoteMutation = useMutation({
-    mutationFn: async ({ noteId, data }: { noteId: number; data: { note: string; note_type: string } }) => {
+    mutationFn: async ({ noteId, data }: { noteId: number; data: { note: string; note_type: string; order_id?: number | null } }) => {
       const r = await fetch(`/api/crm/customers/${id}/notes/${noteId}`, {
         method: "PUT", headers: { ...getAuthHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(data),
       });
@@ -571,11 +671,12 @@ export default function CustomerProfile() {
           SUMMARY CARDS ROW
       ═══════════════════════════════════════════════════════════════════════ */}
       <div className="px-4 md:px-6 pt-3">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <SummaryCard icon={<DollarSign className="h-4 w-4 text-green-500" />} label="Lifetime Revenue" value={fmtCurrency(customer.lifetime_revenue)} testId="text-lifetime-revenue" />
           <SummaryCard icon={<ShoppingBag className="h-4 w-4 text-blue-500" />} label="Lifetime Orders" value={lifetimeOrders.toLocaleString()} testId="text-lifetime-orders" />
           <SummaryCard icon={<TrendingUp className="h-4 w-4 text-purple-500" />} label="Avg Order Value" value={fmtCurrency(avgOrderValue)} />
           <SummaryCard icon={<Calendar className="h-4 w-4 text-amber-500" />} label="Last Order" value={customer.last_order_date ? fmtDate(customer.last_order_date) : "—"} testId="text-last-order-date" />
+          <SummaryCard icon={<CreditCard className="h-4 w-4 text-teal-500" />} label="Store Credit" value={fmtCurrency(customer.store_credit_balance ?? 0)} testId="text-store-credit" />
         </div>
       </div>
 
@@ -685,8 +786,8 @@ export default function CustomerProfile() {
                         return (
                           <div key={entry.id} className="flex gap-3">
                             <div className="flex flex-col items-center">
-                              <div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${TimelineIconBg(entry.type)}`}>
-                                <TimelineIconEl type={entry.type} />
+                              <div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${TimelineIconBg(entry.type, entry.action)}`}>
+                                <TimelineIconEl type={entry.type} action={entry.action} />
                               </div>
                               {!isLast && <div className="w-px flex-1 bg-slate-200 my-1" />}
                             </div>
@@ -817,6 +918,7 @@ export default function CustomerProfile() {
                       <tr className="border-b bg-slate-50">
                         <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Date & Time</th>
                         <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Type</th>
+                        <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Order #</th>
                         <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Note</th>
                         <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Created By</th>
                         <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Actions</th>
@@ -827,6 +929,9 @@ export default function CustomerProfile() {
                         <tr key={note.id} data-testid={`note-row-${note.id}`} className="border-b last:border-0 hover:bg-slate-50 align-top">
                           <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmtDateTime(note.created_at)}</td>
                           <td className="px-4 py-3"><NoteTypePill type={note.note_type} /></td>
+                          <td className="px-4 py-3 text-xs text-indigo-600 font-mono whitespace-nowrap">
+                            {note.order_id ? `#${note.order_id}` : <span className="text-slate-300">—</span>}
+                          </td>
                           <td className="px-4 py-3 text-sm text-slate-700 max-w-[320px]">
                             <p className="whitespace-pre-wrap break-words">{note.note}</p>
                           </td>
@@ -874,14 +979,14 @@ export default function CustomerProfile() {
                     const isLast = i === (timeline as any[]).length - 1;
                     const actor = entry.type === "note"
                       ? createdBy(entry.created_by_name, entry.created_by)
-                      : entry.type === "assignment"
+                      : entry.type === "audit"
                       ? createdBy(entry.user_name, entry.user_id)
                       : "System";
                     return (
                       <div key={entry.id} className="flex gap-4">
                         <div className="flex flex-col items-center">
-                          <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${TimelineIconBg(entry.type)}`}>
-                            <TimelineIconEl type={entry.type} />
+                          <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${TimelineIconBg(entry.type, entry.action)}`}>
+                            <TimelineIconEl type={entry.type} action={entry.action} />
                           </div>
                           {!isLast && <div className="w-px flex-1 bg-slate-200 my-1 min-h-[12px]" />}
                         </div>
@@ -912,14 +1017,16 @@ export default function CustomerProfile() {
         onClose={() => setShowAddNote(false)}
         onSave={data => createNoteMutation.mutate(data)}
         saving={createNoteMutation.isPending}
+        orders={orders as any[]}
       />
       {editingNote && (
         <NoteModal
           open={!!editingNote} title="Edit Note"
-          initial={{ note: editingNote.note, note_type: editingNote.note_type }}
+          initial={{ note: editingNote.note, note_type: editingNote.note_type, order_id: editingNote.order_id }}
           onClose={() => setEditingNote(null)}
           onSave={data => updateNoteMutation.mutate({ noteId: editingNote.id, data })}
           saving={updateNoteMutation.isPending}
+          orders={orders as any[]}
         />
       )}
       <Dialog open={deletingNoteId !== null} onOpenChange={v => { if (!v) setDeletingNoteId(null); }}>
@@ -957,7 +1064,17 @@ export default function CustomerProfile() {
         </DialogContent>
       </Dialog>
 
-      {orderModal && <OrderNotesModal order={orderModal} onClose={() => setOrderModal(null)} />}
+      {orderModal && (
+        <OrderNotesModal
+          order={orderModal}
+          customerId={id}
+          onClose={() => setOrderModal(null)}
+          onSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "orders"] });
+            queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
+          }}
+        />
+      )}
     </div>
   );
 }

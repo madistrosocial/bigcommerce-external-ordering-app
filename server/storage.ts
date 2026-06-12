@@ -107,8 +107,11 @@ export interface IStorage {
   // CRM Notes
   createCrmNote(data: InsertCrmNote): Promise<CrmNote>;
   getCrmNotes(customerId: number): Promise<(CrmNote & { created_by_name?: string | null })[]>;
-  updateCrmNote(id: number, data: { note?: string; note_type?: string }): Promise<CrmNote>;
+  getCrmNoteById(id: number): Promise<CrmNote | undefined>;
+  updateCrmNote(id: number, data: { note?: string; note_type?: string; order_id?: number | null }): Promise<CrmNote>;
   deleteCrmNote(id: number): Promise<void>;
+  getAllCrmNotes(opts: { search?: string; type?: string; createdBy?: number; customerId?: number; orderId?: number; customerGroup?: string; state?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<{ notes: any[]; total: number }>;
+  getCrmNotesKpis(): Promise<{ notesToday: number; followUps: number; salesCalls: number; issues: number; internalNotes: number }>;
   // CRM Timeline
   getCrmTimeline(customerId: number): Promise<any[]>;
   // CRM Reactivation
@@ -117,6 +120,8 @@ export interface IStorage {
   getCrmMetrics(opts: { search?: string; group?: string; state?: string }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }>;
   // CRM Users list
   getCrmUsers(): Promise<{ id: number; name: string }[]>;
+  // CRM Order Notes (mirror update)
+  updateCrmOrderNotes(bcOrderId: number, data: { staff_notes?: string; customer_order_notes?: string }): Promise<void>;
   // CRM Audit Log
   createCrmAuditLog(data: InsertCrmAuditLog): Promise<void>;
 }
@@ -767,7 +772,12 @@ export class DatabaseStorage implements IStorage {
     return rows.map(r => ({ ...r.n, created_by_name: r.u?.name ?? null }));
   }
 
-  async updateCrmNote(id: number, data: { note?: string; note_type?: string }): Promise<CrmNote> {
+  async getCrmNoteById(id: number): Promise<CrmNote | undefined> {
+    const rows = await db.select().from(crmCustomerNotes).where(eq(crmCustomerNotes.id, id)).limit(1);
+    return rows[0];
+  }
+
+  async updateCrmNote(id: number, data: { note?: string; note_type?: string; order_id?: number | null }): Promise<CrmNote> {
     const result = await db.update(crmCustomerNotes)
       .set({ ...data, updated_at: new Date() })
       .where(eq(crmCustomerNotes.id, id))
@@ -779,6 +789,97 @@ export class DatabaseStorage implements IStorage {
     await db.delete(crmCustomerNotes).where(eq(crmCustomerNotes.id, id));
   }
 
+  async getAllCrmNotes(opts: { search?: string; type?: string; createdBy?: number; customerId?: number; orderId?: number; customerGroup?: string; state?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<{ notes: any[]; total: number }> {
+    const { search, type, createdBy, customerId, orderId, customerGroup, state, dateFrom, dateTo, limit = 50, offset = 0 } = opts;
+    const conditions: any[] = [];
+
+    if (search?.trim()) {
+      const s = `%${search.trim()}%`;
+      conditions.push(or(
+        ilike(customersMirror.company, s),
+        ilike(customersMirror.first_name, s),
+        ilike(customersMirror.last_name, s),
+        ilike(crmCustomerNotes.note, s),
+      ));
+    }
+    if (type) conditions.push(eq(crmCustomerNotes.note_type, type));
+    if (createdBy) conditions.push(eq(crmCustomerNotes.created_by, createdBy));
+    if (customerId) conditions.push(eq(crmCustomerNotes.customer_id, customerId));
+    if (orderId) conditions.push(eq(crmCustomerNotes.order_id, orderId));
+    if (customerGroup) conditions.push(eq(customersMirror.customer_group_name, customerGroup));
+    if (state) {
+      conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${state}`);
+    }
+    if (dateFrom) conditions.push(sql`${crmCustomerNotes.created_at} >= ${dateFrom}::timestamptz`);
+    if (dateTo) conditions.push(sql`${crmCustomerNotes.created_at} <= ${dateTo}::timestamptz + interval '1 day'`);
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(crmCustomerNotes)
+        .innerJoin(customersMirror, eq(customersMirror.id, crmCustomerNotes.customer_id))
+        .leftJoin(users, eq(users.id, crmCustomerNotes.created_by))
+        .where(where),
+      db.select({
+        n: crmCustomerNotes,
+        customer_company: customersMirror.company,
+        customer_first_name: customersMirror.first_name,
+        customer_last_name: customersMirror.last_name,
+        customer_bc_id: customersMirror.bigcommerce_customer_id,
+        customer_group_name: customersMirror.customer_group_name,
+        billing_address: customersMirror.billing_address,
+        shipping_address: customersMirror.shipping_address,
+        created_by_name: users.name,
+      })
+        .from(crmCustomerNotes)
+        .innerJoin(customersMirror, eq(customersMirror.id, crmCustomerNotes.customer_id))
+        .leftJoin(users, eq(users.id, crmCustomerNotes.created_by))
+        .where(where)
+        .orderBy(desc(crmCustomerNotes.created_at))
+        .limit(limit)
+        .offset(offset),
+    ]);
+
+    return {
+      notes: rows.map(r => ({
+        ...r.n,
+        customer_company: r.customer_company,
+        customer_first_name: r.customer_first_name,
+        customer_last_name: r.customer_last_name,
+        customer_bc_id: r.customer_bc_id,
+        customer_group_name: r.customer_group_name,
+        created_by_name: r.created_by_name ?? null,
+      })),
+      total: countRows[0]?.count ?? 0,
+    };
+  }
+
+  async getCrmNotesKpis(): Promise<{ notesToday: number; followUps: number; salesCalls: number; issues: number; internalNotes: number }> {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const [todayCount, typeRows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(crmCustomerNotes)
+        .where(sql`${crmCustomerNotes.created_at} >= ${todayStart.toISOString()}::timestamptz`),
+      db.select({ type: crmCustomerNotes.note_type, count: sql<number>`count(*)::int` })
+        .from(crmCustomerNotes)
+        .groupBy(crmCustomerNotes.note_type),
+    ]);
+
+    const typeCounts: Record<string, number> = {};
+    for (const r of typeRows) typeCounts[r.type] = r.count;
+
+    return {
+      notesToday: todayCount[0]?.count ?? 0,
+      followUps: typeCounts['Follow Up'] ?? 0,
+      salesCalls: typeCounts['Sales'] ?? 0,
+      issues: typeCounts['Issue'] ?? 0,
+      internalNotes: typeCounts['Internal'] ?? 0,
+    };
+  }
+
   // ─── CRM Timeline ─────────────────────────────────────────────────────────────
 
   async getCrmTimeline(customerId: number): Promise<any[]> {
@@ -786,6 +887,13 @@ export class DatabaseStorage implements IStorage {
       .from(customersMirror).where(eq(customersMirror.id, customerId)).limit(1);
     if (!custRow[0]) return [];
     const bcId = custRow[0].bc_id;
+
+    const auditActions = [
+      'sales_rep_assigned', 'sales_rep_removed',
+      'note_created', 'note_edited', 'note_deleted',
+      'order_note_created', 'staff_note_updated', 'customer_note_updated',
+      'sales_rep_reassigned',
+    ];
 
     const [orders, notes, auditRows] = await Promise.all([
       db.select().from(customerOrdersMirror)
@@ -802,10 +910,10 @@ export class DatabaseStorage implements IStorage {
         .leftJoin(users, eq(users.id, crmAuditLog.user_id))
         .where(and(
           eq(crmAuditLog.customer_id, customerId),
-          or(eq(crmAuditLog.action, 'sales_rep_assigned'), eq(crmAuditLog.action, 'sales_rep_removed'))
+          inArray(crmAuditLog.action, auditActions),
         ))
         .orderBy(desc(crmAuditLog.created_at))
-        .limit(20),
+        .limit(50),
     ]);
 
     const timeline: any[] = [
@@ -827,11 +935,12 @@ export class DatabaseStorage implements IStorage {
         note_id: row.n.id,
         note_type: row.n.note_type,
         note_content: row.n.note,
+        order_id: row.n.order_id,
         created_by_name: row.u?.name ?? null,
       })),
       ...auditRows.map(row => ({
         id: `audit-${row.a.id}`,
-        type: 'assignment',
+        type: 'audit',
         date: row.a.created_at.toISOString(),
         action: row.a.action,
         detail: row.a.detail,
@@ -928,6 +1037,14 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.is_enabled, true))
       .orderBy(asc(users.name));
     return rows.map(r => ({ id: r.id, name: r.name ?? '' }));
+  }
+
+  // ─── CRM Order Notes ──────────────────────────────────────────────────────────
+
+  async updateCrmOrderNotes(bcOrderId: number, data: { staff_notes?: string; customer_order_notes?: string }): Promise<void> {
+    await db.update(customerOrdersMirror)
+      .set({ ...data, updated_at: new Date() })
+      .where(eq(customerOrdersMirror.bigcommerce_order_id, bcOrderId));
   }
 
   // ─── CRM Audit Log ────────────────────────────────────────────────────────────

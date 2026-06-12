@@ -145,6 +145,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const crmChildren: NavLeaf[] = [
     ...(hasPermission("crm_customers") ? [{ label: "Customers", path: "/crm/customers" }] : []),
     ...(hasPermission("crm_reactivation") ? [{ label: "Reactivation", path: "/crm/reactivation" }] : []),
+    ...(hasPermission("crm_notes") ? [{ label: "Notes", path: "/crm/notes" }] : []),
   ];
 
   // Build final nav list — only include items the user can access
