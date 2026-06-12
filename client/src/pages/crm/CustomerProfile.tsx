@@ -198,8 +198,9 @@ function NoteModal({ open, onClose, onSave, saving, initial, title, orders = [] 
     onClose();
   };
 
-  const bcTarget   = bcStaff && bcCustomer ? "both" : bcStaff ? "staff" : bcCustomer ? "customer" : "crm";
+  const bcTarget    = bcStaff && bcCustomer ? "both" : bcStaff ? "staff" : bcCustomer ? "customer" : "crm";
   const isOrderNote = noteType === "Order Note";
+  const effectiveOrderId = (orderId && orderId !== "__none__") ? orderId : "";
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) handleClose(); }}>
@@ -219,7 +220,7 @@ function NoteModal({ open, onClose, onSave, saving, initial, title, orders = [] 
               <Select value={orderId} onValueChange={setOrderId}>
                 <SelectTrigger data-testid="select-note-order"><SelectValue placeholder="Select order (optional)…" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No specific order</SelectItem>
+                  <SelectItem value="__none__">No specific order</SelectItem>
                   {orders.map((o: any) => (
                     <SelectItem key={o.bigcommerce_order_id} value={String(o.bigcommerce_order_id)}>
                       #{o.order_number ?? o.bigcommerce_order_id}
@@ -233,7 +234,7 @@ function NoteModal({ open, onClose, onSave, saving, initial, title, orders = [] 
             <Label className="text-xs mb-1.5 block">Note</Label>
             <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Enter note…" rows={4} data-testid="textarea-note" />
           </div>
-          {isOrderNote && !!orderId && (
+          {isOrderNote && !!effectiveOrderId && (
             <div className="border rounded-lg p-3 space-y-2 bg-slate-50">
               <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">BigCommerce Sync</p>
               <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
@@ -250,7 +251,7 @@ function NoteModal({ open, onClose, onSave, saving, initial, title, orders = [] 
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>Cancel</Button>
-          <Button onClick={() => onSave({ note, note_type: noteType, order_id: orderId ? parseInt(orderId) : null, bc_target: bcTarget })} disabled={!note.trim() || saving} data-testid="btn-save-note">
+          <Button onClick={() => onSave({ note, note_type: noteType, order_id: effectiveOrderId ? parseInt(effectiveOrderId) : null, bc_target: bcTarget })} disabled={!note.trim() || saving} data-testid="btn-save-note">
             {saving ? "Saving…" : "Save Note"}
           </Button>
         </DialogFooter>
