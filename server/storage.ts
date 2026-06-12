@@ -87,7 +87,9 @@ export interface IStorage {
   deletePromoSku(id: number): Promise<void>;
 
   // CRM operations
-  getCrmCustomers(opts: { search?: string; group?: string; state?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }>;
+  getCrmCustomers(opts: { search?: string; group?: string; state?: string; health?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }>;
+  getHealthThresholds(): Promise<{ healthy_days: number; watch_days: number; at_risk_days: number }>;
+  setHealthThresholds(t: { healthy_days: number; watch_days: number; at_risk_days: number }): Promise<void>;
   getCrmCustomerById(id: number): Promise<(CrmCustomer & { sales_rep_name?: string | null }) | undefined>;
   getCrmCustomerByBcId(bcId: number): Promise<CrmCustomer | undefined>;
   upsertCrmCustomer(data: InsertCrmCustomer): Promise<CrmCustomer>;
@@ -471,7 +473,7 @@ export class DatabaseStorage implements IStorage {
 
   // ─── CRM operations ──────────────────────────────────────────────────────────
 
-  private buildCrmWhereClause(search?: string, group?: string, state?: string) {
+  private buildCrmWhereClause(search?: string, group?: string, state?: string, health?: string) {
     const conditions: any[] = [];
     if (search?.trim()) {
       const s = `%${search.trim()}%`;
@@ -493,9 +495,23 @@ export class DatabaseStorage implements IStorage {
         conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${state}`);
       }
     }
+    if (health) {
+      conditions.push(eq(customersMirror.account_health, health));
+    }
     if (conditions.length === 0) return undefined;
     if (conditions.length === 1) return conditions[0];
     return and(...conditions);
+  }
+
+  async getHealthThresholds(): Promise<{ healthy_days: number; watch_days: number; at_risk_days: number }> {
+    const defaults = { healthy_days: 30, watch_days: 60, at_risk_days: 90 };
+    const row = await this.getSetting("crm_health_thresholds");
+    if (!row?.value) return defaults;
+    try { return { ...defaults, ...row.value }; } catch { return defaults; }
+  }
+
+  async setHealthThresholds(t: { healthy_days: number; watch_days: number; at_risk_days: number }): Promise<void> {
+    await this.setSetting("crm_health_thresholds", t);
   }
 
   private buildCrmOrderBy(sortBy?: string, sortDir?: string) {
@@ -527,9 +543,9 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getCrmCustomers(opts: { search?: string; group?: string; state?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }> {
-    const { search, group, state, sortBy = "last_order_date", sortDir = "desc", limit = 50, offset = 0 } = opts;
-    const where = this.buildCrmWhereClause(search, group, state);
+  async getCrmCustomers(opts: { search?: string; group?: string; state?: string; health?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }> {
+    const { search, group, state, health, sortBy = "last_order_date", sortDir = "desc", limit = 50, offset = 0 } = opts;
+    const where = this.buildCrmWhereClause(search, group, state, health);
     const orderExpr = this.buildCrmOrderBy(sortBy, sortDir);
     const countRows = await db.select({ count: sql<number>`count(*)::int` }).from(customersMirror).where(where);
     const total = countRows[0]?.count ?? 0;
@@ -586,9 +602,9 @@ export class DatabaseStorage implements IStorage {
     return result[0]?.count ?? 0;
   }
 
-  async getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; sortBy?: string; sortDir?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null })[]> {
-    const { search, group, state, sortBy = "last_order_date", sortDir = "desc" } = opts;
-    const where = this.buildCrmWhereClause(search, group, state);
+  async getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; health?: string; sortBy?: string; sortDir?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null })[]> {
+    const { search, group, state, health, sortBy = "last_order_date", sortDir = "desc" } = opts;
+    const where = this.buildCrmWhereClause(search, group, state, health);
     const orderExpr = this.buildCrmOrderBy(sortBy, sortDir);
     const rows = await db.select({ c: customersMirror, rep_name: users.name })
       .from(customersMirror)
@@ -688,6 +704,12 @@ export class DatabaseStorage implements IStorage {
       .from(customerOrdersMirror);
     const customers_in_orders = countRes[0]?.n ?? 0;
 
+    // Load configured thresholds
+    const thresholds = await this.getHealthThresholds();
+    const healthyDays = thresholds.healthy_days;
+    const watchDays   = thresholds.watch_days;
+    const atRiskDays  = thresholds.at_risk_days;
+
     // Update customers that have orders — compute stats + account_health in single pass
     const result = await db.execute(sql`
       UPDATE customers_mirror cm
@@ -697,9 +719,9 @@ export class DatabaseStorage implements IStorage {
         last_order_date  = agg.last_order,
         account_health   = CASE
           WHEN agg.last_order IS NULL THEN 'Lost'
-          WHEN (EXTRACT(EPOCH FROM (NOW() - agg.last_order)) / 86400)::int <= 30 THEN 'Healthy'
-          WHEN (EXTRACT(EPOCH FROM (NOW() - agg.last_order)) / 86400)::int <= 60 THEN 'Watch'
-          WHEN (EXTRACT(EPOCH FROM (NOW() - agg.last_order)) / 86400)::int <= 90 THEN 'At Risk'
+          WHEN (EXTRACT(EPOCH FROM (NOW() - agg.last_order)) / 86400)::int <= ${healthyDays} THEN 'Healthy'
+          WHEN (EXTRACT(EPOCH FROM (NOW() - agg.last_order)) / 86400)::int <= ${watchDays} THEN 'Watch'
+          WHEN (EXTRACT(EPOCH FROM (NOW() - agg.last_order)) / 86400)::int <= ${atRiskDays} THEN 'At Risk'
           ELSE 'Lost'
         END,
         updated_at       = NOW()

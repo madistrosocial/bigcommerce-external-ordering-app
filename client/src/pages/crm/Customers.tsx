@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { getAuthHeaders } from "@/lib/api";
@@ -9,7 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, FileText, FileSpreadsheet, ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight, User, Settings2, X, Users, AlertTriangle, TrendingUp, HeartPulse } from "lucide-react";
+import {
+  Search, FileText, FileSpreadsheet, ArrowUp, ArrowDown, ArrowUpDown,
+  ChevronLeft, ChevronRight, User, Settings2, X, Users, AlertTriangle,
+  TrendingUp, HeartPulse, Activity,
+} from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
@@ -17,22 +21,30 @@ type SortField =
   | "company" | "first_name" | "state" | "customer_group_name"
   | "last_order_date" | "days_since_order" | "lifetime_orders" | "lifetime_revenue";
 
+type HealthFilter = "" | "Healthy" | "Watch" | "At Risk" | "Lost";
+
 const ALL_COLUMNS = [
-  { key: "company",         label: "Company",        required: true  },
-  { key: "customer_name",   label: "Customer Name",  required: true  },
-  { key: "email",           label: "Email",          required: false },
-  { key: "phone",           label: "Phone",          required: false },
-  { key: "state",           label: "State",          required: false },
-  { key: "customer_group",  label: "Customer Group", required: false },
-  { key: "last_order",      label: "Last Order",     required: false },
-  { key: "days_since",      label: "Days Since",     required: false },
-  { key: "orders",          label: "Orders",         required: false },
-  { key: "revenue",         label: "Revenue",        required: false },
-  { key: "sales_rep",       label: "Sales Rep",      required: false },
+  { key: "company",         label: "Company",        required: true,  defaultW: 180 },
+  { key: "customer_name",   label: "Customer Name",  required: true,  defaultW: 180 },
+  { key: "email",           label: "Email",          required: false, defaultW: 220 },
+  { key: "phone",           label: "Phone",          required: false, defaultW: 120 },
+  { key: "state",           label: "State",          required: false, defaultW: 120 },
+  { key: "customer_group",  label: "Customer Group", required: false, defaultW: 180 },
+  { key: "last_order",      label: "Last Order",     required: false, defaultW: 140 },
+  { key: "days_since",      label: "Days Since",     required: false, defaultW: 110 },
+  { key: "orders",          label: "Orders",         required: false, defaultW: 100 },
+  { key: "revenue",         label: "Revenue",        required: false, defaultW: 120 },
+  { key: "sales_rep",       label: "Sales Rep",      required: false, defaultW: 140 },
 ] as const;
 
 type ColKey = typeof ALL_COLUMNS[number]["key"];
 const DEFAULT_VISIBLE = new Set<ColKey>(ALL_COLUMNS.map(c => c.key));
+const DEFAULT_WIDTHS: Record<ColKey, number> = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c.defaultW])) as Record<ColKey, number>;
+const COL_MIN_WIDTHS: Record<ColKey, number> = {
+  company: 180, customer_name: 180, email: 220, phone: 120,
+  state: 120, customer_group: 180, last_order: 120, days_since: 80,
+  orders: 80, revenue: 100, sales_rep: 120,
+};
 
 const PAGE_SIZE = 50;
 
@@ -45,13 +57,83 @@ function fmtCurrency(v: string | number | null): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(v));
 }
 
+const HEALTH_CARDS = [
+  {
+    key: "" as HealthFilter,
+    label: "Total",
+    icon: Users,
+    metricKey: "total" as const,
+    inactive: "bg-slate-50 border-slate-200 hover:bg-blue-50 hover:border-blue-300",
+    active:   "bg-blue-100 border-blue-500 ring-2 ring-blue-400/40",
+    iconCls:  "text-slate-400",
+    labelCls: "text-slate-600",
+    countCls: "text-slate-800",
+    activeLabelCls: "text-blue-700",
+    activeCountCls: "text-blue-800",
+  },
+  {
+    key: "Healthy" as HealthFilter,
+    label: "Healthy",
+    icon: HeartPulse,
+    metricKey: "healthy" as const,
+    inactive: "bg-green-50 border-green-200 hover:bg-green-100 hover:border-green-400",
+    active:   "bg-green-100 border-green-500 ring-2 ring-green-400/40",
+    iconCls:  "text-green-500",
+    labelCls: "text-green-600",
+    countCls: "text-green-700",
+    activeLabelCls: "text-green-800",
+    activeCountCls: "text-green-900",
+  },
+  {
+    key: "Watch" as HealthFilter,
+    label: "Watch",
+    icon: Activity,
+    metricKey: "watch" as const,
+    inactive: "bg-yellow-50 border-yellow-200 hover:bg-yellow-100 hover:border-yellow-400",
+    active:   "bg-yellow-100 border-yellow-500 ring-2 ring-yellow-400/40",
+    iconCls:  "text-yellow-500",
+    labelCls: "text-yellow-600",
+    countCls: "text-yellow-700",
+    activeLabelCls: "text-yellow-800",
+    activeCountCls: "text-yellow-900",
+  },
+  {
+    key: "At Risk" as HealthFilter,
+    label: "At Risk",
+    icon: TrendingUp,
+    metricKey: "at_risk" as const,
+    inactive: "bg-orange-50 border-orange-200 hover:bg-orange-100 hover:border-orange-400",
+    active:   "bg-orange-100 border-orange-500 ring-2 ring-orange-400/40",
+    iconCls:  "text-orange-500",
+    labelCls: "text-orange-600",
+    countCls: "text-orange-700",
+    activeLabelCls: "text-orange-800",
+    activeCountCls: "text-orange-900",
+  },
+  {
+    key: "Lost" as HealthFilter,
+    label: "Lost",
+    icon: AlertTriangle,
+    metricKey: "lost" as const,
+    inactive: "bg-red-50 border-red-200 hover:bg-red-100 hover:border-red-400",
+    active:   "bg-red-100 border-red-500 ring-2 ring-red-400/40",
+    iconCls:  "text-red-500",
+    labelCls: "text-red-600",
+    countCls: "text-red-700",
+    activeLabelCls: "text-red-800",
+    activeCountCls: "text-red-900",
+  },
+] as const;
+
 export default function CRMCustomers() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { currentUser } = useStore();
 
-  const colKey = `crm_cols_v2_${currentUser?.id ?? "guest"}`;
+  const colKey   = `crm_cols_v2_${currentUser?.id ?? "guest"}`;
+  const widthKey = `crm_col_widths_v1_${currentUser?.id ?? "guest"}`;
 
+  // ── Column visibility ─────────────────────────────────────────────────────
   const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(() => {
     try {
       const saved = localStorage.getItem(colKey);
@@ -59,7 +141,6 @@ export default function CRMCustomers() {
     } catch {}
     return DEFAULT_VISIBLE;
   });
-
   const toggleCol = (key: ColKey, required: boolean) => {
     if (required) return;
     const next = new Set(visibleCols);
@@ -69,10 +150,52 @@ export default function CRMCustomers() {
   };
   const vis = (key: ColKey) => visibleCols.has(key);
 
+  // ── Column widths (resizable) ─────────────────────────────────────────────
+  const [colWidths, setColWidths] = useState<Record<ColKey, number>>(() => {
+    try {
+      const saved = localStorage.getItem(widthKey);
+      if (saved) return { ...DEFAULT_WIDTHS, ...JSON.parse(saved) };
+    } catch {}
+    return { ...DEFAULT_WIDTHS };
+  });
+
+  const dragRef = useRef<{ col: ColKey; startX: number; startW: number } | null>(null);
+
+  const startResize = useCallback((col: ColKey, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragRef.current = { col, startX: e.clientX, startW: colWidths[col] };
+
+    const onMove = (me: MouseEvent) => {
+      if (!dragRef.current) return;
+      const delta = me.clientX - dragRef.current.startX;
+      const minW = COL_MIN_WIDTHS[dragRef.current.col] ?? 80;
+      const newW = Math.max(minW, dragRef.current.startW + delta);
+      setColWidths(prev => ({ ...prev, [dragRef.current!.col]: newW }));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      dragRef.current = null;
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [colWidths]);
+
+  const resetWidth = (col: ColKey) => {
+    setColWidths(prev => ({ ...prev, [col]: DEFAULT_WIDTHS[col] }));
+  };
+
+  useEffect(() => {
+    localStorage.setItem(widthKey, JSON.stringify(colWidths));
+  }, [colWidths, widthKey]);
+
+  // ── Filters / sort / pagination ───────────────────────────────────────────
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [group, setGroup] = useState("");
   const [stateFilter, setStateFilter] = useState("");
+  const [healthFilter, setHealthFilter] = useState<HealthFilter>("");
   const [sortBy, setSortBy] = useState<SortField>("last_order_date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
@@ -96,7 +219,12 @@ export default function CRMCustomers() {
 
   const setGroupFilter = (v: string) => { setGroup(v); setPage(1); };
   const setStateFilterVal = (v: string) => { setStateFilter(v); setPage(1); };
+  const toggleHealthFilter = (h: HealthFilter) => {
+    setHealthFilter(prev => prev === h ? "" : h);
+    setPage(1);
+  };
 
+  // ── Queries ───────────────────────────────────────────────────────────────
   const { data: filterOpts } = useQuery({
     queryKey: ["crm", "filters"],
     queryFn: async () => {
@@ -121,7 +249,7 @@ export default function CRMCustomers() {
   });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["crm", "customers", debouncedSearch, group, stateFilter, sortBy, sortDir, page],
+    queryKey: ["crm", "customers", debouncedSearch, group, stateFilter, healthFilter, sortBy, sortDir, page],
     queryFn: async () => {
       const params = new URLSearchParams({
         search: debouncedSearch,
@@ -132,6 +260,7 @@ export default function CRMCustomers() {
       });
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
+      if (healthFilter) params.set("health", healthFilter);
       const r = await fetch(`/api/crm/customers?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load customers");
       return r.json() as Promise<{ customers: any[]; total: number }>;
@@ -148,6 +277,7 @@ export default function CRMCustomers() {
       const params = new URLSearchParams({ search: debouncedSearch, sortBy, sortDir, format });
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
+      if (healthFilter) params.set("health", healthFilter);
       const r = await fetch(`/api/crm/customers/export?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Export failed");
       const blob = await r.blob();
@@ -164,56 +294,88 @@ export default function CRMCustomers() {
     }
   };
 
-  const thClass = "px-3 py-2.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap";
-  const sortTh = (field: SortField, label: string) => (
-    <th
-      className={`${thClass} cursor-pointer hover:text-slate-700 select-none`}
-      onClick={() => toggleSort(field)}
+  const activeFilterCount = [group, stateFilter].filter(Boolean).length;
+  const hasAnyFilter = activeFilterCount > 0 || !!healthFilter;
+
+  // ── Table helpers ─────────────────────────────────────────────────────────
+  const thBase = "relative px-3 py-2.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap select-none";
+  const stickyTh = `${thBase} sticky left-0 z-20 bg-slate-50`;
+
+  const ResizeHandle = ({ col }: { col: ColKey }) => (
+    <div
+      className="absolute right-0 top-0 h-full w-2 cursor-col-resize flex items-center justify-center group/rh z-10"
+      onMouseDown={e => startResize(col, e)}
+      onDoubleClick={() => resetWidth(col)}
     >
-      <span className="flex items-center gap-0.5">
+      <div className="w-px h-4 bg-slate-300 group-hover/rh:bg-blue-400 group-hover/rh:h-full transition-all" />
+    </div>
+  );
+
+  const sortTh = (field: SortField, label: string, col: ColKey, sticky = false) => (
+    <th
+      className={sticky ? stickyTh : thBase}
+      style={{ width: colWidths[col], minWidth: COL_MIN_WIDTHS[col] }}
+    >
+      <span
+        className="flex items-center gap-0.5 cursor-pointer hover:text-slate-700 pr-2"
+        onClick={() => toggleSort(field)}
+      >
         {label}
         {sortBy === field
           ? sortDir === "asc"
-            ? <ArrowUp className="h-3 w-3 text-blue-500 ml-1" />
-            : <ArrowDown className="h-3 w-3 text-blue-500 ml-1" />
-          : <ArrowUpDown className="h-3 w-3 text-slate-400 ml-1" />}
+            ? <ArrowUp className="h-3 w-3 text-blue-500 ml-1 shrink-0" />
+            : <ArrowDown className="h-3 w-3 text-blue-500 ml-1 shrink-0" />
+          : <ArrowUpDown className="h-3 w-3 text-slate-400 ml-1 shrink-0" />}
       </span>
+      <ResizeHandle col={col} />
     </th>
   );
 
-  const activeFilterCount = [group, stateFilter].filter(Boolean).length;
+  const plainTh = (label: string, col: ColKey) => (
+    <th
+      className={thBase}
+      style={{ width: colWidths[col], minWidth: COL_MIN_WIDTHS[col] }}
+    >
+      <span className="pr-2">{label}</span>
+      <ResizeHandle col={col} />
+    </th>
+  );
 
   return (
     <div className="flex flex-col h-full">
-      {/* ── Metrics Cards ──────────────────────────────────────────── */}
+
+      {/* ── Health Cards ─────────────────────────────────────────────────────── */}
       {metrics && (
         <div className="border-b bg-white px-4 py-3 shrink-0">
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-            <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2 bg-slate-50" data-testid="metric-total">
-              <Users className="h-4 w-4 text-slate-400 shrink-0" />
-              <div><p className="text-[11px] text-slate-400">Total</p><p className="text-base font-bold text-slate-800">{(metrics.total ?? 0).toLocaleString()}</p></div>
-            </div>
-            <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2 bg-green-50 border-green-200" data-testid="metric-healthy">
-              <HeartPulse className="h-4 w-4 text-green-500 shrink-0" />
-              <div><p className="text-[11px] text-green-600">Healthy</p><p className="text-base font-bold text-green-700">{(metrics.healthy ?? 0).toLocaleString()}</p></div>
-            </div>
-            <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2 bg-yellow-50 border-yellow-200" data-testid="metric-watch">
-              <TrendingUp className="h-4 w-4 text-yellow-500 shrink-0" />
-              <div><p className="text-[11px] text-yellow-600">Watch</p><p className="text-base font-bold text-yellow-700">{(metrics.watch ?? 0).toLocaleString()}</p></div>
-            </div>
-            <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2 bg-orange-50 border-orange-200" data-testid="metric-at-risk">
-              <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
-              <div><p className="text-[11px] text-orange-600">At Risk</p><p className="text-base font-bold text-orange-700">{(metrics.at_risk ?? 0).toLocaleString()}</p></div>
-            </div>
-            <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2 bg-red-50 border-red-200" data-testid="metric-lost">
-              <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
-              <div><p className="text-[11px] text-red-600">Lost</p><p className="text-base font-bold text-red-700">{(metrics.lost ?? 0).toLocaleString()}</p></div>
-            </div>
+            {HEALTH_CARDS.map(card => {
+              const isActive = healthFilter === card.key;
+              const count = metrics[card.metricKey] ?? 0;
+              const Icon = card.icon;
+              return (
+                <button
+                  key={card.key || "total"}
+                  data-testid={`metric-${card.label.toLowerCase().replace(" ", "-")}`}
+                  onClick={() => toggleHealthFilter(card.key)}
+                  className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all cursor-pointer w-full ${isActive ? card.active : card.inactive}`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Icon className={`h-5 w-5 shrink-0 ${isActive ? card.activeLabelCls : card.iconCls}`} />
+                    <span className={`text-sm font-semibold ${isActive ? card.activeLabelCls : card.labelCls}`}>
+                      {card.label}
+                    </span>
+                  </div>
+                  <span className={`text-3xl font-bold leading-none ml-2 tabular-nums ${isActive ? card.activeCountCls : card.countCls}`}>
+                    {count.toLocaleString()}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* ── Header ─────────────────────────────────────────────────── */}
+      {/* ── Header ───────────────────────────────────────────────────────────── */}
       <div className="border-b bg-white px-4 py-3 shrink-0 space-y-2">
 
         {/* Row 1: title + action buttons */}
@@ -223,7 +385,6 @@ export default function CRMCustomers() {
             <p className="text-xs text-slate-400 mt-0.5">{total.toLocaleString()} customers from local mirror</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Column visibility */}
             <Popover open={showColMenu} onOpenChange={setShowColMenu}>
               <PopoverTrigger asChild>
                 <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" data-testid="btn-columns">
@@ -264,7 +425,6 @@ export default function CRMCustomers() {
 
         {/* Row 2: filters */}
         <div className="flex gap-2 flex-wrap items-center">
-          {/* Search */}
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
             <Input
@@ -276,7 +436,6 @@ export default function CRMCustomers() {
             />
           </div>
 
-          {/* Customer Group filter */}
           <Select value={group || "__all__"} onValueChange={v => setGroupFilter(v === "__all__" ? "" : v)}>
             <SelectTrigger className="h-8 text-sm w-48" data-testid="select-group-filter">
               <SelectValue placeholder="All Groups" />
@@ -289,7 +448,6 @@ export default function CRMCustomers() {
             </SelectContent>
           </Select>
 
-          {/* State filter */}
           <Select value={stateFilter || "__all__"} onValueChange={v => setStateFilterVal(v === "__all__" ? "" : v)}>
             <SelectTrigger className="h-8 text-sm w-36" data-testid="select-state-filter">
               <SelectValue placeholder="All States" />
@@ -303,23 +461,22 @@ export default function CRMCustomers() {
             </SelectContent>
           </Select>
 
-          {/* Clear active filters */}
-          {activeFilterCount > 0 && (
+          {hasAnyFilter && (
             <Button
               size="sm"
               variant="ghost"
               className="h-8 text-xs text-slate-500 gap-1"
-              onClick={() => { setGroupFilter(""); setStateFilterVal(""); }}
+              onClick={() => { setGroupFilter(""); setStateFilterVal(""); setHealthFilter(""); }}
               data-testid="btn-clear-filters"
             >
               <X className="h-3 w-3" />
-              Clear filters ({activeFilterCount})
+              Clear filters
             </Button>
           )}
         </div>
       </div>
 
-      {/* ── Table ──────────────────────────────────────────────────── */}
+      {/* ── Table ────────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading customers…</div>
@@ -330,20 +487,33 @@ export default function CRMCustomers() {
             <p className="text-xs mt-1">Try adjusting your search or filters.</p>
           </div>
         ) : (
-          <table className="w-full text-sm border-collapse min-w-[900px]">
+          <table className="text-sm border-collapse" style={{ tableLayout: "fixed", width: "max-content", minWidth: "100%" }}>
+            <colgroup>
+              {vis("company")        && <col style={{ width: colWidths.company }} />}
+              {vis("customer_name")  && <col style={{ width: colWidths.customer_name }} />}
+              {vis("email")          && <col style={{ width: colWidths.email }} />}
+              {vis("phone")          && <col style={{ width: colWidths.phone }} />}
+              {vis("state")          && <col style={{ width: colWidths.state }} />}
+              {vis("customer_group") && <col style={{ width: colWidths.customer_group }} />}
+              {vis("last_order")     && <col style={{ width: colWidths.last_order }} />}
+              {vis("days_since")     && <col style={{ width: colWidths.days_since }} />}
+              {vis("orders")         && <col style={{ width: colWidths.orders }} />}
+              {vis("revenue")        && <col style={{ width: colWidths.revenue }} />}
+              {vis("sales_rep")      && <col style={{ width: colWidths.sales_rep }} />}
+            </colgroup>
             <thead className="sticky top-0 bg-slate-50 border-b z-10">
               <tr>
-                {vis("company")        && sortTh("company",            "Company")}
-                {vis("customer_name")  && sortTh("first_name",         "Customer Name")}
-                {vis("email")          && <th className={thClass}>Email</th>}
-                {vis("phone")          && <th className={thClass}>Phone</th>}
-                {vis("state")          && sortTh("state",              "State")}
-                {vis("customer_group") && sortTh("customer_group_name","Customer Group")}
-                {vis("last_order")     && sortTh("last_order_date",    "Last Order")}
-                {vis("days_since")     && sortTh("days_since_order",   "Days Since")}
-                {vis("orders")         && sortTh("lifetime_orders",    "Orders")}
-                {vis("revenue")        && sortTh("lifetime_revenue",   "Revenue")}
-                {vis("sales_rep")      && <th className={thClass}>Sales Rep</th>}
+                {vis("company")        && sortTh("company",            "Company",        "company",        true)}
+                {vis("customer_name")  && sortTh("first_name",         "Customer Name",  "customer_name")}
+                {vis("email")          && plainTh("Email",                                "email")}
+                {vis("phone")          && plainTh("Phone",                                "phone")}
+                {vis("state")          && sortTh("state",              "State",          "state")}
+                {vis("customer_group") && sortTh("customer_group_name","Customer Group", "customer_group")}
+                {vis("last_order")     && sortTh("last_order_date",    "Last Order",     "last_order")}
+                {vis("days_since")     && sortTh("days_since_order",   "Days Since",     "days_since")}
+                {vis("orders")         && sortTh("lifetime_orders",    "Orders",         "orders")}
+                {vis("revenue")        && sortTh("lifetime_revenue",   "Revenue",        "revenue")}
+                {vis("sales_rep")      && plainTh("Sales Rep",                            "sales_rep")}
               </tr>
             </thead>
             <tbody>
@@ -361,15 +531,22 @@ export default function CRMCustomers() {
                   <tr
                     key={c.id}
                     data-testid={`row-customer-${c.id}`}
-                    className="border-b hover:bg-blue-50 cursor-pointer transition-colors"
+                    className="group border-b hover:bg-blue-50 cursor-pointer transition-colors"
                     onClick={() => setLocation(`/crm/customers/${c.id}`)}
                   >
-                    {vis("company")        && <td className="px-3 py-2.5 font-medium text-slate-800 max-w-[180px] truncate">{c.company || "—"}</td>}
-                    {vis("customer_name")  && <td className="px-3 py-2.5 text-slate-700">{[c.first_name, c.last_name].filter(Boolean).join(" ") || "—"}</td>}
-                    {vis("email")          && <td className="px-3 py-2.5 text-slate-600 max-w-[180px] truncate">{c.email || "—"}</td>}
-                    {vis("phone")          && <td className="px-3 py-2.5 text-slate-600">{c.phone || "—"}</td>}
+                    {vis("company") && (
+                      <td
+                        className="px-3 py-2.5 sticky left-0 z-10 bg-white group-hover:bg-blue-50 transition-colors border-r border-slate-100"
+                        style={{ maxWidth: colWidths.company }}
+                      >
+                        <span className="font-bold text-slate-800 block truncate">{c.company || "—"}</span>
+                      </td>
+                    )}
+                    {vis("customer_name")  && <td className="px-3 py-2.5 text-slate-700 truncate" style={{ maxWidth: colWidths.customer_name }}>{[c.first_name, c.last_name].filter(Boolean).join(" ") || "—"}</td>}
+                    {vis("email")          && <td className="px-3 py-2.5 text-slate-600 truncate" style={{ maxWidth: colWidths.email }}>{c.email || "—"}</td>}
+                    {vis("phone")          && <td className="px-3 py-2.5 text-slate-600 truncate" style={{ maxWidth: colWidths.phone }}>{c.phone || "—"}</td>}
                     {vis("state")          && <td className="px-3 py-2.5 text-slate-700 font-medium">{stateVal || <span className="text-slate-400">—</span>}</td>}
-                    {vis("customer_group") && <td className="px-3 py-2.5 text-slate-600 max-w-[160px] truncate">{c.customer_group_name || <span className="text-slate-400">—</span>}</td>}
+                    {vis("customer_group") && <td className="px-3 py-2.5 text-slate-600 truncate" style={{ maxWidth: colWidths.customer_group }}>{c.customer_group_name || <span className="text-slate-400">—</span>}</td>}
                     {vis("last_order")     && (
                       <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">
                         {c.last_order_date ? formatDistanceToNow(new Date(c.last_order_date), { addSuffix: true }) : "—"}
@@ -391,7 +568,7 @@ export default function CRMCustomers() {
         )}
       </div>
 
-      {/* ── Pagination ─────────────────────────────────────────────── */}
+      {/* ── Pagination ───────────────────────────────────────────────────────── */}
       {totalPages > 1 && (
         <div className="border-t bg-white px-4 py-2.5 flex items-center justify-between shrink-0">
           <p className="text-xs text-slate-500">

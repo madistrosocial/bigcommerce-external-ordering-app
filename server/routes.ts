@@ -4333,9 +4333,9 @@ export async function registerRoutes(
   // GET /api/crm/customers/export — registered BEFORE /:id to avoid route conflict
   app.get("/api/crm/customers/export", requireAuth, async (req, res) => {
     try {
-      const { search = "", sortBy = "last_order_date", sortDir = "desc", format = "csv", group = "", state = "" } = req.query as any;
-      const customers = await storage.getAllCrmCustomersForExport({ search, group: group || undefined, state: state || undefined, sortBy, sortDir });
-      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "State", "Customer Group", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Sales Rep"];
+      const { search = "", sortBy = "last_order_date", sortDir = "desc", format = "csv", group = "", state = "", health = "" } = req.query as any;
+      const customers = await storage.getAllCrmCustomersForExport({ search, group: group || undefined, state: state || undefined, health: health || undefined, sortBy, sortDir });
+      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "State", "Customer Group", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Sales Rep", "Health Status"];
       const rows = customers.map(c => {
         const addr = (c.shipping_address as any) ?? (c.billing_address as any) ?? {};
         return [
@@ -4351,6 +4351,7 @@ export async function registerRoutes(
           String(c.lifetime_orders ?? 0),
           String(c.lifetime_revenue ?? "0"),
           (c as any).sales_rep_name ?? "",
+          c.account_health ?? "Lost",
         ];
       });
       const dateSuffix = new Date().toISOString().split("T")[0];
@@ -4371,11 +4372,32 @@ export async function registerRoutes(
   // GET /api/crm/customers
   app.get("/api/crm/customers", requireAuth, async (req, res) => {
     try {
-      const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "" } = req.query as any;
+      const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "", health = "" } = req.query as any;
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
       const offset = parseInt(String(req.query.offset ?? "0"));
-      const result = await storage.getCrmCustomers({ search, group: group || undefined, state: state || undefined, sortBy, sortDir, limit, offset });
+      const result = await storage.getCrmCustomers({ search, group: group || undefined, state: state || undefined, health: health || undefined, sortBy, sortDir, limit, offset });
       res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/health-thresholds
+  app.get("/api/crm/health-thresholds", requireAuth, async (req, res) => {
+    try {
+      res.json(await storage.getHealthThresholds());
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/crm/health-thresholds — saves thresholds and auto-recalculates health
+  app.put("/api/crm/health-thresholds", requireAuth, async (req, res) => {
+    try {
+      const { healthy_days, watch_days, at_risk_days } = req.body;
+      const h = Number(healthy_days), w = Number(watch_days), a = Number(at_risk_days);
+      if (!Number.isInteger(h) || !Number.isInteger(w) || !Number.isInteger(a) || h < 1 || w <= h || a <= w) {
+        return res.status(400).json({ error: "Invalid thresholds: must be positive integers with Healthy < Watch < At Risk" });
+      }
+      await storage.setHealthThresholds({ healthy_days: h, watch_days: w, at_risk_days: a });
+      const recalc = await storage.recalculateCrmCustomerStats();
+      res.json({ ok: true, thresholds: { healthy_days: h, watch_days: w, at_risk_days: a }, recalc });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
