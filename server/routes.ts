@@ -4241,9 +4241,17 @@ export async function registerRoutes(
         if (!scRes.ok || scRes.status === 204) break;
         const scData: any[] = await scRes.json();
         if (!Array.isArray(scData) || scData.length === 0) break;
+        if (scPage === 1 && scData[0]) {
+          console.log(`[store-credit-sync] Sample v2 customer keys:`, Object.keys(scData[0]));
+          console.log(`[store-credit-sync] Sample store_credit_amount:`, scData[0].store_credit_amount, `store_credit:`, scData[0].store_credit);
+          // Log any customer with non-zero credit
+          const withCredit = scData.filter(c => parseFloat(c.store_credit_amount ?? c.store_credit ?? 0) > 0);
+          console.log(`[store-credit-sync] Customers with >0 credit on page 1:`, withCredit.map(c => ({ id: c.id, sc: c.store_credit_amount ?? c.store_credit })));
+        }
         for (const c of scData) {
-          if (c.id != null && c.store_credit_amount != null) {
-            storeCreditMap[c.id] = String(c.store_credit_amount);
+          const credit = c.store_credit_amount ?? c.store_credit;
+          if (c.id != null && credit != null) {
+            storeCreditMap[c.id] = String(credit);
           }
         }
         if (scData.length < 250) break;
@@ -4445,8 +4453,10 @@ export async function registerRoutes(
           console.log(`[store-credit] BC status: ${bcRes.status}`);
           if (bcRes.ok) {
             const bcData = await bcRes.json();
-            console.log(`[store-credit] BC response store_credit_amount:`, bcData?.store_credit_amount);
-            if (bcData?.store_credit_amount != null) {
+            console.log(`[store-credit] BC full response keys:`, Object.keys(bcData ?? {}));
+            const rawCredit = bcData?.store_credit_amount ?? bcData?.store_credit;
+            console.log(`[store-credit] BC response credit value:`, rawCredit);
+            if (rawCredit != null) {
               const updated = await storage.upsertCrmCustomer({
                 bigcommerce_customer_id: customer.bigcommerce_customer_id,
                 company: customer.company,
@@ -4460,7 +4470,7 @@ export async function registerRoutes(
                 shipping_address: customer.shipping_address as any,
                 created_date: customer.created_date,
                 is_active: customer.is_active,
-                store_credit_balance: String(bcData.store_credit_amount),
+                store_credit_balance: String(rawCredit),
               });
               return res.json({ ...customer, ...updated, sales_rep_name: customer.sales_rep_name });
             }
