@@ -1,2 +1,3 @@
 - [Rollup native binary fix](rollup-fix.md) — missing @rollup/rollup-linux-x64-gnu breaks startup; fix with installLanguagePackages.
 - [CRM Phase 1 build](crm-phase1.md) — 3 new tables, storage methods, routes, pages all built; db:push confirmed.
+- [Duplicate getBcCreds hoisting bug](duplicate-function-hoisting.md) — two same-named async functions in registerRoutes(); JS hoisting lets the second silently win and break all callers.

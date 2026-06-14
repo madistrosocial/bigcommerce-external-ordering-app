@@ -4514,19 +4514,6 @@ export async function registerRoutes(
 
   // ── CRM Notes ──────────────────────────────────────────────────────────────
 
-  // Shared helper: get BC credentials from settings / env
-  async function getBcCreds() {
-    const setting = await storage.getSetting("bigcommerce_config");
-    let storeHash = process.env.BC_STORE_HASH;
-    let token = process.env.BC_TOKEN;
-    if (setting?.value) {
-      const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
-      storeHash = cfg.storeHash || storeHash;
-      token = cfg.token || token;
-    }
-    return { storeHash, token };
-  }
-
   // GET /api/crm/notes  — global notes page
   app.get("/api/crm/notes", requireAuth, async (req, res) => {
     try {
