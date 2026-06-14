@@ -136,8 +136,12 @@ export default function InvoicePrintPage() {
       const [orderData, settings] = await Promise.all([
         fetch(`/api/bigcommerce/orders/${orderId}/detail`, {
           headers: api.getAuthHeaders(),
-        }).then((r) => {
-          if (!r.ok) throw new Error("Order not found or not synced to BigCommerce");
+        }).then(async (r) => {
+          if (!r.ok) {
+            let msg = `HTTP ${r.status}`;
+            try { const j = await r.json(); msg = j.error || j.message || msg; } catch {}
+            throw new Error(msg);
+          }
           return r.json();
         }),
         api.getInvoiceSettings(),

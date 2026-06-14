@@ -2983,11 +2983,16 @@ export async function registerRoutes(
     try {
       const { storeHash, headers } = await getBcCreds();
       const { orderId } = req.params;
+      console.log(`[invoice] loading order ${orderId}`);
       const [orderRes, productsRes] = await Promise.all([
         fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}`, { headers }),
         fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}/products?limit=250`, { headers }),
       ]);
-      if (!orderRes.ok) throw new Error(`Order fetch failed: ${orderRes.statusText}`);
+      if (!orderRes.ok) {
+        const errBody = await orderRes.text();
+        console.error(`[invoice] BC order fetch failed ${orderRes.status}: ${errBody.slice(0, 200)}`);
+        throw new Error(`Order fetch failed: ${orderRes.status} ${orderRes.statusText}`);
+      }
       if (!productsRes.ok) throw new Error(`Products fetch failed: ${productsRes.statusText}`);
       const order = await orderRes.json();
       const rawProductsData = await productsRes.json();
