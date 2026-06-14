@@ -4439,12 +4439,13 @@ export async function registerRoutes(
           token = cfg.token || token;
         }
         if (storeHash && token) {
-          const bcRes = await fetch(
-            `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${customer.bigcommerce_customer_id}`,
-            { headers: { "X-Auth-Token": String(token), Accept: "application/json" } }
-          );
+          const bcUrl = `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${customer.bigcommerce_customer_id}`;
+          console.log(`[store-credit] fetching ${bcUrl}`);
+          const bcRes = await fetch(bcUrl, { headers: { "X-Auth-Token": String(token), Accept: "application/json" } });
+          console.log(`[store-credit] BC status: ${bcRes.status}`);
           if (bcRes.ok) {
             const bcData = await bcRes.json();
+            console.log(`[store-credit] BC response store_credit_amount:`, bcData?.store_credit_amount);
             if (bcData?.store_credit_amount != null) {
               const updated = await storage.upsertCrmCustomer({
                 bigcommerce_customer_id: customer.bigcommerce_customer_id,
@@ -4463,10 +4464,15 @@ export async function registerRoutes(
               });
               return res.json({ ...customer, ...updated, sales_rep_name: customer.sales_rep_name });
             }
+          } else {
+            const errText = await bcRes.text();
+            console.warn(`[store-credit] BC error ${bcRes.status}: ${errText.slice(0, 200)}`);
           }
+        } else {
+          console.warn(`[store-credit] BC not configured — storeHash=${!!storeHash} token=${!!token}`);
         }
-      } catch (_) {
-        // BC refresh failed — return cached data silently
+      } catch (err: any) {
+        console.error(`[store-credit] refresh failed:`, err.message);
       }
 
       res.json(customer);
