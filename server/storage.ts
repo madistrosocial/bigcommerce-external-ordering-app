@@ -596,6 +596,7 @@ export class DatabaseStorage implements IStorage {
           shipping_address: data.shipping_address,
           created_date: data.created_date,
           is_active: data.is_active,
+          store_credit_balance: data.store_credit_balance,
           updated_at: new Date(),
         },
       }).returning();

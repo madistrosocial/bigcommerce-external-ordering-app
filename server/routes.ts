@@ -4231,6 +4231,25 @@ export async function registerRoutes(
       }
       if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
 
+      // Prefetch store credit from v2 API (v3 does not expose store_credit_amount)
+      const storeCreditMap: Record<number, string> = {};
+      let scPage = 1;
+      while (true) {
+        const scRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers?limit=250&page=${scPage}`, {
+          headers: { "X-Auth-Token": String(token), Accept: "application/json" },
+        });
+        if (!scRes.ok || scRes.status === 204) break;
+        const scData: any[] = await scRes.json();
+        if (!Array.isArray(scData) || scData.length === 0) break;
+        for (const c of scData) {
+          if (c.id != null && c.store_credit_amount != null) {
+            storeCreditMap[c.id] = String(c.store_credit_amount);
+          }
+        }
+        if (scData.length < 250) break;
+        scPage++;
+      }
+
       // Prefetch all customer groups for name resolution
       const cgRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customer_groups?limit=200`, {
         headers: { "X-Auth-Token": String(token), Accept: "application/json" },
@@ -4264,6 +4283,7 @@ export async function registerRoutes(
             shipping_address: shipping ? { street1: shipping.address1, street2: shipping.address2, city: shipping.city, state: shipping.state_or_province, zip: shipping.postal_code, country: shipping.country } : null,
             created_date: bc.date_created ? new Date(bc.date_created) : null,
             is_active: true,
+            store_credit_balance: storeCreditMap[bc.id] ?? "0",
           });
           synced++;
         }
