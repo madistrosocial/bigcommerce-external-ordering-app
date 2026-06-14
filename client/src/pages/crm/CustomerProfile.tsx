@@ -288,26 +288,26 @@ function OrderNotesModal({ order, customerId, onClose, onSaved }: { order: any; 
 
   return (
     <Dialog open={!!order} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent className="w-[95vw] max-w-[95vw] h-[95vh] max-h-[95vh] flex flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Order #{order?.order_number ?? order?.bigcommerce_order_id}</DialogTitle>
         </DialogHeader>
-        <div className="flex flex-wrap gap-2 text-sm text-slate-500 mb-3">
+        <div className="flex flex-wrap gap-2 text-sm text-slate-500 mb-3 shrink-0">
           {order?.order_date && <span>{fmtDateTime(order.order_date)}</span>}
           {order?.status && <Badge variant={statusColor(order.status)} className="capitalize text-xs">{order.status}</Badge>}
           {order?.order_total && <span className="font-semibold text-slate-800">{fmtCurrency(order.order_total)}</span>}
         </div>
-        <div className="space-y-4">
-          <div>
-            <Label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Customer Order Note</Label>
-            <Textarea value={custNote} onChange={e => setCustNote(e.target.value)} rows={3} placeholder="No customer note…" data-testid="textarea-customer-note" />
+        <div className="flex flex-col gap-4 flex-1 overflow-y-auto min-h-0">
+          <div className="flex flex-col flex-1 min-h-0">
+            <Label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block shrink-0">Customer Order Note</Label>
+            <Textarea value={custNote} onChange={e => setCustNote(e.target.value)} className="flex-1 resize-none min-h-0" placeholder="No customer note…" data-testid="textarea-customer-note" />
           </div>
-          <div>
-            <Label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Staff Note</Label>
-            <Textarea value={staffNote} onChange={e => setStaffNote(e.target.value)} rows={3} placeholder="No staff note…" data-testid="textarea-staff-note" />
+          <div className="flex flex-col flex-1 min-h-0">
+            <Label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block shrink-0">Staff Note</Label>
+            <Textarea value={staffNote} onChange={e => setStaffNote(e.target.value)} className="flex-1 resize-none min-h-0" placeholder="No staff note…" data-testid="textarea-staff-note" />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="shrink-0 pt-3">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={handleSave} disabled={!isDirty || saving} data-testid="btn-save-order-notes">
             {saving ? "Saving…" : "Save"}
