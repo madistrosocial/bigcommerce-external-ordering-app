@@ -15,7 +15,7 @@ import {
   ArrowLeft, Building2, User, Mail, Phone, Hash, TrendingUp, ShoppingBag,
   Calendar, DollarSign, Users, Plus, Pencil, Trash2, MessageSquare,
   UserCheck, UserMinus, AlertTriangle, Clock, ChevronLeft, ChevronRight,
-  FileText, CreditCard, Edit3,
+  FileText, CreditCard, Edit3, RefreshCw,
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -677,7 +677,12 @@ export default function CustomerProfile() {
           <SummaryCard icon={<ShoppingBag className="h-4 w-4 text-blue-500" />} label="Lifetime Orders" value={lifetimeOrders.toLocaleString()} testId="text-lifetime-orders" />
           <SummaryCard icon={<TrendingUp className="h-4 w-4 text-purple-500" />} label="Avg Order Value" value={fmtCurrency(avgOrderValue)} />
           <SummaryCard icon={<Calendar className="h-4 w-4 text-amber-500" />} label="Last Order" value={customer.last_order_date ? fmtDate(customer.last_order_date) : "—"} testId="text-last-order-date" />
-          <SummaryCard icon={<CreditCard className="h-4 w-4 text-teal-500" />} label="Store Credit" value={fmtCurrency(customer.store_credit_balance ?? 0)} testId="text-store-credit" />
+          <StoreCreditCard
+            value={fmtCurrency(customer.store_credit_balance ?? 0)}
+            updatedAt={customer.updated_at}
+            onRefresh={() => queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] })}
+            isRefreshing={loadingCustomer}
+          />
         </div>
       </div>
 
@@ -1087,6 +1092,37 @@ function SummaryCard({ icon, label, value, testId }: { icon: React.ReactNode; la
     <div className="rounded-xl border px-3 py-2.5 bg-white shadow-sm">
       <div className="flex items-center gap-1.5 mb-1">{icon}<span className="text-xs text-slate-500">{label}</span></div>
       <p className="text-lg font-bold text-slate-900" data-testid={testId}>{value}</p>
+    </div>
+  );
+}
+
+function StoreCreditCard({ value, updatedAt, onRefresh, isRefreshing }: {
+  value: string;
+  updatedAt: string | Date | null | undefined;
+  onRefresh: () => void;
+  isRefreshing: boolean;
+}) {
+  return (
+    <div className="rounded-xl border px-3 py-2.5 bg-white shadow-sm">
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-1.5">
+          <CreditCard className="h-4 w-4 text-teal-500" />
+          <span className="text-xs text-slate-500">Store Credit</span>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          data-testid="btn-refresh-store-credit"
+          className="text-slate-400 hover:text-teal-600 transition-colors disabled:opacity-40"
+          title="Refresh store credit from BigCommerce"
+        >
+          <RefreshCw className={`h-3 w-3 ${isRefreshing ? "animate-spin" : ""}`} />
+        </button>
+      </div>
+      <p className="text-lg font-bold text-slate-900" data-testid="text-store-credit">{value}</p>
+      {updatedAt && (
+        <p className="text-[10px] text-slate-400 mt-0.5">Updated {smartDate(updatedAt)}</p>
+      )}
     </div>
   );
 }

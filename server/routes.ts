@@ -4427,6 +4427,48 @@ export async function registerRoutes(
       const id = parseInt(req.params.id);
       const customer = await storage.getCrmCustomerById(id);
       if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+      // Refresh store credit live from BC v2 (fire-and-forget style but awaited so the response is fresh)
+      try {
+        const setting = await storage.getSetting("bigcommerce_config");
+        let storeHash = process.env.BC_STORE_HASH;
+        let token = process.env.BC_TOKEN;
+        if (setting?.value) {
+          const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+          storeHash = cfg.storeHash || storeHash;
+          token = cfg.token || token;
+        }
+        if (storeHash && token) {
+          const bcRes = await fetch(
+            `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${customer.bigcommerce_customer_id}`,
+            { headers: { "X-Auth-Token": String(token), Accept: "application/json" } }
+          );
+          if (bcRes.ok) {
+            const bcData = await bcRes.json();
+            if (bcData?.store_credit_amount != null) {
+              const updated = await storage.upsertCrmCustomer({
+                bigcommerce_customer_id: customer.bigcommerce_customer_id,
+                company: customer.company,
+                first_name: customer.first_name,
+                last_name: customer.last_name,
+                email: customer.email,
+                phone: customer.phone,
+                customer_group_id: customer.customer_group_id,
+                customer_group_name: customer.customer_group_name,
+                billing_address: customer.billing_address as any,
+                shipping_address: customer.shipping_address as any,
+                created_date: customer.created_date,
+                is_active: customer.is_active,
+                store_credit_balance: String(bcData.store_credit_amount),
+              });
+              return res.json({ ...customer, ...updated, sales_rep_name: customer.sales_rep_name });
+            }
+          }
+        }
+      } catch (_) {
+        // BC refresh failed — return cached data silently
+      }
+
       res.json(customer);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
