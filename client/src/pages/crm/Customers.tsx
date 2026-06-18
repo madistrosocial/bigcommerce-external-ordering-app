@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Search, FileText, FileSpreadsheet, ArrowUp, ArrowDown, ArrowUpDown,
   ChevronLeft, ChevronRight, User, Settings2, X, Users, AlertTriangle,
-  TrendingUp, HeartPulse, Activity,
+  TrendingUp, HeartPulse, Activity, Phone, Mail,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -254,11 +254,12 @@ export default function CRMCustomers() {
   });
 
   const { data: metrics } = useQuery({
-    queryKey: ["crm", "metrics", debouncedSearch, group, stateFilter],
+    queryKey: ["crm", "metrics", debouncedSearch, group, stateFilter, repFilter],
     queryFn: async () => {
       const params = new URLSearchParams({ search: debouncedSearch });
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
+      if (repFilter) params.set("assignedRep", repFilter);
       const r = await fetch(`/api/crm/metrics?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load metrics");
       return r.json() as Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }>;
@@ -366,8 +367,8 @@ export default function CRMCustomers() {
 
       {/* ── Health Cards ─────────────────────────────────────────────────────── */}
       {metrics && (
-        <div className="border-b bg-white px-4 py-3 shrink-0">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        <div className="border-b bg-white px-3 sm:px-4 py-2 sm:py-3 shrink-0">
+          <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
             {HEALTH_CARDS.map(card => {
               const isActive = healthFilter === card.key;
               const count = metrics[card.metricKey] ?? 0;
@@ -377,15 +378,15 @@ export default function CRMCustomers() {
                   key={card.key || "total"}
                   data-testid={`metric-${card.label.toLowerCase().replace(" ", "-")}`}
                   onClick={() => toggleHealthFilter(card.key)}
-                  className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all cursor-pointer w-full ${isActive ? card.active : card.inactive}`}
+                  className={`flex flex-col sm:flex-row items-center sm:justify-between rounded-lg border px-1.5 py-1.5 sm:px-4 sm:py-3 text-left transition-all cursor-pointer w-full gap-0.5 sm:gap-0 ${isActive ? card.active : card.inactive}`}
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Icon className={`h-5 w-5 shrink-0 ${isActive ? card.activeLabelCls : card.iconCls}`} />
-                    <span className={`text-sm font-semibold ${isActive ? card.activeLabelCls : card.labelCls}`}>
+                  <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+                    <Icon className={`h-3.5 w-3.5 sm:h-5 sm:w-5 shrink-0 ${isActive ? card.activeLabelCls : card.iconCls}`} />
+                    <span className={`text-[10px] sm:text-sm font-semibold leading-tight ${isActive ? card.activeLabelCls : card.labelCls}`}>
                       {card.label}
                     </span>
                   </div>
-                  <span className={`text-3xl font-bold leading-none ml-2 tabular-nums ${isActive ? card.activeCountCls : card.countCls}`}>
+                  <span className={`text-base sm:text-3xl font-bold leading-none sm:ml-2 tabular-nums ${isActive ? card.activeCountCls : card.countCls}`}>
                     {count.toLocaleString()}
                   </span>
                 </button>
@@ -413,7 +414,7 @@ export default function CRMCustomers() {
               </PopoverTrigger>
               <PopoverContent align="end" className="w-52 p-3">
                 <p className="text-xs font-semibold text-slate-700 mb-2.5">Show / Hide Columns</p>
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-[60vh] overflow-y-auto overscroll-contain pr-0.5">
                   {ALL_COLUMNS.map(col => (
                     <label
                       key={col.key}
@@ -582,8 +583,24 @@ export default function CRMCustomers() {
                       </td>
                     )}
                     {vis("customer_name")  && <td className="px-3 py-2.5 text-slate-700 truncate" style={{ maxWidth: colWidths.customer_name }}>{[c.first_name, c.last_name].filter(Boolean).join(" ") || "—"}</td>}
-                    {vis("email")          && <td className="px-3 py-2.5 text-slate-600 truncate" style={{ maxWidth: colWidths.email }}>{c.email || "—"}</td>}
-                    {vis("phone")          && <td className="px-3 py-2.5 text-slate-600 truncate" style={{ maxWidth: colWidths.phone }}>{c.phone || "—"}</td>}
+                    {vis("email") && (
+                      <td className="px-3 py-2.5 truncate" style={{ maxWidth: colWidths.email }}>
+                        {c.email
+                          ? <a href={`mailto:${c.email}`} onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline">
+                              <Mail className="h-3 w-3 shrink-0 opacity-60" />{c.email}
+                            </a>
+                          : <span className="text-slate-400">—</span>}
+                      </td>
+                    )}
+                    {vis("phone") && (
+                      <td className="px-3 py-2.5 truncate" style={{ maxWidth: colWidths.phone }}>
+                        {c.phone
+                          ? <a href={`tel:${c.phone}`} onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline">
+                              <Phone className="h-3 w-3 shrink-0 opacity-60" />{c.phone}
+                            </a>
+                          : <span className="text-slate-400">—</span>}
+                      </td>
+                    )}
                     {vis("state")          && <td className="px-3 py-2.5 text-slate-700 font-medium">{stateVal || <span className="text-slate-400">—</span>}</td>}
                     {vis("customer_group") && <td className="px-3 py-2.5 text-slate-600 truncate" style={{ maxWidth: colWidths.customer_group }}>{c.customer_group_name || <span className="text-slate-400">—</span>}</td>}
                     {vis("last_order")     && (

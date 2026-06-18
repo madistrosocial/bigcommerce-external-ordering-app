@@ -115,9 +115,9 @@ export interface IStorage {
   // CRM Timeline
   getCrmTimeline(customerId: number): Promise<any[]>;
   // CRM Reactivation
-  getReactivationCustomers(opts: { search?: string; group?: string; state?: string; health?: string; rep?: number; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }>;
+  getReactivationCustomers(opts: { search?: string; group?: string; state?: string; health?: string; rep?: number; sortBy?: string; sortDir?: string; limit?: number; offset?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }>;
   // CRM Metrics
-  getCrmMetrics(opts: { search?: string; group?: string; state?: string }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }>;
+  getCrmMetrics(opts: { search?: string; group?: string; state?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }>;
   // CRM Users list
   getCrmUsers(): Promise<{ id: number; name: string }[]>;
   // CRM Order Notes (mirror update)
@@ -984,8 +984,8 @@ export class DatabaseStorage implements IStorage {
 
   // ─── CRM Reactivation ─────────────────────────────────────────────────────────
 
-  async getReactivationCustomers(opts: { search?: string; group?: string; state?: string; health?: string; rep?: number; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }> {
-    const { search, group, state, health, rep, sortBy = 'last_order_date', sortDir = 'asc', limit = 50, offset = 0 } = opts;
+  async getReactivationCustomers(opts: { search?: string; group?: string; state?: string; health?: string; rep?: number; sortBy?: string; sortDir?: string; limit?: number; offset?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }> {
+    const { search, group, state, health, rep, sortBy = 'last_order_date', sortDir = 'asc', limit = 50, offset = 0, visibilityScope, visibilityUserId } = opts;
 
     const healthFilter = health && ['At Risk', 'Lost'].includes(health) ? [health] : ['At Risk', 'Lost'];
     const conditions: any[] = [inArray(customersMirror.account_health, healthFilter)];
@@ -1008,6 +1008,8 @@ export class DatabaseStorage implements IStorage {
       }
     }
     if (rep) conditions.push(eq(customerSalesRep.assigned_user_id, rep));
+    const repVisConds = this.buildCrmRepConditions(undefined, visibilityScope, visibilityUserId);
+    conditions.push(...repVisConds);
 
     const where = and(...conditions);
 
@@ -1038,15 +1040,24 @@ export class DatabaseStorage implements IStorage {
 
   // ─── CRM Metrics ──────────────────────────────────────────────────────────────
 
-  async getCrmMetrics(opts: { search?: string; group?: string; state?: string }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }> {
-    const where = this.buildCrmWhereClause(opts.search, opts.group, opts.state);
-    const rows = await db.select({
-      account_health: customersMirror.account_health,
-      count: sql<number>`count(*)::int`,
-    })
-      .from(customersMirror)
-      .where(where)
-      .groupBy(customersMirror.account_health);
+  async getCrmMetrics(opts: { search?: string; group?: string; state?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }> {
+    const { search, group, state, assignedRep, visibilityScope, visibilityUserId } = opts;
+    const baseWhere = this.buildCrmWhereClause(search, group, state);
+    const repConds = this.buildCrmRepConditions(assignedRep, visibilityScope, visibilityUserId);
+    const needsRepJoin = repConds.length > 0;
+    const allConds = [...(baseWhere ? [baseWhere] : []), ...repConds];
+    const where = allConds.length === 0 ? undefined : allConds.length === 1 ? allConds[0] : and(...allConds);
+
+    const rows = needsRepJoin
+      ? await db.select({ account_health: customersMirror.account_health, count: sql<number>`count(*)::int` })
+          .from(customersMirror)
+          .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+          .where(where)
+          .groupBy(customersMirror.account_health)
+      : await db.select({ account_health: customersMirror.account_health, count: sql<number>`count(*)::int` })
+          .from(customersMirror)
+          .where(where)
+          .groupBy(customersMirror.account_health);
 
     const counts: Record<string, number> = {};
     for (const r of rows) counts[r.account_health ?? '__null__'] = r.count;

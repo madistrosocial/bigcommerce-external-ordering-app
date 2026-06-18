@@ -4376,7 +4376,7 @@ export async function registerRoutes(
   async function getCrmVisibilityScope(stor: typeof storage, userId: number, userRole: string, permStrings?: string[]): Promise<{ scope: string; userId: number }> {
     if (userRole === "admin") return { scope: "ALL_CUSTOMERS", userId };
     const perms = permStrings ?? await stor.getUserPermissionStrings(userId);
-    if (perms.includes("crm:visibility_all")) return { scope: "ALL_CUSTOMERS", userId };
+    if (perms.includes("crm:view_all") || perms.includes("crm:visibility_all")) return { scope: "ALL_CUSTOMERS", userId };
     if (perms.includes("crm:visibility_assigned_unassigned")) return { scope: "ASSIGNED_AND_UNASSIGNED", userId };
     if (perms.includes("crm:visibility_assigned_only")) return { scope: "ASSIGNED_ONLY", userId };
     return { scope: "ASSIGNED_ONLY", userId };
@@ -4958,10 +4958,15 @@ export async function registerRoutes(
   // GET /api/crm/reactivation
   app.get("/api/crm/reactivation", requireAuth, async (req, res) => {
     try {
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
       const { search = "", group = "", state = "", health = "", rep, sortBy = "last_order_date", sortDir = "asc" } = req.query as Record<string, string>;
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
       const offset = parseInt(String(req.query.offset ?? "0"));
-      const result = await storage.getReactivationCustomers({ search, group, state, health, rep: rep ? parseInt(rep) : undefined, sortBy, sortDir, limit, offset });
+      const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
+      const visScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
+      const result = await storage.getReactivationCustomers({ search, group, state, health, rep: rep ? parseInt(rep) : undefined, sortBy, sortDir, limit, offset, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
       res.json(result);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -4969,8 +4974,14 @@ export async function registerRoutes(
   // GET /api/crm/metrics
   app.get("/api/crm/metrics", requireAuth, async (req, res) => {
     try {
-      const { search = "", group = "", state = "" } = req.query as Record<string, string>;
-      const metrics = await storage.getCrmMetrics({ search, group, state });
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const { search = "", group = "", state = "", assignedRep = "" } = req.query as Record<string, string>;
+      const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
+      const visScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
+      const repFilter = assignedRep === "unassigned" ? "unassigned" : (assignedRep ? parseInt(String(assignedRep)) : undefined) as number | "unassigned" | undefined;
+      const metrics = await storage.getCrmMetrics({ search, group, state, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
       res.json(metrics);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
