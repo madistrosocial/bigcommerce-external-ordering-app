@@ -4348,6 +4348,16 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // ── CRM visibility scope helper ───────────────────────────────────────────────
+  async function getCrmVisibilityScope(stor: typeof storage, userId: number, userRole: string): Promise<{ scope: string; userId: number }> {
+    if (userRole === "admin") return { scope: "ALL_CUSTOMERS", userId };
+    const perms = await stor.getUserPermissionStrings(userId);
+    if (perms.includes("crm:visibility_all")) return { scope: "ALL_CUSTOMERS", userId };
+    if (perms.includes("crm:visibility_assigned_unassigned")) return { scope: "ASSIGNED_AND_UNASSIGNED", userId };
+    if (perms.includes("crm:visibility_assigned_only")) return { scope: "ASSIGNED_ONLY", userId };
+    return { scope: "ALL_CUSTOMERS", userId };
+  }
+
   // GET /api/crm/filters
   app.get("/api/crm/filters", requireAuth, async (_req, res) => {
     try {
@@ -4359,8 +4369,17 @@ export async function registerRoutes(
   // GET /api/crm/customers/export — registered BEFORE /:id to avoid route conflict
   app.get("/api/crm/customers/export", requireAuth, async (req, res) => {
     try {
-      const { search = "", sortBy = "last_order_date", sortDir = "desc", format = "csv", group = "", state = "", health = "" } = req.query as any;
-      const customers = await storage.getAllCrmCustomersForExport({ search, group: group || undefined, state: state || undefined, health: health || undefined, sortBy, sortDir });
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      if (user.role !== "admin") {
+        const perms = await storage.getUserPermissionStrings(userId);
+        if (!perms.includes("crm:export")) return res.status(403).json({ error: "Forbidden: crm:export permission required" });
+      }
+      const { search = "", sortBy = "last_order_date", sortDir = "desc", format = "csv", group = "", state = "", health = "", assignedRep = "" } = req.query as any;
+      const visScope = await getCrmVisibilityScope(storage, userId, user.role);
+      const repFilter = assignedRep === "unassigned" ? "unassigned" : (assignedRep ? parseInt(String(assignedRep)) : undefined) as number | "unassigned" | undefined;
+      const customers = await storage.getAllCrmCustomersForExport({ search, group: group || undefined, state: state || undefined, health: health || undefined, sortBy, sortDir, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
       const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "State", "Customer Group", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Sales Rep", "Health Status"];
       const rows = customers.map(c => {
         const addr = (c.shipping_address as any) ?? (c.billing_address as any) ?? {};
@@ -4398,10 +4417,15 @@ export async function registerRoutes(
   // GET /api/crm/customers
   app.get("/api/crm/customers", requireAuth, async (req, res) => {
     try {
-      const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "", health = "" } = req.query as any;
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "", health = "", assignedRep = "" } = req.query as any;
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
       const offset = parseInt(String(req.query.offset ?? "0"));
-      const result = await storage.getCrmCustomers({ search, group: group || undefined, state: state || undefined, health: health || undefined, sortBy, sortDir, limit, offset });
+      const visScope = await getCrmVisibilityScope(storage, userId, user.role);
+      const repFilter = assignedRep === "unassigned" ? "unassigned" : (assignedRep ? parseInt(String(assignedRep)) : undefined) as number | "unassigned" | undefined;
+      const result = await storage.getCrmCustomers({ search, group: group || undefined, state: state || undefined, health: health || undefined, sortBy, sortDir, limit, offset, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
       res.json(result);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -4492,6 +4516,13 @@ export async function registerRoutes(
   // PUT /api/crm/customers/:id/sales-rep
   app.put("/api/crm/customers/:id/sales-rep", requireAuth, async (req, res) => {
     try {
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      if (user.role !== "admin") {
+        const perms = await storage.getUserPermissionStrings(userId);
+        if (!perms.includes("crm:assign_rep")) return res.status(403).json({ error: "Forbidden: crm:assign_rep permission required" });
+      }
       const customerId = parseInt(req.params.id);
       const { assigned_user_id } = req.body;
       if (!assigned_user_id) return res.status(400).json({ error: "assigned_user_id required" });
@@ -4505,6 +4536,13 @@ export async function registerRoutes(
   // DELETE /api/crm/customers/:id/sales-rep
   app.delete("/api/crm/customers/:id/sales-rep", requireAuth, async (req, res) => {
     try {
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      if (user.role !== "admin") {
+        const perms = await storage.getUserPermissionStrings(userId);
+        if (!perms.includes("crm:assign_rep")) return res.status(403).json({ error: "Forbidden: crm:assign_rep permission required" });
+      }
       const customerId = parseInt(req.params.id);
       await storage.removeCrmSalesRep(customerId);
       await storage.createCrmAuditLog({ user_id: (req as any).userId ?? null, action: 'sales_rep_removed', customer_id: customerId, detail: {} });

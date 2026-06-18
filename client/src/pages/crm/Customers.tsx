@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { getAuthHeaders } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -132,6 +133,8 @@ export default function CRMCustomers() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { currentUser } = useStore();
+  const { hasPermission } = usePermissions();
+  const canExport = hasPermission("crm", "export");
 
   const colKey   = `crm_cols_v2_${currentUser?.id ?? "guest"}`;
   const widthKey = `crm_col_widths_v1_${currentUser?.id ?? "guest"}`;
@@ -198,6 +201,7 @@ export default function CRMCustomers() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [group, setGroup] = useState("");
   const [stateFilter, setStateFilter] = useState("");
+  const [repFilter, setRepFilter] = useState("");
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("");
   const [sortBy, setSortBy] = useState<SortField>("last_order_date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -222,6 +226,7 @@ export default function CRMCustomers() {
 
   const setGroupFilter = (v: string) => { setGroup(v); setPage(1); };
   const setStateFilterVal = (v: string) => { setStateFilter(v); setPage(1); };
+  const setRepFilterVal = (v: string) => { setRepFilter(v); setPage(1); };
   const toggleHealthFilter = (h: HealthFilter) => {
     setHealthFilter(prev => prev === h ? "" : h);
     setPage(1);
@@ -252,7 +257,7 @@ export default function CRMCustomers() {
   });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["crm", "customers", debouncedSearch, group, stateFilter, healthFilter, sortBy, sortDir, page],
+    queryKey: ["crm", "customers", debouncedSearch, group, stateFilter, repFilter, healthFilter, sortBy, sortDir, page],
     queryFn: async () => {
       const params = new URLSearchParams({
         search: debouncedSearch,
@@ -263,6 +268,7 @@ export default function CRMCustomers() {
       });
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
+      if (repFilter) params.set("assignedRep", repFilter);
       if (healthFilter) params.set("health", healthFilter);
       const r = await fetch(`/api/crm/customers?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load customers");
@@ -280,6 +286,7 @@ export default function CRMCustomers() {
       const params = new URLSearchParams({ search: debouncedSearch, sortBy, sortDir, format });
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
+      if (repFilter) params.set("assignedRep", repFilter);
       if (healthFilter) params.set("health", healthFilter);
       const r = await fetch(`/api/crm/customers/export?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Export failed");
@@ -297,7 +304,7 @@ export default function CRMCustomers() {
     }
   };
 
-  const activeFilterCount = [group, stateFilter].filter(Boolean).length;
+  const activeFilterCount = [group, stateFilter, repFilter].filter(Boolean).length;
   const hasAnyFilter = activeFilterCount > 0 || !!healthFilter;
 
   // ── Table helpers ─────────────────────────────────────────────────────────
@@ -415,14 +422,18 @@ export default function CRMCustomers() {
               </PopoverContent>
             </Popover>
 
-            <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => handleExport("csv")} disabled={exporting === "csv"} data-testid="btn-export-csv">
-              <FileText className="h-3.5 w-3.5" />
-              {exporting === "csv" ? "Exporting…" : "Export CSV"}
-            </Button>
-            <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => handleExport("xlsx")} disabled={exporting === "xlsx"} data-testid="btn-export-xlsx">
-              <FileSpreadsheet className="h-3.5 w-3.5" />
-              {exporting === "xlsx" ? "Exporting…" : "Export Excel"}
-            </Button>
+            {canExport && (
+              <>
+                <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => handleExport("csv")} disabled={exporting === "csv"} data-testid="btn-export-csv">
+                  <FileText className="h-3.5 w-3.5" />
+                  {exporting === "csv" ? "Exporting…" : "Export CSV"}
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => handleExport("xlsx")} disabled={exporting === "xlsx"} data-testid="btn-export-xlsx">
+                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                  {exporting === "xlsx" ? "Exporting…" : "Export Excel"}
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
@@ -435,7 +446,7 @@ export default function CRMCustomers() {
               value={search}
               onChange={e => debounce(e.target.value)}
               placeholder="Search company, name, email, phone…"
-              className="pl-8 h-8 text-sm w-64"
+              className="pl-8 h-8 text-sm w-80"
             />
           </div>
 
@@ -464,12 +475,27 @@ export default function CRMCustomers() {
             </SelectContent>
           </Select>
 
+          {(filterOpts?.reps ?? []).length > 0 && (
+            <Select value={repFilter || "__all__"} onValueChange={v => setRepFilterVal(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8 text-sm w-40" data-testid="select-rep-filter">
+                <SelectValue placeholder="All Reps" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Reps</SelectItem>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {(filterOpts?.reps ?? []).map(r => (
+                  <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
           {hasAnyFilter && (
             <Button
               size="sm"
               variant="ghost"
               className="h-8 text-xs text-slate-500 gap-1"
-              onClick={() => { setGroupFilter(""); setStateFilterVal(""); setHealthFilter(""); }}
+              onClick={() => { setGroupFilter(""); setStateFilterVal(""); setRepFilterVal(""); setHealthFilter(""); }}
               data-testid="btn-clear-filters"
             >
               <X className="h-3 w-3" />

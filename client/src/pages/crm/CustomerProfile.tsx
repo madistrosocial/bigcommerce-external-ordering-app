@@ -394,7 +394,7 @@ export default function CustomerProfile() {
   const canCreateNote = hasPermission("crm", "notes_create");
   const canEditNote   = hasPermission("crm", "notes_edit");
   const canDeleteNote = hasPermission("crm", "notes_delete");
-  const canAssignRep  = hasPermission("crm", "customer_assignment");
+  const canAssignRep  = hasPermission("crm", "assign_rep");
 
   const [activeTab, setActiveTab]           = useState<Tab>("overview");
   const [showAddNote, setShowAddNote]       = useState(false);
