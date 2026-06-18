@@ -1,0 +1,504 @@
+CRM PHASE 2.6 – SALES TEAM ROLLOUT, CUSTOMER NOTES SYNC & EXPORT SECURITY
+
+OBJECTIVE
+
+Prepare the CRM for daily use by sales representatives before Zoho CRM integration.
+
+This phase focuses on:
+
+1. RBAC-based CRM customer visibility
+2. Assigned Rep filtering and assignment permissions
+3. BigCommerce Customer General Notes synchronization
+4. CRM customer list usability improvements
+5. CRM export security and RBAC
+
+The goal is for sales reps to log in and immediately see only the accounts assigned to them, along with customer health status, notes, and customer intelligence information.
+
+==================================================================
+FEATURE 1: CRM VISIBILITY RBAC
+==============================
+
+Create a new CRM-specific RBAC permission.
+
+Permission Name:
+
+CRM_VISIBILITY_SCOPE
+
+Available Values:
+
+* ALL_CUSTOMERS
+* ASSIGNED_AND_UNASSIGNED
+* ASSIGNED_ONLY
+
+Behavior:
+
+ALL_CUSTOMERS
+
+* User can view all CRM customers.
+* No restrictions.
+
+ASSIGNED_AND_UNASSIGNED
+
+* User can view:
+
+  * Customers assigned to themselves
+  * Customers without an assigned rep
+
+ASSIGNED_ONLY
+
+* User can only view customers assigned to themselves.
+
+Implementation:
+
+Add visibility_scope field to CRM permissions.
+
+Example:
+
+Admin
+→ ALL_CUSTOMERS
+
+Sales Manager
+→ ALL_CUSTOMERS
+
+Sales Rep
+→ ASSIGNED_ONLY
+
+When loading CRM Customers page, automatically apply visibility filtering server-side.
+
+Do not rely on frontend filtering.
+
+The backend query must enforce visibility scope.
+
+==================================================================
+FEATURE 2: ASSIGNED REP FILTER
+==============================
+
+CRM Customer List page:
+
+Current filters:
+
+* Search
+* Customer Group
+* State
+
+Add:
+
+Assigned Rep Dropdown
+
+Values:
+
+* All Reps
+* Unassigned
+* Dynamic list of active users
+
+Populate from users table.
+
+Behavior:
+
+All Reps
+→ No filter
+
+Unassigned
+→ assigned_user_id IS NULL
+
+Specific Rep
+→ assigned_user_id = selected_user_id
+
+Filters must be combinable with:
+
+* Search
+* Group
+* State
+
+Example:
+
+Group = NC Active
+State = North Carolina
+Assigned Rep = Rose
+
+Should return matching subset only.
+
+==================================================================
+FEATURE 3: CUSTOMER LIST UI IMPROVEMENTS
+========================================
+
+Current layout is becoming crowded.
+
+Update layout:
+
+LEFT SIDE
+
+Search Box
+
+Increase width to approximately 500px.
+
+Search placeholder:
+
+Search company, customer name, email, phone...
+
+RIGHT SIDE
+
+Move filters into a filter group:
+
+[ Customer Group ]
+[ State ]
+[ Assigned Rep ]
+
+Maintain responsive behavior.
+
+Desktop:
+
+Search left
+Filters right
+
+Mobile:
+
+Stack vertically
+
+==================================================================
+FEATURE 4: CRM ASSIGN REP PERMISSION
+====================================
+
+Current behavior:
+
+Only Admin can assign sales reps.
+
+Replace with RBAC permission.
+
+New Permission:
+
+CRM_ASSIGN_REP
+
+Users with permission:
+
+Can assign customer accounts.
+
+Users without permission:
+
+Cannot assign or reassign accounts.
+
+UI Behavior:
+
+Hide Assign Rep button if permission is missing.
+
+Do not rely solely on frontend.
+
+Backend must validate permission before saving.
+
+Examples:
+
+Admin
+→ Allowed
+
+Sales Manager
+→ Allowed
+
+Sales Rep
+→ Not Allowed
+
+Operations Manager
+→ Allowed if permission granted
+
+Assignment capability must be completely independent from Admin role.
+
+==================================================================
+FEATURE 5: BIGCOMMERCE CUSTOMER GENERAL NOTES SYNC
+==================================================
+
+PURPOSE
+
+BigCommerce Customer Notes currently contain valuable customer information such as:
+
+* Account creation notes
+* Tax documents
+* Verification notes
+* Customer preferences
+* General account concerns
+
+CRM should display and edit this information.
+
+==================================================================
+BIGCOMMERCE CUSTOMER NOTE AS MASTER REPOSITORY
+==============================================
+
+Customer-level notes without an order association should sync into BigCommerce Customer Notes.
+
+Examples:
+
+* General
+* Sales
+* Follow Up
+* Issue
+* Internal
+
+Order-linked notes should NOT sync.
+
+Order notes remain inside order history.
+
+==================================================================
+CUSTOMER PROFILE CHANGES
+========================
+
+Add a new section:
+
+GENERAL NOTES
+
+Display:
+
+BigCommerce Customer Notes
+
+Editable from CRM.
+
+When saved:
+
+Update BigCommerce Customer Notes.
+
+==================================================================
+NOTE STRUCTURE
+==============
+
+Reserve structure inside BigCommerce Customer Notes.
+
+Format:
+
+=== CUSTOMER GENERAL NOTES ===
+
+[Permanent account information]
+
+=== CRM HISTORY ===
+
+[Generated CRM entries]
+
+Each CRM-generated entry should contain:
+
+* Date
+* User
+* Type
+* Source
+* Content
+
+Example:
+
+---
+
+Date: 2026-06-15 10:42 AM
+Type: Follow Up
+User: Rose
+Source: CRM
+
+Called customer regarding inactive account.
+
+---
+
+Notes must remain human readable.
+
+CRM should append entries rather than overwrite history.
+
+==================================================================
+CRM NOTE BEHAVIOR
+=================
+
+Customer-Level Notes
+
+Sync To:
+
+BigCommerce Customer Notes
+
+Order-Level Notes
+
+Do NOT sync
+
+Remain attached to order records.
+
+==================================================================
+AUDIT LOGGING
+=============
+
+Log all customer note changes.
+
+Record:
+
+* Customer ID
+* User ID
+* Timestamp
+* Action
+* Previous Value
+* New Value
+
+Add timeline entries:
+
+Customer General Note Updated
+
+User Name
+Date
+Time
+
+==================================================================
+FEATURE 6: CRM EXPORT RBAC
+==========================
+
+PURPOSE
+
+CRM customer data contains:
+
+* Revenue
+* Order Counts
+* Store Credit
+* Customer Health
+* Customer Contact Information
+* Assigned Sales Reps
+
+Exporting this data must be controlled through RBAC.
+
+==================================================================
+NEW PERMISSION
+==============
+
+Create:
+
+CRM_EXPORT
+
+This single permission controls all CRM export functionality.
+
+==================================================================
+UI BEHAVIOR
+===========
+
+Current buttons:
+
+* Export CSV
+* Export Excel
+
+Users WITH permission:
+
+Buttons visible and functional.
+
+Users WITHOUT permission:
+
+Buttons hidden entirely.
+
+Do not display disabled buttons.
+
+==================================================================
+BACKEND SECURITY
+================
+
+Do not rely on frontend visibility.
+
+All export endpoints must validate:
+
+CRM_EXPORT
+
+before generating any file.
+
+If permission is missing:
+
+Return:
+
+403 Forbidden
+
+and log the attempt.
+
+==================================================================
+VISIBILITY-AWARE EXPORTS
+========================
+
+Exports must respect CRM visibility scope.
+
+Example:
+
+Sales Rep
+
+CRM_VISIBILITY_SCOPE = ASSIGNED_ONLY
+CRM_EXPORT = TRUE
+
+Export should contain ONLY customers visible to that user.
+
+Never export accounts outside the user's visibility scope.
+
+Examples:
+
+Admin
+
+Visibility = ALL_CUSTOMERS
+Export = TRUE
+
+Can export entire CRM.
+
+Sales Manager
+
+Visibility = ALL_CUSTOMERS
+Export = TRUE
+
+Can export entire CRM.
+
+Sales Rep
+
+Visibility = ASSIGNED_ONLY
+Export = TRUE
+
+Can export only assigned customers.
+
+Sales Rep
+
+Visibility = ASSIGNED_ONLY
+Export = FALSE
+
+Cannot export.
+
+==================================================================
+EXPORT AUDIT LOGGING
+====================
+
+Record all exports.
+
+Log:
+
+* User
+* Date
+* Time
+* Export Type
+* Record Count
+* Applied Filters
+
+Example:
+
+Rose
+Export CSV
+312 Records
+
+Group = NC Active
+Assigned Rep = Rose
+
+==================================================================
+FUTURE PROOFING
+===============
+
+CRM_EXPORT permission should automatically apply to future exports including:
+
+* Customer Export
+* Reactivation Export
+* Notes Export
+* Task Export
+* Kanban Export
+* Customer Intelligence Export
+
+No future export should bypass CRM_EXPORT permission.
+
+==================================================================
+DELIVERABLES
+============
+
+1. CRM visibility scope RBAC
+2. Assigned Rep dropdown filter
+3. CRM customer list UI improvements
+4. CRM_ASSIGN_REP permission
+5. BigCommerce Customer Notes sync
+6. Customer General Notes editor
+7. Audit logging for note changes
+8. CRM_EXPORT permission
+9. Visibility-aware exports
+10. Export audit logging
+11. Server-side enforcement of visibility, assignment, and export permissions
+
+Do not modify existing CRM health logic, customer scoring, store credit functionality, order history, CRM notes functionality, or Zoho integration work in this phase beyond the synchronization changes described above.
