@@ -243,6 +243,16 @@ export default function CRMCustomers() {
     staleTime: 60_000,
   });
 
+  const { data: activeUsers = [] } = useQuery({
+    queryKey: ["crm", "users"],
+    queryFn: async () => {
+      const r = await fetch("/api/crm/users", { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load users");
+      return r.json() as Promise<{ id: number; name: string }[]>;
+    },
+    staleTime: 120_000,
+  });
+
   const { data: metrics } = useQuery({
     queryKey: ["crm", "metrics", debouncedSearch, group, stateFilter],
     queryFn: async () => {
@@ -445,8 +455,8 @@ export default function CRMCustomers() {
               data-testid="input-crm-search"
               value={search}
               onChange={e => debounce(e.target.value)}
-              placeholder="Search company, name, email, phone…"
-              className="pl-8 h-8 text-sm w-80"
+              placeholder="Search company, customer name, email, phone…"
+              className="pl-8 h-8 text-sm w-[500px] max-w-full"
             />
           </div>
 
@@ -475,20 +485,18 @@ export default function CRMCustomers() {
             </SelectContent>
           </Select>
 
-          {(filterOpts?.reps ?? []).length > 0 && (
-            <Select value={repFilter || "__all__"} onValueChange={v => setRepFilterVal(v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8 text-sm w-40" data-testid="select-rep-filter">
-                <SelectValue placeholder="All Reps" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All Reps</SelectItem>
-                <SelectItem value="unassigned">Unassigned</SelectItem>
-                {(filterOpts?.reps ?? []).map(r => (
-                  <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
+          <Select value={repFilter || "__all__"} onValueChange={v => setRepFilterVal(v === "__all__" ? "" : v)}>
+            <SelectTrigger className="h-8 text-sm w-40" data-testid="select-rep-filter">
+              <SelectValue placeholder="All Reps" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All Reps</SelectItem>
+              <SelectItem value="unassigned">Unassigned</SelectItem>
+              {activeUsers.map(r => (
+                <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {hasAnyFilter && (
             <Button

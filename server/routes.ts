@@ -4349,13 +4349,15 @@ export async function registerRoutes(
   });
 
   // ── CRM visibility scope helper ───────────────────────────────────────────────
-  async function getCrmVisibilityScope(stor: typeof storage, userId: number, userRole: string): Promise<{ scope: string; userId: number }> {
+  // Non-admin users without an explicit visibility permission default to ASSIGNED_ONLY
+  // (least-privilege). Admins always get ALL_CUSTOMERS.
+  async function getCrmVisibilityScope(stor: typeof storage, userId: number, userRole: string, permStrings?: string[]): Promise<{ scope: string; userId: number }> {
     if (userRole === "admin") return { scope: "ALL_CUSTOMERS", userId };
-    const perms = await stor.getUserPermissionStrings(userId);
+    const perms = permStrings ?? await stor.getUserPermissionStrings(userId);
     if (perms.includes("crm:visibility_all")) return { scope: "ALL_CUSTOMERS", userId };
     if (perms.includes("crm:visibility_assigned_unassigned")) return { scope: "ASSIGNED_AND_UNASSIGNED", userId };
     if (perms.includes("crm:visibility_assigned_only")) return { scope: "ASSIGNED_ONLY", userId };
-    return { scope: "ALL_CUSTOMERS", userId };
+    return { scope: "ASSIGNED_ONLY", userId };
   }
 
   // GET /api/crm/filters
@@ -4372,12 +4374,22 @@ export async function registerRoutes(
       const userId = (req as any).userId as number;
       const user = await storage.getUser(userId);
       if (!user) return res.status(401).json({ error: "Unauthorized" });
-      if (user.role !== "admin") {
-        const perms = await storage.getUserPermissionStrings(userId);
-        if (!perms.includes("crm:export")) return res.status(403).json({ error: "Forbidden: crm:export permission required" });
-      }
       const { search = "", sortBy = "last_order_date", sortDir = "desc", format = "csv", group = "", state = "", health = "", assignedRep = "" } = req.query as any;
-      const visScope = await getCrmVisibilityScope(storage, userId, user.role);
+      let perms: string[] = [];
+      if (user.role !== "admin") {
+        perms = await storage.getUserPermissionStrings(userId);
+        if (!perms.includes("crm:export")) {
+          // Log denied export attempt before refusing
+          try {
+            await storage.createCrmAuditLog({
+              user_id: userId, action: "export_denied", customer_id: null,
+              detail: { timestamp: new Date().toISOString(), format: String(format), filters: { search, group, state, health, assignedRep } },
+            });
+          } catch (_) {}
+          return res.status(403).json({ error: "Forbidden: crm:export permission required" });
+        }
+      }
+      const visScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
       const repFilter = assignedRep === "unassigned" ? "unassigned" : (assignedRep ? parseInt(String(assignedRep)) : undefined) as number | "unassigned" | undefined;
       const customers = await storage.getAllCrmCustomersForExport({ search, group: group || undefined, state: state || undefined, health: health || undefined, sortBy, sortDir, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
       const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "State", "Customer Group", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Sales Rep", "Health Status"];
@@ -4423,7 +4435,8 @@ export async function registerRoutes(
       const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "", health = "", assignedRep = "" } = req.query as any;
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
       const offset = parseInt(String(req.query.offset ?? "0"));
-      const visScope = await getCrmVisibilityScope(storage, userId, user.role);
+      const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
+      const visScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
       const repFilter = assignedRep === "unassigned" ? "unassigned" : (assignedRep ? parseInt(String(assignedRep)) : undefined) as number | "unassigned" | undefined;
       const result = await storage.getCrmCustomers({ search, group: group || undefined, state: state || undefined, health: health || undefined, sortBy, sortDir, limit, offset, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
       res.json(result);
