@@ -549,6 +549,20 @@ export default function CustomerProfile() {
     }
   };
 
+  // ── BC notes edit buffer sync (hooks must be before any early returns) ────────
+
+  // Sync edit buffer when bc-notes data arrives or tab opens
+  useEffect(() => {
+    if (bcNotesData && generalNotesEdit === null) {
+      setGeneralNotesEdit(bcNotesData.generalNotes ?? "");
+    }
+  }, [bcNotesData]);
+
+  // Reset edit buffer when tab changes away from bc-notes
+  useEffect(() => {
+    if (activeTab !== "bc-notes") setGeneralNotesEdit(null);
+  }, [activeTab]);
+
   // ── Loading / Error ───────────────────────────────────────────────────────────
 
   if (loadingCustomer) {
@@ -591,18 +605,6 @@ export default function CustomerProfile() {
   };
 
   // ── Tab nav ────────────────────────────────────────────────────────────────
-
-  // Sync edit buffer when bc-notes data arrives or tab opens
-  useEffect(() => {
-    if (bcNotesData && generalNotesEdit === null) {
-      setGeneralNotesEdit(bcNotesData.generalNotes ?? "");
-    }
-  }, [bcNotesData]);
-
-  // Reset edit buffer when tab changes away from bc-notes
-  useEffect(() => {
-    if (activeTab !== "bc-notes") setGeneralNotesEdit(null);
-  }, [activeTab]);
 
   const handleSaveBcNotes = async () => {
     if (generalNotesEdit === null) return;
