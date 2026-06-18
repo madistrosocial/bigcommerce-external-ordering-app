@@ -4348,6 +4348,28 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // ── CRM permission auto-seed ──────────────────────────────────────────────────
+  // Ensures the 5 CRM RBAC permissions exist in the DB at startup so admins can
+  // assign them to roles/users through the normal RBAC console.
+  await (async () => {
+    const CRM_PERMS: Array<{ module: string; action: string; description: string }> = [
+      { module: "crm", action: "visibility_all",                description: "CRM: see all customers regardless of rep assignment" },
+      { module: "crm", action: "visibility_assigned_unassigned", description: "CRM: see own-assigned customers + unassigned customers" },
+      { module: "crm", action: "visibility_assigned_only",       description: "CRM: see only own-assigned customers" },
+      { module: "crm", action: "assign_rep",                     description: "CRM: assign / remove a sales rep on a customer" },
+      { module: "crm", action: "export",                         description: "CRM: export customer list to CSV / Excel" },
+    ];
+    try {
+      const existing = await storage.getPermissions();
+      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+      for (const p of CRM_PERMS) {
+        if (!existingSet.has(`${p.module}:${p.action}`)) {
+          await storage.createPermission({ module: p.module, action: p.action, description: p.description });
+        }
+      }
+    } catch (_) { /* non-fatal — permissions may already exist */ }
+  })();
+
   // ── CRM visibility scope helper ───────────────────────────────────────────────
   // Non-admin users without an explicit visibility permission default to ASSIGNED_ONLY
   // (least-privilege). Admins always get ALL_CUSTOMERS.
@@ -4358,6 +4380,40 @@ export async function registerRoutes(
     if (perms.includes("crm:visibility_assigned_unassigned")) return { scope: "ASSIGNED_AND_UNASSIGNED", userId };
     if (perms.includes("crm:visibility_assigned_only")) return { scope: "ASSIGNED_ONLY", userId };
     return { scope: "ASSIGNED_ONLY", userId };
+  }
+
+  // ── CRM customer access check (IDOR prevention) ───────────────────────────────
+  // Returns true if the caller may access the given customer; sends 403 and returns
+  // false if they cannot. Fetch perms once and reuse to avoid duplicate DB round-trips.
+  async function assertCrmCustomerAccess(
+    stor: typeof storage,
+    customerId: number,
+    userId: number,
+    userRole: string,
+    res: Response,
+  ): Promise<boolean> {
+    if (userRole === "admin") return true;
+    const perms = await stor.getUserPermissionStrings(userId);
+    const visScope = await getCrmVisibilityScope(stor, userId, userRole, perms);
+    if (visScope.scope === "ALL_CUSTOMERS") return true;
+    const rep = await stor.getCrmSalesRep(customerId);
+    if (visScope.scope === "ASSIGNED_ONLY") {
+      if (rep?.assigned_user_id !== userId) {
+        res.status(403).json({ error: "Forbidden: customer not in your visibility scope" });
+        return false;
+      }
+      return true;
+    }
+    if (visScope.scope === "ASSIGNED_AND_UNASSIGNED") {
+      // Allow if unassigned OR assigned to this user
+      if (rep !== undefined && rep.assigned_user_id !== userId) {
+        res.status(403).json({ error: "Forbidden: customer not in your visibility scope" });
+        return false;
+      }
+      return true;
+    }
+    res.status(403).json({ error: "Forbidden: customer not in your visibility scope" });
+    return false;
   }
 
   // GET /api/crm/filters
@@ -4467,9 +4523,13 @@ export async function registerRoutes(
   // GET /api/crm/customers/:id
   app.get("/api/crm/customers/:id", requireAuth, async (req, res) => {
     try {
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
       const id = parseInt(req.params.id);
       const customer = await storage.getCrmCustomerById(id);
       if (!customer) return res.status(404).json({ error: "Customer not found" });
+      if (!await assertCrmCustomerAccess(storage, id, userId, user.role, res)) return;
 
       // Refresh store credit live from BC v2 (fire-and-forget style but awaited so the response is fresh)
       try {
@@ -4518,7 +4578,11 @@ export async function registerRoutes(
   // GET /api/crm/customers/:id/orders
   app.get("/api/crm/customers/:id/orders", requireAuth, async (req, res) => {
     try {
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
       const id = parseInt(req.params.id);
+      if (!await assertCrmCustomerAccess(storage, id, userId, user.role, res)) return;
       const customer = await storage.getCrmCustomerById(id);
       if (!customer) return res.status(404).json({ error: "Customer not found" });
       const orders = await storage.getCrmOrdersByBcCustomerId(customer.bigcommerce_customer_id, 10000);
@@ -4592,7 +4656,11 @@ export async function registerRoutes(
   // GET /api/crm/customers/:id/notes
   app.get("/api/crm/customers/:id/notes", requireAuth, async (req, res) => {
     try {
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
+      if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
       const notes = await storage.getCrmNotes(customerId);
       res.json(notes);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -4601,7 +4669,11 @@ export async function registerRoutes(
   // POST /api/crm/customers/:id/notes
   app.post("/api/crm/customers/:id/notes", requireAuth, async (req, res) => {
     try {
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
+      if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
       const { note, note_type = "General", order_id, bc_target = "crm" } = req.body;
       if (!note?.trim()) return res.status(400).json({ error: "note is required" });
 
@@ -4647,7 +4719,11 @@ export async function registerRoutes(
   // PUT /api/crm/customers/:id/notes/:noteId
   app.put("/api/crm/customers/:id/notes/:noteId", requireAuth, async (req, res) => {
     try {
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
+      if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
       const noteId = parseInt(req.params.noteId);
       const { note, note_type, order_id } = req.body;
       const updated = await storage.updateCrmNote(noteId, {
@@ -4665,7 +4741,11 @@ export async function registerRoutes(
   // DELETE /api/crm/customers/:id/notes/:noteId
   app.delete("/api/crm/customers/:id/notes/:noteId", requireAuth, async (req, res) => {
     try {
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
+      if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
       const noteId = parseInt(req.params.noteId);
       const existing = await storage.getCrmNoteById(noteId);
       if (existing) {
@@ -4682,7 +4762,11 @@ export async function registerRoutes(
   // PUT /api/crm/customers/:id/orders/:orderId/notes  — editable order notes popup
   app.put("/api/crm/customers/:id/orders/:orderId/notes", requireAuth, async (req, res) => {
     try {
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
+      if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
       const bcOrderId = parseInt(req.params.orderId);
       const { customer_note, staff_notes } = req.body;
 
@@ -4732,7 +4816,11 @@ export async function registerRoutes(
   // GET /api/crm/customers/:id/timeline
   app.get("/api/crm/customers/:id/timeline", requireAuth, async (req, res) => {
     try {
+      const userId = (req as any).userId as number;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
+      if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
       const timeline = await storage.getCrmTimeline(customerId);
       res.json(timeline);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
