@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { getAuthHeaders } from "@/lib/api";
@@ -593,14 +593,14 @@ export default function CustomerProfile() {
   // ── Tab nav ────────────────────────────────────────────────────────────────
 
   // Sync edit buffer when bc-notes data arrives or tab opens
-  React.useEffect(() => {
+  useEffect(() => {
     if (bcNotesData && generalNotesEdit === null) {
       setGeneralNotesEdit(bcNotesData.generalNotes ?? "");
     }
   }, [bcNotesData]);
 
   // Reset edit buffer when tab changes away from bc-notes
-  React.useEffect(() => {
+  useEffect(() => {
     if (activeTab !== "bc-notes") setGeneralNotesEdit(null);
   }, [activeTab]);
 
