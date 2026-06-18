@@ -4489,8 +4489,8 @@ export async function registerRoutes(
   // GET /api/crm/customers/export — registered BEFORE /:id to avoid route conflict
   app.get("/api/crm/customers/export", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const { search = "", sortBy = "last_order_date", sortDir = "desc", format = "csv", group = "", state = "", health = "", assignedRep = "" } = req.query as any;
       let perms: string[] = [];
@@ -4547,8 +4547,8 @@ export async function registerRoutes(
   // GET /api/crm/customers
   app.get("/api/crm/customers", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "", health = "", assignedRep = "" } = req.query as any;
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
@@ -4585,8 +4585,8 @@ export async function registerRoutes(
   // GET /api/crm/customers/:id
   app.get("/api/crm/customers/:id", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const id = parseInt(req.params.id);
       const customer = await storage.getCrmCustomerById(id);
@@ -4640,8 +4640,8 @@ export async function registerRoutes(
   // GET /api/crm/customers/:id/orders
   app.get("/api/crm/customers/:id/orders", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const id = parseInt(req.params.id);
       if (!await assertCrmCustomerAccess(storage, id, userId, user.role, res)) return;
@@ -4655,8 +4655,8 @@ export async function registerRoutes(
   // PUT /api/crm/customers/:id/sales-rep
   app.put("/api/crm/customers/:id/sales-rep", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       if (user.role !== "admin") {
         const perms = await storage.getUserPermissionStrings(userId);
@@ -4665,9 +4665,9 @@ export async function registerRoutes(
       const customerId = parseInt(req.params.id);
       const { assigned_user_id } = req.body;
       if (!assigned_user_id) return res.status(400).json({ error: "assigned_user_id required" });
-      const rep = await storage.setCrmSalesRep({ customer_id: customerId, assigned_user_id: parseInt(assigned_user_id), assigned_by: (req as any).userId ?? null });
+      const rep = await storage.setCrmSalesRep({ customer_id: customerId, assigned_user_id: parseInt(assigned_user_id), assigned_by: userId ?? null });
       const repUser = await storage.getUser(parseInt(assigned_user_id));
-      await storage.createCrmAuditLog({ user_id: (req as any).userId ?? null, action: 'sales_rep_assigned', customer_id: customerId, detail: { rep_name: repUser?.name ?? null, assigned_user_id: parseInt(assigned_user_id) } });
+      await storage.createCrmAuditLog({ user_id: userId ?? null, action: 'sales_rep_assigned', customer_id: customerId, detail: { rep_name: repUser?.name ?? null, assigned_user_id: parseInt(assigned_user_id) } });
       res.json(rep);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -4675,8 +4675,8 @@ export async function registerRoutes(
   // DELETE /api/crm/customers/:id/sales-rep
   app.delete("/api/crm/customers/:id/sales-rep", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       if (user.role !== "admin") {
         const perms = await storage.getUserPermissionStrings(userId);
@@ -4684,7 +4684,7 @@ export async function registerRoutes(
       }
       const customerId = parseInt(req.params.id);
       await storage.removeCrmSalesRep(customerId);
-      await storage.createCrmAuditLog({ user_id: (req as any).userId ?? null, action: 'sales_rep_removed', customer_id: customerId, detail: {} });
+      await storage.createCrmAuditLog({ user_id: userId ?? null, action: 'sales_rep_removed', customer_id: customerId, detail: {} });
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -4718,8 +4718,8 @@ export async function registerRoutes(
   // GET /api/crm/customers/:id/notes
   app.get("/api/crm/customers/:id/notes", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
       if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
@@ -4731,8 +4731,8 @@ export async function registerRoutes(
   // POST /api/crm/customers/:id/notes
   app.post("/api/crm/customers/:id/notes", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
       if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
@@ -4742,12 +4742,12 @@ export async function registerRoutes(
       const created = await storage.createCrmNote({
         customer_id: customerId, note: note.trim(), note_type,
         order_id: order_id ? parseInt(String(order_id)) : null,
-        created_by: (req as any).userId ?? null,
+        created_by: userId ?? null,
       });
 
       const auditAction = note_type === "Order Note" ? "order_note_created" : "note_created";
       await storage.createCrmAuditLog({
-        user_id: (req as any).userId ?? null, action: auditAction, customer_id: customerId,
+        user_id: userId ?? null, action: auditAction, customer_id: customerId,
         detail: { note_type, note_preview: note.trim().slice(0, 120), order_id: order_id ?? null },
       });
 
@@ -4780,15 +4780,14 @@ export async function registerRoutes(
           const { storeHash, token } = await getBcCreds();
           const customerRec = await storage.getCrmCustomerById(customerId);
           if (customerRec) {
-            const authorUser = await storage.getUser((req as any).userId ?? userId);
-            const authorName = authorUser?.name ?? "System";
+            const authorName = user?.name ?? "System";
             const prevRaw = await fetchBcCustomerNotes(storeHash, token, customerRec.bigcommerce_customer_id);
             const { generalNotes, crmHistory } = parseBcCustomerNotes(prevRaw);
             const newHistory = appendCrmHistoryEntry(crmHistory, note_type, authorName, note.trim(), new Date());
             const newRaw = buildBcCustomerNotes(generalNotes, newHistory);
             await pushBcCustomerNotes(storeHash, token, customerRec.bigcommerce_customer_id, newRaw);
             await storage.createCrmAuditLog({
-              user_id: (req as any).userId ?? userId, action: "bc_notes_updated", customer_id: customerId,
+              user_id: userId ?? null, action: "bc_notes_updated", customer_id: customerId,
               detail: { source: "crm_note_created", note_type, user: authorName, previous: prevRaw, updated: newRaw },
             });
           }
@@ -4802,8 +4801,8 @@ export async function registerRoutes(
   // PUT /api/crm/customers/:id/notes/:noteId
   app.put("/api/crm/customers/:id/notes/:noteId", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
       if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
@@ -4814,7 +4813,7 @@ export async function registerRoutes(
         order_id: order_id !== undefined ? (order_id ? parseInt(String(order_id)) : null) : undefined,
       });
       await storage.createCrmAuditLog({
-        user_id: (req as any).userId ?? null, action: 'note_edited', customer_id: customerId,
+        user_id: userId ?? null, action: 'note_edited', customer_id: customerId,
         detail: { note_type: updated.note_type, note_preview: updated.note.slice(0, 120) },
       });
       res.json(updated);
@@ -4824,8 +4823,8 @@ export async function registerRoutes(
   // DELETE /api/crm/customers/:id/notes/:noteId
   app.delete("/api/crm/customers/:id/notes/:noteId", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
       if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
@@ -4833,7 +4832,7 @@ export async function registerRoutes(
       const existing = await storage.getCrmNoteById(noteId);
       if (existing) {
         await storage.createCrmAuditLog({
-          user_id: (req as any).userId ?? null, action: 'note_deleted', customer_id: customerId,
+          user_id: userId ?? null, action: 'note_deleted', customer_id: customerId,
           detail: { note_type: existing.note_type, note_preview: existing.note.slice(0, 120), order_id: existing.order_id ?? null },
         });
       }
@@ -4845,8 +4844,8 @@ export async function registerRoutes(
   // PUT /api/crm/customers/:id/orders/:orderId/notes  — editable order notes popup
   app.put("/api/crm/customers/:id/orders/:orderId/notes", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
       if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
@@ -4880,13 +4879,13 @@ export async function registerRoutes(
       const auditEntries: Promise<void>[] = [];
       if (staff_notes !== undefined) {
         auditEntries.push(storage.createCrmAuditLog({
-          user_id: (req as any).userId ?? null, action: 'staff_note_updated', customer_id: customerId,
+          user_id: userId ?? null, action: 'staff_note_updated', customer_id: customerId,
           detail: { bc_order_id: bcOrderId },
         }));
       }
       if (customer_note !== undefined) {
         auditEntries.push(storage.createCrmAuditLog({
-          user_id: (req as any).userId ?? null, action: 'customer_note_updated', customer_id: customerId,
+          user_id: userId ?? null, action: 'customer_note_updated', customer_id: customerId,
           detail: { bc_order_id: bcOrderId },
         }));
       }
@@ -4899,8 +4898,8 @@ export async function registerRoutes(
   // GET /api/crm/customers/:id/timeline
   app.get("/api/crm/customers/:id/timeline", requireAuth, async (req, res) => {
     try {
-      const userId = (req as any).userId as number;
-      const user = await storage.getUser(userId);
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const customerId = parseInt(req.params.id);
       if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
