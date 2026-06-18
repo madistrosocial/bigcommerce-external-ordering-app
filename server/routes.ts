@@ -4789,7 +4789,7 @@ export async function registerRoutes(
             await pushBcCustomerNotes(storeHash, token, customerRec.bigcommerce_customer_id, newRaw);
             await storage.createCrmAuditLog({
               user_id: (req as any).userId ?? userId, action: "bc_notes_updated", customer_id: customerId,
-              detail: { source: "crm_note_created", note_type, user: authorName, updated: newRaw.slice(0, 500) },
+              detail: { source: "crm_note_created", note_type, user: authorName, previous: prevRaw, updated: newRaw },
             });
           }
         } catch (_) { /* BC sync failure is non-fatal */ }
@@ -4950,7 +4950,7 @@ export async function registerRoutes(
       // Audit + timeline
       await storage.createCrmAuditLog({
         user_id: userId, action: "bc_notes_updated", customer_id: customerId,
-        detail: { previous: prevRaw.slice(0, 500), updated: newRaw.slice(0, 500), user: user.name },
+        detail: { source: "manual_save", previous: prevRaw, updated: newRaw, user: user.name },
       });
       res.json({ success: true, generalNotes: String(newGeneralNotes), crmHistory });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
