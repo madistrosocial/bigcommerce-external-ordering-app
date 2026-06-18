@@ -4382,6 +4382,68 @@ export async function registerRoutes(
     return { scope: "ASSIGNED_ONLY", userId };
   }
 
+  // ── BC Customer Notes helpers ─────────────────────────────────────────────────
+  const BC_GN_HEADER = "=== CUSTOMER GENERAL NOTES ===";
+  const BC_CH_HEADER = "=== CRM HISTORY ===";
+
+  function parseBcCustomerNotes(raw: string | null | undefined): { generalNotes: string; crmHistory: string } {
+    if (!raw?.trim()) return { generalNotes: "", crmHistory: "" };
+    const gnIdx = raw.indexOf(BC_GN_HEADER);
+    const chIdx = raw.indexOf(BC_CH_HEADER);
+    if (gnIdx === -1 && chIdx === -1) return { generalNotes: raw.trim(), crmHistory: "" };
+    let generalNotes = "";
+    let crmHistory = "";
+    if (gnIdx !== -1) {
+      const afterHeader = raw.slice(gnIdx + BC_GN_HEADER.length);
+      const nextBlock = afterHeader.indexOf(BC_CH_HEADER);
+      generalNotes = (nextBlock === -1 ? afterHeader : afterHeader.slice(0, nextBlock)).trim();
+    }
+    if (chIdx !== -1) {
+      crmHistory = raw.slice(chIdx + BC_CH_HEADER.length).trim();
+    }
+    return { generalNotes, crmHistory };
+  }
+
+  function buildBcCustomerNotes(generalNotes: string, crmHistory: string): string {
+    return [
+      BC_GN_HEADER,
+      generalNotes || "",
+      "",
+      BC_CH_HEADER,
+      ...(crmHistory ? [crmHistory] : []),
+    ].join("\n");
+  }
+
+  function appendCrmHistoryEntry(existingHistory: string, noteType: string, userName: string, noteText: string, date: Date): string {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const y = date.getFullYear(), mo = pad(date.getMonth() + 1), d = pad(date.getDate());
+    let h = date.getHours(); const mins = pad(date.getMinutes()); const ampm = h >= 12 ? "PM" : "AM"; h = h % 12 || 12;
+    const dateStr = `${y}-${mo}-${d} ${pad(h)}:${mins} ${ampm}`;
+    const entry = `---\nDate: ${dateStr}\nType: ${noteType}\nUser: ${userName}\nSource: CRM\n\n${noteText}\n---`;
+    return existingHistory.trim() ? existingHistory.trim() + "\n" + entry : entry;
+  }
+
+  async function fetchBcCustomerNotes(storeHash: string, token: string, bcCustomerId: number): Promise<string> {
+    const resp = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`, {
+      headers: { "X-Auth-Token": token, Accept: "application/json" },
+    });
+    if (!resp.ok) throw new Error(`BC API error ${resp.status}`);
+    const data = await resp.json();
+    return data.notes ?? "";
+  }
+
+  async function pushBcCustomerNotes(storeHash: string, token: string, bcCustomerId: number, notes: string): Promise<void> {
+    const resp = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`, {
+      method: "PUT",
+      headers: { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ notes }),
+    });
+    if (!resp.ok) { const err = await resp.text().catch(() => ""); throw new Error(`BC API error ${resp.status}: ${err}`); }
+  }
+
+  // Note types that get auto-appended to CRM HISTORY (order-linked notes are excluded)
+  const CRM_SYNC_NOTE_TYPES = new Set(["General", "Sales", "Follow Up", "Issue", "Internal"]);
+
   // ── CRM customer access check (IDOR prevention) ───────────────────────────────
   // Returns true if the caller may access the given customer; sends 403 and returns
   // false if they cannot. Fetch perms once and reuse to avoid duplicate DB round-trips.
@@ -4689,7 +4751,7 @@ export async function registerRoutes(
         detail: { note_type, note_preview: note.trim().slice(0, 120), order_id: order_id ?? null },
       });
 
-      // Optional BC sync
+      // Optional BC order sync (for order-linked notes)
       if (order_id && (bc_target === "staff" || bc_target === "customer" || bc_target === "both")) {
         try {
           const { storeHash, token } = await getBcCreds();
@@ -4708,6 +4770,27 @@ export async function registerRoutes(
               if (body.customer_message !== undefined) updated.customer_order_notes = body.customer_message;
               await storage.updateCrmOrderNotes(parseInt(String(order_id)), updated);
             }
+          }
+        } catch (_) { /* BC sync failure is non-fatal */ }
+      }
+
+      // Auto-append to BC Customer Notes CRM HISTORY for non-order customer-level notes
+      if (!order_id && CRM_SYNC_NOTE_TYPES.has(note_type)) {
+        try {
+          const { storeHash, token } = await getBcCreds();
+          const customerRec = await storage.getCrmCustomerById(customerId);
+          if (customerRec) {
+            const authorUser = await storage.getUser((req as any).userId ?? userId);
+            const authorName = authorUser?.name ?? "System";
+            const prevRaw = await fetchBcCustomerNotes(storeHash, token, customerRec.bigcommerce_customer_id);
+            const { generalNotes, crmHistory } = parseBcCustomerNotes(prevRaw);
+            const newHistory = appendCrmHistoryEntry(crmHistory, note_type, authorName, note.trim(), new Date());
+            const newRaw = buildBcCustomerNotes(generalNotes, newHistory);
+            await pushBcCustomerNotes(storeHash, token, customerRec.bigcommerce_customer_id, newRaw);
+            await storage.createCrmAuditLog({
+              user_id: (req as any).userId ?? userId, action: "bc_notes_updated", customer_id: customerId,
+              detail: { source: "crm_note_created", note_type, user: authorName, updated: newRaw.slice(0, 500) },
+            });
           }
         } catch (_) { /* BC sync failure is non-fatal */ }
       }
@@ -4823,6 +4906,53 @@ export async function registerRoutes(
       if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
       const timeline = await storage.getCrmTimeline(customerId);
       res.json(timeline);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/customers/:id/bc-notes — read BigCommerce customer notes field
+  app.get("/api/crm/customers/:id/bc-notes", requireAuth, async (req, res) => {
+    try {
+      const userId = parseInt(req.headers["x-user-id"] as string);
+      const user = (req as any).authUser;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const customerId = parseInt(req.params.id);
+      if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
+      const customer = await storage.getCrmCustomerById(customerId);
+      if (!customer) return res.status(404).json({ error: "Customer not found" });
+      try {
+        const { storeHash, token } = await getBcCreds();
+        const raw = await fetchBcCustomerNotes(storeHash, token, customer.bigcommerce_customer_id);
+        const { generalNotes, crmHistory } = parseBcCustomerNotes(raw);
+        res.json({ generalNotes, crmHistory, raw });
+      } catch (_) {
+        // BC creds not configured or API error — return empty but don't fail
+        res.json({ generalNotes: "", crmHistory: "", raw: "" });
+      }
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/crm/customers/:id/bc-notes — write General Notes block (preserves CRM HISTORY)
+  app.put("/api/crm/customers/:id/bc-notes", requireAuth, async (req, res) => {
+    try {
+      const userId = parseInt(req.headers["x-user-id"] as string);
+      const user = (req as any).authUser;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const customerId = parseInt(req.params.id);
+      if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
+      const customer = await storage.getCrmCustomerById(customerId);
+      if (!customer) return res.status(404).json({ error: "Customer not found" });
+      const { generalNotes: newGeneralNotes = "" } = req.body;
+      const { storeHash, token } = await getBcCreds();
+      const prevRaw = await fetchBcCustomerNotes(storeHash, token, customer.bigcommerce_customer_id);
+      const { crmHistory } = parseBcCustomerNotes(prevRaw);
+      const newRaw = buildBcCustomerNotes(String(newGeneralNotes), crmHistory);
+      await pushBcCustomerNotes(storeHash, token, customer.bigcommerce_customer_id, newRaw);
+      // Audit + timeline
+      await storage.createCrmAuditLog({
+        user_id: userId, action: "bc_notes_updated", customer_id: customerId,
+        detail: { previous: prevRaw.slice(0, 500), updated: newRaw.slice(0, 500), user: user.name },
+      });
+      res.json({ success: true, generalNotes: String(newGeneralNotes), crmHistory });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

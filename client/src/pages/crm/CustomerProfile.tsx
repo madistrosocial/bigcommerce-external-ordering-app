@@ -15,7 +15,7 @@ import {
   ArrowLeft, Building2, User, Mail, Phone, Hash, TrendingUp, ShoppingBag,
   Calendar, DollarSign, Users, Plus, Pencil, Trash2, MessageSquare,
   UserCheck, UserMinus, AlertTriangle, Clock, ChevronLeft, ChevronRight,
-  FileText, CreditCard, Edit3, RefreshCw,
+  FileText, CreditCard, Edit3, RefreshCw, BookOpen, Save,
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
@@ -107,6 +107,7 @@ function TimelineIconBg(type: string, action?: string) {
   if (type === "note")   return "bg-purple-100";
   if (type === "audit") {
     if (action === "note_deleted") return "bg-red-100";
+    if (action === "bc_notes_updated") return "bg-teal-100";
     if (action?.includes("rep")) return "bg-green-100";
     if (action?.includes("note")) return "bg-purple-100";
     if (action?.includes("staff_note") || action?.includes("customer_note")) return "bg-amber-100";
@@ -120,6 +121,7 @@ function TimelineIconEl({ type, action }: { type: string; action?: string }) {
     if (action === "note_deleted")                                         return <Trash2 className="h-3.5 w-3.5 text-red-500" />;
     if (action === "note_edited")                                          return <Pencil className="h-3.5 w-3.5 text-purple-600" />;
     if (action === "note_created" || action === "order_note_created")      return <MessageSquare className="h-3.5 w-3.5 text-purple-600" />;
+    if (action === "bc_notes_updated")                                     return <BookOpen className="h-3.5 w-3.5 text-teal-600" />;
     if (action === "staff_note_updated" || action === "customer_note_updated") return <Edit3 className="h-3.5 w-3.5 text-amber-600" />;
     if (action?.includes("rep"))                                           return <UserCheck className="h-3.5 w-3.5 text-green-600" />;
   }
@@ -163,6 +165,8 @@ function TimelineDescription({ entry }: { entry: any }) {
         return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> updated Staff Note{d.bc_order_id ? ` for Order #${d.bc_order_id}` : ""}.</p>;
       case "customer_note_updated":
         return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> updated Customer Note{d.bc_order_id ? ` for Order #${d.bc_order_id}` : ""}.</p>;
+      case "bc_notes_updated":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> updated <span className="font-medium text-teal-700">Customer General Notes</span>{d.source === "crm_note_created" ? <span className="text-xs text-slate-400 ml-1">(auto-synced from CRM note)</span> : ""}.</p>;
       case "sales_rep_assigned":
         return <p className="text-sm text-slate-700"><span className="font-medium">Rep assigned:</span> {d.rep_name ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
       case "sales_rep_reassigned":
@@ -377,7 +381,7 @@ function OrdersTable({ orders, onRowClick }: { orders: any[]; onRowClick: (o: an
 
 // ─── Tab type ─────────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "orders" | "notes" | "timeline";
+type Tab = "overview" | "orders" | "notes" | "timeline" | "bc-notes";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main Component
@@ -404,6 +408,8 @@ export default function CustomerProfile() {
   const [selectedRep, setSelectedRep]       = useState("");
   const [assignSaving, setAssignSaving]     = useState(false);
   const [orderModal, setOrderModal]         = useState<any | null>(null);
+  const [generalNotesEdit, setGeneralNotesEdit] = useState<string | null>(null); // null = not loaded yet
+  const [savingBcNotes, setSavingBcNotes]   = useState(false);
 
   // Orders tab pagination
   const [ordersPage, setOrdersPage]         = useState(1);
@@ -450,6 +456,16 @@ export default function CustomerProfile() {
       return r.json();
     },
     enabled: !!id,
+  });
+
+  const { data: bcNotesData, isLoading: loadingBcNotes, refetch: refetchBcNotes } = useQuery({
+    queryKey: ["crm", "customer", id, "bc-notes"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/customers/${id}/bc-notes`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load BC notes");
+      return r.json() as Promise<{ generalNotes: string; crmHistory: string; raw: string }>;
+    },
+    enabled: activeTab === "bc-notes",
   });
 
   const { data: crmUsers = [] } = useQuery({
@@ -576,11 +592,42 @@ export default function CustomerProfile() {
 
   // ── Tab nav ────────────────────────────────────────────────────────────────
 
+  // Sync edit buffer when bc-notes data arrives or tab opens
+  React.useEffect(() => {
+    if (bcNotesData && generalNotesEdit === null) {
+      setGeneralNotesEdit(bcNotesData.generalNotes ?? "");
+    }
+  }, [bcNotesData]);
+
+  // Reset edit buffer when tab changes away from bc-notes
+  React.useEffect(() => {
+    if (activeTab !== "bc-notes") setGeneralNotesEdit(null);
+  }, [activeTab]);
+
+  const handleSaveBcNotes = async () => {
+    if (generalNotesEdit === null) return;
+    setSavingBcNotes(true);
+    try {
+      const r = await fetch(`/api/crm/customers/${id}/bc-notes`, {
+        method: "PUT",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ generalNotes: generalNotesEdit }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to save");
+      toast({ title: "General notes saved to BigCommerce" });
+      refetchBcNotes();
+      queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setSavingBcNotes(false); }
+  };
+
   const TABS: { id: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
     { id: "overview",  label: "Overview",  icon: <User className="h-3.5 w-3.5" /> },
     { id: "orders",    label: "Orders",    icon: <ShoppingBag className="h-3.5 w-3.5" />, count: allOrders.length || undefined },
     { id: "notes",     label: "Notes",     icon: <MessageSquare className="h-3.5 w-3.5" />, count: (notes as any[]).length || undefined },
     { id: "timeline",  label: "Timeline",  icon: <Clock className="h-3.5 w-3.5" /> },
+    { id: "bc-notes",  label: "General Notes", icon: <BookOpen className="h-3.5 w-3.5" /> },
   ];
 
   return (
@@ -1006,6 +1053,76 @@ export default function CustomerProfile() {
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── GENERAL NOTES (BC) TAB ────────────────────────────────────── */}
+          {activeTab === "bc-notes" && (
+            <div>
+              {/* Header */}
+              <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between gap-3 flex-wrap">
+                <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                  <BookOpen className="h-4 w-4 text-slate-400" />
+                  BigCommerce Customer Notes
+                  <span className="text-[11px] font-normal text-slate-400 ml-1">Synced to &amp; from BigCommerce</span>
+                </h2>
+                <Button
+                  size="sm"
+                  className="h-7 text-xs gap-1.5"
+                  onClick={handleSaveBcNotes}
+                  disabled={savingBcNotes || loadingBcNotes || generalNotesEdit === null || generalNotesEdit === (bcNotesData?.generalNotes ?? "")}
+                  data-testid="btn-save-bc-notes"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  {savingBcNotes ? "Saving…" : "Save to BigCommerce"}
+                </Button>
+              </div>
+
+              {loadingBcNotes ? (
+                <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Loading from BigCommerce…</div>
+              ) : (
+                <div className="p-5 space-y-5">
+                  {/* Editable: General Notes */}
+                  <div>
+                    <Label className="text-xs text-slate-600 font-semibold uppercase tracking-wide mb-1.5 block">
+                      Customer General Notes
+                    </Label>
+                    <p className="text-[11px] text-slate-400 mb-2">
+                      Permanent account-level notes visible to your team. Saved directly to the BigCommerce customer record.
+                    </p>
+                    <Textarea
+                      data-testid="textarea-general-notes"
+                      value={generalNotesEdit ?? ""}
+                      onChange={e => setGeneralNotesEdit(e.target.value)}
+                      placeholder="Enter general account notes here…"
+                      className="min-h-[180px] text-sm font-mono resize-y"
+                    />
+                  </div>
+
+                  {/* Read-only: CRM History */}
+                  <div>
+                    <Label className="text-xs text-slate-600 font-semibold uppercase tracking-wide mb-1.5 block">
+                      CRM History
+                    </Label>
+                    <p className="text-[11px] text-slate-400 mb-2">
+                      Auto-appended when CRM notes are created (General, Sales, Follow Up, Issue, Internal types). Read-only here.
+                    </p>
+                    {(bcNotesData?.crmHistory ?? "").trim() === "" ? (
+                      <div className="rounded-lg border border-dashed bg-slate-50 flex flex-col items-center justify-center py-8 text-slate-400 text-xs gap-1">
+                        <Clock className="h-5 w-5 opacity-30" />
+                        No CRM history yet — create a customer note to begin
+                      </div>
+                    ) : (
+                      <pre
+                        data-testid="text-crm-history"
+                        className="bg-slate-50 border rounded-lg p-4 text-xs text-slate-600 font-mono whitespace-pre-wrap break-words max-h-[400px] overflow-y-auto leading-relaxed"
+                      >
+                        {bcNotesData?.crmHistory ?? ""}
+                      </pre>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
