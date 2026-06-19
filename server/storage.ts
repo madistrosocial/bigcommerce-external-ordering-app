@@ -124,6 +124,9 @@ export interface IStorage {
   updateCrmOrderNotes(bcOrderId: number, data: { staff_notes?: string; customer_order_notes?: string }): Promise<void>;
   // CRM Audit Log
   createCrmAuditLog(data: InsertCrmAuditLog): Promise<void>;
+  // CRM Table resets
+  truncateCrmCustomers(): Promise<void>;
+  truncateCrmOrders(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -495,7 +498,7 @@ export class DatabaseStorage implements IStorage {
     }
     if (state) {
       if (state === "Unknown") {
-        conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') IS NULL OR coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ''`);
+        conditions.push(sql`(coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') IS NULL OR coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = '')`);
       } else {
         conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${state}`);
       }
@@ -1002,7 +1005,7 @@ export class DatabaseStorage implements IStorage {
     if (group) conditions.push(eq(customersMirror.customer_group_name, group));
     if (state) {
       if (state === 'Unknown') {
-        conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') IS NULL OR coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ''`);
+        conditions.push(sql`(coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') IS NULL OR coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = '')`);
       } else {
         conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${state}`);
       }
@@ -1092,6 +1095,14 @@ export class DatabaseStorage implements IStorage {
 
   async createCrmAuditLog(data: InsertCrmAuditLog): Promise<void> {
     await db.insert(crmAuditLog).values(data);
+  }
+
+  async truncateCrmCustomers(): Promise<void> {
+    await db.delete(customersMirror);
+  }
+
+  async truncateCrmOrders(): Promise<void> {
+    await db.delete(customerOrdersMirror);
   }
 }
 

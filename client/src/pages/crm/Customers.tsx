@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Search, FileText, FileSpreadsheet, ArrowUp, ArrowDown, ArrowUpDown,
   ChevronLeft, ChevronRight, User, Settings2, X, Users, AlertTriangle,
@@ -399,17 +399,18 @@ export default function CRMCustomers() {
       {/* ── Header ───────────────────────────────────────────────────────────── */}
       <div className="border-b bg-white px-4 py-3 shrink-0 space-y-2">
 
-        {/* Row 1: title + action buttons */}
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div>
+        {/* Row 1: title + action buttons — all 3 buttons always in one row */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
             <h1 className="text-lg font-bold text-slate-800">CRM Customers</h1>
             <p className="text-xs text-slate-400 mt-0.5">{total.toLocaleString()} customers from local mirror</p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-nowrap shrink-0">
             <Popover open={showColMenu} onOpenChange={setShowColMenu}>
               <PopoverTrigger asChild>
-                <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" data-testid="btn-columns">
-                  <Settings2 className="h-3.5 w-3.5" /> Columns
+                <Button size="sm" variant="outline" className="h-8 text-xs gap-1" data-testid="btn-columns">
+                  <Settings2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Columns</span>
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-52 p-3">
@@ -435,34 +436,35 @@ export default function CRMCustomers() {
 
             {canExport && (
               <>
-                <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => handleExport("csv")} disabled={exporting === "csv"} data-testid="btn-export-csv">
+                <Button size="sm" variant="outline" className="h-8 text-xs gap-1" onClick={() => handleExport("csv")} disabled={exporting === "csv"} data-testid="btn-export-csv">
                   <FileText className="h-3.5 w-3.5" />
-                  {exporting === "csv" ? "Exporting…" : "Export CSV"}
+                  <span className="hidden sm:inline">{exporting === "csv" ? "Exporting…" : "Export"} </span>CSV
                 </Button>
-                <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => handleExport("xlsx")} disabled={exporting === "xlsx"} data-testid="btn-export-xlsx">
+                <Button size="sm" variant="outline" className="h-8 text-xs gap-1" onClick={() => handleExport("xlsx")} disabled={exporting === "xlsx"} data-testid="btn-export-xlsx">
                   <FileSpreadsheet className="h-3.5 w-3.5" />
-                  {exporting === "xlsx" ? "Exporting…" : "Export Excel"}
+                  <span className="hidden sm:inline">{exporting === "xlsx" ? "Exporting…" : "Export"} </span>Excel
                 </Button>
               </>
             )}
           </div>
         </div>
 
-        {/* Row 2: filters */}
-        <div className="flex gap-2 flex-wrap items-center">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-            <Input
-              data-testid="input-crm-search"
-              value={search}
-              onChange={e => debounce(e.target.value)}
-              placeholder="Search company, customer name, email, phone…"
-              className="pl-8 h-8 text-sm w-[500px] max-w-full"
-            />
-          </div>
+        {/* Row 2: search (full-width on mobile) */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+          <Input
+            data-testid="input-crm-search"
+            value={search}
+            onChange={e => debounce(e.target.value)}
+            placeholder="Search company, customer name, email, phone…"
+            className="pl-8 h-8 text-sm w-full sm:w-[500px]"
+          />
+        </div>
 
+        {/* Row 3: filters — single column on mobile, row on desktop */}
+        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
           <Select value={group || "__all__"} onValueChange={v => setGroupFilter(v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-8 text-sm w-48" data-testid="select-group-filter">
+            <SelectTrigger className="h-8 text-sm w-full sm:w-48" data-testid="select-group-filter">
               <SelectValue placeholder="All Groups" />
             </SelectTrigger>
             <SelectContent>
@@ -474,20 +476,53 @@ export default function CRMCustomers() {
           </Select>
 
           <Select value={stateFilter || "__all__"} onValueChange={v => setStateFilterVal(v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-8 text-sm w-36" data-testid="select-state-filter">
+            <SelectTrigger className="h-8 text-sm w-full sm:w-36" data-testid="select-state-filter">
               <SelectValue placeholder="All States" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="max-h-[300px]">
               <SelectItem value="__all__">All States</SelectItem>
               <SelectItem value="Unknown">Unknown / Intl</SelectItem>
-              {(filterOpts?.states ?? []).map(s => (
-                <SelectItem key={s} value={s}>{s}</SelectItem>
-              ))}
+              {(() => {
+                const US_STATES = new Set([
+                  "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut",
+                  "Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa",
+                  "Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan",
+                  "Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada",
+                  "New Hampshire","New Jersey","New Mexico","New York","North Carolina",
+                  "North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island",
+                  "South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont",
+                  "Virginia","Washington","West Virginia","Wisconsin","Wyoming",
+                  "District of Columbia","Washington DC",
+                  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN",
+                  "IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV",
+                  "NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN",
+                  "TX","UT","VT","VA","WA","WV","WI","WY","DC",
+                ]);
+                const allStates = filterOpts?.states ?? [];
+                const usStates = allStates.filter(s => US_STATES.has(s)).sort((a, b) => a.localeCompare(b));
+                const intlStates = allStates.filter(s => !US_STATES.has(s)).sort((a, b) => a.localeCompare(b));
+                return (
+                  <>
+                    {usStates.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel className="text-[11px] text-slate-400 uppercase tracking-wide">United States</SelectLabel>
+                        {usStates.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      </SelectGroup>
+                    )}
+                    {intlStates.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel className="text-[11px] text-slate-400 uppercase tracking-wide">International</SelectLabel>
+                        {intlStates.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      </SelectGroup>
+                    )}
+                  </>
+                );
+              })()}
             </SelectContent>
           </Select>
 
           <Select value={repFilter || "__all__"} onValueChange={v => setRepFilterVal(v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-8 text-sm w-40" data-testid="select-rep-filter">
+            <SelectTrigger className="h-8 text-sm w-full sm:w-40" data-testid="select-rep-filter">
               <SelectValue placeholder="All Reps" />
             </SelectTrigger>
             <SelectContent>
@@ -503,7 +538,7 @@ export default function CRMCustomers() {
             <Button
               size="sm"
               variant="ghost"
-              className="h-8 text-xs text-slate-500 gap-1"
+              className="h-8 text-xs text-slate-500 gap-1 w-full sm:w-auto justify-center sm:justify-start"
               onClick={() => { setGroupFilter(""); setStateFilterVal(""); setRepFilterVal(""); setHealthFilter(""); }}
               data-testid="btn-clear-filters"
             >

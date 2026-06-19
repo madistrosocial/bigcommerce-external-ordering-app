@@ -4194,12 +4194,17 @@ export async function registerRoutes(
   // GET /api/crm/status
   app.get("/api/crm/status", requireAuth, async (_req, res) => {
     try {
-      const [customer_count, order_count, lastCustSync, lastOrderSync, lastStatsRecalc] = await Promise.all([
+      const [customer_count, order_count, lastCustSync, lastOrderSync, lastStatsRecalc,
+             lastCustIncSync, lastOrdIncSync, autoCustomers, autoOrders] = await Promise.all([
         storage.getCrmCustomerCount(),
         storage.getCrmOrderCount(),
         storage.getSetting("crm_last_customer_sync"),
         storage.getSetting("crm_last_order_sync"),
         storage.getSetting("crm_last_stats_recalc"),
+        storage.getSetting("crm_last_customer_incremental_sync"),
+        storage.getSetting("crm_last_order_incremental_sync"),
+        storage.getSetting("crm_auto_sync_customers"),
+        storage.getSetting("crm_auto_sync_orders"),
       ]);
       res.json({
         customer_count,
@@ -4207,6 +4212,10 @@ export async function registerRoutes(
         last_customer_sync: lastCustSync?.value ?? null,
         last_order_sync: lastOrderSync?.value ?? null,
         last_stats_recalc: lastStatsRecalc?.value ?? null,
+        last_customer_incremental_sync: lastCustIncSync?.value ?? null,
+        last_order_incremental_sync: lastOrdIncSync?.value ?? null,
+        auto_sync_customers: autoCustomers?.value === true || autoCustomers?.value === "true",
+        auto_sync_orders: autoOrders?.value === true || autoOrders?.value === "true",
       });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -4347,6 +4356,261 @@ export async function registerRoutes(
       res.json({ success: true, synced });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
+
+  // ── Incremental / Auto / Reset sync routes ────────────────────────────────
+
+  // Helper to get BC creds (avoids repetition below)
+  async function getBcConfig() {
+    const bcSetting = await storage.getSetting("bigcommerce_config");
+    let storeHash = process.env.BC_STORE_HASH;
+    let token = process.env.BC_TOKEN;
+    if (bcSetting?.value) {
+      const cfg = typeof bcSetting.value === "string" ? JSON.parse(bcSetting.value) : bcSetting.value;
+      storeHash = cfg.storeHash || storeHash;
+      token = cfg.token || token;
+    }
+    return { storeHash, token };
+  }
+
+  // POST /api/crm/sync/customers/incremental
+  app.post("/api/crm/sync/customers/incremental", requireAuth, async (_req, res) => {
+    try {
+      const { storeHash, token } = await getBcConfig();
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
+
+      const lastSync = await storage.getSetting("crm_last_customer_sync");
+      const since = lastSync?.value ? new Date(lastSync.value) : null;
+
+      const cgRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customer_groups?limit=200`, {
+        headers: { "X-Auth-Token": String(token), Accept: "application/json" },
+      });
+      const cgData: any[] = cgRes.ok ? await cgRes.json() : [];
+      const groupNameMap: Record<number, string> = {};
+      for (const g of cgData) groupNameMap[g.id] = g.name;
+
+      let page = 1, synced = 0;
+      while (true) {
+        let url = `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?include=addresses&limit=250&page=${page}`;
+        if (since) url += `&date_modified:min=${since.toISOString()}`;
+        const r = await fetch(url, { headers: { "X-Auth-Token": String(token), Accept: "application/json" } });
+        if (!r.ok) break;
+        const json = await r.json();
+        const bcCustomers: any[] = json.data ?? [];
+        if (bcCustomers.length === 0) break;
+        for (const bc of bcCustomers) {
+          const billing = bc.addresses?.find((a: any) => a.address_type === "commercial") ?? bc.addresses?.[0] ?? null;
+          const shipping = bc.addresses?.find((a: any) => a.address_type === "residential") ?? null;
+          await storage.upsertCrmCustomer({
+            bigcommerce_customer_id: bc.id,
+            company: bc.company || null,
+            first_name: bc.first_name || "",
+            last_name: bc.last_name || "",
+            email: bc.email || "",
+            phone: bc.phone || null,
+            customer_group_id: bc.customer_group_id || null,
+            customer_group_name: groupNameMap[bc.customer_group_id] ?? null,
+            billing_address: billing ? { street1: billing.address1, street2: billing.address2, city: billing.city, state: billing.state_or_province, zip: billing.postal_code, country: billing.country } : null,
+            shipping_address: shipping ? { street1: shipping.address1, street2: shipping.address2, city: shipping.city, state: shipping.state_or_province, zip: shipping.postal_code, country: shipping.country } : null,
+            created_date: bc.date_created ? new Date(bc.date_created) : null,
+            is_active: true,
+            store_credit_balance: "0",
+          });
+          synced++;
+        }
+        if (bcCustomers.length < 250) break;
+        page++;
+      }
+      const now = new Date().toISOString();
+      await storage.setSetting("crm_last_customer_incremental_sync", now);
+      await storage.setSetting("crm_last_customer_sync", now);
+      res.json({ success: true, synced });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/crm/sync/orders/incremental
+  app.post("/api/crm/sync/orders/incremental", requireAuth, async (_req, res) => {
+    try {
+      const { storeHash, token } = await getBcConfig();
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
+
+      const lastSync = await storage.getSetting("crm_last_order_sync");
+      const since = lastSync?.value ? new Date(lastSync.value) : null;
+
+      let page = 1, synced = 0;
+      while (true) {
+        let url = `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?limit=250&page=${page}&sort=id:desc`;
+        if (since) url += `&min_date_modified=${since.toISOString()}`;
+        const r = await fetch(url, { headers: { "X-Auth-Token": String(token), Accept: "application/json" } });
+        if (!r.ok || r.status === 204) break;
+        const bcOrders: any[] = await r.json();
+        if (!Array.isArray(bcOrders) || bcOrders.length === 0) break;
+        for (const o of bcOrders) {
+          if (!o.customer_id || o.customer_id === 0) continue;
+          const customerName = [o.billing_address?.first_name, o.billing_address?.last_name].filter(Boolean).join(" ");
+          await storage.upsertCrmOrder({
+            bigcommerce_order_id: o.id,
+            bigcommerce_customer_id: o.customer_id,
+            order_number: o.id,
+            order_date: o.date_created ? new Date(o.date_created) : null,
+            order_total: String(o.total_inc_tax || "0"),
+            status: o.status || null,
+            payment_status: o.payment_status || null,
+            customer_name: customerName || null,
+            customer_email: o.billing_address?.email || null,
+            staff_notes: o.staff_notes || o.order_note || null,
+            customer_order_notes: o.customer_message || null,
+          });
+          synced++;
+        }
+        if (bcOrders.length < 250) break;
+        page++;
+      }
+      await storage.recalculateCrmCustomerStats();
+      const now = new Date().toISOString();
+      await storage.setSetting("crm_last_order_incremental_sync", now);
+      await storage.setSetting("crm_last_order_sync", now);
+      res.json({ success: true, synced });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/crm/sync/auto/customers — toggle auto-sync
+  app.post("/api/crm/sync/auto/customers", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (user?.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+      const { enabled } = req.body as { enabled: boolean };
+      await storage.setSetting("crm_auto_sync_customers", enabled);
+      res.json({ success: true, enabled });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/crm/sync/auto/orders — toggle auto-sync
+  app.post("/api/crm/sync/auto/orders", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (user?.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+      const { enabled } = req.body as { enabled: boolean };
+      await storage.setSetting("crm_auto_sync_orders", enabled);
+      res.json({ success: true, enabled });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/crm/sync/customers/reset
+  app.delete("/api/crm/sync/customers/reset", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (user?.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+      await storage.truncateCrmCustomers();
+      await storage.setSetting("crm_last_customer_sync", null);
+      await storage.setSetting("crm_last_customer_incremental_sync", null);
+      res.json({ success: true, message: "Customer mirror cleared" });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/crm/sync/orders/reset
+  app.delete("/api/crm/sync/orders/reset", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (user?.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+      await storage.truncateCrmOrders();
+      await storage.setSetting("crm_last_order_sync", null);
+      await storage.setSetting("crm_last_order_incremental_sync", null);
+      res.json({ success: true, message: "Order mirror cleared" });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Auto-sync background job ──────────────────────────────────────────────
+  // Runs every 15 minutes; performs incremental sync for whichever entities
+  // have auto-sync enabled. No-op if BigCommerce is not configured.
+  setInterval(async () => {
+    try {
+      const { storeHash, token } = await getBcConfig();
+      if (!storeHash || !token) return;
+
+      const [autoC, autoO] = await Promise.all([
+        storage.getSetting("crm_auto_sync_customers"),
+        storage.getSetting("crm_auto_sync_orders"),
+      ]);
+
+      if (autoC?.value === true || autoC?.value === "true") {
+        try {
+          const lastSync = await storage.getSetting("crm_last_customer_sync");
+          const since = lastSync?.value ? new Date(lastSync.value) : null;
+          const cgRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customer_groups?limit=200`, {
+            headers: { "X-Auth-Token": String(token), Accept: "application/json" },
+          });
+          const cgData: any[] = cgRes.ok ? await cgRes.json() : [];
+          const groupNameMap: Record<number, string> = {};
+          for (const g of cgData) groupNameMap[g.id] = g.name;
+          let page = 1;
+          while (true) {
+            let url = `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?include=addresses&limit=250&page=${page}`;
+            if (since) url += `&date_modified:min=${since.toISOString()}`;
+            const r = await fetch(url, { headers: { "X-Auth-Token": String(token), Accept: "application/json" } });
+            if (!r.ok) break;
+            const json = await r.json();
+            const bcCustomers: any[] = json.data ?? [];
+            if (bcCustomers.length === 0) break;
+            for (const bc of bcCustomers) {
+              const billing = bc.addresses?.find((a: any) => a.address_type === "commercial") ?? bc.addresses?.[0] ?? null;
+              const shipping = bc.addresses?.find((a: any) => a.address_type === "residential") ?? null;
+              await storage.upsertCrmCustomer({
+                bigcommerce_customer_id: bc.id, company: bc.company || null,
+                first_name: bc.first_name || "", last_name: bc.last_name || "",
+                email: bc.email || "", phone: bc.phone || null,
+                customer_group_id: bc.customer_group_id || null,
+                customer_group_name: groupNameMap[bc.customer_group_id] ?? null,
+                billing_address: billing ? { street1: billing.address1, street2: billing.address2, city: billing.city, state: billing.state_or_province, zip: billing.postal_code, country: billing.country } : null,
+                shipping_address: shipping ? { street1: shipping.address1, street2: shipping.address2, city: shipping.city, state: shipping.state_or_province, zip: shipping.postal_code, country: shipping.country } : null,
+                created_date: bc.date_created ? new Date(bc.date_created) : null,
+                is_active: true, store_credit_balance: "0",
+              });
+            }
+            if (bcCustomers.length < 250) break;
+            page++;
+          }
+          const now = new Date().toISOString();
+          await storage.setSetting("crm_last_customer_incremental_sync", now);
+          await storage.setSetting("crm_last_customer_sync", now);
+        } catch (e) { console.error("[Auto-sync] customer error:", e); }
+      }
+
+      if (autoO?.value === true || autoO?.value === "true") {
+        try {
+          const lastSync = await storage.getSetting("crm_last_order_sync");
+          const since = lastSync?.value ? new Date(lastSync.value) : null;
+          let page = 1;
+          while (true) {
+            let url = `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?limit=250&page=${page}&sort=id:desc`;
+            if (since) url += `&min_date_modified=${since.toISOString()}`;
+            const r = await fetch(url, { headers: { "X-Auth-Token": String(token), Accept: "application/json" } });
+            if (!r.ok || r.status === 204) break;
+            const bcOrders: any[] = await r.json();
+            if (!Array.isArray(bcOrders) || bcOrders.length === 0) break;
+            for (const o of bcOrders) {
+              if (!o.customer_id || o.customer_id === 0) continue;
+              const customerName = [o.billing_address?.first_name, o.billing_address?.last_name].filter(Boolean).join(" ");
+              await storage.upsertCrmOrder({
+                bigcommerce_order_id: o.id, bigcommerce_customer_id: o.customer_id,
+                order_number: o.id, order_date: o.date_created ? new Date(o.date_created) : null,
+                order_total: String(o.total_inc_tax || "0"), status: o.status || null,
+                payment_status: o.payment_status || null, customer_name: customerName || null,
+                customer_email: o.billing_address?.email || null,
+                staff_notes: o.staff_notes || o.order_note || null,
+                customer_order_notes: o.customer_message || null,
+              });
+            }
+            if (bcOrders.length < 250) break;
+            page++;
+          }
+          await storage.recalculateCrmCustomerStats();
+          const now = new Date().toISOString();
+          await storage.setSetting("crm_last_order_incremental_sync", now);
+          await storage.setSetting("crm_last_order_sync", now);
+        } catch (e) { console.error("[Auto-sync] orders error:", e); }
+      }
+    } catch (e) { console.error("[Auto-sync] config error:", e); }
+  }, 15 * 60 * 1000); // every 15 minutes
 
   // ── CRM permission auto-seed ──────────────────────────────────────────────────
   // Ensures the 5 CRM RBAC permissions exist in the DB at startup so admins can
