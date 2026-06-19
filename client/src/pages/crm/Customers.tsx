@@ -449,103 +449,107 @@ export default function CRMCustomers() {
           </div>
         </div>
 
-        {/* Row 2: search (full-width on mobile) */}
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-          <Input
-            data-testid="input-crm-search"
-            value={search}
-            onChange={e => debounce(e.target.value)}
-            placeholder="Search company, customer name, email, phone…"
-            className="pl-8 h-8 text-sm w-full sm:w-[500px]"
-          />
-        </div>
+        {/* Row 2 (mobile: search) / Row 2 (desktop: search + filters inline) */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
 
-        {/* Row 3: filters — single column on mobile, row on desktop */}
-        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
-          <Select value={group || "__all__"} onValueChange={v => setGroupFilter(v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-8 text-sm w-full sm:w-48" data-testid="select-group-filter">
-              <SelectValue placeholder="All Groups" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All Groups</SelectItem>
-              {(filterOpts?.groups ?? []).map(g => (
-                <SelectItem key={g} value={g}>{g}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Search — full width on mobile, fixed on desktop */}
+          <div className="relative sm:shrink-0">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+            <Input
+              data-testid="input-crm-search"
+              value={search}
+              onChange={e => debounce(e.target.value)}
+              placeholder="Search company, customer name, email, phone…"
+              className="pl-8 h-8 text-sm w-full sm:w-[320px]"
+            />
+          </div>
 
-          <Select value={stateFilter || "__all__"} onValueChange={v => setStateFilterVal(v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-8 text-sm w-full sm:w-36" data-testid="select-state-filter">
-              <SelectValue placeholder="All States" />
-            </SelectTrigger>
-            <SelectContent className="max-h-[300px]">
-              <SelectItem value="__all__">All States</SelectItem>
-              <SelectItem value="Unknown">Unknown / Intl</SelectItem>
-              {(() => {
-                const US_STATES = new Set([
-                  "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut",
-                  "Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa",
-                  "Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan",
-                  "Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada",
-                  "New Hampshire","New Jersey","New Mexico","New York","North Carolina",
-                  "North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island",
-                  "South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont",
-                  "Virginia","Washington","West Virginia","Wisconsin","Wyoming",
-                  "District of Columbia","Washington DC",
-                  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN",
-                  "IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV",
-                  "NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN",
-                  "TX","UT","VT","VA","WA","WV","WI","WY","DC",
-                ]);
-                const allStates = filterOpts?.states ?? [];
-                const usStates = allStates.filter(s => US_STATES.has(s)).sort((a, b) => a.localeCompare(b));
-                const intlStates = allStates.filter(s => !US_STATES.has(s)).sort((a, b) => a.localeCompare(b));
-                return (
-                  <>
-                    {usStates.length > 0 && (
-                      <SelectGroup>
-                        <SelectLabel className="text-[11px] text-slate-400 uppercase tracking-wide">United States</SelectLabel>
-                        {usStates.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                      </SelectGroup>
-                    )}
-                    {intlStates.length > 0 && (
-                      <SelectGroup>
-                        <SelectLabel className="text-[11px] text-slate-400 uppercase tracking-wide">International</SelectLabel>
-                        {intlStates.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                      </SelectGroup>
-                    )}
-                  </>
-                );
-              })()}
-            </SelectContent>
-          </Select>
+          {/* Filters — always one horizontal row on both mobile and desktop */}
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            <Select value={group || "__all__"} onValueChange={v => setGroupFilter(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-40" data-testid="select-group-filter">
+                <SelectValue placeholder="All Groups" />
+              </SelectTrigger>
+              <SelectContent className="min-w-[min(280px,calc(100vw-2rem))]">
+                <SelectItem value="__all__">All Groups</SelectItem>
+                {(filterOpts?.groups ?? []).map(g => (
+                  <SelectItem key={g} value={g}>{g}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-          <Select value={repFilter || "__all__"} onValueChange={v => setRepFilterVal(v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-8 text-sm w-full sm:w-40" data-testid="select-rep-filter">
-              <SelectValue placeholder="All Reps" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All Reps</SelectItem>
-              <SelectItem value="unassigned">Unassigned</SelectItem>
-              {activeUsers.map(r => (
-                <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <Select value={stateFilter || "__all__"} onValueChange={v => setStateFilterVal(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-36" data-testid="select-state-filter">
+                <SelectValue placeholder="All States" />
+              </SelectTrigger>
+              <SelectContent className="min-w-[min(280px,calc(100vw-2rem))] max-h-[300px]">
+                <SelectItem value="__all__">All States</SelectItem>
+                <SelectItem value="Unknown">Unknown / Intl</SelectItem>
+                {(() => {
+                  const US_STATES = new Set([
+                    "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut",
+                    "Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa",
+                    "Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan",
+                    "Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada",
+                    "New Hampshire","New Jersey","New Mexico","New York","North Carolina",
+                    "North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island",
+                    "South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont",
+                    "Virginia","Washington","West Virginia","Wisconsin","Wyoming",
+                    "District of Columbia","Washington DC",
+                    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN",
+                    "IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV",
+                    "NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN",
+                    "TX","UT","VT","VA","WA","WV","WI","WY","DC",
+                  ]);
+                  const allStates = filterOpts?.states ?? [];
+                  const usStates = allStates.filter(s => US_STATES.has(s)).sort((a, b) => a.localeCompare(b));
+                  const intlStates = allStates.filter(s => !US_STATES.has(s)).sort((a, b) => a.localeCompare(b));
+                  return (
+                    <>
+                      {usStates.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel className="text-[11px] text-slate-400 uppercase tracking-wide">United States</SelectLabel>
+                          {usStates.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                        </SelectGroup>
+                      )}
+                      {intlStates.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel className="text-[11px] text-slate-400 uppercase tracking-wide">International</SelectLabel>
+                          {intlStates.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                        </SelectGroup>
+                      )}
+                    </>
+                  );
+                })()}
+              </SelectContent>
+            </Select>
 
-          {hasAnyFilter && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 text-xs text-slate-500 gap-1 w-full sm:w-auto justify-center sm:justify-start"
-              onClick={() => { setGroupFilter(""); setStateFilterVal(""); setRepFilterVal(""); setHealthFilter(""); }}
-              data-testid="btn-clear-filters"
-            >
-              <X className="h-3 w-3" />
-              Clear filters
-            </Button>
-          )}
+            <Select value={repFilter || "__all__"} onValueChange={v => setRepFilterVal(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-36" data-testid="select-rep-filter">
+                <SelectValue placeholder="All Reps" />
+              </SelectTrigger>
+              <SelectContent className="min-w-[min(280px,calc(100vw-2rem))]">
+                <SelectItem value="__all__">All Reps</SelectItem>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {activeUsers.map(r => (
+                  <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {hasAnyFilter && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="shrink-0 h-8 text-xs text-slate-500 gap-1 px-2"
+                onClick={() => { setGroupFilter(""); setStateFilterVal(""); setRepFilterVal(""); setHealthFilter(""); }}
+                data-testid="btn-clear-filters"
+              >
+                <X className="h-3 w-3" />
+                <span className="hidden sm:inline">Clear</span>
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
