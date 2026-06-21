@@ -169,6 +169,10 @@ export const customersMirror = pgTable("customers_mirror", {
   store_credit_balance: decimal("store_credit_balance", { precision: 14, scale: 2 }).notNull().default("0"),
   is_active: boolean("is_active").notNull().default(true),
   account_health: text("account_health"),
+  primary_rep_id: integer("primary_rep_id"),
+  secondary_rep_id: integer("secondary_rep_id"),
+  customer_type: text("customer_type").notNull().default("Store"),
+  address_type: text("address_type").notNull().default("Unknown"),
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
 });

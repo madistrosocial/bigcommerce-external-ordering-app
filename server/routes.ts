@@ -4756,12 +4756,11 @@ export async function registerRoutes(
       const user = (req as any).authUser;
       const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
-      const { search = "", sortBy = "last_order_date", sortDir = "desc", format = "csv", group = "", state = "", health = "", assignedRep = "" } = req.query as any;
+      const { search = "", sortBy = "last_order_date", sortDir = "desc", format = "csv", group = "", state = "", health = "", assignedRep = "", customerType = "", addressType = "", primaryRep = "", secondaryRep = "" } = req.query as any;
       let perms: string[] = [];
       if (user.role !== "admin") {
         perms = await storage.getUserPermissionStrings(userId);
         if (!perms.includes("crm:export")) {
-          // Log denied export attempt before refusing
           try {
             await storage.createCrmAuditLog({
               user_id: userId, action: "export_denied", customer_id: null,
@@ -4773,8 +4772,10 @@ export async function registerRoutes(
       }
       const visScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
       const repFilter = assignedRep === "unassigned" ? "unassigned" : (assignedRep ? parseInt(String(assignedRep)) : undefined) as number | "unassigned" | undefined;
-      const customers = await storage.getAllCrmCustomersForExport({ search, group: group || undefined, state: state || undefined, health: health || undefined, sortBy, sortDir, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
-      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "State", "Customer Group", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Sales Rep", "Health Status"];
+      const primaryRepFilterExp = primaryRep === "unassigned" ? "unassigned" : (primaryRep ? parseInt(String(primaryRep)) : undefined) as number | "unassigned" | undefined;
+      const secondaryRepFilterExp = secondaryRep === "unassigned" ? "unassigned" : (secondaryRep ? parseInt(String(secondaryRep)) : undefined) as number | "unassigned" | undefined;
+      const customers = await storage.getAllCrmCustomersForExport({ search, group: group || undefined, state: state || undefined, health: health || undefined, customerType: customerType || undefined, addressType: addressType || undefined, primaryRep: primaryRepFilterExp, secondaryRep: secondaryRepFilterExp, sortBy, sortDir, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
+      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "State", "Customer Group", "Customer Type", "Address Type", "Primary Rep", "Secondary Rep", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Sales Rep", "Health Status"];
       const rows = customers.map(c => {
         const addr = (c.shipping_address as any) ?? (c.billing_address as any) ?? {};
         return [
@@ -4786,6 +4787,10 @@ export async function registerRoutes(
           c.phone ?? "",
           addr.state ?? "",
           c.customer_group_name ?? "",
+          (c as any).customer_type ?? "Store",
+          (c as any).address_type ?? "Unknown",
+          (c as any).primary_rep_name ?? "",
+          (c as any).secondary_rep_name ?? "",
           c.last_order_date ? new Date(c.last_order_date).toISOString().split("T")[0] : "",
           String(c.lifetime_orders ?? 0),
           String(c.lifetime_revenue ?? "0"),
@@ -4814,13 +4819,15 @@ export async function registerRoutes(
       const user = (req as any).authUser;
       const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
-      const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "", health = "", assignedRep = "" } = req.query as any;
+      const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "", health = "", assignedRep = "", customerType = "", addressType = "", primaryRep = "", secondaryRep = "" } = req.query as any;
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
       const offset = parseInt(String(req.query.offset ?? "0"));
       const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
       const visScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
       const repFilter = assignedRep === "unassigned" ? "unassigned" : (assignedRep ? parseInt(String(assignedRep)) : undefined) as number | "unassigned" | undefined;
-      const result = await storage.getCrmCustomers({ search, group: group || undefined, state: state || undefined, health: health || undefined, sortBy, sortDir, limit, offset, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
+      const primaryRepFilter = primaryRep === "unassigned" ? "unassigned" : (primaryRep ? parseInt(String(primaryRep)) : undefined) as number | "unassigned" | undefined;
+      const secondaryRepFilter = secondaryRep === "unassigned" ? "unassigned" : (secondaryRep ? parseInt(String(secondaryRep)) : undefined) as number | "unassigned" | undefined;
+      const result = await storage.getCrmCustomers({ search, group: group || undefined, state: state || undefined, health: health || undefined, customerType: customerType || undefined, addressType: addressType || undefined, primaryRep: primaryRepFilter, secondaryRep: secondaryRepFilter, sortBy, sortDir, limit, offset, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
       res.json(result);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -4898,6 +4905,48 @@ export async function registerRoutes(
       }
 
       res.json(customer);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PATCH /api/crm/customers/:id — update master fields (primary_rep, secondary_rep, customer_type, address_type)
+  app.patch("/api/crm/customers/:id", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const id = parseInt(req.params.id);
+      if (!await assertCrmCustomerAccess(storage, id, userId, user.role, res)) return;
+      const { primary_rep_id, secondary_rep_id, customer_type, address_type } = req.body;
+      if (customer_type !== undefined && !["Store", "Distributor"].includes(customer_type)) {
+        return res.status(400).json({ error: "Invalid customer_type" });
+      }
+      if (address_type !== undefined && !["Commercial", "Residential", "Unknown"].includes(address_type)) {
+        return res.status(400).json({ error: "Invalid address_type" });
+      }
+      const data: { primary_rep_id?: number | null; secondary_rep_id?: number | null; customer_type?: string; address_type?: string } = {};
+      if ('primary_rep_id' in req.body) data.primary_rep_id = primary_rep_id != null ? Number(primary_rep_id) : null;
+      if ('secondary_rep_id' in req.body) data.secondary_rep_id = secondary_rep_id != null ? Number(secondary_rep_id) : null;
+      if (customer_type !== undefined) data.customer_type = customer_type;
+      if (address_type !== undefined) data.address_type = address_type;
+      await storage.updateCrmCustomerMasterFields(id, data);
+      // Keep customer_sales_rep in sync with primary_rep_id for visibility scoping
+      if ('primary_rep_id' in data) {
+        if (data.primary_rep_id) {
+          await storage.setCrmSalesRep({ customer_id: id, assigned_user_id: data.primary_rep_id, assigned_by: userId });
+        } else {
+          await storage.removeCrmSalesRep(id);
+        }
+        try {
+          await storage.createCrmAuditLog({
+            user_id: userId,
+            action: data.primary_rep_id ? "primary_rep_assigned" : "primary_rep_removed",
+            customer_id: id,
+            detail: { primary_rep_id: data.primary_rep_id },
+          });
+        } catch (_) {}
+      }
+      const updated = await storage.getCrmCustomerById(id);
+      res.json(updated);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

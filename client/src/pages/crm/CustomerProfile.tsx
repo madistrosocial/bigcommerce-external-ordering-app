@@ -405,6 +405,7 @@ export default function CustomerProfile() {
   const [editingNote, setEditingNote]       = useState<any | null>(null);
   const [deletingNoteId, setDeletingNoteId] = useState<number | null>(null);
   const [showAssignRep, setShowAssignRep]   = useState(false);
+  const [repAssignMode, setRepAssignMode]   = useState<"primary" | "secondary">("primary");
   const [selectedRep, setSelectedRep]       = useState("");
   const [assignSaving, setAssignSaving]     = useState(false);
   const [orderModal, setOrderModal]         = useState<any | null>(null);
@@ -523,27 +524,45 @@ export default function CustomerProfile() {
     if (!selectedRep) return;
     setAssignSaving(true);
     try {
-      const r = await fetch(`/api/crm/customers/${id}/sales-rep`, {
-        method: "PUT", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ assigned_user_id: parseInt(selectedRep) }),
+      const field = repAssignMode === "primary" ? "primary_rep_id" : "secondary_rep_id";
+      const r = await fetch(`/api/crm/customers/${id}`, {
+        method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: parseInt(selectedRep) }),
       });
       if (!r.ok) throw new Error((await r.json()).error ?? "Failed to assign rep");
       queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
       queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
-      toast({ title: "Sales rep assigned" });
+      toast({ title: repAssignMode === "primary" ? "Primary rep assigned" : "Secondary rep assigned" });
       setShowAssignRep(false);
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally { setAssignSaving(false); }
   };
 
-  const handleRemoveRep = async () => {
+  const handleRemoveRep = async (mode: "primary" | "secondary") => {
     try {
-      const r = await fetch(`/api/crm/customers/${id}/sales-rep`, { method: "DELETE", headers: getAuthHeaders() });
+      const field = mode === "primary" ? "primary_rep_id" : "secondary_rep_id";
+      const r = await fetch(`/api/crm/customers/${id}`, {
+        method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: null }),
+      });
       if (!r.ok) throw new Error("Failed to remove rep");
       queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
       queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
-      toast({ title: "Sales rep removed" });
+      toast({ title: mode === "primary" ? "Primary rep removed" : "Secondary rep removed" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const handleMasterFieldChange = async (field: string, value: string) => {
+    try {
+      const r = await fetch(`/api/crm/customers/${id}`, {
+        method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to update");
+      queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
     }
@@ -683,23 +702,78 @@ export default function CustomerProfile() {
                     </span>
                   )}
                 </div>
-                {/* Rep */}
-                <div className="flex items-center flex-wrap gap-2">
-                  {customer.sales_rep_name
-                    ? <Badge variant="secondary" className="text-xs gap-1"><UserCheck className="h-3 w-3" />Rep: {customer.sales_rep_name}</Badge>
-                    : <span className="text-xs text-slate-400">No rep assigned</span>}
-                  {canAssignRep && (
-                    <>
-                      <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setSelectedRep(""); setShowAssignRep(true); }} data-testid="btn-assign-rep">
-                        {customer.sales_rep_name ? "Change Rep" : "Assign Rep"}
-                      </Button>
-                      {customer.sales_rep_name && (
-                        <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-red-500 hover:text-red-700" onClick={handleRemoveRep} data-testid="btn-remove-rep">
-                          <UserMinus className="h-3 w-3 mr-1" />Remove
+                {/* Primary Rep / Secondary Rep */}
+                <div className="flex flex-wrap gap-x-5 gap-y-1.5 mt-1">
+                  {/* Primary Rep */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-slate-500 font-medium shrink-0">Primary Rep:</span>
+                    {customer.primary_rep_name
+                      ? <Badge variant="secondary" className="text-xs gap-1"><UserCheck className="h-3 w-3" />{customer.primary_rep_name}</Badge>
+                      : <span className="text-xs text-slate-400">Unassigned</span>}
+                    {canAssignRep && (
+                      <>
+                        <Button size="sm" variant="outline" className="h-6 text-xs px-2" data-testid="btn-assign-primary-rep"
+                          onClick={() => { setRepAssignMode("primary"); setSelectedRep(customer.primary_rep_id ? String(customer.primary_rep_id) : ""); setShowAssignRep(true); }}>
+                          {customer.primary_rep_name ? "Change" : "Assign"}
                         </Button>
-                      )}
-                    </>
-                  )}
+                        {customer.primary_rep_name && (
+                          <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-red-500 hover:text-red-700" data-testid="btn-remove-primary-rep"
+                            onClick={() => handleRemoveRep("primary")}>
+                            <UserMinus className="h-3 w-3 mr-1" />Remove
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {/* Secondary Rep */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-slate-500 font-medium shrink-0">Secondary Rep:</span>
+                    {customer.secondary_rep_name
+                      ? <Badge variant="secondary" className="text-xs gap-1"><UserCheck className="h-3 w-3" />{customer.secondary_rep_name}</Badge>
+                      : <span className="text-xs text-slate-400">Unassigned</span>}
+                    {canAssignRep && (
+                      <>
+                        <Button size="sm" variant="outline" className="h-6 text-xs px-2" data-testid="btn-assign-secondary-rep"
+                          onClick={() => { setRepAssignMode("secondary"); setSelectedRep(customer.secondary_rep_id ? String(customer.secondary_rep_id) : ""); setShowAssignRep(true); }}>
+                          {customer.secondary_rep_name ? "Change" : "Assign"}
+                        </Button>
+                        {customer.secondary_rep_name && (
+                          <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-red-500 hover:text-red-700" data-testid="btn-remove-secondary-rep"
+                            onClick={() => handleRemoveRep("secondary")}>
+                            <UserMinus className="h-3 w-3 mr-1" />Remove
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+                {/* Customer Type / Address Type */}
+                <div className="flex items-center flex-wrap gap-x-5 gap-y-1 mt-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-slate-500 font-medium">Type:</span>
+                    <Select value={customer.customer_type ?? "Store"} onValueChange={v => handleMasterFieldChange("customer_type", v)}>
+                      <SelectTrigger className="h-6 text-xs w-auto border border-slate-200 rounded-md px-2 gap-1 focus:ring-1 focus:ring-blue-400" data-testid="select-customer-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Store">Store</SelectItem>
+                        <SelectItem value="Distributor">Distributor</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-slate-500 font-medium">Address Type:</span>
+                    <Select value={customer.address_type ?? "Unknown"} onValueChange={v => handleMasterFieldChange("address_type", v)}>
+                      <SelectTrigger className="h-6 text-xs w-auto border border-slate-200 rounded-md px-2 gap-1 focus:ring-1 focus:ring-blue-400" data-testid="select-address-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Commercial">Commercial</SelectItem>
+                        <SelectItem value="Residential">Residential</SelectItem>
+                        <SelectItem value="Unknown">Unknown</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1168,15 +1242,23 @@ export default function CustomerProfile() {
       </Dialog>
       <Dialog open={showAssignRep} onOpenChange={v => { if (!v) setShowAssignRep(false); }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Assign Sales Rep</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{repAssignMode === "primary" ? "Assign Primary Rep" : "Assign Secondary Rep"}</DialogTitle>
+          </DialogHeader>
           <div className="space-y-2">
             <Label className="text-xs">Select Rep</Label>
             <Select value={selectedRep} onValueChange={setSelectedRep}>
               <SelectTrigger data-testid="select-assign-rep"><SelectValue placeholder="Choose a rep…" /></SelectTrigger>
               <SelectContent>
-                {(crmUsers as { id: number; name: string }[]).map(u => (
-                  <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>
-                ))}
+                {(crmUsers as { id: number; name: string }[])
+                  .filter(u => {
+                    if (repAssignMode === "primary" && customer?.secondary_rep_id) return String(u.id) !== String(customer.secondary_rep_id);
+                    if (repAssignMode === "secondary" && customer?.primary_rep_id) return String(u.id) !== String(customer.primary_rep_id);
+                    return true;
+                  })
+                  .map(u => (
+                    <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>

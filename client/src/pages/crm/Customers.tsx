@@ -31,6 +31,10 @@ const ALL_COLUMNS = [
   { key: "phone",           label: "Phone",          required: false, defaultW: 120 },
   { key: "state",           label: "State",          required: false, defaultW: 120 },
   { key: "customer_group",  label: "Customer Group", required: false, defaultW: 180 },
+  { key: "customer_type",   label: "Cust. Type",     required: false, defaultW: 120 },
+  { key: "address_type",    label: "Addr. Type",     required: false, defaultW: 110 },
+  { key: "primary_rep",     label: "Primary Rep",    required: false, defaultW: 150 },
+  { key: "secondary_rep",   label: "Secondary Rep",  required: false, defaultW: 150 },
   { key: "last_order",      label: "Last Order",     required: false, defaultW: 140 },
   { key: "days_since",      label: "Days Since",     required: false, defaultW: 110 },
   { key: "orders",          label: "Orders",         required: false, defaultW: 100 },
@@ -41,12 +45,14 @@ const ALL_COLUMNS = [
 
 type ColKey = typeof ALL_COLUMNS[number]["key"];
 const DEFAULT_VISIBLE = new Set<ColKey>(
-  ALL_COLUMNS.filter(c => c.key !== "store_credit").map(c => c.key)
+  ALL_COLUMNS.filter(c => !["store_credit", "customer_type", "address_type", "primary_rep", "secondary_rep"].includes(c.key)).map(c => c.key)
 );
 const DEFAULT_WIDTHS: Record<ColKey, number> = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c.defaultW])) as Record<ColKey, number>;
 const COL_MIN_WIDTHS: Record<ColKey, number> = {
   company: 180, customer_name: 180, email: 220, phone: 120,
-  state: 120, customer_group: 180, last_order: 120, days_since: 80,
+  state: 120, customer_group: 180, customer_type: 100, address_type: 90,
+  primary_rep: 120, secondary_rep: 120,
+  last_order: 120, days_since: 80,
   orders: 80, revenue: 100, sales_rep: 120, store_credit: 100,
 };
 
@@ -202,6 +208,10 @@ export default function CRMCustomers() {
   const [group, setGroup] = useState("");
   const [stateFilter, setStateFilter] = useState("");
   const [repFilter, setRepFilter] = useState("");
+  const [primaryRepFilter, setPrimaryRepFilter]     = useState("");
+  const [secondaryRepFilter, setSecondaryRepFilter] = useState("");
+  const [customerTypeFilter, setCustomerTypeFilter] = useState("");
+  const [addressTypeFilter, setAddressTypeFilter]   = useState("");
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("");
   const [sortBy, setSortBy] = useState<SortField>("last_order_date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -224,9 +234,13 @@ export default function CRMCustomers() {
     setPage(1);
   };
 
-  const setGroupFilter = (v: string) => { setGroup(v); setPage(1); };
-  const setStateFilterVal = (v: string) => { setStateFilter(v); setPage(1); };
-  const setRepFilterVal = (v: string) => { setRepFilter(v); setPage(1); };
+  const setGroupFilter          = (v: string) => { setGroup(v); setPage(1); };
+  const setStateFilterVal       = (v: string) => { setStateFilter(v); setPage(1); };
+  const setRepFilterVal         = (v: string) => { setRepFilter(v); setPage(1); };
+  const setPrimaryRepFilterVal  = (v: string) => { setPrimaryRepFilter(v); setPage(1); };
+  const setSecondaryRepFilterVal = (v: string) => { setSecondaryRepFilter(v); setPage(1); };
+  const setCustomerTypeFilterVal = (v: string) => { setCustomerTypeFilter(v); setPage(1); };
+  const setAddressTypeFilterVal  = (v: string) => { setAddressTypeFilter(v); setPage(1); };
   const toggleHealthFilter = (h: HealthFilter) => {
     setHealthFilter(prev => prev === h ? "" : h);
     setPage(1);
@@ -268,7 +282,7 @@ export default function CRMCustomers() {
   });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["crm", "customers", debouncedSearch, group, stateFilter, repFilter, healthFilter, sortBy, sortDir, page],
+    queryKey: ["crm", "customers", debouncedSearch, group, stateFilter, repFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter, healthFilter, sortBy, sortDir, page],
     queryFn: async () => {
       const params = new URLSearchParams({
         search: debouncedSearch,
@@ -280,6 +294,10 @@ export default function CRMCustomers() {
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
       if (repFilter) params.set("assignedRep", repFilter);
+      if (primaryRepFilter) params.set("primaryRep", primaryRepFilter);
+      if (secondaryRepFilter) params.set("secondaryRep", secondaryRepFilter);
+      if (customerTypeFilter) params.set("customerType", customerTypeFilter);
+      if (addressTypeFilter) params.set("addressType", addressTypeFilter);
       if (healthFilter) params.set("health", healthFilter);
       const r = await fetch(`/api/crm/customers?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load customers");
@@ -298,6 +316,10 @@ export default function CRMCustomers() {
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
       if (repFilter) params.set("assignedRep", repFilter);
+      if (primaryRepFilter) params.set("primaryRep", primaryRepFilter);
+      if (secondaryRepFilter) params.set("secondaryRep", secondaryRepFilter);
+      if (customerTypeFilter) params.set("customerType", customerTypeFilter);
+      if (addressTypeFilter) params.set("addressType", addressTypeFilter);
       if (healthFilter) params.set("health", healthFilter);
       const r = await fetch(`/api/crm/customers/export?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Export failed");
@@ -315,7 +337,7 @@ export default function CRMCustomers() {
     }
   };
 
-  const activeFilterCount = [group, stateFilter, repFilter].filter(Boolean).length;
+  const activeFilterCount = [group, stateFilter, repFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter].filter(Boolean).length;
   const hasAnyFilter = activeFilterCount > 0 || !!healthFilter;
 
   // ── Table helpers ─────────────────────────────────────────────────────────
@@ -542,7 +564,7 @@ export default function CRMCustomers() {
                 size="sm"
                 variant="ghost"
                 className="shrink-0 h-8 text-xs text-slate-500 gap-1 px-2"
-                onClick={() => { setGroupFilter(""); setStateFilterVal(""); setRepFilterVal(""); setHealthFilter(""); }}
+                onClick={() => { setGroupFilter(""); setStateFilterVal(""); setRepFilterVal(""); setHealthFilter(""); setPrimaryRepFilterVal(""); setSecondaryRepFilterVal(""); setCustomerTypeFilterVal(""); setAddressTypeFilterVal(""); }}
                 data-testid="btn-clear-filters"
               >
                 <X className="h-3 w-3" />
@@ -550,6 +572,58 @@ export default function CRMCustomers() {
               </Button>
             )}
           </div>
+        </div>
+
+        {/* Row 3: extended filters (Primary Rep, Secondary Rep, Type, Address Type) */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Select value={primaryRepFilter || "__all__"} onValueChange={v => setPrimaryRepFilterVal(v === "__all__" ? "" : v)}>
+            <SelectTrigger className="h-8 text-xs w-36" data-testid="select-primary-rep-filter">
+              <SelectValue placeholder="Primary Rep" />
+            </SelectTrigger>
+            <SelectContent className="min-w-[min(220px,calc(100vw-2rem))]">
+              <SelectItem value="__all__">All Primary Reps</SelectItem>
+              <SelectItem value="unassigned">Unassigned</SelectItem>
+              {activeUsers.map(r => (
+                <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={secondaryRepFilter || "__all__"} onValueChange={v => setSecondaryRepFilterVal(v === "__all__" ? "" : v)}>
+            <SelectTrigger className="h-8 text-xs w-36" data-testid="select-secondary-rep-filter">
+              <SelectValue placeholder="Secondary Rep" />
+            </SelectTrigger>
+            <SelectContent className="min-w-[min(220px,calc(100vw-2rem))]">
+              <SelectItem value="__all__">All Secondary Reps</SelectItem>
+              <SelectItem value="unassigned">Unassigned</SelectItem>
+              {activeUsers.map(r => (
+                <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={customerTypeFilter || "__all__"} onValueChange={v => setCustomerTypeFilterVal(v === "__all__" ? "" : v)}>
+            <SelectTrigger className="h-8 text-xs w-32" data-testid="select-customer-type-filter">
+              <SelectValue placeholder="All Types" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All Types</SelectItem>
+              <SelectItem value="Store">Store</SelectItem>
+              <SelectItem value="Distributor">Distributor</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={addressTypeFilter || "__all__"} onValueChange={v => setAddressTypeFilterVal(v === "__all__" ? "" : v)}>
+            <SelectTrigger className="h-8 text-xs w-36" data-testid="select-address-type-filter">
+              <SelectValue placeholder="All Addr. Types" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All Addr. Types</SelectItem>
+              <SelectItem value="Commercial">Commercial</SelectItem>
+              <SelectItem value="Residential">Residential</SelectItem>
+              <SelectItem value="Unknown">Unknown</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -572,6 +646,10 @@ export default function CRMCustomers() {
               {vis("phone")          && <col style={{ width: colWidths.phone }} />}
               {vis("state")          && <col style={{ width: colWidths.state }} />}
               {vis("customer_group") && <col style={{ width: colWidths.customer_group }} />}
+              {vis("customer_type")  && <col style={{ width: colWidths.customer_type }} />}
+              {vis("address_type")   && <col style={{ width: colWidths.address_type }} />}
+              {vis("primary_rep")    && <col style={{ width: colWidths.primary_rep }} />}
+              {vis("secondary_rep")  && <col style={{ width: colWidths.secondary_rep }} />}
               {vis("last_order")     && <col style={{ width: colWidths.last_order }} />}
               {vis("days_since")     && <col style={{ width: colWidths.days_since }} />}
               {vis("orders")         && <col style={{ width: colWidths.orders }} />}
@@ -587,6 +665,10 @@ export default function CRMCustomers() {
                 {vis("phone")          && plainTh("Phone",                                "phone")}
                 {vis("state")          && sortTh("state",              "State",          "state")}
                 {vis("customer_group") && sortTh("customer_group_name","Customer Group", "customer_group")}
+                {vis("customer_type")  && plainTh("Cust. Type",                           "customer_type")}
+                {vis("address_type")   && plainTh("Addr. Type",                           "address_type")}
+                {vis("primary_rep")    && plainTh("Primary Rep",                          "primary_rep")}
+                {vis("secondary_rep")  && plainTh("Secondary Rep",                        "secondary_rep")}
                 {vis("last_order")     && sortTh("last_order_date",    "Last Order",     "last_order")}
                 {vis("days_since")     && sortTh("days_since_order",   "Days Since",     "days_since")}
                 {vis("orders")         && sortTh("lifetime_orders",    "Orders",         "orders")}
@@ -642,6 +724,34 @@ export default function CRMCustomers() {
                     )}
                     {vis("state")          && <td className="px-3 py-2.5 text-slate-700 font-medium">{stateVal || <span className="text-slate-400">—</span>}</td>}
                     {vis("customer_group") && <td className="px-3 py-2.5 text-slate-600 truncate" style={{ maxWidth: colWidths.customer_group }}>{c.customer_group_name || <span className="text-slate-400">—</span>}</td>}
+                    {vis("customer_type") && (
+                      <td className="px-3 py-2.5">
+                        {c.customer_type === "Distributor"
+                          ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-purple-100 text-purple-700">Distributor</span>
+                          : c.customer_type === "Store"
+                          ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-100 text-blue-700">Store</span>
+                          : <span className="text-slate-400">—</span>}
+                      </td>
+                    )}
+                    {vis("address_type") && (
+                      <td className="px-3 py-2.5">
+                        {c.address_type === "Commercial"
+                          ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-green-100 text-green-700">Commercial</span>
+                          : c.address_type === "Residential"
+                          ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-orange-100 text-orange-700">Residential</span>
+                          : <span className="text-slate-400">Unknown</span>}
+                      </td>
+                    )}
+                    {vis("primary_rep") && (
+                      <td className="px-3 py-2.5 text-xs">
+                        {c.primary_rep_name ? <Badge variant="secondary" className="text-xs">{c.primary_rep_name}</Badge> : <span className="text-slate-400">—</span>}
+                      </td>
+                    )}
+                    {vis("secondary_rep") && (
+                      <td className="px-3 py-2.5 text-xs">
+                        {c.secondary_rep_name ? <Badge variant="secondary" className="text-xs">{c.secondary_rep_name}</Badge> : <span className="text-slate-400">—</span>}
+                      </td>
+                    )}
                     {vis("last_order")     && (
                       <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">
                         {c.last_order_date ? formatDistanceToNow(new Date(c.last_order_date), { addSuffix: true }) : "—"}
