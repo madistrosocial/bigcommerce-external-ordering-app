@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useStore } from "@/lib/store";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,38 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Truck, ShieldCheck, UserCircle } from "lucide-react";
-import { login as apiLogin } from "@/lib/api";
+import { login as apiLogin, getMyPermissions } from "@/lib/api";
+import { LANDING_OPTIONS } from "@/pages/admin/AdminUsers";
+
+const FALLBACK_ORDER = [
+  "crm_customers",
+  "orders_my",
+  "catalog",
+  "inventory_push",
+  "dashboard",
+];
+
+function resolveRedirectTarget(
+  preferred: string,
+  permStrings: string[],
+  isAdmin: boolean,
+): string {
+  if (isAdmin) return preferred || "/dashboard";
+
+  const preferred_opt = LANDING_OPTIONS.find((o) => o.route === preferred);
+  if (preferred_opt && permStrings.includes(`${preferred_opt.permission}:view`)) {
+    return preferred;
+  }
+
+  for (const perm of FALLBACK_ORDER) {
+    if (permStrings.includes(`${perm}:view`)) {
+      const opt = LANDING_OPTIONS.find((o) => o.permission === perm);
+      if (opt) return opt.route;
+    }
+  }
+
+  return "/dashboard";
+}
 
 async function fetchBusinessLogo(): Promise<string | null> {
   try {
@@ -28,16 +59,41 @@ export default function Login() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [businessLogo, setBusinessLogo] = useState<string | null>(null);
+  // Tracks whether a fresh login flow is handling the redirect, so the
+  // already-logged-in useEffect doesn't fire concurrently and override it.
+  const redirectingRef = useRef(false);
 
   useEffect(() => {
     fetchBusinessLogo().then(setBusinessLogo);
   }, []);
 
+  // Handles the "already logged in" case (e.g. page refresh with active session).
+  // Skipped when a fresh login is in progress — doRedirect owns the redirect then.
   useEffect(() => {
-    if (currentUser) {
-      setLocation("/dashboard");
+    if (currentUser && !redirectingRef.current) {
+      setLocation(currentUser.default_landing_page || "/dashboard");
     }
   }, [currentUser, setLocation]);
+
+  const doRedirect = async (user: NonNullable<ReturnType<typeof useStore>["currentUser"]>) => {
+    redirectingRef.current = true;
+    login(user);
+    const preferred = user.default_landing_page || "/dashboard";
+    try {
+      if (user.role === "admin") {
+        setLocation(preferred);
+      } else {
+        try {
+          const perms = await getMyPermissions();
+          setLocation(resolveRedirectTarget(preferred, perms, false));
+        } catch {
+          setLocation("/dashboard");
+        }
+      }
+    } finally {
+      redirectingRef.current = false;
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,7 +102,7 @@ export default function Login() {
 
     try {
       const user = await apiLogin(username, password);
-      login(user);
+      await doRedirect(user);
     } catch (err: any) {
       setError(err.message || "Login failed");
     } finally {
@@ -61,7 +117,7 @@ export default function Login() {
     try {
       const demoUser = demoRole === 'admin' ? 'admin@vansales.com' : 'agent1@vansales.com';
       const user = await apiLogin(demoUser, 'demo123');
-      login(user);
+      await doRedirect(user);
     } catch (err: any) {
       setError(err.message || "Demo login failed");
     } finally {

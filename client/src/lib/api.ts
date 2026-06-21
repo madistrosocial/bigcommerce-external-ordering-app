@@ -22,6 +22,7 @@ export interface User {
   role: 'admin' | 'agent';
   is_enabled: boolean;
   allow_bigcommerce_search: boolean;
+  default_landing_page?: string;
 }
 
 export interface OrderItem {
@@ -695,13 +696,14 @@ export interface RbacUser {
   role: string;
   is_enabled: boolean;
   allow_bigcommerce_search: boolean;
+  default_landing_page?: string;
   role_id?: number | null;
   permissions: RbacPermission[];
 }
 
 export async function updateUserDetails(
   id: number,
-  data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean }>,
+  data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>,
 ): Promise<User> {
   const res = await fetch(`${API_BASE}/users/${id}`, {
     method: "PUT",

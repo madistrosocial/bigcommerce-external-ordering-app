@@ -41,6 +41,7 @@ export const users = pgTable("users", {
   is_enabled: boolean("is_enabled").notNull().default(true),
   allow_bigcommerce_search: boolean("allow_bigcommerce_search").notNull().default(false),
   role_id: integer("role_id"), // nullable FK to roles
+  default_landing_page: text("default_landing_page").notNull().default("/dashboard"),
 });
 
 export const products = pgTable("products", {

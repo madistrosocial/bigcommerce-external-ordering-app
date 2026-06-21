@@ -752,13 +752,14 @@ export async function registerRoutes(
   app.put("/api/users/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const { name, username, password, role, is_enabled, allow_bigcommerce_search } = req.body;
+      const { name, username, password, role, is_enabled, allow_bigcommerce_search, default_landing_page } = req.body;
       const update: Record<string, any> = {};
       if (name !== undefined) update.name = name;
       if (username !== undefined) update.username = username;
       if (role !== undefined) update.role = role;
       if (is_enabled !== undefined) update.is_enabled = is_enabled;
       if (allow_bigcommerce_search !== undefined) update.allow_bigcommerce_search = allow_bigcommerce_search;
+      if (default_landing_page !== undefined) update.default_landing_page = default_landing_page;
       if (password && password.trim()) {
         const bcrypt = await import("bcryptjs");
         update.password = await bcrypt.hash(password, 10);

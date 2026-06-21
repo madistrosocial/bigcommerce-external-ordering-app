@@ -15,6 +15,19 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Users, ShieldCheck, ChevronRight, ArrowLeft, User, Lock, Shield, Eye, EyeOff, Save, Search, UsersRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// ─── Landing page options ─────────────────────────────────────────────────────
+
+export const LANDING_OPTIONS = [
+  { label: "Dashboard",             route: "/dashboard",        permission: "dashboard" },
+  { label: "CRM › Customers",       route: "/crm/customers",    permission: "crm_customers" },
+  { label: "CRM › Reactivation",    route: "/crm/reactivation", permission: "crm_reactivation" },
+  { label: "Inventory › Push",      route: "/inventory-push",   permission: "inventory_push" },
+  { label: "Products",              route: "/products",         permission: "catalog" },
+  { label: "Orders",                route: "/orders",           permission: "orders_my" },
+  { label: "POS",                   route: "/pos",              permission: "pos" },
+  { label: "Settings",              route: "/settings",         permission: "admin" },
+];
+
 // ─── All permission modules ───────────────────────────────────────────────────
 
 export const MODULES = [
@@ -109,17 +122,20 @@ function UserDetail({
   const [isEnabled, setIsEnabled] = useState(user.is_enabled);
   const [allowBcSearch, setAllowBcSearch] = useState(user.allow_bigcommerce_search);
   const [groupId, setGroupId] = useState<string>(user.role_id != null ? String(user.role_id) : "none");
+  const [landingPage, setLandingPage] = useState(user.default_landing_page || "/dashboard");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setName(user.name); setUsername(user.username); setRole(user.role);
     setIsEnabled(user.is_enabled); setAllowBcSearch(user.allow_bigcommerce_search);
     setGroupId(user.role_id != null ? String(user.role_id) : "none");
+    setLandingPage(user.default_landing_page || "/dashboard");
   }, [user.id]);
 
   const isDirty = name !== user.name || username !== user.username || role !== user.role
     || isEnabled !== user.is_enabled || allowBcSearch !== user.allow_bigcommerce_search
-    || password.trim() !== "" || groupId !== (user.role_id != null ? String(user.role_id) : "none");
+    || password.trim() !== "" || groupId !== (user.role_id != null ? String(user.role_id) : "none")
+    || landingPage !== (user.default_landing_page || "/dashboard");
 
   const handleSave = async () => {
     if (!name.trim() || !username.trim()) {
@@ -132,6 +148,7 @@ function UserDetail({
         updateUserDetails(user.id, {
           name: name.trim(), username: username.trim(), role, is_enabled: isEnabled,
           allow_bigcommerce_search: allowBcSearch,
+          default_landing_page: landingPage,
           ...(password.trim() ? { password: password.trim() } : {}),
         }),
         setUserRole(user.id, newGroupId),
@@ -210,6 +227,18 @@ function UserDetail({
                   {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-slate-600">Default Landing Page</Label>
+              <Select value={landingPage} onValueChange={setLandingPage}>
+                <SelectTrigger data-testid="select-user-landing-page"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {LANDING_OPTIONS.map((o) => (
+                    <SelectItem key={o.route} value={o.route}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-slate-400">Page shown after the user logs in. Falls back if the user lacks permission.</p>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-slate-600">System Role</Label>
