@@ -39,13 +39,12 @@ const ALL_COLUMNS = [
   { key: "days_since",      label: "Days Since",     required: false, defaultW: 110 },
   { key: "orders",          label: "Orders",         required: false, defaultW: 100 },
   { key: "revenue",         label: "Revenue",        required: false, defaultW: 120 },
-  { key: "sales_rep",       label: "Sales Rep",      required: false, defaultW: 140 },
   { key: "store_credit",    label: "Store Credit",   required: false, defaultW: 130 },
 ] as const;
 
 type ColKey = typeof ALL_COLUMNS[number]["key"];
 const DEFAULT_VISIBLE = new Set<ColKey>(
-  ALL_COLUMNS.filter(c => !["store_credit", "customer_type", "address_type", "primary_rep", "secondary_rep"].includes(c.key)).map(c => c.key)
+  ALL_COLUMNS.filter(c => !["store_credit", "customer_type", "address_type", "primary_rep", "secondary_rep", "sales_rep"].includes(c.key)).map(c => c.key)
 );
 const DEFAULT_WIDTHS: Record<ColKey, number> = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c.defaultW])) as Record<ColKey, number>;
 const COL_MIN_WIDTHS: Record<ColKey, number> = {
@@ -53,7 +52,7 @@ const COL_MIN_WIDTHS: Record<ColKey, number> = {
   state: 120, customer_group: 180, customer_type: 100, address_type: 90,
   primary_rep: 120, secondary_rep: 120,
   last_order: 120, days_since: 80,
-  orders: 80, revenue: 100, sales_rep: 120, store_credit: 100,
+  orders: 80, revenue: 100, store_credit: 100,
 };
 
 const PAGE_SIZE = 50;
@@ -207,7 +206,6 @@ export default function CRMCustomers() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [group, setGroup] = useState("");
   const [stateFilter, setStateFilter] = useState("");
-  const [repFilter, setRepFilter] = useState("");
   const [primaryRepFilter, setPrimaryRepFilter]     = useState("");
   const [secondaryRepFilter, setSecondaryRepFilter] = useState("");
   const [customerTypeFilter, setCustomerTypeFilter] = useState("");
@@ -236,7 +234,6 @@ export default function CRMCustomers() {
 
   const setGroupFilter          = (v: string) => { setGroup(v); setPage(1); };
   const setStateFilterVal       = (v: string) => { setStateFilter(v); setPage(1); };
-  const setRepFilterVal         = (v: string) => { setRepFilter(v); setPage(1); };
   const setPrimaryRepFilterVal  = (v: string) => { setPrimaryRepFilter(v); setPage(1); };
   const setSecondaryRepFilterVal = (v: string) => { setSecondaryRepFilter(v); setPage(1); };
   const setCustomerTypeFilterVal = (v: string) => { setCustomerTypeFilter(v); setPage(1); };
@@ -268,12 +265,11 @@ export default function CRMCustomers() {
   });
 
   const { data: metrics } = useQuery({
-    queryKey: ["crm", "metrics", debouncedSearch, group, stateFilter, repFilter],
+    queryKey: ["crm", "metrics", debouncedSearch, group, stateFilter],
     queryFn: async () => {
       const params = new URLSearchParams({ search: debouncedSearch });
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
-      if (repFilter) params.set("assignedRep", repFilter);
       const r = await fetch(`/api/crm/metrics?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load metrics");
       return r.json() as Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }>;
@@ -282,7 +278,7 @@ export default function CRMCustomers() {
   });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["crm", "customers", debouncedSearch, group, stateFilter, repFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter, healthFilter, sortBy, sortDir, page],
+    queryKey: ["crm", "customers", debouncedSearch, group, stateFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter, healthFilter, sortBy, sortDir, page],
     queryFn: async () => {
       const params = new URLSearchParams({
         search: debouncedSearch,
@@ -293,7 +289,6 @@ export default function CRMCustomers() {
       });
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
-      if (repFilter) params.set("assignedRep", repFilter);
       if (primaryRepFilter) params.set("primaryRep", primaryRepFilter);
       if (secondaryRepFilter) params.set("secondaryRep", secondaryRepFilter);
       if (customerTypeFilter) params.set("customerType", customerTypeFilter);
@@ -315,7 +310,6 @@ export default function CRMCustomers() {
       const params = new URLSearchParams({ search: debouncedSearch, sortBy, sortDir, format });
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
-      if (repFilter) params.set("assignedRep", repFilter);
       if (primaryRepFilter) params.set("primaryRep", primaryRepFilter);
       if (secondaryRepFilter) params.set("secondaryRep", secondaryRepFilter);
       if (customerTypeFilter) params.set("customerType", customerTypeFilter);
@@ -337,7 +331,7 @@ export default function CRMCustomers() {
     }
   };
 
-  const activeFilterCount = [group, stateFilter, repFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter].filter(Boolean).length;
+  const activeFilterCount = [group, stateFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter].filter(Boolean).length;
   const hasAnyFilter = activeFilterCount > 0 || !!healthFilter;
 
   // ── Table helpers ─────────────────────────────────────────────────────────
@@ -546,12 +540,12 @@ export default function CRMCustomers() {
               </SelectContent>
             </Select>
 
-            <Select value={repFilter || "__all__"} onValueChange={v => setRepFilterVal(v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-36" data-testid="select-rep-filter">
-                <SelectValue placeholder="All Reps" />
+            <Select value={primaryRepFilter || "__all__"} onValueChange={v => setPrimaryRepFilterVal(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-36" data-testid="select-primary-rep-filter">
+                <SelectValue placeholder="Primary Rep" />
               </SelectTrigger>
-              <SelectContent className="min-w-[min(280px,calc(100vw-2rem))]">
-                <SelectItem value="__all__">All Reps</SelectItem>
+              <SelectContent className="min-w-[min(220px,calc(100vw-2rem))]">
+                <SelectItem value="__all__">All Primary Reps</SelectItem>
                 <SelectItem value="unassigned">Unassigned</SelectItem>
                 {activeUsers.map(r => (
                   <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
@@ -559,12 +553,48 @@ export default function CRMCustomers() {
               </SelectContent>
             </Select>
 
+            <Select value={secondaryRepFilter || "__all__"} onValueChange={v => setSecondaryRepFilterVal(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-36" data-testid="select-secondary-rep-filter">
+                <SelectValue placeholder="Secondary Rep" />
+              </SelectTrigger>
+              <SelectContent className="min-w-[min(220px,calc(100vw-2rem))]">
+                <SelectItem value="__all__">All Secondary Reps</SelectItem>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {activeUsers.map(r => (
+                  <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={customerTypeFilter || "__all__"} onValueChange={v => setCustomerTypeFilterVal(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-32" data-testid="select-customer-type-filter">
+                <SelectValue placeholder="All Types" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Types</SelectItem>
+                <SelectItem value="Store">Store</SelectItem>
+                <SelectItem value="Distributor">Distributor</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={addressTypeFilter || "__all__"} onValueChange={v => setAddressTypeFilterVal(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-36" data-testid="select-address-type-filter">
+                <SelectValue placeholder="All Addr. Types" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Addr. Types</SelectItem>
+                <SelectItem value="Commercial">Commercial</SelectItem>
+                <SelectItem value="Residential">Residential</SelectItem>
+                <SelectItem value="Unknown">Unknown</SelectItem>
+              </SelectContent>
+            </Select>
+
             {hasAnyFilter && (
               <Button
                 size="sm"
                 variant="ghost"
-                className="shrink-0 h-8 text-xs text-slate-500 gap-1 px-2"
-                onClick={() => { setGroupFilter(""); setStateFilterVal(""); setRepFilterVal(""); setHealthFilter(""); setPrimaryRepFilterVal(""); setSecondaryRepFilterVal(""); setCustomerTypeFilterVal(""); setAddressTypeFilterVal(""); }}
+                className="shrink-0 h-8 text-xs text-slate-500 gap-1 px-2 ml-auto"
+                onClick={() => { setGroupFilter(""); setStateFilterVal(""); setHealthFilter(""); setPrimaryRepFilterVal(""); setSecondaryRepFilterVal(""); setCustomerTypeFilterVal(""); setAddressTypeFilterVal(""); }}
                 data-testid="btn-clear-filters"
               >
                 <X className="h-3 w-3" />
@@ -572,58 +602,6 @@ export default function CRMCustomers() {
               </Button>
             )}
           </div>
-        </div>
-
-        {/* Row 3: extended filters (Primary Rep, Secondary Rep, Type, Address Type) */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Select value={primaryRepFilter || "__all__"} onValueChange={v => setPrimaryRepFilterVal(v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-8 text-xs w-36" data-testid="select-primary-rep-filter">
-              <SelectValue placeholder="Primary Rep" />
-            </SelectTrigger>
-            <SelectContent className="min-w-[min(220px,calc(100vw-2rem))]">
-              <SelectItem value="__all__">All Primary Reps</SelectItem>
-              <SelectItem value="unassigned">Unassigned</SelectItem>
-              {activeUsers.map(r => (
-                <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={secondaryRepFilter || "__all__"} onValueChange={v => setSecondaryRepFilterVal(v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-8 text-xs w-36" data-testid="select-secondary-rep-filter">
-              <SelectValue placeholder="Secondary Rep" />
-            </SelectTrigger>
-            <SelectContent className="min-w-[min(220px,calc(100vw-2rem))]">
-              <SelectItem value="__all__">All Secondary Reps</SelectItem>
-              <SelectItem value="unassigned">Unassigned</SelectItem>
-              {activeUsers.map(r => (
-                <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={customerTypeFilter || "__all__"} onValueChange={v => setCustomerTypeFilterVal(v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-8 text-xs w-32" data-testid="select-customer-type-filter">
-              <SelectValue placeholder="All Types" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All Types</SelectItem>
-              <SelectItem value="Store">Store</SelectItem>
-              <SelectItem value="Distributor">Distributor</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Select value={addressTypeFilter || "__all__"} onValueChange={v => setAddressTypeFilterVal(v === "__all__" ? "" : v)}>
-            <SelectTrigger className="h-8 text-xs w-36" data-testid="select-address-type-filter">
-              <SelectValue placeholder="All Addr. Types" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All Addr. Types</SelectItem>
-              <SelectItem value="Commercial">Commercial</SelectItem>
-              <SelectItem value="Residential">Residential</SelectItem>
-              <SelectItem value="Unknown">Unknown</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
       </div>
 
@@ -654,7 +632,6 @@ export default function CRMCustomers() {
               {vis("days_since")     && <col style={{ width: colWidths.days_since }} />}
               {vis("orders")         && <col style={{ width: colWidths.orders }} />}
               {vis("revenue")        && <col style={{ width: colWidths.revenue }} />}
-              {vis("sales_rep")      && <col style={{ width: colWidths.sales_rep }} />}
               {vis("store_credit")   && <col style={{ width: colWidths.store_credit }} />}
             </colgroup>
             <thead className="sticky top-0 bg-slate-50 border-b z-10">
@@ -673,7 +650,6 @@ export default function CRMCustomers() {
                 {vis("days_since")     && sortTh("days_since_order",   "Days Since",     "days_since")}
                 {vis("orders")         && sortTh("lifetime_orders",    "Orders",         "orders")}
                 {vis("revenue")        && sortTh("lifetime_revenue",   "Revenue",        "revenue")}
-                {vis("sales_rep")      && plainTh("Sales Rep",                            "sales_rep")}
                 {vis("store_credit")   && sortTh("store_credit_balance", "Store Credit", "store_credit")}
               </tr>
             </thead>
@@ -760,11 +736,6 @@ export default function CRMCustomers() {
                     {vis("days_since")     && <td className={`px-3 py-2.5 whitespace-nowrap ${daysColor}`}>{days != null ? `${days}d` : "—"}</td>}
                     {vis("orders")         && <td className="px-3 py-2.5 text-right text-slate-700">{(c.lifetime_orders ?? 0).toLocaleString()}</td>}
                     {vis("revenue")        && <td className="px-3 py-2.5 text-right font-medium text-slate-800">{fmtCurrency(c.lifetime_revenue)}</td>}
-                    {vis("sales_rep")      && (
-                      <td className="px-3 py-2.5 text-slate-500 text-xs">
-                        {c.sales_rep_name ? <Badge variant="secondary" className="text-xs">{c.sales_rep_name}</Badge> : "—"}
-                      </td>
-                    )}
                     {vis("store_credit")   && (
                       <td className="px-3 py-2.5 text-right font-medium text-teal-700">
                         {Number(c.store_credit_balance ?? 0) > 0 ? fmtCurrency(c.store_credit_balance) : <span className="text-slate-300">—</span>}

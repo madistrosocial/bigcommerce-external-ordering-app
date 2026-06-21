@@ -173,6 +173,22 @@ function TimelineDescription({ entry }: { entry: any }) {
         return <p className="text-sm text-slate-700"><span className="font-medium">Rep changed</span> to {d.rep_name ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
       case "sales_rep_removed":
         return <p className="text-sm text-slate-700"><span className="font-medium">Rep removed</span> <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "primary_rep_assigned":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Primary Rep assigned:</span> {d.new_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "primary_rep_changed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Primary Rep changed:</span> {d.old_value ?? "—"} → {d.new_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "primary_rep_removed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Primary Rep removed:</span> {d.old_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "secondary_rep_assigned":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Secondary Rep assigned:</span> {d.new_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "secondary_rep_changed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Secondary Rep changed:</span> {d.old_value ?? "—"} → {d.new_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "secondary_rep_removed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Secondary Rep removed:</span> {d.old_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "customer_type_changed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Customer Type changed:</span> {d.old_value ?? "—"} → {d.new_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "address_type_updated":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Address Type updated:</span> {d.old_value ?? "—"} → {d.new_value ?? "—"} <span className="text-xs text-slate-400 ml-1">(Source: BigCommerce)</span></p>;
     }
   }
   return <p className="text-sm text-slate-500">Activity recorded</p>;
@@ -763,16 +779,14 @@ export default function CustomerProfile() {
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs text-slate-500 font-medium">Address Type:</span>
-                    <Select value={customer.address_type ?? "Unknown"} onValueChange={v => handleMasterFieldChange("address_type", v)}>
-                      <SelectTrigger className="h-6 text-xs w-auto border border-slate-200 rounded-md px-2 gap-1 focus:ring-1 focus:ring-blue-400" data-testid="select-address-type">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Commercial">Commercial</SelectItem>
-                        <SelectItem value="Residential">Residential</SelectItem>
-                        <SelectItem value="Unknown">Unknown</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <span className="text-xs text-slate-700 font-medium" data-testid="text-address-type">
+                      {customer.address_type === "Commercial"
+                        ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-green-100 text-green-700">Commercial</span>
+                        : customer.address_type === "Residential"
+                        ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-orange-100 text-orange-700">Residential</span>
+                        : <span className="text-slate-400 text-xs">Unknown</span>}
+                      <span className="text-[10px] text-slate-400 ml-1.5">(synced from BigCommerce)</span>
+                    </span>
                   </div>
                 </div>
               </div>

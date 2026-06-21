@@ -96,7 +96,7 @@ export interface IStorage {
   upsertCrmCustomer(data: InsertCrmCustomer): Promise<CrmCustomer>;
   getCrmCustomerCount(): Promise<number>;
   getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null })[]>;
-  updateCrmCustomerMasterFields(id: number, data: { primary_rep_id?: number | null; secondary_rep_id?: number | null; customer_type?: string; address_type?: string }): Promise<void>;
+  updateCrmCustomerMasterFields(id: number, data: { primary_rep_id?: number | null; secondary_rep_id?: number | null; customer_type?: string }): Promise<void>;
   getCrmFilterOptions(): Promise<{ groups: string[]; states: string[]; reps: { id: number; name: string }[] }>;
   getCrmOrdersByBcCustomerId(bcCustomerId: number, limit?: number): Promise<CrmOrder[]>;
   upsertCrmOrder(data: InsertCrmOrder): Promise<CrmOrder>;
@@ -678,6 +678,7 @@ export class DatabaseStorage implements IStorage {
           created_date: data.created_date,
           is_active: data.is_active,
           store_credit_balance: data.store_credit_balance,
+          address_type: data.address_type,
           updated_at: new Date(),
         },
       }).returning();
@@ -725,13 +726,11 @@ export class DatabaseStorage implements IStorage {
     primary_rep_id?: number | null;
     secondary_rep_id?: number | null;
     customer_type?: string;
-    address_type?: string;
   }): Promise<void> {
     const updates: Record<string, any> = { updated_at: new Date() };
     if ('primary_rep_id' in data) updates.primary_rep_id = data.primary_rep_id ?? null;
     if ('secondary_rep_id' in data) updates.secondary_rep_id = data.secondary_rep_id ?? null;
     if (data.customer_type !== undefined) updates.customer_type = data.customer_type;
-    if (data.address_type !== undefined) updates.address_type = data.address_type;
     await db.update(customersMirror).set(updates).where(eq(customersMirror.id, id));
   }
 
@@ -1004,10 +1003,12 @@ export class DatabaseStorage implements IStorage {
     const bcId = custRow[0].bc_id;
 
     const auditActions = [
-      'sales_rep_assigned', 'sales_rep_removed',
+      'sales_rep_assigned', 'sales_rep_removed', 'sales_rep_reassigned',
+      'primary_rep_assigned', 'primary_rep_changed', 'primary_rep_removed',
+      'secondary_rep_assigned', 'secondary_rep_changed', 'secondary_rep_removed',
+      'customer_type_changed', 'address_type_updated',
       'note_created', 'note_edited', 'note_deleted',
       'order_note_created', 'staff_note_updated', 'customer_note_updated',
-      'sales_rep_reassigned',
     ];
 
     const [orders, notes, auditRows] = await Promise.all([

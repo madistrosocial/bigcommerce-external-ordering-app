@@ -4775,7 +4775,7 @@ export async function registerRoutes(
       const primaryRepFilterExp = primaryRep === "unassigned" ? "unassigned" : (primaryRep ? parseInt(String(primaryRep)) : undefined) as number | "unassigned" | undefined;
       const secondaryRepFilterExp = secondaryRep === "unassigned" ? "unassigned" : (secondaryRep ? parseInt(String(secondaryRep)) : undefined) as number | "unassigned" | undefined;
       const customers = await storage.getAllCrmCustomersForExport({ search, group: group || undefined, state: state || undefined, health: health || undefined, customerType: customerType || undefined, addressType: addressType || undefined, primaryRep: primaryRepFilterExp, secondaryRep: secondaryRepFilterExp, sortBy, sortDir, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
-      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "State", "Customer Group", "Customer Type", "Address Type", "Primary Rep", "Secondary Rep", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Sales Rep", "Health Status"];
+      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "State", "Customer Group", "Customer Type", "Address Type", "Primary Rep", "Secondary Rep", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Health Status"];
       const rows = customers.map(c => {
         const addr = (c.shipping_address as any) ?? (c.billing_address as any) ?? {};
         return [
@@ -4794,7 +4794,6 @@ export async function registerRoutes(
           c.last_order_date ? new Date(c.last_order_date).toISOString().split("T")[0] : "",
           String(c.lifetime_orders ?? 0),
           String(c.lifetime_revenue ?? "0"),
-          (c as any).sales_rep_name ?? "",
           c.account_health ?? "Lost",
         ];
       });
@@ -4916,19 +4915,28 @@ export async function registerRoutes(
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const id = parseInt(req.params.id);
       if (!await assertCrmCustomerAccess(storage, id, userId, user.role, res)) return;
-      const { primary_rep_id, secondary_rep_id, customer_type, address_type } = req.body;
+      const { primary_rep_id, secondary_rep_id, customer_type } = req.body;
       if (customer_type !== undefined && !["Store", "Distributor"].includes(customer_type)) {
         return res.status(400).json({ error: "Invalid customer_type" });
       }
-      if (address_type !== undefined && !["Commercial", "Residential", "Unknown"].includes(address_type)) {
-        return res.status(400).json({ error: "Invalid address_type" });
-      }
-      const data: { primary_rep_id?: number | null; secondary_rep_id?: number | null; customer_type?: string; address_type?: string } = {};
+
+      // Load current state before update for timeline logging
+      const before = await storage.getCrmCustomerById(id);
+      if (!before) return res.status(404).json({ error: "Customer not found" });
+
+      const data: { primary_rep_id?: number | null; secondary_rep_id?: number | null; customer_type?: string } = {};
       if ('primary_rep_id' in req.body) data.primary_rep_id = primary_rep_id != null ? Number(primary_rep_id) : null;
       if ('secondary_rep_id' in req.body) data.secondary_rep_id = secondary_rep_id != null ? Number(secondary_rep_id) : null;
       if (customer_type !== undefined) data.customer_type = customer_type;
-      if (address_type !== undefined) data.address_type = address_type;
+
+      // Resolve old rep names before update
+      const [oldPrimaryUser, oldSecondaryUser] = await Promise.all([
+        (before as any).primary_rep_id ? storage.getUser((before as any).primary_rep_id) : Promise.resolve(null),
+        (before as any).secondary_rep_id ? storage.getUser((before as any).secondary_rep_id) : Promise.resolve(null),
+      ]);
+
       await storage.updateCrmCustomerMasterFields(id, data);
+
       // Keep customer_sales_rep in sync with primary_rep_id for visibility scoping
       if ('primary_rep_id' in data) {
         if (data.primary_rep_id) {
@@ -4936,15 +4944,58 @@ export async function registerRoutes(
         } else {
           await storage.removeCrmSalesRep(id);
         }
-        try {
-          await storage.createCrmAuditLog({
-            user_id: userId,
-            action: data.primary_rep_id ? "primary_rep_assigned" : "primary_rep_removed",
-            customer_id: id,
-            detail: { primary_rep_id: data.primary_rep_id },
-          });
-        } catch (_) {}
       }
+
+      // Resolve new rep names for logging
+      const [newPrimaryUser, newSecondaryUser] = await Promise.all([
+        ('primary_rep_id' in data && data.primary_rep_id) ? storage.getUser(data.primary_rep_id) : Promise.resolve(null),
+        ('secondary_rep_id' in data && data.secondary_rep_id) ? storage.getUser(data.secondary_rep_id) : Promise.resolve(null),
+      ]);
+
+      // Timeline + audit logging
+      const auditEntries: Promise<void>[] = [];
+
+      if ('primary_rep_id' in data) {
+        const oldName = oldPrimaryUser?.name ?? null;
+        const newName = newPrimaryUser?.name ?? null;
+        const oldId = (before as any).primary_rep_id ?? null;
+        const action = !oldId && data.primary_rep_id ? "primary_rep_assigned"
+          : oldId && !data.primary_rep_id ? "primary_rep_removed"
+          : "primary_rep_changed";
+        auditEntries.push(storage.createCrmAuditLog({
+          user_id: userId,
+          action,
+          customer_id: id,
+          detail: { old_value: oldName, new_value: newName },
+        }));
+      }
+
+      if ('secondary_rep_id' in data) {
+        const oldName = oldSecondaryUser?.name ?? null;
+        const newName = newSecondaryUser?.name ?? null;
+        const oldId = (before as any).secondary_rep_id ?? null;
+        const action = !oldId && data.secondary_rep_id ? "secondary_rep_assigned"
+          : oldId && !data.secondary_rep_id ? "secondary_rep_removed"
+          : "secondary_rep_changed";
+        auditEntries.push(storage.createCrmAuditLog({
+          user_id: userId,
+          action,
+          customer_id: id,
+          detail: { old_value: oldName, new_value: newName },
+        }));
+      }
+
+      if ('customer_type' in data && (before as any).customer_type !== data.customer_type) {
+        auditEntries.push(storage.createCrmAuditLog({
+          user_id: userId,
+          action: "customer_type_changed",
+          customer_id: id,
+          detail: { old_value: (before as any).customer_type ?? "Store", new_value: data.customer_type },
+        }));
+      }
+
+      await Promise.allSettled(auditEntries);
+
       const updated = await storage.getCrmCustomerById(id);
       res.json(updated);
     } catch (e: any) { res.status(500).json({ error: e.message }); }

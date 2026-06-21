@@ -1,0 +1,425 @@
+# CRM Customer Master Data Refinements
+
+## Objective
+
+Refine the recently deployed CRM Customer Master Data update before GitHub push and before Zoho CRM integration begins.
+
+This update focuses on:
+
+1. Customer Timeline / Activity logging
+2. Address Type handling
+3. Legacy Sales Rep cleanup
+4. CRM Customer List filter layout improvements
+
+Do not modify Zoho integration work.
+
+Do not modify existing permissions.
+
+Do not modify Store Credit, CRM Notes, General Notes, Customer Health, or Reactivation logic.
+
+---
+
+# 1. Customer Timeline & Activity Logging
+
+## Problem
+
+Changes to customer master data are currently not generating timeline/activity entries.
+
+This creates a lack of auditability.
+
+---
+
+## Requirement
+
+Any modification to customer master fields must generate:
+
+* CRM Timeline entry
+* CRM Activity entry
+* CRM Audit Log entry
+
+using the existing audit logging framework.
+
+---
+
+## Trigger Events
+
+### Primary Rep
+
+Create log when:
+
+```text
+Assigned
+Changed
+Removed
+```
+
+Examples:
+
+```text
+Primary Rep assigned:
+Test Agent
+
+Primary Rep changed:
+Test Agent → John Doe
+
+Primary Rep removed:
+John Doe
+```
+
+---
+
+### Secondary Rep
+
+Create log when:
+
+```text
+Assigned
+Changed
+Removed
+```
+
+Examples:
+
+```text
+Secondary Rep assigned:
+John Doe
+
+Secondary Rep changed:
+John Doe → Rose
+
+Secondary Rep removed:
+John Doe
+```
+
+---
+
+### Customer Type
+
+Create log when:
+
+```text
+Store → Distributor
+Distributor → Store
+```
+
+Example:
+
+```text
+Customer Type changed:
+Store → Distributor
+```
+
+---
+
+### Address Type
+
+If Address Type is changed via BigCommerce sync:
+
+Create informational activity entry:
+
+```text
+Address Type updated:
+Residential → Commercial
+Source: BigCommerce
+```
+
+---
+
+## Requirements
+
+All events should display:
+
+```text
+Date
+User
+Action
+Old Value
+New Value
+```
+
+using existing CRM timeline conventions.
+
+---
+
+# 2. Address Type Should Sync From BigCommerce
+
+## Problem
+
+Address Type is currently manually editable.
+
+This creates duplicate maintenance.
+
+BigCommerce already stores this value in the customer address book.
+
+---
+
+## Requirement
+
+Address Type becomes:
+
+```text
+Display Only
+```
+
+inside CRM.
+
+---
+
+## Source of Truth
+
+BigCommerce Address Book
+
+Field:
+
+```text
+Residential
+Commercial
+```
+
+---
+
+## CRM Behavior
+
+Display:
+
+```text
+Commercial
+Residential
+Unknown
+```
+
+but do not allow editing.
+
+Remove dropdown editing.
+
+Remove PATCH endpoint support.
+
+Remove manual update capability.
+
+---
+
+## Customer Sync
+
+During customer sync:
+
+```text
+BigCommerce
+↓
+Address Type
+↓
+CRM
+```
+
+should automatically update.
+
+---
+
+## Customer List
+
+Keep:
+
+```text
+Address Type Column
+Address Type Filter
+Address Type Export
+```
+
+These remain useful.
+
+---
+
+# 3. Legacy Sales Rep Cleanup
+
+## Problem
+
+Old Sales Rep field is still visible throughout the CRM.
+
+Primary Rep is already synchronizing into the existing backend visibility model.
+
+The old field is now redundant.
+
+---
+
+## Requirement
+
+Keep backend compatibility.
+
+Do NOT remove database support currently used by permissions.
+
+---
+
+## Remove From UI
+
+Remove:
+
+```text
+Sales Rep Column
+Sales Rep Filter
+Sales Rep Column Selector
+Sales Rep Display Field
+```
+
+from:
+
+* CRM Customer List
+* Column Chooser
+* Filters
+* Exports
+
+---
+
+## Replace With
+
+Only display:
+
+```text
+Primary Rep
+Secondary Rep
+```
+
+---
+
+## Backend
+
+Existing:
+
+```text
+customer_sales_rep
+```
+
+may continue to exist internally for permission enforcement.
+
+Do not remove backend compatibility.
+
+Only remove user-facing references.
+
+---
+
+# 4. CRM Customer List Filter Layout
+
+## Problem
+
+Filters currently wrap awkwardly.
+
+Clear button appears in the middle of filter groups.
+
+Creates poor UX.
+
+---
+
+## Requirement
+
+Keep all filters on a single row whenever screen width allows.
+
+---
+
+## Desired Order
+
+```text
+Search
+
+Customer Group
+State
+
+Primary Rep
+Secondary Rep
+
+Customer Type
+Address Type
+
+Clear
+```
+
+---
+
+## Responsive Behavior
+
+If viewport width becomes too small:
+
+```text
+Wrap gracefully to second row
+```
+
+but maintain logical ordering.
+
+---
+
+## Clear Button
+
+Move:
+
+```text
+Clear
+```
+
+to the far right end of the filter row.
+
+Never place it between filter groups.
+
+---
+
+# Testing Requirements
+
+Verify:
+
+### Timeline
+
+```text
+Primary Rep changes logged
+Secondary Rep changes logged
+Customer Type changes logged
+```
+
+---
+
+### Address Type
+
+```text
+No manual editing
+
+BigCommerce sync updates correctly
+```
+
+---
+
+### CRM List
+
+```text
+Legacy Sales Rep removed
+
+Primary Rep visible
+
+Secondary Rep visible
+```
+
+---
+
+### Filters
+
+```text
+Primary Rep filter works
+
+Secondary Rep filter works
+
+Customer Type filter works
+
+Address Type filter works
+
+Clear button works
+
+Layout responsive
+```
+
+---
+
+# Deliverables
+
+* Timeline logging updates
+* Audit logging updates
+* Address Type sync-only implementation
+* Legacy Sales Rep UI cleanup
+* Filter layout improvements
+* Testing
+* Documentation
+
+This refinement must be completed before GitHub push and before Zoho CRM integration begins.
