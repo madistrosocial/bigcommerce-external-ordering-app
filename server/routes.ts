@@ -4285,6 +4285,8 @@ export async function registerRoutes(
         for (const bc of bcCustomers) {
           const billing = bc.addresses?.find((a: any) => a.address_type === "commercial") ?? bc.addresses?.[0] ?? null;
           const shipping = bc.addresses?.find((a: any) => a.address_type === "residential") ?? null;
+          const primaryAddrType = bc.addresses?.[0]?.address_type;
+          const derivedAddressType = primaryAddrType === "residential" ? "Residential" : primaryAddrType === "commercial" ? "Commercial" : "Unknown";
           await storage.upsertCrmCustomer({
             bigcommerce_customer_id: bc.id,
             company: bc.company || null,
@@ -4299,6 +4301,7 @@ export async function registerRoutes(
             created_date: bc.date_created ? new Date(bc.date_created) : null,
             is_active: true,
             store_credit_balance: storeCreditMap[bc.id] ?? "0",
+            address_type: derivedAddressType,
           });
           synced++;
         }
@@ -4400,6 +4403,8 @@ export async function registerRoutes(
         for (const bc of bcCustomers) {
           const billing = bc.addresses?.find((a: any) => a.address_type === "commercial") ?? bc.addresses?.[0] ?? null;
           const shipping = bc.addresses?.find((a: any) => a.address_type === "residential") ?? null;
+          const primaryAddrType = bc.addresses?.[0]?.address_type;
+          const derivedAddressType = primaryAddrType === "residential" ? "Residential" : primaryAddrType === "commercial" ? "Commercial" : "Unknown";
           await storage.upsertCrmCustomer({
             bigcommerce_customer_id: bc.id,
             company: bc.company || null,
@@ -4414,6 +4419,7 @@ export async function registerRoutes(
             created_date: bc.date_created ? new Date(bc.date_created) : null,
             is_active: true,
             store_credit_balance: "0",
+            address_type: derivedAddressType,
           });
           synced++;
         }
@@ -4554,6 +4560,8 @@ export async function registerRoutes(
             for (const bc of bcCustomers) {
               const billing = bc.addresses?.find((a: any) => a.address_type === "commercial") ?? bc.addresses?.[0] ?? null;
               const shipping = bc.addresses?.find((a: any) => a.address_type === "residential") ?? null;
+              const primaryAddrType = bc.addresses?.[0]?.address_type;
+              const derivedAddressType = primaryAddrType === "residential" ? "Residential" : primaryAddrType === "commercial" ? "Commercial" : "Unknown";
               await storage.upsertCrmCustomer({
                 bigcommerce_customer_id: bc.id, company: bc.company || null,
                 first_name: bc.first_name || "", last_name: bc.last_name || "",
@@ -4564,6 +4572,7 @@ export async function registerRoutes(
                 shipping_address: shipping ? { street1: shipping.address1, street2: shipping.address2, city: shipping.city, state: shipping.state_or_province, zip: shipping.postal_code, country: shipping.country } : null,
                 created_date: bc.date_created ? new Date(bc.date_created) : null,
                 is_active: true, store_credit_balance: "0",
+                address_type: derivedAddressType,
               });
             }
             if (bcCustomers.length < 250) break;

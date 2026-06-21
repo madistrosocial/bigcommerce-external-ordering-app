@@ -785,7 +785,6 @@ export default function CustomerProfile() {
                         : customer.address_type === "Residential"
                         ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-orange-100 text-orange-700">Residential</span>
                         : <span className="text-slate-400 text-xs">Unknown</span>}
-                      <span className="text-[10px] text-slate-400 ml-1.5">(synced from BigCommerce)</span>
                     </span>
                   </div>
                 </div>
