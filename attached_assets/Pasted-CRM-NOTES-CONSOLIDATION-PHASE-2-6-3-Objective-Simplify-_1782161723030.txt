@@ -1,0 +1,225 @@
+CRM NOTES CONSOLIDATION
+PHASE 2.6.3
+
+Objective
+
+Simplify customer note management by merging the current "General Notes" tab into the existing "Notes" tab.
+
+Users should no longer have to decide whether information belongs in General Notes or Notes.
+
+The Notes tab becomes the single location for all customer-related notes.
+
+No data migration required.
+No data loss.
+No behavior changes to existing CRM notes.
+Existing BigCommerce customer note sync must remain fully intact.
+
+====================================================
+UI CHANGES
+====================================================
+
+Remove tab:
+
+- General Notes
+
+Keep tabs:
+
+- Overview
+- Orders
+- Notes
+- Timeline
+
+====================================================
+NEW NOTES TAB LAYOUT
+====================================================
+
+Inside the Notes tab:
+
+SECTION 1
+
+--------------------------------------------------
+CUSTOMER ACCOUNT NOTES
+(BigCommerce Customer Notes)
+--------------------------------------------------
+
+Display the current General Notes functionality here.
+
+Textarea:
+
+- Loads customer.notes from BigCommerce sync
+- Saves back to BigCommerce customer note
+- Existing sync behavior unchanged
+
+Show:
+
+Customer Account Notes
+Permanent account-level notes synced with BigCommerce.
+
+[textarea]
+
+[Save To BigCommerce]
+
+Optional:
+
+Last synced: {timestamp}
+
+Purpose:
+
+- Documents received
+- Licensing information
+- Permanent customer instructions
+- Internal account details
+- Customer preferences
+- Non-order-related notes
+
+====================================================
+
+SECTION 2
+
+--------------------------------------------------
+CRM NOTES
+--------------------------------------------------
+
+Move the entire current Notes section directly underneath.
+
+No functional changes.
+
+Keep:
+
+- Add Note button
+- Note categories
+- Edit
+- Delete
+- Filters
+- Existing permissions
+- Existing note history
+
+Types remain:
+
+- General
+- Follow Up
+- Sales
+- Issue
+- Credit
+- Replacement
+- Visit
+- Internal
+- Order Note
+
+No changes to database structure.
+
+====================================================
+RBAC
+====================================================
+
+Add new CRM permission:
+
+crm:edit_customer_notes
+
+Label:
+
+Edit Customer Account Notes
+
+Description:
+
+Can edit and save BigCommerce customer account notes.
+
+====================================================
+USER GROUP PERMISSIONS
+====================================================
+
+Add the same permission to User Groups.
+
+User Group:
+CRM Permissions
+
+Add:
+
+Edit Customer Account Notes
+
+====================================================
+USER PERMISSIONS
+====================================================
+
+Add the same permission to individual user permissions.
+
+User:
+CRM Permissions
+
+Add:
+
+Edit Customer Account Notes
+
+====================================================
+PERMISSION BEHAVIOR
+====================================================
+
+Users WITH permission:
+
+- Can edit textarea
+- Can click Save To BigCommerce
+
+Users WITHOUT permission:
+
+- Read-only textarea
+- Save button hidden
+- Can still view notes
+
+====================================================
+NO CHANGES
+====================================================
+
+Do NOT modify:
+
+- crm_customer_notes table
+- Timeline system
+- CRM note creation
+- CRM note edit/delete
+- CRM note categories
+- BigCommerce sync behavior
+- Existing audit logs
+
+====================================================
+OPTIONAL UI IMPROVEMENT
+====================================================
+
+Update Notes tab badge count.
+
+Current:
+
+Notes (15)
+
+New:
+
+Notes (15)
+
+Count remains CRM note count only.
+
+Do not include account note count for now.
+
+====================================================
+SUCCESS CRITERIA
+====================================================
+
+1. General Notes tab removed.
+
+2. Notes tab becomes single source for all notes.
+
+3. Customer Account Notes section appears at the top.
+
+4. CRM Notes section appears underneath.
+
+5. BigCommerce sync continues working exactly as before.
+
+6. New permission:
+   crm:edit_customer_notes
+
+7. Permission available in:
+   - User Groups
+   - User Management
+
+8. Users without permission can view but cannot edit account notes.
+
+9. No database schema changes required.
+
+10. No existing notes are lost.

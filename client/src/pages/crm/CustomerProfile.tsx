@@ -397,7 +397,7 @@ function OrdersTable({ orders, onRowClick }: { orders: any[]; onRowClick: (o: an
 
 // ─── Tab type ─────────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "orders" | "notes" | "timeline" | "bc-notes";
+type Tab = "overview" | "orders" | "notes" | "timeline";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main Component
@@ -411,10 +411,11 @@ export default function CustomerProfile() {
   const queryClient = useQueryClient();
   const id = parseInt(params.id);
 
-  const canCreateNote = hasPermission("crm", "add_note");
-  const canEditNote   = hasPermission("crm", "notes_edit");
-  const canDeleteNote = hasPermission("crm", "notes_delete");
-  const canAssignRep  = hasPermission("crm", "assign_rep");
+  const canCreateNote    = hasPermission("crm", "add_note");
+  const canEditNote      = hasPermission("crm", "notes_edit");
+  const canDeleteNote    = hasPermission("crm", "notes_delete");
+  const canAssignRep     = hasPermission("crm", "assign_rep");
+  const canEditBcNotes   = hasPermission("crm", "edit_customer_notes");
 
   const [activeTab, setActiveTab]           = useState<Tab>("overview");
   const [showAddNote, setShowAddNote]       = useState(false);
@@ -482,7 +483,7 @@ export default function CustomerProfile() {
       if (!r.ok) throw new Error("Failed to load BC notes");
       return r.json() as Promise<{ generalNotes: string; crmHistory: string; raw: string }>;
     },
-    enabled: activeTab === "bc-notes",
+    enabled: activeTab === "notes",
   });
 
   const { data: crmUsers = [] } = useQuery({
@@ -593,9 +594,9 @@ export default function CustomerProfile() {
     }
   }, [bcNotesData]);
 
-  // Reset edit buffer when tab changes away from bc-notes
+  // Reset edit buffer when tab changes away from notes
   useEffect(() => {
-    if (activeTab !== "bc-notes") setGeneralNotesEdit(null);
+    if (activeTab !== "notes") setGeneralNotesEdit(null);
   }, [activeTab]);
 
   // ── Loading / Error ───────────────────────────────────────────────────────────
@@ -664,7 +665,6 @@ export default function CustomerProfile() {
     { id: "orders",    label: "Orders",    icon: <ShoppingBag className="h-3.5 w-3.5" />, count: allOrders.length || undefined },
     { id: "notes",     label: "Notes",     icon: <MessageSquare className="h-3.5 w-3.5" />, count: (notes as any[]).length || undefined },
     { id: "timeline",  label: "Timeline",  icon: <Clock className="h-3.5 w-3.5" /> },
-    { id: "bc-notes",  label: "General Notes", icon: <BookOpen className="h-3.5 w-3.5" /> },
   ];
 
   return (
@@ -1034,10 +1034,53 @@ export default function CustomerProfile() {
           {/* ── NOTES TAB ─────────────────────────────────────────────────── */}
           {activeTab === "notes" && (
             <div>
+
+              {/* ── SECTION 1: Customer Account Notes (BigCommerce) ────────── */}
+              <div className="border-b">
+                <div className="px-4 py-3 bg-slate-50 flex items-center justify-between gap-3 flex-wrap border-b">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                      <BookOpen className="h-4 w-4 text-slate-400" />
+                      Customer Account Notes
+                    </h2>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Permanent account-level notes synced with BigCommerce.
+                    </p>
+                  </div>
+                  {canEditBcNotes && (
+                    <Button
+                      size="sm"
+                      className="h-7 text-xs gap-1.5 shrink-0"
+                      onClick={handleSaveBcNotes}
+                      disabled={savingBcNotes || loadingBcNotes || generalNotesEdit === null || generalNotesEdit === (bcNotesData?.generalNotes ?? "")}
+                      data-testid="btn-save-bc-notes"
+                    >
+                      <Save className="h-3.5 w-3.5" />
+                      {savingBcNotes ? "Saving…" : "Save To BigCommerce"}
+                    </Button>
+                  )}
+                </div>
+                {loadingBcNotes ? (
+                  <div className="flex items-center justify-center h-24 text-slate-400 text-sm">Loading from BigCommerce…</div>
+                ) : (
+                  <div className="p-4">
+                    <Textarea
+                      data-testid="textarea-general-notes"
+                      value={generalNotesEdit ?? ""}
+                      onChange={e => canEditBcNotes && setGeneralNotesEdit(e.target.value)}
+                      readOnly={!canEditBcNotes}
+                      placeholder={canEditBcNotes ? "Enter general account notes here…" : "No account notes."}
+                      className={`min-h-[140px] text-sm font-mono resize-y w-full ${!canEditBcNotes ? "bg-slate-50 cursor-default" : ""}`}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* ── SECTION 2: CRM Notes ───────────────────────────────────── */}
               <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
                   <MessageSquare className="h-4 w-4 text-slate-400" />
-                  Notes {(notes as any[]).length > 0 && <span className="text-xs font-normal text-slate-400">({(notes as any[]).length})</span>}
+                  CRM Notes {(notes as any[]).length > 0 && <span className="text-xs font-normal text-slate-400">({(notes as any[]).length})</span>}
                 </h2>
                 {canCreateNote && (
                   <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowAddNote(true)} data-testid="btn-add-note-tab">
@@ -1147,75 +1190,6 @@ export default function CustomerProfile() {
             </div>
           )}
 
-          {/* ── GENERAL NOTES (BC) TAB ────────────────────────────────────── */}
-          {activeTab === "bc-notes" && (
-            <div>
-              {/* Header */}
-              <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between gap-3 flex-wrap">
-                <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                  <BookOpen className="h-4 w-4 text-slate-400" />
-                  BigCommerce Customer Notes
-                  <span className="text-[11px] font-normal text-slate-400 ml-1">Synced to &amp; from BigCommerce</span>
-                </h2>
-                <Button
-                  size="sm"
-                  className="h-7 text-xs gap-1.5"
-                  onClick={handleSaveBcNotes}
-                  disabled={savingBcNotes || loadingBcNotes || generalNotesEdit === null || generalNotesEdit === (bcNotesData?.generalNotes ?? "")}
-                  data-testid="btn-save-bc-notes"
-                >
-                  <Save className="h-3.5 w-3.5" />
-                  {savingBcNotes ? "Saving…" : "Save to BigCommerce"}
-                </Button>
-              </div>
-
-              {loadingBcNotes ? (
-                <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Loading from BigCommerce…</div>
-              ) : (
-                <div className="p-5 space-y-5">
-                  {/* Editable: General Notes */}
-                  <div>
-                    <Label className="text-xs text-slate-600 font-semibold uppercase tracking-wide mb-1.5 block">
-                      Customer General Notes
-                    </Label>
-                    <p className="text-[11px] text-slate-400 mb-2">
-                      Permanent account-level notes visible to your team. Saved directly to the BigCommerce customer record.
-                    </p>
-                    <Textarea
-                      data-testid="textarea-general-notes"
-                      value={generalNotesEdit ?? ""}
-                      onChange={e => setGeneralNotesEdit(e.target.value)}
-                      placeholder="Enter general account notes here…"
-                      className="min-h-[180px] text-sm font-mono resize-y"
-                    />
-                  </div>
-
-                  {/* Read-only: CRM History */}
-                  <div>
-                    <Label className="text-xs text-slate-600 font-semibold uppercase tracking-wide mb-1.5 block">
-                      CRM History
-                    </Label>
-                    <p className="text-[11px] text-slate-400 mb-2">
-                      Auto-appended when CRM notes are created (General, Sales, Follow Up, Issue, Internal types). Read-only here.
-                    </p>
-                    {(bcNotesData?.crmHistory ?? "").trim() === "" ? (
-                      <div className="rounded-lg border border-dashed bg-slate-50 flex flex-col items-center justify-center py-8 text-slate-400 text-xs gap-1">
-                        <Clock className="h-5 w-5 opacity-30" />
-                        No CRM history yet — create a customer note to begin
-                      </div>
-                    ) : (
-                      <pre
-                        data-testid="text-crm-history"
-                        className="bg-slate-50 border rounded-lg p-4 text-xs text-slate-600 font-mono whitespace-pre-wrap break-words max-h-[400px] overflow-y-auto leading-relaxed"
-                      >
-                        {bcNotesData?.crmHistory ?? ""}
-                      </pre>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
         </div>
       </div>

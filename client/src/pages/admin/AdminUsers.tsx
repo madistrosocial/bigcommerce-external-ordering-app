@@ -56,10 +56,11 @@ export const MODULES = [
 ];
 
 export const CRM_ACTION_PERMS = [
-  { module: "crm", action: "view_all",    label: "View All Customers",  description: "Can see all customers. Without this, only assigned customers are visible." },
-  { module: "crm", action: "assign_rep",  label: "Assign Sales Rep",    description: "Can assign or remove a sales rep from a customer." },
-  { module: "crm", action: "export",      label: "Export CRM Data",     description: "Can export the customer list to CSV or Excel." },
-  { module: "crm", action: "add_note",    label: "Add CRM Notes",       description: "Can create CRM customer notes." },
+  { module: "crm", action: "view_all",           label: "View All Customers",        description: "Can see all customers. Without this, only assigned customers are visible." },
+  { module: "crm", action: "assign_rep",         label: "Assign Sales Rep",          description: "Can assign or remove a sales rep from a customer." },
+  { module: "crm", action: "export",             label: "Export CRM Data",           description: "Can export the customer list to CSV or Excel." },
+  { module: "crm", action: "add_note",           label: "Add CRM Notes",             description: "Can create CRM customer notes." },
+  { module: "crm", action: "edit_customer_notes", label: "Edit Customer Account Notes", description: "Can edit and save BigCommerce customer account notes." },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
