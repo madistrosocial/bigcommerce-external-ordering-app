@@ -411,7 +411,7 @@ export default function CustomerProfile() {
   const queryClient = useQueryClient();
   const id = parseInt(params.id);
 
-  const canCreateNote = hasPermission("crm", "notes_create");
+  const canCreateNote = hasPermission("crm", "add_note");
   const canEditNote   = hasPermission("crm", "notes_edit");
   const canDeleteNote = hasPermission("crm", "notes_delete");
   const canAssignRep  = hasPermission("crm", "assign_rep");

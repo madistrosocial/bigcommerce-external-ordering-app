@@ -119,7 +119,7 @@ export interface IStorage {
   // CRM Reactivation
   getReactivationCustomers(opts: { search?: string; group?: string; state?: string; health?: string; rep?: number; sortBy?: string; sortDir?: string; limit?: number; offset?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }>;
   // CRM Metrics
-  getCrmMetrics(opts: { search?: string; group?: string; state?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }>;
+  getCrmMetrics(opts: { search?: string; group?: string; state?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; customerType?: string; addressType?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }>;
   // CRM Users list
   getCrmUsers(): Promise<{ id: number; name: string }[]>;
   // CRM Order Notes (mirror update)
@@ -563,6 +563,22 @@ export class DatabaseStorage implements IStorage {
         return sortDir === "asc"
           ? sql`${customersMirror.last_order_date} DESC NULLS LAST`
           : sql`${customersMirror.last_order_date} ASC NULLS LAST`;
+      case "customer_type":
+        return sortDir === "asc"
+          ? sql`${customersMirror.customer_type} ASC NULLS LAST`
+          : sql`${customersMirror.customer_type} DESC NULLS LAST`;
+      case "address_type":
+        return sortDir === "asc"
+          ? sql`${customersMirror.address_type} ASC NULLS LAST`
+          : sql`${customersMirror.address_type} DESC NULLS LAST`;
+      case "primary_rep_name":
+        return sortDir === "asc"
+          ? sql`primary_rep_user.name ASC NULLS LAST`
+          : sql`primary_rep_user.name DESC NULLS LAST`;
+      case "secondary_rep_name":
+        return sortDir === "asc"
+          ? sql`secondary_rep_user.name ASC NULLS LAST`
+          : sql`secondary_rep_user.name DESC NULLS LAST`;
       default:
         return sortDir === "asc"
           ? sql`${customersMirror.last_order_date} ASC NULLS LAST`
@@ -1126,9 +1142,9 @@ export class DatabaseStorage implements IStorage {
 
   // ─── CRM Metrics ──────────────────────────────────────────────────────────────
 
-  async getCrmMetrics(opts: { search?: string; group?: string; state?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }> {
-    const { search, group, state, assignedRep, visibilityScope, visibilityUserId } = opts;
-    const baseWhere = this.buildCrmWhereClause(search, group, state);
+  async getCrmMetrics(opts: { search?: string; group?: string; state?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; customerType?: string; addressType?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }> {
+    const { search, group, state, primaryRep, secondaryRep, customerType, addressType, assignedRep, visibilityScope, visibilityUserId } = opts;
+    const baseWhere = this.buildCrmWhereClause(search, group, state, undefined, customerType, addressType, primaryRep, secondaryRep);
     const repConds = this.buildCrmRepConditions(assignedRep, visibilityScope, visibilityUserId);
     const needsRepJoin = repConds.length > 0;
     const allConds = [...(baseWhere ? [baseWhere] : []), ...repConds];

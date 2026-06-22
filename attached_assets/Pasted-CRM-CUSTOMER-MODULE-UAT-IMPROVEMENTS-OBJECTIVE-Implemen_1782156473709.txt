@@ -1,0 +1,310 @@
+CRM CUSTOMER MODULE - UAT IMPROVEMENTS
+
+OBJECTIVE
+
+Implement the following CRM enhancements identified during production UAT.
+
+IMPORTANT
+
+Do NOT create any new database tables.
+
+Do NOT create any new database columns.
+
+Do NOT create any migrations.
+
+Filter persistence must be handled entirely on the frontend using localStorage.
+
+This update should be a lightweight CRM UX and permission enhancement only.
+
+==================================================
+
+1. CRM CUSTOMER FILTER PERSISTENCE
+   ==================================================
+
+PROBLEM
+
+Users filter CRM Customers by:
+
+* Search
+* Customer Group
+* State
+* Primary Rep
+* Secondary Rep
+* Customer Type
+* Address Type
+
+When they open a customer profile and return to CRM Customers, all filters are lost.
+
+Support reps repeatedly rebuild the same filters.
+
+REQUIRED BEHAVIOR
+
+Persist the following per user:
+
+* Search
+* Customer Group
+* State
+* Primary Rep
+* Secondary Rep
+* Customer Type
+* Address Type
+* Sort Column
+* Sort Direction
+* Current Page
+* Filter Drawer Open/Closed State
+
+IMPLEMENTATION
+
+Use localStorage only.
+
+Recommended key:
+
+crm_customers_filters_{userId}
+
+Filters should survive:
+
+* Customer profile navigation
+* Browser refresh
+* Logout/Login
+
+Filters should only reset when user explicitly clicks:
+
+Clear Filters
+
+==================================================
+2. CRM CUSTOMER FILTER DRAWER
+=============================
+
+PROBLEM
+
+CRM Customer filters permanently occupy screen space.
+
+CRM Notes already has a better UX.
+
+REQUIRED BEHAVIOR
+
+Match CRM Notes module behavior.
+
+Default state:
+
+[ Filters ]
+
+Filters hidden.
+
+When clicked:
+
+Expand filter section.
+
+Show:
+
+* Search
+* Customer Group
+* State
+* Primary Rep
+* Secondary Rep
+* Customer Type
+* Address Type
+* Clear Filters
+
+When collapsed:
+
+Only Filters button remains visible.
+
+MOBILE
+
+Must match CRM Notes behavior.
+
+This is especially important for mobile users.
+
+==================================================
+3. CRM CUSTOMER SUMMARY CARDS FIX
+=================================
+
+CURRENT BUG
+
+The following filters:
+
+* Primary Rep
+* Secondary Rep
+* Customer Type
+* Address Type
+
+correctly filter the customer grid but do NOT update:
+
+* Total
+* Healthy
+* Watch
+* At Risk
+* Lost
+
+cards.
+
+REQUIRED BEHAVIOR
+
+All active filters must participate in card calculations.
+
+Cards must always represent the exact filtered dataset currently displayed.
+
+Example:
+
+Filter:
+
+Primary Rep = John
+
+Cards should only calculate from John's customers.
+
+==================================================
+4. CRM CUSTOMER SORTING FIX
+===========================
+
+CURRENT BUG
+
+The following columns are not sortable:
+
+* Primary Rep
+* Secondary Rep
+* Customer Type
+* Address Type
+
+REQUIRED BEHAVIOR
+
+Match existing sortable columns.
+
+Support:
+
+* Ascending
+* Descending
+
+Display sort indicators.
+
+Sorting should persist through filter persistence.
+
+==================================================
+5. CRM NOTES PERMISSION
+=======================
+
+CURRENT ISSUE
+
+Only admins can create CRM customer notes.
+
+REQUIRED
+
+Add new permission:
+
+crm:add_note
+
+DESCRIPTION
+
+Can create CRM customer notes.
+
+==================================================
+6. USER GROUP PERMISSION
+========================
+
+Add new permission under:
+
+User Groups
+→ CRM Permissions
+
+Permission:
+
+Add CRM Notes
+
+Group admins should be able to enable/disable note creation for entire groups.
+
+==================================================
+7. USER PERMISSION
+==================
+
+Add new permission under:
+
+User Management
+→ CRM Permissions
+
+Permission:
+
+Add CRM Notes
+
+User-specific override should work exactly like existing CRM permissions.
+
+==================================================
+8. CUSTOMER PROFILE NOTE BUTTON
+===============================
+
+If user has:
+
+crm:add_note
+
+Show:
+
+* Add Note
+
+Allow creation of:
+
+* General
+* Follow Up
+* Sales
+* Issue
+* Credit
+* Replacement
+* Visit
+* Internal
+* Order Note
+
+If user lacks permission:
+
+Hide:
+
+* Add Note
+
+User may still view notes if they have CRM access.
+
+==================================================
+9. STATE RESTORATION TEST
+=========================
+
+Verify this workflow:
+
+CRM Customers
+
+Apply:
+
+* Primary Rep
+* State
+* Customer Type
+
+Navigate to:
+
+Customer Profile
+
+Return to:
+
+CRM Customers
+
+Expected:
+
+* Same filters
+* Same page
+* Same sorting
+* Same drawer state
+
+Nothing resets.
+
+==================================================
+10. DELIVERABLE
+===============
+
+Provide:
+
+1. Files modified
+2. New permission keys added
+3. Frontend localStorage keys used
+4. Manual QA checklist
+5. Confirmation that:
+
+* No new tables were created
+* No new columns were created
+* No migrations were created
+* Existing CRM functionality remains intact
+
+Maintain full backward compatibility with production data.

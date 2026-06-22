@@ -5351,11 +5351,13 @@ export async function registerRoutes(
       const user = (req as any).authUser;
       const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
-      const { search = "", group = "", state = "", assignedRep = "" } = req.query as Record<string, string>;
+      const { search = "", group = "", state = "", assignedRep = "", primaryRep = "", secondaryRep = "", customerType = "", addressType = "" } = req.query as Record<string, string>;
       const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
       const visScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
       const repFilter = assignedRep === "unassigned" ? "unassigned" : (assignedRep ? parseInt(String(assignedRep)) : undefined) as number | "unassigned" | undefined;
-      const metrics = await storage.getCrmMetrics({ search, group, state, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
+      const primaryRepFilter = primaryRep === "unassigned" ? "unassigned" : (primaryRep ? parseInt(String(primaryRep)) : undefined) as number | "unassigned" | undefined;
+      const secondaryRepFilter = secondaryRep === "unassigned" ? "unassigned" : (secondaryRep ? parseInt(String(secondaryRep)) : undefined) as number | "unassigned" | undefined;
+      const metrics = await storage.getCrmMetrics({ search, group, state, primaryRep: primaryRepFilter, secondaryRep: secondaryRepFilter, customerType: customerType || undefined, addressType: addressType || undefined, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
       res.json(metrics);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });

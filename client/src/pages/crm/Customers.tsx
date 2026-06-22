@@ -13,14 +13,15 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import {
   Search, FileText, FileSpreadsheet, ArrowUp, ArrowDown, ArrowUpDown,
   ChevronLeft, ChevronRight, User, Settings2, X, Users, AlertTriangle,
-  TrendingUp, HeartPulse, Activity, Phone, Mail,
+  TrendingUp, HeartPulse, Activity, Phone, Mail, Filter,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
 type SortField =
   | "company" | "first_name" | "state" | "customer_group_name"
-  | "last_order_date" | "days_since_order" | "lifetime_orders" | "lifetime_revenue";
+  | "last_order_date" | "days_since_order" | "lifetime_orders" | "lifetime_revenue"
+  | "primary_rep_name" | "secondary_rep_name" | "customer_type" | "address_type";
 
 type HealthFilter = "" | "Healthy" | "Watch" | "At Risk" | "Lost";
 
@@ -141,8 +142,9 @@ export default function CRMCustomers() {
   const { hasPermission } = usePermissions();
   const canExport = hasPermission("crm", "export");
 
-  const colKey   = `crm_cols_v2_${currentUser?.id ?? "guest"}`;
-  const widthKey = `crm_col_widths_v1_${currentUser?.id ?? "guest"}`;
+  const colKey    = `crm_cols_v2_${currentUser?.id ?? "guest"}`;
+  const widthKey  = `crm_col_widths_v1_${currentUser?.id ?? "guest"}`;
+  const filterKey = `crm_customers_filters_${currentUser?.id ?? "guest"}`;
 
   // ── Column visibility ─────────────────────────────────────────────────────
   const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(() => {
@@ -202,20 +204,40 @@ export default function CRMCustomers() {
   }, [colWidths, widthKey]);
 
   // ── Filters / sort / pagination ───────────────────────────────────────────
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [group, setGroup] = useState("");
-  const [stateFilter, setStateFilter] = useState("");
-  const [primaryRepFilter, setPrimaryRepFilter]     = useState("");
-  const [secondaryRepFilter, setSecondaryRepFilter] = useState("");
-  const [customerTypeFilter, setCustomerTypeFilter] = useState("");
-  const [addressTypeFilter, setAddressTypeFilter]   = useState("");
-  const [healthFilter, setHealthFilter] = useState<HealthFilter>("");
-  const [sortBy, setSortBy] = useState<SortField>("last_order_date");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [page, setPage] = useState(1);
+  // Load persisted filter state from localStorage once on mount
+  const savedFilters = (() => {
+    try { const raw = localStorage.getItem(filterKey); if (raw) return JSON.parse(raw); } catch {}
+    return {};
+  })();
+
+  const [showFilters, setShowFilters] = useState<boolean>(() => savedFilters.showFilters ?? false);
+  const [search, setSearch] = useState<string>(() => savedFilters.search ?? "");
+  const [debouncedSearch, setDebouncedSearch] = useState<string>(() => savedFilters.search ?? "");
+  const [group, setGroup] = useState<string>(() => savedFilters.group ?? "");
+  const [stateFilter, setStateFilter] = useState<string>(() => savedFilters.state ?? "");
+  const [primaryRepFilter, setPrimaryRepFilter]     = useState<string>(() => savedFilters.primaryRep ?? "");
+  const [secondaryRepFilter, setSecondaryRepFilter] = useState<string>(() => savedFilters.secondaryRep ?? "");
+  const [customerTypeFilter, setCustomerTypeFilter] = useState<string>(() => savedFilters.customerType ?? "");
+  const [addressTypeFilter, setAddressTypeFilter]   = useState<string>(() => savedFilters.addressType ?? "");
+  const [healthFilter, setHealthFilter] = useState<HealthFilter>(() => savedFilters.healthFilter ?? "");
+  const [sortBy, setSortBy] = useState<SortField>(() => savedFilters.sortBy ?? "last_order_date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(() => savedFilters.sortDir ?? "desc");
+  const [page, setPage] = useState<number>(() => savedFilters.page ?? 1);
   const [exporting, setExporting] = useState<"csv" | "xlsx" | null>(null);
   const [showColMenu, setShowColMenu] = useState(false);
+
+  // Persist filter state to localStorage whenever anything changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(filterKey, JSON.stringify({
+        showFilters, search, group, state: stateFilter,
+        primaryRep: primaryRepFilter, secondaryRep: secondaryRepFilter,
+        customerType: customerTypeFilter, addressType: addressTypeFilter,
+        healthFilter, sortBy, sortDir, page,
+      }));
+    } catch {}
+  }, [showFilters, search, group, stateFilter, primaryRepFilter, secondaryRepFilter,
+      customerTypeFilter, addressTypeFilter, healthFilter, sortBy, sortDir, page, filterKey]);
 
   const debounce = useCallback((val: string) => {
     setSearch(val);
@@ -265,11 +287,15 @@ export default function CRMCustomers() {
   });
 
   const { data: metrics } = useQuery({
-    queryKey: ["crm", "metrics", debouncedSearch, group, stateFilter],
+    queryKey: ["crm", "metrics", debouncedSearch, group, stateFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter],
     queryFn: async () => {
       const params = new URLSearchParams({ search: debouncedSearch });
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
+      if (primaryRepFilter) params.set("primaryRep", primaryRepFilter);
+      if (secondaryRepFilter) params.set("secondaryRep", secondaryRepFilter);
+      if (customerTypeFilter) params.set("customerType", customerTypeFilter);
+      if (addressTypeFilter) params.set("addressType", addressTypeFilter);
       const r = await fetch(`/api/crm/metrics?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load metrics");
       return r.json() as Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }>;
@@ -332,7 +358,21 @@ export default function CRMCustomers() {
   };
 
   const activeFilterCount = [group, stateFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter].filter(Boolean).length;
-  const hasAnyFilter = activeFilterCount > 0 || !!healthFilter;
+  const hasAnyFilter = activeFilterCount > 0 || !!healthFilter || !!debouncedSearch;
+
+  const clearAllFilters = () => {
+    setSearch("");
+    clearTimeout((window as any).__crmSearchTimer);
+    setDebouncedSearch("");
+    setGroup("");
+    setStateFilter("");
+    setHealthFilter("");
+    setPrimaryRepFilter("");
+    setSecondaryRepFilter("");
+    setCustomerTypeFilter("");
+    setAddressTypeFilter("");
+    setPage(1);
+  };
 
   // ── Table helpers ─────────────────────────────────────────────────────────
   const thBase = "relative px-3 py-2.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap select-none";
@@ -413,9 +453,7 @@ export default function CRMCustomers() {
       )}
 
       {/* ── Header ───────────────────────────────────────────────────────────── */}
-      <div className="border-b bg-white px-4 py-3 shrink-0 space-y-2">
-
-        {/* Row 1: title + action buttons — all 3 buttons always in one row */}
+      <div className="border-b bg-white px-4 py-3 shrink-0">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-lg font-bold text-slate-800">CRM Customers</h1>
@@ -462,148 +500,167 @@ export default function CRMCustomers() {
                 </Button>
               </>
             )}
-          </div>
-        </div>
 
-        {/* Row 2 (mobile: search) / Row 2 (desktop: search + filters inline) */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-
-          {/* Search — full width on mobile, fixed on desktop */}
-          <div className="relative sm:shrink-0">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-            <Input
-              data-testid="input-crm-search"
-              value={search}
-              onChange={e => debounce(e.target.value)}
-              placeholder="Search company, customer name, email, phone…"
-              className="pl-8 h-8 text-sm w-full sm:w-[320px]"
-            />
-          </div>
-
-          {/* Filters — always one horizontal row on both mobile and desktop */}
-          <div className="flex items-center gap-1.5 min-w-0 flex-1">
-            <Select value={group || "__all__"} onValueChange={v => setGroupFilter(v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-40" data-testid="select-group-filter">
-                <SelectValue placeholder="All Groups" />
-              </SelectTrigger>
-              <SelectContent className="min-w-[min(280px,calc(100vw-2rem))]">
-                <SelectItem value="__all__">All Groups</SelectItem>
-                {(filterOpts?.groups ?? []).map(g => (
-                  <SelectItem key={g} value={g}>{g}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={stateFilter || "__all__"} onValueChange={v => setStateFilterVal(v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-36" data-testid="select-state-filter">
-                <SelectValue placeholder="All States" />
-              </SelectTrigger>
-              <SelectContent className="min-w-[min(280px,calc(100vw-2rem))] max-h-[300px]">
-                <SelectItem value="__all__">All States</SelectItem>
-                <SelectItem value="Unknown">Unknown / Intl</SelectItem>
-                {(() => {
-                  const US_STATES = new Set([
-                    "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut",
-                    "Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa",
-                    "Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan",
-                    "Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada",
-                    "New Hampshire","New Jersey","New Mexico","New York","North Carolina",
-                    "North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island",
-                    "South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont",
-                    "Virginia","Washington","West Virginia","Wisconsin","Wyoming",
-                    "District of Columbia","Washington DC",
-                    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN",
-                    "IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV",
-                    "NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN",
-                    "TX","UT","VT","VA","WA","WV","WI","WY","DC",
-                  ]);
-                  const allStates = filterOpts?.states ?? [];
-                  const usStates = allStates.filter(s => US_STATES.has(s)).sort((a, b) => a.localeCompare(b));
-                  const intlStates = allStates.filter(s => !US_STATES.has(s)).sort((a, b) => a.localeCompare(b));
-                  return (
-                    <>
-                      {usStates.length > 0 && (
-                        <SelectGroup>
-                          <SelectLabel className="text-[11px] text-slate-400 uppercase tracking-wide">United States</SelectLabel>
-                          {usStates.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                        </SelectGroup>
-                      )}
-                      {intlStates.length > 0 && (
-                        <SelectGroup>
-                          <SelectLabel className="text-[11px] text-slate-400 uppercase tracking-wide">International</SelectLabel>
-                          {intlStates.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                        </SelectGroup>
-                      )}
-                    </>
-                  );
-                })()}
-              </SelectContent>
-            </Select>
-
-            <Select value={primaryRepFilter || "__all__"} onValueChange={v => setPrimaryRepFilterVal(v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-36" data-testid="select-primary-rep-filter">
-                <SelectValue placeholder="Primary Rep" />
-              </SelectTrigger>
-              <SelectContent className="min-w-[min(220px,calc(100vw-2rem))]">
-                <SelectItem value="__all__">All Primary Reps</SelectItem>
-                <SelectItem value="unassigned">Unassigned</SelectItem>
-                {activeUsers.map(r => (
-                  <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={secondaryRepFilter || "__all__"} onValueChange={v => setSecondaryRepFilterVal(v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-36" data-testid="select-secondary-rep-filter">
-                <SelectValue placeholder="Secondary Rep" />
-              </SelectTrigger>
-              <SelectContent className="min-w-[min(220px,calc(100vw-2rem))]">
-                <SelectItem value="__all__">All Secondary Reps</SelectItem>
-                <SelectItem value="unassigned">Unassigned</SelectItem>
-                {activeUsers.map(r => (
-                  <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={customerTypeFilter || "__all__"} onValueChange={v => setCustomerTypeFilterVal(v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-32" data-testid="select-customer-type-filter">
-                <SelectValue placeholder="All Types" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All Types</SelectItem>
-                <SelectItem value="Store">Store</SelectItem>
-                <SelectItem value="Distributor">Distributor</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={addressTypeFilter || "__all__"} onValueChange={v => setAddressTypeFilterVal(v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8 text-xs flex-1 min-w-0 sm:flex-none sm:w-36" data-testid="select-address-type-filter">
-                <SelectValue placeholder="All Addr. Types" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All Addr. Types</SelectItem>
-                <SelectItem value="Commercial">Commercial</SelectItem>
-                <SelectItem value="Residential">Residential</SelectItem>
-                <SelectItem value="Unknown">Unknown</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {hasAnyFilter && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="shrink-0 h-8 text-xs text-slate-500 gap-1 px-2 ml-auto"
-                onClick={() => { setGroupFilter(""); setStateFilterVal(""); setHealthFilter(""); setPrimaryRepFilterVal(""); setSecondaryRepFilterVal(""); setCustomerTypeFilterVal(""); setAddressTypeFilterVal(""); }}
-                data-testid="btn-clear-filters"
-              >
-                <X className="h-3 w-3" />
-                <span className="hidden sm:inline">Clear</span>
-              </Button>
-            )}
+            <Button
+              size="sm"
+              variant={showFilters ? "default" : "outline"}
+              className="h-8 text-xs gap-1 relative"
+              onClick={() => setShowFilters(v => !v)}
+              data-testid="btn-toggle-filters"
+            >
+              <Filter className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Filters</span>
+              {hasAnyFilter && (
+                <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-blue-500 border border-white" />
+              )}
+            </Button>
           </div>
         </div>
       </div>
+
+      {/* ── Filter drawer ─────────────────────────────────────────────────────── */}
+      {showFilters && (
+        <div className="border-b bg-white px-4 pb-3 pt-2 shrink-0">
+          <div className="bg-slate-50 border rounded-xl p-3 space-y-2.5">
+
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input
+                data-testid="input-crm-search"
+                value={search}
+                onChange={e => debounce(e.target.value)}
+                placeholder="Search company, customer name, email, phone…"
+                className="pl-8 h-8 text-sm w-full"
+              />
+            </div>
+
+            {/* Filter dropdowns */}
+            <div className="flex flex-wrap gap-2">
+              <Select value={group || "__all__"} onValueChange={v => setGroupFilter(v === "__all__" ? "" : v)}>
+                <SelectTrigger className="h-8 text-xs w-44" data-testid="select-group-filter">
+                  <SelectValue placeholder="All Groups" />
+                </SelectTrigger>
+                <SelectContent className="min-w-[min(280px,calc(100vw-2rem))]">
+                  <SelectItem value="__all__">All Groups</SelectItem>
+                  {(filterOpts?.groups ?? []).map(g => (
+                    <SelectItem key={g} value={g}>{g}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={stateFilter || "__all__"} onValueChange={v => setStateFilterVal(v === "__all__" ? "" : v)}>
+                <SelectTrigger className="h-8 text-xs w-36" data-testid="select-state-filter">
+                  <SelectValue placeholder="All States" />
+                </SelectTrigger>
+                <SelectContent className="min-w-[min(280px,calc(100vw-2rem))] max-h-[300px]">
+                  <SelectItem value="__all__">All States</SelectItem>
+                  <SelectItem value="Unknown">Unknown / Intl</SelectItem>
+                  {(() => {
+                    const US_STATES = new Set([
+                      "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut",
+                      "Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa",
+                      "Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan",
+                      "Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada",
+                      "New Hampshire","New Jersey","New Mexico","New York","North Carolina",
+                      "North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island",
+                      "South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont",
+                      "Virginia","Washington","West Virginia","Wisconsin","Wyoming",
+                      "District of Columbia","Washington DC",
+                      "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN",
+                      "IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV",
+                      "NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN",
+                      "TX","UT","VT","VA","WA","WV","WI","WY","DC",
+                    ]);
+                    const allStates = filterOpts?.states ?? [];
+                    const usStates = allStates.filter(s => US_STATES.has(s)).sort((a, b) => a.localeCompare(b));
+                    const intlStates = allStates.filter(s => !US_STATES.has(s)).sort((a, b) => a.localeCompare(b));
+                    return (
+                      <>
+                        {usStates.length > 0 && (
+                          <SelectGroup>
+                            <SelectLabel className="text-[11px] text-slate-400 uppercase tracking-wide">United States</SelectLabel>
+                            {usStates.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          </SelectGroup>
+                        )}
+                        {intlStates.length > 0 && (
+                          <SelectGroup>
+                            <SelectLabel className="text-[11px] text-slate-400 uppercase tracking-wide">International</SelectLabel>
+                            {intlStates.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          </SelectGroup>
+                        )}
+                      </>
+                    );
+                  })()}
+                </SelectContent>
+              </Select>
+
+              <Select value={primaryRepFilter || "__all__"} onValueChange={v => setPrimaryRepFilterVal(v === "__all__" ? "" : v)}>
+                <SelectTrigger className="h-8 text-xs w-36" data-testid="select-primary-rep-filter">
+                  <SelectValue placeholder="Primary Rep" />
+                </SelectTrigger>
+                <SelectContent className="min-w-[min(220px,calc(100vw-2rem))]">
+                  <SelectItem value="__all__">All Primary Reps</SelectItem>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {activeUsers.map(r => (
+                    <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={secondaryRepFilter || "__all__"} onValueChange={v => setSecondaryRepFilterVal(v === "__all__" ? "" : v)}>
+                <SelectTrigger className="h-8 text-xs w-36" data-testid="select-secondary-rep-filter">
+                  <SelectValue placeholder="Secondary Rep" />
+                </SelectTrigger>
+                <SelectContent className="min-w-[min(220px,calc(100vw-2rem))]">
+                  <SelectItem value="__all__">All Secondary Reps</SelectItem>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {activeUsers.map(r => (
+                    <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={customerTypeFilter || "__all__"} onValueChange={v => setCustomerTypeFilterVal(v === "__all__" ? "" : v)}>
+                <SelectTrigger className="h-8 text-xs w-32" data-testid="select-customer-type-filter">
+                  <SelectValue placeholder="All Types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All Types</SelectItem>
+                  <SelectItem value="Store">Store</SelectItem>
+                  <SelectItem value="Distributor">Distributor</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={addressTypeFilter || "__all__"} onValueChange={v => setAddressTypeFilterVal(v === "__all__" ? "" : v)}>
+                <SelectTrigger className="h-8 text-xs w-36" data-testid="select-address-type-filter">
+                  <SelectValue placeholder="All Addr. Types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All Addr. Types</SelectItem>
+                  <SelectItem value="Commercial">Commercial</SelectItem>
+                  <SelectItem value="Residential">Residential</SelectItem>
+                  <SelectItem value="Unknown">Unknown</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {hasAnyFilter && (
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-slate-500 gap-1"
+                  onClick={clearAllFilters}
+                  data-testid="btn-clear-filters"
+                >
+                  <X className="h-3 w-3" />Clear Filters
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Table ────────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-auto">
@@ -642,10 +699,10 @@ export default function CRMCustomers() {
                 {vis("phone")          && plainTh("Phone",                                "phone")}
                 {vis("state")          && sortTh("state",              "State",          "state")}
                 {vis("customer_group") && sortTh("customer_group_name","Customer Group", "customer_group")}
-                {vis("customer_type")  && plainTh("Cust. Type",                           "customer_type")}
-                {vis("address_type")   && plainTh("Addr. Type",                           "address_type")}
-                {vis("primary_rep")    && plainTh("Primary Rep",                          "primary_rep")}
-                {vis("secondary_rep")  && plainTh("Secondary Rep",                        "secondary_rep")}
+                {vis("customer_type")  && sortTh("customer_type",       "Cust. Type",     "customer_type")}
+                {vis("address_type")   && sortTh("address_type",        "Addr. Type",     "address_type")}
+                {vis("primary_rep")    && sortTh("primary_rep_name",    "Primary Rep",    "primary_rep")}
+                {vis("secondary_rep")  && sortTh("secondary_rep_name",  "Secondary Rep",  "secondary_rep")}
                 {vis("last_order")     && sortTh("last_order_date",    "Last Order",     "last_order")}
                 {vis("days_since")     && sortTh("days_since_order",   "Days Since",     "days_since")}
                 {vis("orders")         && sortTh("lifetime_orders",    "Orders",         "orders")}
