@@ -24,8 +24,8 @@ import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 function formatBcAddress(addr: any): string {
   if (!addr) return "";
   const parts = [
-    addr.address1 || addr.street1 || "",
-    addr.address2 || addr.street2 || "",
+    addr.address1 || addr.street_1 || addr.street1 || "",
+    addr.address2 || addr.street_2 || addr.street2 || "",
     addr.city || "",
     [addr.state_or_province || addr.state || "", addr.postal_code || addr.zip || ""].filter(Boolean).join(" "),
     addr.country || "",
