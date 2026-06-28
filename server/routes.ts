@@ -5319,11 +5319,10 @@ export async function registerRoutes(
       try {
         const { storeHash, token } = await getBcCreds();
         const raw = await fetchBcCustomerNotes(storeHash, token, customer.bigcommerce_customer_id);
-        const { generalNotes, crmHistory } = parseBcCustomerNotes(raw);
-        res.json({ generalNotes, crmHistory, raw });
+        res.json({ generalNotes: raw, raw });
       } catch (_) {
         // BC creds not configured or API error — return empty but don't fail
-        res.json({ generalNotes: "", crmHistory: "", raw: "" });
+        res.json({ generalNotes: "", raw: "" });
       }
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -5341,15 +5340,14 @@ export async function registerRoutes(
       const { generalNotes: newGeneralNotes = "" } = req.body;
       const { storeHash, token } = await getBcCreds();
       const prevRaw = await fetchBcCustomerNotes(storeHash, token, customer.bigcommerce_customer_id);
-      const { crmHistory } = parseBcCustomerNotes(prevRaw);
-      const newRaw = buildBcCustomerNotes(String(newGeneralNotes), crmHistory);
+      const newRaw = String(newGeneralNotes);
       await pushBcCustomerNotes(storeHash, token, customer.bigcommerce_customer_id, newRaw);
       // Audit + timeline
       await storage.createCrmAuditLog({
         user_id: userId, action: "bc_notes_updated", customer_id: customerId,
         detail: { source: "manual_save", previous: prevRaw, updated: newRaw, user: user.name },
       });
-      res.json({ success: true, generalNotes: String(newGeneralNotes), crmHistory });
+      res.json({ success: true, generalNotes: newRaw });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
