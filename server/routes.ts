@@ -4785,11 +4785,11 @@ export async function registerRoutes(
       const primaryRepFilterExp = primaryRep === "unassigned" ? "unassigned" : (primaryRep ? parseInt(String(primaryRep)) : undefined) as number | "unassigned" | undefined;
       const secondaryRepFilterExp = secondaryRep === "unassigned" ? "unassigned" : (secondaryRep ? parseInt(String(secondaryRep)) : undefined) as number | "unassigned" | undefined;
       const customers = await storage.getAllCrmCustomersForExport({ search, group: group || undefined, state: state || undefined, health: health || undefined, customerType: customerType || undefined, addressType: addressType || undefined, primaryRep: primaryRepFilterExp, secondaryRep: secondaryRepFilterExp, sortBy, sortDir, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
-      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "City", "State", "Customer Group", "Customer Type", "Address Type", "Primary Rep", "Secondary Rep", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Health Status", "Last Follow-Up Date", "Last Follow-Up By"];
+      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "City", "State", "Customer Group", "Customer Type", "Address Type", "Primary Rep", "Secondary Rep", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Health Status", "Last Action Date", "Last Action Type"];
       const rows = customers.map(c => {
         const addr = (c.shipping_address as any) ?? (c.billing_address as any) ?? {};
-        const followUpDate = (c as any).last_follow_up_date
-          ? new Date((c as any).last_follow_up_date).toISOString().split("T")[0]
+        const lastActionDate = (c as any).last_action_date
+          ? new Date((c as any).last_action_date).toISOString().split("T")[0]
           : "";
         return [
           String(c.bigcommerce_customer_id),
@@ -4809,8 +4809,8 @@ export async function registerRoutes(
           String(c.lifetime_orders ?? 0),
           String(c.lifetime_revenue ?? "0"),
           c.account_health ?? "Lost",
-          followUpDate,
-          (c as any).last_follow_up_by ?? "",
+          lastActionDate,
+          (c as any).last_action_type ?? "",
         ];
       });
       const dateSuffix = new Date().toISOString().split("T")[0];

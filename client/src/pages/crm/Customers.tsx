@@ -43,7 +43,7 @@ const ALL_COLUMNS = [
   { key: "orders",          label: "Orders",         required: false, defaultW: 100 },
   { key: "revenue",         label: "Revenue",        required: false, defaultW: 120 },
   { key: "store_credit",    label: "Store Credit",   required: false, defaultW: 130 },
-  { key: "last_follow_up",  label: "Last Follow-Up", required: false, defaultW: 160 },
+  { key: "last_follow_up",  label: "Last Action",    required: false, defaultW: 160 },
 ] as const;
 
 type ColKey = typeof ALL_COLUMNS[number]["key"];
@@ -715,7 +715,7 @@ export default function CRMCustomers() {
                 {vis("orders")         && sortTh("lifetime_orders",    "Orders",         "orders")}
                 {vis("revenue")        && sortTh("lifetime_revenue",   "Revenue",        "revenue")}
                 {vis("store_credit")   && sortTh("store_credit_balance", "Store Credit", "store_credit")}
-                {vis("last_follow_up") && sortTh("last_follow_up",       "Last Follow-Up","last_follow_up")}
+                {vis("last_follow_up") && sortTh("last_follow_up",       "Last Action","last_follow_up")}
               </tr>
             </thead>
             <tbody>
@@ -732,8 +732,8 @@ export default function CRMCustomers() {
                 const cityVal = (c.shipping_address as any)?.city
                   || (c.billing_address as any)?.city
                   || null;
-                const followUpDate = (c as any).last_follow_up_date ?? null;
-                const followUpBy = (c as any).last_follow_up_by ?? null;
+                const followUpDate = (c as any).last_action_date ?? null;
+                const followUpBy = (c as any).last_action_type ?? null;
                 return (
                   <tr
                     key={c.id}
@@ -826,7 +826,7 @@ export default function CRMCustomers() {
                             )}
                           </div>
                         ) : (
-                          <span className="text-slate-400 text-xs">No Follow-Up</span>
+                          <span className="text-slate-400 text-xs">No Activity</span>
                         )}
                       </td>
                     )}
