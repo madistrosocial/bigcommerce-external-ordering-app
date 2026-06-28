@@ -31,6 +31,7 @@ const ALL_COLUMNS = [
   { key: "customer_name",   label: "Customer Name",  required: true,  defaultW: 180 },
   { key: "email",           label: "Email",          required: false, defaultW: 220 },
   { key: "phone",           label: "Phone",          required: false, defaultW: 120 },
+  { key: "city",            label: "City",           required: false, defaultW: 140 },
   { key: "state",           label: "State",          required: false, defaultW: 120 },
   { key: "customer_group",  label: "Customer Group", required: false, defaultW: 180 },
   { key: "customer_type",   label: "Cust. Type",     required: false, defaultW: 120 },
@@ -42,7 +43,6 @@ const ALL_COLUMNS = [
   { key: "orders",          label: "Orders",         required: false, defaultW: 100 },
   { key: "revenue",         label: "Revenue",        required: false, defaultW: 120 },
   { key: "store_credit",    label: "Store Credit",   required: false, defaultW: 130 },
-  { key: "city",            label: "City",           required: false, defaultW: 140 },
   { key: "last_follow_up",  label: "Last Follow-Up", required: false, defaultW: 160 },
 ] as const;
 
@@ -683,6 +683,7 @@ export default function CRMCustomers() {
               {vis("customer_name")  && <col style={{ width: colWidths.customer_name }} />}
               {vis("email")          && <col style={{ width: colWidths.email }} />}
               {vis("phone")          && <col style={{ width: colWidths.phone }} />}
+              {vis("city")           && <col style={{ width: colWidths.city }} />}
               {vis("state")          && <col style={{ width: colWidths.state }} />}
               {vis("customer_group") && <col style={{ width: colWidths.customer_group }} />}
               {vis("customer_type")  && <col style={{ width: colWidths.customer_type }} />}
@@ -694,7 +695,6 @@ export default function CRMCustomers() {
               {vis("orders")         && <col style={{ width: colWidths.orders }} />}
               {vis("revenue")        && <col style={{ width: colWidths.revenue }} />}
               {vis("store_credit")   && <col style={{ width: colWidths.store_credit }} />}
-              {vis("city")           && <col style={{ width: colWidths.city }} />}
               {vis("last_follow_up") && <col style={{ width: colWidths.last_follow_up }} />}
             </colgroup>
             <thead className="sticky top-0 bg-slate-50 border-b z-10">
@@ -703,6 +703,7 @@ export default function CRMCustomers() {
                 {vis("customer_name")  && sortTh("first_name",         "Customer Name",  "customer_name")}
                 {vis("email")          && plainTh("Email",                                "email")}
                 {vis("phone")          && plainTh("Phone",                                "phone")}
+                {vis("city")           && sortTh("city",                 "City",          "city")}
                 {vis("state")          && sortTh("state",              "State",          "state")}
                 {vis("customer_group") && sortTh("customer_group_name","Customer Group", "customer_group")}
                 {vis("customer_type")  && sortTh("customer_type",       "Cust. Type",     "customer_type")}
@@ -714,7 +715,6 @@ export default function CRMCustomers() {
                 {vis("orders")         && sortTh("lifetime_orders",    "Orders",         "orders")}
                 {vis("revenue")        && sortTh("lifetime_revenue",   "Revenue",        "revenue")}
                 {vis("store_credit")   && sortTh("store_credit_balance", "Store Credit", "store_credit")}
-                {vis("city")           && sortTh("city",                 "City",          "city")}
                 {vis("last_follow_up") && sortTh("last_follow_up",       "Last Follow-Up","last_follow_up")}
               </tr>
             </thead>
@@ -768,6 +768,9 @@ export default function CRMCustomers() {
                           : <span className="text-slate-400">—</span>}
                       </td>
                     )}
+                    {vis("city") && (
+                      <td className="px-3 py-2.5 text-slate-700 font-medium">{cityVal || <span className="text-slate-400">—</span>}</td>
+                    )}
                     {vis("state")          && <td className="px-3 py-2.5 text-slate-700 font-medium">{stateVal || <span className="text-slate-400">—</span>}</td>}
                     {vis("customer_group") && <td className="px-3 py-2.5 text-slate-600 truncate" style={{ maxWidth: colWidths.customer_group }}>{c.customer_group_name || <span className="text-slate-400">—</span>}</td>}
                     {vis("customer_type") && (
@@ -810,9 +813,6 @@ export default function CRMCustomers() {
                       <td className="px-3 py-2.5 text-right font-medium text-teal-700">
                         {Number(c.store_credit_balance ?? 0) > 0 ? fmtCurrency(c.store_credit_balance) : <span className="text-slate-300">—</span>}
                       </td>
-                    )}
-                    {vis("city") && (
-                      <td className="px-3 py-2.5 text-slate-700 font-medium">{cityVal || <span className="text-slate-400">—</span>}</td>
                     )}
                     {vis("last_follow_up") && (
                       <td className="px-3 py-2.5">
