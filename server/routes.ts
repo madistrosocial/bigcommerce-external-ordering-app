@@ -4785,9 +4785,12 @@ export async function registerRoutes(
       const primaryRepFilterExp = primaryRep === "unassigned" ? "unassigned" : (primaryRep ? parseInt(String(primaryRep)) : undefined) as number | "unassigned" | undefined;
       const secondaryRepFilterExp = secondaryRep === "unassigned" ? "unassigned" : (secondaryRep ? parseInt(String(secondaryRep)) : undefined) as number | "unassigned" | undefined;
       const customers = await storage.getAllCrmCustomersForExport({ search, group: group || undefined, state: state || undefined, health: health || undefined, customerType: customerType || undefined, addressType: addressType || undefined, primaryRep: primaryRepFilterExp, secondaryRep: secondaryRepFilterExp, sortBy, sortDir, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
-      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "State", "Customer Group", "Customer Type", "Address Type", "Primary Rep", "Secondary Rep", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Health Status"];
+      const headers = ["BC Customer ID", "Company", "First Name", "Last Name", "Email", "Phone", "City", "State", "Customer Group", "Customer Type", "Address Type", "Primary Rep", "Secondary Rep", "Last Order Date", "Lifetime Orders", "Lifetime Revenue", "Health Status", "Last Follow-Up Date", "Last Follow-Up By"];
       const rows = customers.map(c => {
         const addr = (c.shipping_address as any) ?? (c.billing_address as any) ?? {};
+        const followUpDate = (c as any).last_follow_up_date
+          ? new Date((c as any).last_follow_up_date).toISOString().split("T")[0]
+          : "";
         return [
           String(c.bigcommerce_customer_id),
           c.company ?? "",
@@ -4795,6 +4798,7 @@ export async function registerRoutes(
           c.last_name,
           c.email,
           c.phone ?? "",
+          addr.city ?? "",
           addr.state ?? "",
           c.customer_group_name ?? "",
           (c as any).customer_type ?? "Store",
@@ -4805,6 +4809,8 @@ export async function registerRoutes(
           String(c.lifetime_orders ?? 0),
           String(c.lifetime_revenue ?? "0"),
           c.account_health ?? "Lost",
+          followUpDate,
+          (c as any).last_follow_up_by ?? "",
         ];
       });
       const dateSuffix = new Date().toISOString().split("T")[0];
@@ -5148,26 +5154,6 @@ export async function registerRoutes(
         } catch (_) { /* BC sync failure is non-fatal */ }
       }
 
-      // Auto-append to BC Customer Notes CRM HISTORY for non-order customer-level notes
-      if (!order_id && CRM_SYNC_NOTE_TYPES.has(note_type)) {
-        try {
-          const { storeHash, token } = await getBcCreds();
-          const customerRec = await storage.getCrmCustomerById(customerId);
-          if (customerRec) {
-            const authorName = user?.name ?? "System";
-            const prevRaw = await fetchBcCustomerNotes(storeHash, token, customerRec.bigcommerce_customer_id);
-            const { generalNotes, crmHistory } = parseBcCustomerNotes(prevRaw);
-            const newHistory = appendCrmHistoryEntry(crmHistory, note_type, authorName, note.trim(), new Date());
-            const newRaw = buildBcCustomerNotes(generalNotes, newHistory);
-            await pushBcCustomerNotes(storeHash, token, customerRec.bigcommerce_customer_id, newRaw);
-            await storage.createCrmAuditLog({
-              user_id: userId ?? null, action: "bc_notes_updated", customer_id: customerId,
-              detail: { source: "crm_note_created", note_type, user: authorName, previous: prevRaw, updated: newRaw },
-            });
-          }
-        } catch (_) { /* BC sync failure is non-fatal */ }
-      }
-
       res.status(201).json(created);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -5279,6 +5265,36 @@ export async function registerRoutes(
       if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
       const timeline = await storage.getCrmTimeline(customerId);
       res.json(timeline);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/customers/:id/addresses — fetch full BC address book
+  app.get("/api/crm/customers/:id/addresses", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const id = parseInt(req.params.id);
+      if (!await assertCrmCustomerAccess(storage, id, userId, user.role, res)) return;
+      const customer = await storage.getCrmCustomerById(id);
+      if (!customer) return res.status(404).json({ error: "Customer not found" });
+      const { storeHash, token } = await getBcCreds();
+      if (storeHash && token) {
+        try {
+          const bcRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${customer.bigcommerce_customer_id}/addresses?limit=250`, {
+            headers: { "X-Auth-Token": String(token), Accept: "application/json" },
+          });
+          if (bcRes.ok) {
+            const data = await bcRes.json();
+            return res.json(Array.isArray(data) ? data : []);
+          }
+        } catch (_) { /* fall through to stored data */ }
+      }
+      // Fallback: return stored billing + shipping addresses
+      const fallback: any[] = [];
+      if (customer.billing_address) fallback.push({ ...(customer.billing_address as any), _source: "billing" });
+      if (customer.shipping_address) fallback.push({ ...(customer.shipping_address as any), _source: "shipping" });
+      res.json(fallback);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

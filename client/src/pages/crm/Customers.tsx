@@ -21,7 +21,8 @@ import { useToast } from "@/hooks/use-toast";
 type SortField =
   | "company" | "first_name" | "state" | "customer_group_name"
   | "last_order_date" | "days_since_order" | "lifetime_orders" | "lifetime_revenue"
-  | "primary_rep_name" | "secondary_rep_name" | "customer_type" | "address_type";
+  | "primary_rep_name" | "secondary_rep_name" | "customer_type" | "address_type"
+  | "city" | "last_follow_up";
 
 type HealthFilter = "" | "Healthy" | "Watch" | "At Risk" | "Lost";
 
@@ -41,11 +42,13 @@ const ALL_COLUMNS = [
   { key: "orders",          label: "Orders",         required: false, defaultW: 100 },
   { key: "revenue",         label: "Revenue",        required: false, defaultW: 120 },
   { key: "store_credit",    label: "Store Credit",   required: false, defaultW: 130 },
+  { key: "city",            label: "City",           required: false, defaultW: 140 },
+  { key: "last_follow_up",  label: "Last Follow-Up", required: false, defaultW: 160 },
 ] as const;
 
 type ColKey = typeof ALL_COLUMNS[number]["key"];
 const DEFAULT_VISIBLE = new Set<ColKey>(
-  ALL_COLUMNS.filter(c => !["store_credit", "customer_type", "address_type", "primary_rep", "secondary_rep", "sales_rep"].includes(c.key)).map(c => c.key)
+  ALL_COLUMNS.filter(c => !["store_credit", "customer_type", "address_type", "primary_rep", "secondary_rep", "sales_rep", "city", "last_follow_up"].includes(c.key)).map(c => c.key)
 );
 const DEFAULT_WIDTHS: Record<ColKey, number> = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c.defaultW])) as Record<ColKey, number>;
 const COL_MIN_WIDTHS: Record<ColKey, number> = {
@@ -54,6 +57,7 @@ const COL_MIN_WIDTHS: Record<ColKey, number> = {
   primary_rep: 120, secondary_rep: 120,
   last_order: 120, days_since: 80,
   orders: 80, revenue: 100, store_credit: 100,
+  city: 100, last_follow_up: 130,
 };
 
 const PAGE_SIZE = 50;
@@ -690,6 +694,8 @@ export default function CRMCustomers() {
               {vis("orders")         && <col style={{ width: colWidths.orders }} />}
               {vis("revenue")        && <col style={{ width: colWidths.revenue }} />}
               {vis("store_credit")   && <col style={{ width: colWidths.store_credit }} />}
+              {vis("city")           && <col style={{ width: colWidths.city }} />}
+              {vis("last_follow_up") && <col style={{ width: colWidths.last_follow_up }} />}
             </colgroup>
             <thead className="sticky top-0 bg-slate-50 border-b z-10">
               <tr>
@@ -708,6 +714,8 @@ export default function CRMCustomers() {
                 {vis("orders")         && sortTh("lifetime_orders",    "Orders",         "orders")}
                 {vis("revenue")        && sortTh("lifetime_revenue",   "Revenue",        "revenue")}
                 {vis("store_credit")   && sortTh("store_credit_balance", "Store Credit", "store_credit")}
+                {vis("city")           && sortTh("city",                 "City",          "city")}
+                {vis("last_follow_up") && sortTh("last_follow_up",       "Last Follow-Up","last_follow_up")}
               </tr>
             </thead>
             <tbody>
@@ -721,6 +729,11 @@ export default function CRMCustomers() {
                 const stateVal = (c.shipping_address as any)?.state
                   || (c.billing_address as any)?.state
                   || null;
+                const cityVal = (c.shipping_address as any)?.city
+                  || (c.billing_address as any)?.city
+                  || null;
+                const followUpDate = (c as any).last_follow_up_date ?? null;
+                const followUpBy = (c as any).last_follow_up_by ?? null;
                 return (
                   <tr
                     key={c.id}
@@ -796,6 +809,25 @@ export default function CRMCustomers() {
                     {vis("store_credit")   && (
                       <td className="px-3 py-2.5 text-right font-medium text-teal-700">
                         {Number(c.store_credit_balance ?? 0) > 0 ? fmtCurrency(c.store_credit_balance) : <span className="text-slate-300">—</span>}
+                      </td>
+                    )}
+                    {vis("city") && (
+                      <td className="px-3 py-2.5 text-slate-700 font-medium">{cityVal || <span className="text-slate-400">—</span>}</td>
+                    )}
+                    {vis("last_follow_up") && (
+                      <td className="px-3 py-2.5">
+                        {followUpDate ? (
+                          <div>
+                            <span className="text-slate-700 whitespace-nowrap text-xs font-medium">
+                              {formatDistanceToNow(new Date(followUpDate), { addSuffix: true })}
+                            </span>
+                            {followUpBy && (
+                              <div className="text-[11px] text-slate-400 truncate">{followUpBy}</div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 text-xs">No Follow-Up</span>
+                        )}
                       </td>
                     )}
                   </tr>

@@ -88,14 +88,14 @@ export interface IStorage {
   deletePromoSku(id: number): Promise<void>;
 
   // CRM operations
-  getCrmCustomers(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; limit?: number; offset?: number; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null })[]; total: number }>;
+  getCrmCustomers(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; limit?: number; offset?: number; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null; last_follow_up_date?: string | null; last_follow_up_by?: string | null })[]; total: number }>;
   getHealthThresholds(): Promise<{ healthy_days: number; watch_days: number; at_risk_days: number }>;
   setHealthThresholds(t: { healthy_days: number; watch_days: number; at_risk_days: number }): Promise<void>;
   getCrmCustomerById(id: number): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null }) | undefined>;
   getCrmCustomerByBcId(bcId: number): Promise<CrmCustomer | undefined>;
   upsertCrmCustomer(data: InsertCrmCustomer): Promise<CrmCustomer>;
   getCrmCustomerCount(): Promise<number>;
-  getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null })[]>;
+  getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null; last_follow_up_date?: string | null; last_follow_up_by?: string | null })[]>;
   updateCrmCustomerMasterFields(id: number, data: { primary_rep_id?: number | null; secondary_rep_id?: number | null; customer_type?: string }): Promise<void>;
   getCrmFilterOptions(): Promise<{ groups: string[]; states: string[]; reps: { id: number; name: string }[] }>;
   getCrmOrdersByBcCustomerId(bcCustomerId: number, limit?: number): Promise<CrmOrder[]>;
@@ -502,6 +502,7 @@ export class DatabaseStorage implements IStorage {
         ilike(customersMirror.last_name, s),
         ilike(customersMirror.email, s),
         ilike(customersMirror.phone, s),
+        sql`coalesce(${customersMirror.shipping_address}->>'city', ${customersMirror.billing_address}->>'city') ILIKE ${s}`,
       ));
     }
     if (group) conditions.push(eq(customersMirror.customer_group_name, group));
@@ -579,6 +580,14 @@ export class DatabaseStorage implements IStorage {
         return sortDir === "asc"
           ? sql`secondary_rep_user.name ASC NULLS LAST`
           : sql`secondary_rep_user.name DESC NULLS LAST`;
+      case "city":
+        return sortDir === "asc"
+          ? sql`coalesce(${customersMirror.shipping_address}->>'city', ${customersMirror.billing_address}->>'city') ASC NULLS LAST`
+          : sql`coalesce(${customersMirror.shipping_address}->>'city', ${customersMirror.billing_address}->>'city') DESC NULLS LAST`;
+      case "last_follow_up":
+        return sortDir === "asc"
+          ? sql`(SELECT n.created_at FROM crm_customer_notes n WHERE n.customer_id = customers_mirror.id AND n.note_type = 'Follow Up' ORDER BY n.created_at DESC LIMIT 1) ASC NULLS LAST`
+          : sql`(SELECT n.created_at FROM crm_customer_notes n WHERE n.customer_id = customers_mirror.id AND n.note_type = 'Follow Up' ORDER BY n.created_at DESC LIMIT 1) DESC NULLS LAST`;
       default:
         return sortDir === "asc"
           ? sql`${customersMirror.last_order_date} ASC NULLS LAST`
@@ -627,6 +636,8 @@ export class DatabaseStorage implements IStorage {
       rep_name: users.name,
       primary_rep_name: primaryRepUser.name,
       secondary_rep_name: secondaryRepUser.name,
+      last_follow_up_date: sql<string | null>`(SELECT n.created_at FROM crm_customer_notes n WHERE n.customer_id = customers_mirror.id AND n.note_type = 'Follow Up' ORDER BY n.created_at DESC LIMIT 1)`,
+      last_follow_up_by: sql<string | null>`(SELECT u.name FROM crm_customer_notes n LEFT JOIN users u ON u.id = n.created_by WHERE n.customer_id = customers_mirror.id AND n.note_type = 'Follow Up' ORDER BY n.created_at DESC LIMIT 1)`,
     })
       .from(customersMirror)
       .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
@@ -643,6 +654,8 @@ export class DatabaseStorage implements IStorage {
         sales_rep_name: r.rep_name ?? null,
         primary_rep_name: r.primary_rep_name ?? null,
         secondary_rep_name: r.secondary_rep_name ?? null,
+        last_follow_up_date: r.last_follow_up_date ?? null,
+        last_follow_up_by: r.last_follow_up_by ?? null,
       })),
       total,
     };
@@ -722,6 +735,8 @@ export class DatabaseStorage implements IStorage {
       rep_name: users.name,
       primary_rep_name: primaryRepUser.name,
       secondary_rep_name: secondaryRepUser.name,
+      last_follow_up_date: sql<string | null>`(SELECT n.created_at FROM crm_customer_notes n WHERE n.customer_id = customers_mirror.id AND n.note_type = 'Follow Up' ORDER BY n.created_at DESC LIMIT 1)`,
+      last_follow_up_by: sql<string | null>`(SELECT u.name FROM crm_customer_notes n LEFT JOIN users u ON u.id = n.created_by WHERE n.customer_id = customers_mirror.id AND n.note_type = 'Follow Up' ORDER BY n.created_at DESC LIMIT 1)`,
     })
       .from(customersMirror)
       .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
@@ -735,6 +750,8 @@ export class DatabaseStorage implements IStorage {
       sales_rep_name: r.rep_name ?? null,
       primary_rep_name: r.primary_rep_name ?? null,
       secondary_rep_name: r.secondary_rep_name ?? null,
+      last_follow_up_date: r.last_follow_up_date ?? null,
+      last_follow_up_by: r.last_follow_up_by ?? null,
     }));
   }
 

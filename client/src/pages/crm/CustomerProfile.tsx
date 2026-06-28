@@ -21,6 +21,18 @@ import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function formatBcAddress(addr: any): string {
+  if (!addr) return "";
+  const parts = [
+    addr.address1 || addr.street1 || "",
+    addr.address2 || addr.street2 || "",
+    addr.city || "",
+    [addr.state_or_province || addr.state || "", addr.postal_code || addr.zip || ""].filter(Boolean).join(" "),
+    addr.country || "",
+  ].filter(Boolean);
+  return parts.join(", ");
+}
+
 function fmtCurrency(v: string | number | null | undefined): string {
   const n = Number(v ?? 0);
   if (isNaN(n)) return "$0.00";
@@ -428,6 +440,7 @@ export default function CustomerProfile() {
   const [orderModal, setOrderModal]         = useState<any | null>(null);
   const [generalNotesEdit, setGeneralNotesEdit] = useState<string | null>(null); // null = not loaded yet
   const [savingBcNotes, setSavingBcNotes]   = useState(false);
+  const [selectedAddressIdx, setSelectedAddressIdx] = useState(0);
 
   // Orders tab pagination
   const [ordersPage, setOrdersPage]         = useState(1);
@@ -443,6 +456,17 @@ export default function CustomerProfile() {
       return r.json();
     },
     enabled: !!id,
+  });
+
+  const { data: addressBook = [], isLoading: loadingAddresses } = useQuery<any[]>({
+    queryKey: ["crm", "customer", id, "addresses"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/customers/${id}/addresses`, { headers: getAuthHeaders() });
+      if (!r.ok) return [];
+      return r.json();
+    },
+    enabled: !!id,
+    staleTime: 60_000,
   });
 
   const { data: orders = [], isLoading: loadingOrders } = useQuery({
@@ -763,6 +787,37 @@ export default function CustomerProfile() {
                     )}
                   </div>
                 </div>
+                {/* Address Book Dropdown */}
+                <div className="flex items-center gap-2 mt-1.5 min-w-0">
+                  <span className="text-xs text-slate-500 font-medium shrink-0">Address:</span>
+                  {loadingAddresses ? (
+                    <span className="text-xs text-slate-400">Loading…</span>
+                  ) : addressBook.length > 0 ? (
+                    <Select
+                      value={String(Math.min(selectedAddressIdx, addressBook.length - 1))}
+                      onValueChange={v => setSelectedAddressIdx(parseInt(v))}
+                    >
+                      <SelectTrigger className="h-6 text-xs flex-1 min-w-0 max-w-lg border border-slate-200 rounded-md px-2 gap-1 focus:ring-1 focus:ring-blue-400" data-testid="select-address-book">
+                        <SelectValue>
+                          <span className="truncate">{formatBcAddress(addressBook[Math.min(selectedAddressIdx, addressBook.length - 1)])}</span>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent className="max-w-lg">
+                        {addressBook.map((addr: any, i: number) => (
+                          <SelectItem key={i} value={String(i)}>
+                            <div className="py-0.5">
+                              {addr.company && <div className="font-medium text-xs text-slate-800">{addr.company}</div>}
+                              <div className="text-xs text-slate-600">{formatBcAddress(addr)}</div>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span className="text-xs text-slate-400">No addresses on file</span>
+                  )}
+                </div>
+
                 {/* Customer Type / Address Type */}
                 <div className="flex items-center flex-wrap gap-x-5 gap-y-1 mt-1.5">
                   <div className="flex items-center gap-1.5">
