@@ -69,7 +69,12 @@ function NoteExpandModal({ note, onClose }: { note: any; onClose: () => void }) 
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <NoteTypePill type={note.note_type} />
-            {note.customer_name && <span className="text-sm font-normal text-slate-500">{note.customer_name}</span>}
+            {(note.customer_first_name || note.customer_last_name) && (
+              <span className="text-sm font-normal text-slate-500">
+                {[note.customer_first_name, note.customer_last_name].filter(Boolean).join(" ")}
+                {note.customer_company ? ` — ${note.customer_company}` : ""}
+              </span>
+            )}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-2">
@@ -127,14 +132,20 @@ export default function CRMNotes() {
     limit: String(LIMIT), offset: String((page - 1) * LIMIT),
   }).toString();
 
+  // KPI params — same filters but WITHOUT type (so all type cards update together)
+  const kpiParams = new URLSearchParams({
+    search, createdBy, dateFrom, dateTo,
+    customerGroup: groupFilter, state: stateFilter,
+  }).toString();
+
   const { data: kpis } = useQuery({
-    queryKey: ["crm", "notes", "kpis"],
+    queryKey: ["crm", "notes", "kpis", kpiParams],
     queryFn: async () => {
-      const r = await fetch("/api/crm/notes/kpis", { headers: getAuthHeaders() });
+      const r = await fetch(`/api/crm/notes/kpis?${kpiParams}`, { headers: getAuthHeaders() });
       if (!r.ok) return null;
       return r.json();
     },
-    staleTime: 60_000,
+    staleTime: 30_000,
   });
 
   const { data: notesData, isLoading } = useQuery({
@@ -200,11 +211,11 @@ export default function CRMNotes() {
       {kpis && (
         <div className="px-4 md:px-6 pt-4">
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            <KpiCard label="Notes Today"    value={kpis.today ?? 0}     color="text-slate-800" />
-            <KpiCard label="Follow Ups"     value={kpis.follow_up ?? 0} color="text-blue-600" />
-            <KpiCard label="Sales Calls"    value={kpis.sales ?? 0}     color="text-green-600" />
-            <KpiCard label="Issues"         value={kpis.issue ?? 0}     color="text-red-600" />
-            <KpiCard label="Internal"       value={kpis.internal ?? 0}  color="text-yellow-600" />
+            <KpiCard label="Notes Today"    value={kpis.notesToday ?? 0}    color="text-slate-800" />
+            <KpiCard label="Follow Ups"     value={kpis.followUps ?? 0}     color="text-blue-600" />
+            <KpiCard label="Sales Calls"    value={kpis.salesCalls ?? 0}    color="text-green-600" />
+            <KpiCard label="Issues"         value={kpis.issues ?? 0}        color="text-red-600" />
+            <KpiCard label="Internal"       value={kpis.internalNotes ?? 0} color="text-yellow-600" />
           </div>
         </div>
       )}
@@ -377,8 +388,10 @@ export default function CRMNotes() {
                           <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmtDateTime(note.created_at)}</td>
                           <td className="px-4 py-3"><NoteTypePill type={note.note_type} /></td>
                           <td className="px-4 py-3">
-                            {note.customer_name
-                              ? <span className="text-xs font-medium text-blue-600">{note.customer_name}</span>
+                            {(note.customer_first_name || note.customer_last_name)
+                              ? <span className="text-xs font-medium text-blue-600">
+                                  {[note.customer_first_name, note.customer_last_name].filter(Boolean).join(" ")}
+                                </span>
                               : <span className="text-slate-300 text-xs">—</span>}
                             {note.customer_company && (
                               <p className="text-[11px] text-slate-400 truncate max-w-[160px]">{note.customer_company}</p>

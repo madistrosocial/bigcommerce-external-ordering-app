@@ -113,7 +113,7 @@ export interface IStorage {
   updateCrmNote(id: number, data: { note?: string; note_type?: string; order_id?: number | null }): Promise<CrmNote>;
   deleteCrmNote(id: number): Promise<void>;
   getAllCrmNotes(opts: { search?: string; type?: string; createdBy?: number; customerId?: number; orderId?: number; customerGroup?: string; state?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<{ notes: any[]; total: number }>;
-  getCrmNotesKpis(): Promise<{ notesToday: number; followUps: number; salesCalls: number; issues: number; internalNotes: number }>;
+  getCrmNotesKpis(opts?: { search?: string; createdBy?: number; customerGroup?: string; state?: string; dateFrom?: string; dateTo?: string }): Promise<{ notesToday: number; followUps: number; salesCalls: number; issues: number; internalNotes: number }>;
   // CRM Timeline
   getCrmTimeline(customerId: number): Promise<any[]>;
   // CRM Reactivation
@@ -1002,16 +1002,43 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getCrmNotesKpis(): Promise<{ notesToday: number; followUps: number; salesCalls: number; issues: number; internalNotes: number }> {
+  async getCrmNotesKpis(opts: {
+    search?: string; createdBy?: number; customerGroup?: string;
+    state?: string; dateFrom?: string; dateTo?: string;
+  } = {}): Promise<{ notesToday: number; followUps: number; salesCalls: number; issues: number; internalNotes: number }> {
+    const { search, createdBy, customerGroup, state, dateFrom, dateTo } = opts;
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
+
+    const baseConds: any[] = [];
+    if (search?.trim()) {
+      const s = `%${search.trim()}%`;
+      baseConds.push(or(
+        ilike(customersMirror.company, s),
+        ilike(customersMirror.first_name, s),
+        ilike(customersMirror.last_name, s),
+        ilike(crmCustomerNotes.note, s),
+      ));
+    }
+    if (createdBy) baseConds.push(eq(crmCustomerNotes.created_by, createdBy));
+    if (customerGroup) baseConds.push(eq(customersMirror.customer_group_name, customerGroup));
+    if (state) baseConds.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${state}`);
+    if (dateFrom) baseConds.push(sql`${crmCustomerNotes.created_at} >= ${dateFrom}::timestamptz`);
+    if (dateTo) baseConds.push(sql`${crmCustomerNotes.created_at} <= ${dateTo}::timestamptz + interval '1 day'`);
+
+    const todayConds = [...baseConds, sql`${crmCustomerNotes.created_at} >= ${todayStart.toISOString()}::timestamptz`];
+    const baseWhere = baseConds.length > 0 ? and(...baseConds) : undefined;
+    const todayWhere = and(...todayConds);
 
     const [todayCount, typeRows] = await Promise.all([
       db.select({ count: sql<number>`count(*)::int` })
         .from(crmCustomerNotes)
-        .where(sql`${crmCustomerNotes.created_at} >= ${todayStart.toISOString()}::timestamptz`),
+        .innerJoin(customersMirror, eq(customersMirror.id, crmCustomerNotes.customer_id))
+        .where(todayWhere),
       db.select({ type: crmCustomerNotes.note_type, count: sql<number>`count(*)::int` })
         .from(crmCustomerNotes)
+        .innerJoin(customersMirror, eq(customersMirror.id, crmCustomerNotes.customer_id))
+        .where(baseWhere)
         .groupBy(crmCustomerNotes.note_type),
     ]);
 

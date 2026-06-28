@@ -5088,9 +5088,17 @@ export async function registerRoutes(
   });
 
   // GET /api/crm/notes/kpis
-  app.get("/api/crm/notes/kpis", requireAuth, async (_req, res) => {
+  app.get("/api/crm/notes/kpis", requireAuth, async (req, res) => {
     try {
-      const kpis = await storage.getCrmNotesKpis();
+      const { search = "", createdBy, customerGroup = "", state = "", dateFrom = "", dateTo = "" } = req.query as Record<string, string>;
+      const kpis = await storage.getCrmNotesKpis({
+        search: search || undefined,
+        createdBy: createdBy ? parseInt(createdBy) : undefined,
+        customerGroup: customerGroup || undefined,
+        state: state || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+      });
       res.json(kpis);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
