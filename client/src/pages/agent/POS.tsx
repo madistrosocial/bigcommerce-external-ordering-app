@@ -1077,6 +1077,7 @@ export default function POSPage() {
   const [openHistoryLineId, setOpenHistoryLineId] = useState<string | null>(
     null,
   );
+  const [wsHistoryRect, setWsHistoryRect] = useState<{ top: number; left: number } | null>(null);
   const [loadingHistoryLineId, setLoadingHistoryLineId] = useState<
     string | null
   >(null);
@@ -3019,7 +3020,9 @@ export default function POSPage() {
                                           className="h-7 px-2 text-[11px] font-semibold border border-slate-200 rounded bg-white hover:border-slate-400 disabled:opacity-40 transition-colors whitespace-nowrap"
                                           onClick={async (e) => {
                                             e.stopPropagation();
-                                            if (isOpen) { setOpenHistoryLineId(null); return; }
+                                            if (isOpen) { setOpenHistoryLineId(null); setWsHistoryRect(null); return; }
+                                            const r = e.currentTarget.getBoundingClientRect();
+                                            setWsHistoryRect({ top: r.bottom + 4, left: r.left });
                                             setLoadingHistoryLineId(item.lineId);
                                             try { await fetchPriceHistory(item); } finally { setLoadingHistoryLineId(null); }
                                             setOpenHistoryLineId(item.lineId);
@@ -3028,8 +3031,8 @@ export default function POSPage() {
                                         >
                                           Hist ▾
                                         </button>
-                                        {isOpen && (
-                                          <div className="absolute left-0 top-full mt-1 w-52 bg-white border rounded-md shadow-lg z-50 py-1" onMouseDown={(e) => e.preventDefault()}>
+                                        {isOpen && wsHistoryRect && (
+                                          <div style={{ position: "fixed", top: wsHistoryRect.top, left: wsHistoryRect.left, zIndex: 9999 }} className="w-52 bg-white border rounded-md shadow-lg py-1" onMouseDown={(e) => e.preventDefault()}>
                                             {hist.length === 0 ? (
                                               <p className="px-3 py-2 text-xs text-slate-500">No history</p>
                                             ) : (
