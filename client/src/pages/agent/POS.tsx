@@ -2908,6 +2908,7 @@ export default function POSPage() {
                         <th className="px-3 py-2 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-24">Unit $</th>
                         <th className="px-3 py-2 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-24">Disc %</th>
                         <th className="px-3 py-2 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-28">Price $</th>
+                        {selectedCustomer && <th className="px-2 py-2 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-28">History</th>}
                         <th className="px-3 py-2 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-24">Total</th>
                         <th className="px-2 py-2 w-10"></th>
                       </tr>
@@ -2983,6 +2984,76 @@ export default function POSPage() {
                                 data-testid={`input-ws-price-${item.lineId}`}
                               />
                             </td>
+                            {selectedCustomer && (
+                              <td className="px-2 py-1.5">
+                                <div className="flex items-center gap-1">
+                                  {/* Last $ */}
+                                  <button
+                                    className="h-7 px-2 text-[11px] font-semibold border border-slate-200 rounded bg-white hover:border-slate-400 disabled:opacity-40 transition-colors whitespace-nowrap"
+                                    disabled={loadingHistoryLineId === item.lineId}
+                                    onClick={async () => {
+                                      setLoadingHistoryLineId(item.lineId);
+                                      try {
+                                        const hist = await fetchPriceHistory(item);
+                                        if (hist.length === 0) {
+                                          toast({ title: "No price history", variant: "destructive", duration: 2000 });
+                                          return;
+                                        }
+                                        applyManualPrice(item, index, hist[0].price, "historical");
+                                      } finally {
+                                        setLoadingHistoryLineId(null);
+                                      }
+                                    }}
+                                    data-testid={`button-ws-last-price-${item.lineId}`}
+                                  >
+                                    {loadingHistoryLineId === item.lineId ? <Loader2 className="h-3 w-3 animate-spin" /> : "Last $"}
+                                  </button>
+                                  {/* History dropdown */}
+                                  {(() => {
+                                    const hkey = historyKey(item);
+                                    const hist = priceHistoryCache.get(hkey) ?? [];
+                                    const isOpen = openHistoryLineId === item.lineId;
+                                    return (
+                                      <div className="relative">
+                                        <button
+                                          className="h-7 px-2 text-[11px] font-semibold border border-slate-200 rounded bg-white hover:border-slate-400 disabled:opacity-40 transition-colors whitespace-nowrap"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            if (isOpen) { setOpenHistoryLineId(null); return; }
+                                            setLoadingHistoryLineId(item.lineId);
+                                            try { await fetchPriceHistory(item); } finally { setLoadingHistoryLineId(null); }
+                                            setOpenHistoryLineId(item.lineId);
+                                          }}
+                                          data-testid={`button-ws-history-${item.lineId}`}
+                                        >
+                                          Hist ▾
+                                        </button>
+                                        {isOpen && (
+                                          <div className="absolute left-0 top-full mt-1 w-52 bg-white border rounded-md shadow-lg z-50 py-1" onMouseDown={(e) => e.preventDefault()}>
+                                            {hist.length === 0 ? (
+                                              <p className="px-3 py-2 text-xs text-slate-500">No history</p>
+                                            ) : (
+                                              hist.map((h, hi) => (
+                                                <button key={hi} className="w-full text-left px-3 py-1.5 hover:bg-slate-50 border-b last:border-0"
+                                                  onClick={() => { applyManualPrice(item, index, h.price, "historical"); setOpenHistoryLineId(null); }}
+                                                  data-testid={`option-ws-history-${item.lineId}-${hi}`}
+                                                >
+                                                  <p className="text-sm font-bold text-green-600">${fmtPrice(parseFloat(h.price))}</p>
+                                                  <p className="text-xs text-slate-400">
+                                                    {h.date ? new Date(h.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : ""}
+                                                    {h.orderId ? ` | #${h.orderId}` : ""}
+                                                  </p>
+                                                </button>
+                                              ))
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              </td>
+                            )}
                             <td className="px-3 py-1.5 text-right">
                               <span className="text-sm font-bold text-slate-900">${fmtPrice(item.price_at_sale * item.quantity)}</span>
                               {isFree && <p className="text-[10px] text-red-500 font-bold">FREE</p>}
