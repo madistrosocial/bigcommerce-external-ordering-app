@@ -56,6 +56,9 @@ import {
   Wallet,
   Percent,
   DollarSign,
+  Maximize2,
+  Minimize2,
+  Columns2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
@@ -929,6 +932,32 @@ export default function POSPage() {
     setAllowOverselling((v) => {
       const next = !v;
       localStorage.setItem("pos_allow_overselling", String(next));
+      return next;
+    });
+
+  // ── Fullscreen ──────────────────────────────────────────────────────────────
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const fn = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", fn);
+    return () => document.removeEventListener("fullscreenchange", fn);
+  }, []);
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  };
+
+  // ── Wholesale Mode ───────────────────────────────────────────────────────────
+  const [wholesaleMode, setWholesaleMode] = useState(
+    () => localStorage.getItem("pos_wholesale_mode") === "true",
+  );
+  const toggleWholesaleMode = () =>
+    setWholesaleMode((v) => {
+      const next = !v;
+      localStorage.setItem("pos_wholesale_mode", String(next));
       return next;
     });
 
@@ -2288,21 +2317,7 @@ export default function POSPage() {
           );
         } catch {}
       }
-      toast({ title: "Draft Saved", duration: 1500 });
-      clearCart();
-      setActiveLineId(null);
-      setDiscountInputs({});
-      setManualPriceInputs({});
-      setInventoryErrorIds(new Set());
-      setSelectedCustomer(null);
-      setSelectedAddress(null);
-      setCustomerAddresses([]);
-      setCustomerSearch("");
-      setOrderNote("");
-      setStaffNote("");
-      setCartDiscount(null);
-      setDiscountTabInput("");
-      setDiscountOpen(false);
+      toast({ title: "Draft Saved", description: "Cart preserved — continue editing.", duration: 3000 });
       focusSearch();
     } catch (e: any) {
       toast({
@@ -2519,12 +2534,32 @@ export default function POSPage() {
             );
           })()}
 
+        {/* ── Fullscreen + Wholesale mode toggles ── */}
+        <div className="flex items-center gap-1 ml-1 shrink-0">
+          <button
+            onClick={toggleWholesaleMode}
+            className={`h-8 w-8 flex items-center justify-center rounded border text-xs transition-colors ${wholesaleMode ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"}`}
+            title="Wholesale Mode"
+            data-testid="button-pos-wholesale-mode"
+          >
+            <Columns2 className="h-4 w-4" />
+          </button>
+          <button
+            onClick={toggleFullscreen}
+            className="h-8 w-8 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:border-slate-300 transition-colors"
+            title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+            data-testid="button-pos-fullscreen"
+          >
+            {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
+        </div>
+
       </header>
 
       {/* ── Body ── */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className={`flex-1 flex overflow-hidden ${wholesaleMode ? "flex-col" : ""}`}>
         {/* ── LEFT: Search + Pinned Products ── */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <div className={wholesaleMode ? "shrink-0 bg-white border-b" : "flex-1 flex flex-col overflow-hidden min-w-0"}>
           {/* Search input */}
           <div className="px-4 pt-4 pb-2 shrink-0">
             <div className="relative">
@@ -2728,7 +2763,7 @@ export default function POSPage() {
             })()}
 
           {/* No suggestions / default: Favorites / Sale tabs */}
-          {!showSuggestions && (
+          {!showSuggestions && !wholesaleMode && (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Tab bar */}
               <div className="flex shrink-0 border-b bg-slate-50">
@@ -2810,7 +2845,7 @@ export default function POSPage() {
 
         {/* ── RIGHT: Cart Panel (38%) ── */}
         <div
-          className="flex-none w-[38%] min-w-[340px] max-w-[520px] flex flex-col bg-white border-l shadow-md"
+          className={wholesaleMode ? "flex-1 flex flex-col bg-white overflow-hidden" : "flex-none w-[38%] min-w-[340px] max-w-[520px] flex flex-col bg-white border-l shadow-md"}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Cart header */}
@@ -2853,8 +2888,119 @@ export default function POSPage() {
           </div>
 
           {/* Cart items */}
-          <div className="flex-1 overflow-y-auto divide-y">
-            {cart.length === 0 ? (
+          <div className={`flex-1 overflow-y-auto ${wholesaleMode ? "" : "divide-y"}`}>
+            {/* ── Wholesale Mode: spreadsheet-style table ── */}
+            {wholesaleMode && (
+              cart.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-40 text-slate-400">
+                  <ShoppingCart className="h-8 w-8 mb-2 opacity-20" />
+                  <p className="text-sm">No items in cart yet</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[820px]">
+                    <thead>
+                      <tr className="border-b bg-slate-50 sticky top-0 z-10">
+                        <th className="px-2 py-2 w-12"></th>
+                        <th className="px-3 py-2 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Product</th>
+                        <th className="px-3 py-2 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-16">Stock</th>
+                        <th className="px-3 py-2 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-32">Qty</th>
+                        <th className="px-3 py-2 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-24">Unit $</th>
+                        <th className="px-3 py-2 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-24">Disc %</th>
+                        <th className="px-3 py-2 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-28">Price $</th>
+                        <th className="px-3 py-2 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wide w-24">Total</th>
+                        <th className="px-2 py-2 w-10"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {cart.map((item, index) => {
+                        const isFree = item.discount_type === "free";
+                        const hasPct = item.discount_type === "percent";
+                        const isDiscounted = item.price_at_sale < item.original_price;
+                        const wsDiscountInput = discountInputs[item.lineId] ?? (hasPct ? String(item.discount_value ?? "") : "");
+                        const wsManualInput = manualPriceInputs[item.lineId] ?? "";
+                        const wsStock = freshStockByLineId.has(item.lineId)
+                          ? freshStockByLineId.get(item.lineId)!
+                          : (item.variant?.stock_level ?? item.product.stock_level ?? 0);
+                        const wsAtMax = !allowOverselling && item.quantity >= wsStock;
+                        return (
+                          <tr key={item.lineId} className={`hover:bg-slate-50/50 transition-colors ${inventoryErrorIds.has(item.lineId) ? "bg-red-50" : ""}`} data-testid={`ws-row-${item.lineId}`}>
+                            <td className="px-2 py-1.5">
+                              {item.product.image ? (
+                                <img src={item.product.image} alt="" className="w-9 h-9 object-cover rounded border shrink-0" />
+                              ) : (
+                                <div className="w-9 h-9 bg-slate-100 rounded border flex items-center justify-center">
+                                  <Package className="h-4 w-4 text-slate-300" />
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-3 py-1.5 min-w-0 max-w-[180px]">
+                              <p className="font-semibold text-slate-900 text-sm leading-tight truncate">{item.product.name}</p>
+                              <p className="text-[11px] text-slate-400 truncate">
+                                {item.variant?.sku || item.product.sku}
+                                {item.variant?.option_values?.length > 0 && ` · ${item.variant.option_values.map((ov: any) => ov.label).join(" / ")}`}
+                              </p>
+                            </td>
+                            <td className="px-3 py-1.5 text-center">
+                              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${wsStock <= 0 ? "text-red-600 bg-red-50" : wsStock < 5 ? "text-amber-700 bg-amber-50" : "text-slate-600 bg-slate-100"}`}>{wsStock}</span>
+                            </td>
+                            <td className="px-3 py-1.5">
+                              <div className="flex items-center gap-1 justify-center">
+                                <button className="h-7 w-7 rounded border border-slate-200 flex items-center justify-center text-slate-500 hover:border-slate-400 disabled:opacity-40 transition-colors" disabled={item.quantity <= 1} onClick={() => updateCartQuantityAtIndex(index, -1)} data-testid={`button-ws-minus-${item.lineId}`}><Minus className="h-3 w-3" /></button>
+                                <input type="number" min="1" className="w-12 h-7 text-center text-sm font-bold border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" defaultValue={item.quantity} key={`ws-qty-${item.lineId}-${item.quantity}`}
+                                  onBlur={(e) => {
+                                    let newQty = parseInt(e.target.value, 10);
+                                    if (!isNaN(newQty) && newQty >= 1) {
+                                      if (!allowOverselling && wsStock > 0) newQty = Math.min(newQty, wsStock);
+                                      const delta = newQty - item.quantity;
+                                      if (delta !== 0) updateCartQuantityAtIndex(index, delta);
+                                    }
+                                  }}
+                                  data-testid={`input-ws-qty-${item.lineId}`}
+                                />
+                                <button className="h-7 w-7 rounded border border-slate-200 flex items-center justify-center text-slate-500 hover:border-slate-400 disabled:opacity-40 transition-colors" disabled={wsAtMax} onClick={() => updateCartQuantityAtIndex(index, 1)} data-testid={`button-ws-plus-${item.lineId}`}><Plus className="h-3 w-3" /></button>
+                              </div>
+                            </td>
+                            <td className="px-3 py-1.5 text-right">
+                              <span className={`text-sm font-bold ${isDiscounted || isFree ? "text-red-600" : "text-slate-900"}`}>${fmtPrice(item.price_at_sale)}</span>
+                              {(isDiscounted || isFree) && <p className="text-[10px] text-slate-400 line-through">${fmtPrice(item.original_price)}</p>}
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input type="number" min="0" max="100" placeholder="0" className="w-20 h-7 text-center text-xs border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" value={wsDiscountInput}
+                                onChange={(e) => setDiscountInputs(p => ({ ...p, [item.lineId]: e.target.value }))}
+                                onBlur={(e) => {
+                                  const pct = parseFloat(e.target.value);
+                                  if (!isNaN(pct) && pct >= 0 && pct <= 100) applyPercent(item, index, pct);
+                                  else if (!e.target.value && hasPct) clearLineDiscount(item, index);
+                                }}
+                                data-testid={`input-ws-discount-${item.lineId}`}
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input type="number" min="0" step="0.01" placeholder="—" className="w-24 h-7 text-center text-xs border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" value={wsManualInput}
+                                onChange={(e) => setManualPriceInputs(p => ({ ...p, [item.lineId]: e.target.value }))}
+                                onBlur={(e) => { if (e.target.value) applyManualPrice(item, index, e.target.value); }}
+                                data-testid={`input-ws-price-${item.lineId}`}
+                              />
+                            </td>
+                            <td className="px-3 py-1.5 text-right">
+                              <span className="text-sm font-bold text-slate-900">${fmtPrice(item.price_at_sale * item.quantity)}</span>
+                              {isFree && <p className="text-[10px] text-red-500 font-bold">FREE</p>}
+                              {hasPct && <p className="text-[10px] text-red-500">-{item.discount_value}%</p>}
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <button className="text-slate-300 hover:text-red-500 transition-colors" onClick={() => { removeFromCartAtIndex(index); if (activeLineId === item.lineId) setActiveLineId(null); }} data-testid={`button-ws-remove-${item.lineId}`}><X className="h-4 w-4" /></button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            )}
+            {/* ── Normal Mode: expandable card items ── */}
+            {!wholesaleMode && (cart.length === 0 ? (
               <div className="flex items-center justify-center h-24 text-slate-400 text-sm">
                 No items yet
               </div>
@@ -3321,7 +3467,7 @@ export default function POSPage() {
                   </div>
                 );
               })
-            )}
+            ))}
           </div>
 
           {/* Notes section */}
@@ -3563,7 +3709,7 @@ export default function POSPage() {
             </div>
           )}
 
-          {/* Cart footer: totals + checkout */}
+          {!wholesaleMode && (
           <div className="border-t px-4 py-3 bg-slate-50 shrink-0 space-y-1">
             <div className="flex justify-between items-center">
               <span className="text-sm text-slate-500">
@@ -3714,6 +3860,41 @@ export default function POSPage() {
               </span>
             </div>
           </div>
+          )}
+          {/* ── Wholesale sticky footer ── */}
+          {wholesaleMode && (
+            <div className="shrink-0 border-t bg-white px-4 py-3 shadow-inner">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="text-2xl font-bold text-slate-900">${fmtPrice(adjustedTotal)}</span>
+                  <span className="text-sm text-slate-500 ml-1">{totalQty} item{totalQty !== 1 ? "s" : ""}</span>
+                  {totalDiscount > 0 && <span className="text-sm text-red-500 font-medium ml-1">· -{fmtPrice(totalDiscount)}</span>}
+                  {cartDiscountAmount > 0 && <span className="text-sm text-red-500 font-medium ml-1">· -{fmtPrice(cartDiscountAmount)}</span>}
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" disabled={cart.length === 0 || isSubmitting} onClick={handleSaveDraft} data-testid="button-ws-save-draft">
+                    <FileText className="h-4 w-4 mr-1.5" />Save Draft
+                  </Button>
+                  <Button disabled={cart.length === 0 || !selectedCustomer || !selectedAddress || isSubmitting} onClick={handleCheckoutClick} data-testid="button-ws-checkout">
+                    {isSubmitting ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CreditCard className="h-4 w-4 mr-1.5" />}
+                    {isSubmitting ? "Processing…" : "Checkout"}
+                  </Button>
+                </div>
+              </div>
+              {cart.length > 0 && !selectedCustomer && (
+                <div className="flex items-center gap-1.5 mt-2 text-amber-600 text-xs font-medium">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  Select a customer to enable checkout
+                </div>
+              )}
+              {cart.length > 0 && selectedCustomer && !selectedAddress && (
+                <div className="flex items-center gap-1.5 mt-2 text-amber-600 text-xs font-medium">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  No address found for this customer
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
