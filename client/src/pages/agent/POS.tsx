@@ -2482,38 +2482,6 @@ export default function POSPage() {
           </div>
         )}
 
-        {/* Tier / wholesale badge — after address dropdown */}
-        {selectedCustomer &&
-          (() => {
-            const badgeLabel =
-              matchedTier?.label ||
-              (selectedCustomer as any).price_list_name ||
-              "WHOLESALE";
-            if (matchedTier) {
-              return (
-                <span
-                  className="text-[10px] px-2 py-1 rounded font-bold text-white shrink-0 whitespace-nowrap leading-none"
-                  style={{ backgroundColor: matchedTier.color }}
-                  data-testid="text-price-tier"
-                >
-                  {badgeLabel}
-                </span>
-              );
-            }
-            const groupId = (selectedCustomer as any).customer_group_id;
-            if (groupId) {
-              return (
-                <span
-                  className="text-[10px] px-2 py-1 rounded font-bold text-white shrink-0 whitespace-nowrap leading-none bg-slate-700"
-                  data-testid="text-price-tier"
-                >
-                  {badgeLabel}
-                </span>
-              );
-            }
-            return null;
-          })()}
-
         {/* Store credit badge */}
         {selectedCustomer &&
           (() => {
@@ -2536,7 +2504,7 @@ export default function POSPage() {
           })()}
 
         {/* ── Fullscreen + Wholesale mode toggles ── */}
-        <div className="flex items-center gap-1 ml-1 shrink-0">
+        <div className="flex items-center gap-1 ml-auto shrink-0">
           <button
             onClick={toggleWholesaleMode}
             className={`h-8 w-8 flex items-center justify-center rounded border text-xs transition-colors ${wholesaleMode ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"}`}
