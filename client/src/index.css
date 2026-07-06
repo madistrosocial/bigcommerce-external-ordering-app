@@ -120,14 +120,18 @@
     overflow: hidden;
   }
 
-  /* #root must also be 100% so percentage heights (used instead of dvh) chain
-     correctly all the way down to the app shell. Without this, `height: 100%`
-     on the app shell resolves against #root's default (auto) height instead
-     of the real screen height, leaving a gap that reveals body's background
-     — this is what showed up as a grey/white bar at the bottom in standalone
-     PWA mode on iOS/Android, where there's no browser chrome to size around. */
+  /* #root is pinned with position:fixed + inset:0 instead of height:100%.
+     iOS WebKit in standalone PWA mode (Add to Home Screen) can miscompute
+     percentage/dvh-based heights on body/#root, leaving a gap at the bottom
+     that reveals body's background — a well-known WebKit quirk. Fixed
+     positioning with inset:0 is anchored directly to the true visual
+     viewport (which already correctly excludes nothing extra in standalone
+     mode, since there's no browser chrome), sidestepping the miscalculation
+     entirely. */
   #root {
-    height: 100%;
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
   }
 
   body {
