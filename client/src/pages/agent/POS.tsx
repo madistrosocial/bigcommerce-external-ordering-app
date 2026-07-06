@@ -173,6 +173,9 @@ function VariantPopupDialog({
   >({});
   const [openHistoryKey, setOpenHistoryKey] = useState<string | null>(null);
   const [historicalKeys, setHistoricalKeys] = useState<Set<string>>(new Set());
+  const [belowCostReview, setBelowCostReview] = useState<
+    Array<{ v: any; k: string; price: number; cost: number }> | null
+  >(null);
 
   const key = (v: any) => String(v?.id ?? "0");
   // Default qty is 0 (not 1)
@@ -300,6 +303,27 @@ function VariantPopupDialog({
 
   // Bulk add all variants with qty > 0
   const handleBulkAdd = () => {
+    const cost = parseFloat(String(product.cost_price ?? ""));
+    if (!isNaN(cost) && cost > 0) {
+      const flagged: Array<{ v: any; k: string; price: number; cost: number }> =
+        [];
+      for (const v of rows) {
+        const qty = getQty(v);
+        if (qty <= 0) continue;
+        const { finalPrice } = buildAddArgs(v);
+        if (finalPrice < cost) {
+          flagged.push({ v, k: key(v), price: finalPrice, cost });
+        }
+      }
+      if (flagged.length > 0) {
+        setBelowCostReview(flagged);
+        return;
+      }
+    }
+    performBulkAdd(false);
+  };
+
+  const performBulkAdd = (confirmedBelowCost: boolean) => {
     let addedCount = 0;
     for (const v of rows) {
       const qty = getQty(v);
@@ -335,6 +359,24 @@ function VariantPopupDialog({
         tierLabel,
         tierColor,
       );
+      if (confirmedBelowCost) {
+        const cost = parseFloat(String(product.cost_price ?? ""));
+        if (!isNaN(cost) && cost > 0 && finalPrice < cost) {
+          api
+            .createPriceOverrideAudit({
+              customer_id: selectedCustomer?.id ?? null,
+              customer_name: selectedCustomer
+                ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}`
+                : null,
+              product_id: product.id,
+              product_name: product.name,
+              sku: v?.sku || product.sku,
+              product_cost: cost,
+              selling_price: finalPrice,
+            })
+            .catch(() => {});
+        }
+      }
       resetVariant(key(v));
       addedCount++;
     }
@@ -345,6 +387,18 @@ function VariantPopupDialog({
         duration: 2000,
       });
     }
+    setBelowCostReview(null);
+  };
+
+  const cancelBelowCostReview = () => {
+    if (belowCostReview) {
+      setPriceInputs((p) => {
+        const n = { ...p };
+        for (const item of belowCostReview) delete n[item.k];
+        return n;
+      });
+    }
+    setBelowCostReview(null);
   };
 
   const selectedCount = rows.reduce((n, v) => n + (getQty(v) > 0 ? 1 : 0), 0);
@@ -355,6 +409,7 @@ function VariantPopupDialog({
   }, 0);
 
   return (
+    <>
     <Dialog
       open
       onOpenChange={(open) => {
@@ -706,6 +761,73 @@ function VariantPopupDialog({
         </div>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog
+      open={!!belowCostReview}
+      onOpenChange={(open) => {
+        if (!open) cancelBelowCostReview();
+      }}
+    >
+      <AlertDialogContent data-testid="dialog-below-cost-popup">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-red-600 flex items-center gap-2">
+            <AlertCircle className="h-5 w-5" />
+            Price Below Cost
+          </AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-2 text-sm text-slate-700">
+              <p>
+                {belowCostReview && belowCostReview.length > 1
+                  ? "The following variants are priced below their cost:"
+                  : "This variant is priced below its cost:"}
+              </p>
+              <div className="space-y-2">
+                {belowCostReview?.map((f) => (
+                  <div
+                    key={f.k}
+                    className="border rounded p-2 bg-slate-50"
+                    data-testid={`below-cost-row-${f.k}`}
+                  >
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">SKU</span>
+                      <span className="font-medium text-slate-800">
+                        {f.v?.sku || product.sku}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Cost</span>
+                      <span className="font-medium text-slate-800">
+                        ${fmtPrice(f.cost)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Selling Price</span>
+                      <span className="font-bold text-red-600">
+                        ${fmtPrice(f.price)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p>Do you want to continue selling below cost?</p>
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel data-testid="button-below-cost-popup-no">
+            No
+          </AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-red-600 hover:bg-red-700"
+            data-testid="button-below-cost-popup-yes"
+            onClick={() => performBulkAdd(true)}
+          >
+            Yes, Continue
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 
