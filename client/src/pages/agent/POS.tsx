@@ -2343,6 +2343,244 @@ export default function POSPage() {
   const totalQty = cart.reduce((s, i) => s + i.quantity, 0);
   const visibleSuggestions = suggestions.slice(0, suggestionLimit);
 
+  const notesSectionContent = (
+    <>
+      <CollapsibleTextarea
+        label="Customer Note"
+        placeholder="Visible to customer on order…"
+        value={orderNote}
+        onChange={setOrderNote}
+        testId="input-pos-order-note"
+      />
+      <CollapsibleTextarea
+        label="Staff Note"
+        placeholder="Internal staff note (not shared with customer)…"
+        value={staffNote}
+        onChange={setStaffNote}
+        testId="input-pos-staff-note"
+      />
+
+      {/* ── Discount section ── */}
+      <div className="border rounded-md overflow-hidden">
+        <button
+          className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+          onClick={() => setDiscountOpen((o) => !o)}
+          data-testid="btn-discount-toggle"
+        >
+          <div className="flex items-center gap-1.5">
+            <Tag className="h-3.5 w-3.5 text-slate-400" />
+            Discount
+            {cartDiscount && (
+              <span className="text-[11px] font-bold text-red-500 ml-0.5">
+                •{" "}
+                {cartDiscount.type === "store_credit"
+                  ? "Credit"
+                  : cartDiscount.type === "percent"
+                    ? `${cartDiscount.value}%`
+                    : `$${fmtPrice(cartDiscount.value)}`}
+              </span>
+            )}
+          </div>
+          <ChevronDown
+            className={`h-4 w-4 text-slate-400 transition-transform ${discountOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        {discountOpen && (
+          <div className="px-3 py-2 border-t space-y-2 bg-slate-50">
+            {/* Tab row */}
+            <div className="flex rounded border overflow-hidden text-xs font-semibold">
+              {(
+                [
+                  {
+                    key: "store_credit" as const,
+                    label: "Store Credit",
+                    Icon: Wallet,
+                  },
+                  {
+                    key: "percent" as const,
+                    label: "%",
+                    Icon: Percent,
+                  },
+                  {
+                    key: "dollar" as const,
+                    label: "$",
+                    Icon: DollarSign,
+                  },
+                ]
+              ).map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  className={`flex-1 py-1.5 flex items-center justify-center gap-1 transition-colors border-x first:border-l-0 last:border-r-0 ${
+                    activeDiscountTab === key
+                      ? "bg-slate-800 text-white"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                  onClick={() => {
+                    setActiveDiscountTab(key);
+                    setDiscountTabInput("");
+                  }}
+                  data-testid={`btn-discount-tab-${key}`}
+                >
+                  <Icon className="h-3 w-3" />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Store Credit panel */}
+            {activeDiscountTab === "store_credit" &&
+              (() => {
+                const credit =
+                  parseFloat(
+                    String(selectedCustomer?.store_credit_amount ?? 0),
+                  ) || 0;
+                return (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-slate-500">
+                      Available:{" "}
+                      <span
+                        className={`font-bold ${credit > 0 ? "text-green-600" : "text-slate-400"}`}
+                      >
+                        ${fmtPrice(credit)}
+                      </span>
+                      {!selectedCustomer && (
+                        <span className="text-amber-500 ml-1">
+                          — select a customer first
+                        </span>
+                      )}
+                    </p>
+                    {selectedCustomer && credit > 0 ? (
+                      <Button
+                        size="sm"
+                        className="w-full h-7 text-xs"
+                        variant={
+                          cartDiscount?.type === "store_credit"
+                            ? "destructive"
+                            : "default"
+                        }
+                        onClick={() =>
+                          setCartDiscount(
+                            cartDiscount?.type === "store_credit"
+                              ? null
+                              : { type: "store_credit", value: credit },
+                          )
+                        }
+                        data-testid="btn-apply-store-credit"
+                      >
+                        {cartDiscount?.type === "store_credit"
+                          ? "Remove Store Credit"
+                          : "Apply Store Credit"}
+                      </Button>
+                    ) : selectedCustomer && credit === 0 ? (
+                      <p className="text-xs text-slate-400 italic">
+                        No store credit available for this customer
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })()}
+
+            {/* % panel */}
+            {activeDiscountTab === "percent" && (
+              <div className="flex gap-1.5 items-center">
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  placeholder="0 – 100"
+                  value={discountTabInput}
+                  onChange={(e) => setDiscountTabInput(e.target.value)}
+                  className="h-7 text-xs flex-1"
+                  data-testid="input-discount-pct"
+                />
+                <Button
+                  size="sm"
+                  className="h-7 text-xs shrink-0"
+                  onClick={() => {
+                    const v = parseFloat(discountTabInput);
+                    if (!isNaN(v) && v >= 0 && v <= 100) {
+                      setCartDiscount({ type: "percent", value: v });
+                    }
+                  }}
+                  data-testid="btn-apply-pct"
+                >
+                  Apply
+                </Button>
+                {cartDiscount?.type === "percent" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs shrink-0 px-2"
+                    onClick={() => {
+                      setCartDiscount(null);
+                      setDiscountTabInput("");
+                    }}
+                    data-testid="btn-remove-pct"
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* $ panel */}
+            {activeDiscountTab === "dollar" && (
+              <div className="flex gap-1.5 items-center">
+                <Input
+                  type="number"
+                  min="0"
+                  placeholder="Amount"
+                  value={discountTabInput}
+                  onChange={(e) => setDiscountTabInput(e.target.value)}
+                  className="h-7 text-xs flex-1"
+                  data-testid="input-discount-dollar"
+                />
+                <Button
+                  size="sm"
+                  className="h-7 text-xs shrink-0"
+                  onClick={() => {
+                    const v = parseFloat(discountTabInput);
+                    if (!isNaN(v) && v >= 0) {
+                      setCartDiscount({ type: "dollar", value: v });
+                    }
+                  }}
+                  data-testid="btn-apply-dollar"
+                >
+                  Apply
+                </Button>
+                {cartDiscount?.type === "dollar" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs shrink-0 px-2"
+                    onClick={() => {
+                      setCartDiscount(null);
+                      setDiscountTabInput("");
+                    }}
+                    data-testid="btn-remove-dollar"
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* Applied discount summary */}
+            {cartDiscount && cartDiscountAmount > 0 && (
+              <p
+                className="text-xs font-semibold text-red-600"
+                data-testid="text-discount-applied"
+              >
+                Applied: -${fmtPrice(cartDiscountAmount)}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div
@@ -3041,6 +3279,11 @@ export default function POSPage() {
                 </div>
               )
             )}
+            {wholesaleMode && cart.length > 0 && (
+              <div className="px-3 py-3 border-t space-y-2 bg-white">
+                {notesSectionContent}
+              </div>
+            )}
             {/* ── Normal Mode: expandable card items ── */}
             {!wholesaleMode && (cart.length === 0 ? (
               <div className="flex items-center justify-center h-24 text-slate-400 text-sm">
@@ -3513,241 +3756,9 @@ export default function POSPage() {
           </div>
 
           {/* Notes section */}
-          {cart.length > 0 && (
+          {!wholesaleMode && cart.length > 0 && (
             <div className="px-3 py-2 border-t shrink-0 space-y-2">
-              <CollapsibleTextarea
-                label="Customer Note"
-                placeholder="Visible to customer on order…"
-                value={orderNote}
-                onChange={setOrderNote}
-                testId="input-pos-order-note"
-              />
-              <CollapsibleTextarea
-                label="Staff Note"
-                placeholder="Internal staff note (not shared with customer)…"
-                value={staffNote}
-                onChange={setStaffNote}
-                testId="input-pos-staff-note"
-              />
-
-              {/* ── Discount section ── */}
-              <div className="border rounded-md overflow-hidden">
-                <button
-                  className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-                  onClick={() => setDiscountOpen((o) => !o)}
-                  data-testid="btn-discount-toggle"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <Tag className="h-3.5 w-3.5 text-slate-400" />
-                    Discount
-                    {cartDiscount && (
-                      <span className="text-[11px] font-bold text-red-500 ml-0.5">
-                        •{" "}
-                        {cartDiscount.type === "store_credit"
-                          ? "Credit"
-                          : cartDiscount.type === "percent"
-                            ? `${cartDiscount.value}%`
-                            : `$${fmtPrice(cartDiscount.value)}`}
-                      </span>
-                    )}
-                  </div>
-                  <ChevronDown
-                    className={`h-4 w-4 text-slate-400 transition-transform ${discountOpen ? "rotate-180" : ""}`}
-                  />
-                </button>
-
-                {discountOpen && (
-                  <div className="px-3 py-2 border-t space-y-2 bg-slate-50">
-                    {/* Tab row */}
-                    <div className="flex rounded border overflow-hidden text-xs font-semibold">
-                      {(
-                        [
-                          {
-                            key: "store_credit" as const,
-                            label: "Store Credit",
-                            Icon: Wallet,
-                          },
-                          {
-                            key: "percent" as const,
-                            label: "%",
-                            Icon: Percent,
-                          },
-                          {
-                            key: "dollar" as const,
-                            label: "$",
-                            Icon: DollarSign,
-                          },
-                        ]
-                      ).map(({ key, label, Icon }) => (
-                        <button
-                          key={key}
-                          className={`flex-1 py-1.5 flex items-center justify-center gap-1 transition-colors border-x first:border-l-0 last:border-r-0 ${
-                            activeDiscountTab === key
-                              ? "bg-slate-800 text-white"
-                              : "text-slate-600 hover:bg-slate-100"
-                          }`}
-                          onClick={() => {
-                            setActiveDiscountTab(key);
-                            setDiscountTabInput("");
-                          }}
-                          data-testid={`btn-discount-tab-${key}`}
-                        >
-                          <Icon className="h-3 w-3" />
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Store Credit panel */}
-                    {activeDiscountTab === "store_credit" &&
-                      (() => {
-                        const credit =
-                          parseFloat(
-                            String(selectedCustomer?.store_credit_amount ?? 0),
-                          ) || 0;
-                        return (
-                          <div className="space-y-1.5">
-                            <p className="text-xs text-slate-500">
-                              Available:{" "}
-                              <span
-                                className={`font-bold ${credit > 0 ? "text-green-600" : "text-slate-400"}`}
-                              >
-                                ${fmtPrice(credit)}
-                              </span>
-                              {!selectedCustomer && (
-                                <span className="text-amber-500 ml-1">
-                                  — select a customer first
-                                </span>
-                              )}
-                            </p>
-                            {selectedCustomer && credit > 0 ? (
-                              <Button
-                                size="sm"
-                                className="w-full h-7 text-xs"
-                                variant={
-                                  cartDiscount?.type === "store_credit"
-                                    ? "destructive"
-                                    : "default"
-                                }
-                                onClick={() =>
-                                  setCartDiscount(
-                                    cartDiscount?.type === "store_credit"
-                                      ? null
-                                      : { type: "store_credit", value: credit },
-                                  )
-                                }
-                                data-testid="btn-apply-store-credit"
-                              >
-                                {cartDiscount?.type === "store_credit"
-                                  ? "Remove Store Credit"
-                                  : "Apply Store Credit"}
-                              </Button>
-                            ) : selectedCustomer && credit === 0 ? (
-                              <p className="text-xs text-slate-400 italic">
-                                No store credit available for this customer
-                              </p>
-                            ) : null}
-                          </div>
-                        );
-                      })()}
-
-                    {/* % panel */}
-                    {activeDiscountTab === "percent" && (
-                      <div className="flex gap-1.5 items-center">
-                        <Input
-                          type="number"
-                          min="0"
-                          max="100"
-                          placeholder="0 – 100"
-                          value={discountTabInput}
-                          onChange={(e) => setDiscountTabInput(e.target.value)}
-                          className="h-7 text-xs flex-1"
-                          data-testid="input-discount-pct"
-                        />
-                        <Button
-                          size="sm"
-                          className="h-7 text-xs shrink-0"
-                          onClick={() => {
-                            const v = parseFloat(discountTabInput);
-                            if (!isNaN(v) && v >= 0 && v <= 100) {
-                              setCartDiscount({ type: "percent", value: v });
-                            }
-                          }}
-                          data-testid="btn-apply-pct"
-                        >
-                          Apply
-                        </Button>
-                        {cartDiscount?.type === "percent" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs shrink-0 px-2"
-                            onClick={() => {
-                              setCartDiscount(null);
-                              setDiscountTabInput("");
-                            }}
-                            data-testid="btn-remove-pct"
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* $ panel */}
-                    {activeDiscountTab === "dollar" && (
-                      <div className="flex gap-1.5 items-center">
-                        <Input
-                          type="number"
-                          min="0"
-                          placeholder="Amount"
-                          value={discountTabInput}
-                          onChange={(e) => setDiscountTabInput(e.target.value)}
-                          className="h-7 text-xs flex-1"
-                          data-testid="input-discount-dollar"
-                        />
-                        <Button
-                          size="sm"
-                          className="h-7 text-xs shrink-0"
-                          onClick={() => {
-                            const v = parseFloat(discountTabInput);
-                            if (!isNaN(v) && v >= 0) {
-                              setCartDiscount({ type: "dollar", value: v });
-                            }
-                          }}
-                          data-testid="btn-apply-dollar"
-                        >
-                          Apply
-                        </Button>
-                        {cartDiscount?.type === "dollar" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs shrink-0 px-2"
-                            onClick={() => {
-                              setCartDiscount(null);
-                              setDiscountTabInput("");
-                            }}
-                            data-testid="btn-remove-dollar"
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Applied discount summary */}
-                    {cartDiscount && cartDiscountAmount > 0 && (
-                      <p
-                        className="text-xs font-semibold text-red-600"
-                        data-testid="text-discount-applied"
-                      >
-                        Applied: -${fmtPrice(cartDiscountAmount)}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
+              {notesSectionContent}
             </div>
           )}
 
