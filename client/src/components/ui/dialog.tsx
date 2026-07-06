@@ -44,7 +44,7 @@ const DialogContent = React.forwardRef<
         // (viewport-fit=cover means env() values are non-zero on notched devices)
         marginTop: "env(safe-area-inset-top)",
         maxHeight:
-          "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1rem)",
+          "calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1rem)",
         ...style,
       }}
       {...props}

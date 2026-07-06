@@ -40,7 +40,7 @@ const AlertDialogContent = React.forwardRef<
       style={{
         marginTop: "env(safe-area-inset-top)",
         maxHeight:
-          "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1rem)",
+          "calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1rem)",
         ...style,
       }}
       {...props}

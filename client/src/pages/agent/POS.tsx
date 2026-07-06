@@ -3982,7 +3982,7 @@ export default function POSPage() {
         <DialogContent
           className="w-[95%] max-w-[95%] flex flex-col p-0 gap-0"
           style={{
-            maxHeight: "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 2rem)",
+            maxHeight: "calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 2rem)",
             marginTop: "env(safe-area-inset-top)",
           }}
           data-testid="dialog-inv-shortfall"

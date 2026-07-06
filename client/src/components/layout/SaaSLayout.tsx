@@ -325,8 +325,9 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className="flex h-[100dvh] bg-white overflow-hidden"
+      className="flex bg-white overflow-hidden"
       style={{
+        height: "var(--app-height, 100dvh)",
         paddingTop: "env(safe-area-inset-top)",
         paddingBottom: "env(safe-area-inset-bottom)",
         paddingLeft: "env(safe-area-inset-left)",
