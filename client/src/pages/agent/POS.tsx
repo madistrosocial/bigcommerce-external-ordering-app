@@ -2590,10 +2590,6 @@ export default function POSPage() {
       {/* ── Header ── */}
       <header
         className="flex items-center gap-3 px-4 h-14 bg-white border-b shadow-sm shrink-0 z-20"
-        style={{
-          paddingTop: "env(safe-area-inset-top)",
-          height: "calc(3.5rem + env(safe-area-inset-top))",
-        }}
       >
         <span className="font-bold text-base uppercase tracking-widest text-slate-800 shrink-0">
           POS
@@ -3894,7 +3890,6 @@ export default function POSPage() {
             {/* ── Inline sync row ── */}
             <div
               className="flex items-center gap-2 pt-1.5 border-t mt-2"
-              style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
               data-testid="pos-sync-footer"
             >
               <button
