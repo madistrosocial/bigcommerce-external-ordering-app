@@ -3,3 +3,4 @@
 - [Duplicate getBcCreds hoisting bug](duplicate-function-hoisting.md) — two same-named async functions in registerRoutes(); JS hoisting lets the second silently win and break all callers.
 - [CRM auth pattern](crm-auth-pattern.md) — `requireAuth` sets `authUser`, NOT `userId`; using `(req as any).userId` silently breaks all CRM endpoints (returns 401 → shows 0 customers).
 - [CRM Visibility RBAC](crm-visibility-rbac.md) — crm:view_all is the canonical "see all customers" perm; CRM_ACTION_PERMS in AdminUsers.tsx; health cards and reactivation both now pass visibility scope.
+- [POS store credit lookup](pos-store-credit-lookup.md) — POS-side CRM writes should take bigcommerce_customer_id from client and resolve internal CRM id server-side, not the reverse.

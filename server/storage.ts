@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage } from "@shared/schema";
 import { eq, desc, and, inArray, gt, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
@@ -129,6 +129,14 @@ export interface IStorage {
   // CRM Table resets
   truncateCrmCustomers(): Promise<void>;
   truncateCrmOrders(): Promise<void>;
+
+  // POS Enhancements — Price Override Audit
+  createPosPriceOverrideAudit(entry: InsertPosPriceOverrideAudit): Promise<PosPriceOverrideAudit>;
+  getPosPriceOverrideAudit(opts: { userId?: number; customerId?: number; sku?: string; dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ rows: PosPriceOverrideAudit[]; total: number }>;
+
+  // POS Enhancements — Store Credit Usage
+  createPosStoreCreditUsage(entry: InsertPosStoreCreditUsage): Promise<PosStoreCreditUsage>;
+  getPosStoreCreditUsage(opts: { customerId?: number; cashierId?: number; orderSearch?: string; dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ rows: PosStoreCreditUsage[]; total: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1246,6 +1254,80 @@ export class DatabaseStorage implements IStorage {
 
   async truncateCrmOrders(): Promise<void> {
     await db.delete(customerOrdersMirror);
+  }
+
+  // ─── POS Enhancements — Price Override Audit ───────────────────────────────
+
+  async createPosPriceOverrideAudit(entry: InsertPosPriceOverrideAudit): Promise<PosPriceOverrideAudit> {
+    const result = await db.insert(posPriceOverrideAudit).values(entry).returning();
+    return result[0];
+  }
+
+  async getPosPriceOverrideAudit(opts: { userId?: number; customerId?: number; sku?: string; dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ rows: PosPriceOverrideAudit[]; total: number }> {
+    const { userId, customerId, sku, dateFrom, dateTo, sortBy = "created_at", sortDir = "desc", limit = 50, offset = 0 } = opts;
+    const conditions: any[] = [];
+    if (userId) conditions.push(eq(posPriceOverrideAudit.user_id, userId));
+    if (customerId) conditions.push(eq(posPriceOverrideAudit.customer_id, customerId));
+    if (sku?.trim()) conditions.push(ilike(posPriceOverrideAudit.sku, `%${sku.trim()}%`));
+    if (dateFrom) conditions.push(sql`${posPriceOverrideAudit.created_at} >= ${dateFrom}::timestamptz`);
+    if (dateTo) conditions.push(sql`${posPriceOverrideAudit.created_at} <= ${dateTo}::timestamptz + interval '1 day'`);
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const sortColMap: Record<string, any> = {
+      created_at: posPriceOverrideAudit.created_at,
+      loss_amount: posPriceOverrideAudit.loss_amount,
+      sku: posPriceOverrideAudit.sku,
+      product_cost: posPriceOverrideAudit.product_cost,
+      selling_price: posPriceOverrideAudit.selling_price,
+    };
+    const sortCol = sortColMap[sortBy] ?? posPriceOverrideAudit.created_at;
+    const orderFn = sortDir === "asc" ? asc : desc;
+
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(posPriceOverrideAudit).where(where),
+      db.select().from(posPriceOverrideAudit).where(where).orderBy(orderFn(sortCol)).limit(limit).offset(offset),
+    ]);
+
+    return { rows, total: countRows[0]?.count ?? 0 };
+  }
+
+  // ─── POS Enhancements — Store Credit Usage ─────────────────────────────────
+
+  async createPosStoreCreditUsage(entry: InsertPosStoreCreditUsage): Promise<PosStoreCreditUsage> {
+    const result = await db.insert(posStoreCreditUsage).values(entry).returning();
+    return result[0];
+  }
+
+  async getPosStoreCreditUsage(opts: { customerId?: number; cashierId?: number; orderSearch?: string; dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ rows: PosStoreCreditUsage[]; total: number }> {
+    const { customerId, cashierId, orderSearch, dateFrom, dateTo, sortBy = "created_at", sortDir = "desc", limit = 50, offset = 0 } = opts;
+    const conditions: any[] = [];
+    if (customerId) conditions.push(eq(posStoreCreditUsage.customer_id, customerId));
+    if (cashierId) conditions.push(eq(posStoreCreditUsage.cashier_id, cashierId));
+    if (orderSearch?.trim()) {
+      const s = orderSearch.trim();
+      conditions.push(or(
+        sql`${posStoreCreditUsage.bigcommerce_order_id}::text ilike ${`%${s}%`}`,
+        sql`${posStoreCreditUsage.order_id}::text ilike ${`%${s}%`}`,
+      ));
+    }
+    if (dateFrom) conditions.push(sql`${posStoreCreditUsage.created_at} >= ${dateFrom}::timestamptz`);
+    if (dateTo) conditions.push(sql`${posStoreCreditUsage.created_at} <= ${dateTo}::timestamptz + interval '1 day'`);
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const sortColMap: Record<string, any> = {
+      created_at: posStoreCreditUsage.created_at,
+      credit_used: posStoreCreditUsage.credit_used,
+      final_order_total: posStoreCreditUsage.final_order_total,
+    };
+    const sortCol = sortColMap[sortBy] ?? posStoreCreditUsage.created_at;
+    const orderFn = sortDir === "asc" ? asc : desc;
+
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(posStoreCreditUsage).where(where),
+      db.select().from(posStoreCreditUsage).where(where).orderBy(orderFn(sortCol)).limit(limit).offset(offset),
+    ]);
+
+    return { rows, total: countRows[0]?.count ?? 0 };
   }
 }
 

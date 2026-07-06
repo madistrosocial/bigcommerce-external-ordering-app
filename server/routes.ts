@@ -1789,6 +1789,7 @@ export async function registerRoutes(
           p.sale_price ?? null,
           p.price,
         ).toString(),
+        cost_price: p.cost_price != null ? p.cost_price.toString() : null,
         image: p.primary_image?.url_standard || "",
         description: p.description
           ? p.description.replace(/<[^>]*>?/gm, "")
@@ -2122,6 +2123,7 @@ export async function registerRoutes(
             name: p.name,
             sku: p.sku,
             price: displayPrice.toString(),
+            cost_price: p.cost_price != null ? p.cost_price.toString() : null,
             image: primaryImage?.url_standard ?? "",
             description: p.description
               ? p.description.replace(/<[^>]*>?/gm, "")
@@ -5389,6 +5391,180 @@ export async function registerRoutes(
     try {
       const users = await storage.getCrmUsers();
       res.json(users);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── POS Enhancements: Store Credit (live, same source as CRM) ─────────────
+
+  // GET /api/pos/customer-store-credit/:bcCustomerId — live BC v2 balance, mirrors CRM's source
+  app.get("/api/pos/customer-store-credit/:bcCustomerId", requireAuth, async (req, res) => {
+    try {
+      const bcCustomerId = parseInt(req.params.bcCustomerId);
+      if (isNaN(bcCustomerId)) return res.status(400).json({ error: "Invalid customer id" });
+      const { storeHash, headers } = await getBcCreds();
+      const bcRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`, { headers });
+      if (!bcRes.ok) return res.status(502).json({ error: "Failed to fetch store credit from BigCommerce" });
+      const bcData = await bcRes.json();
+      const rawCredit = bcData?.store_credit_amount ?? bcData?.store_credit ?? 0;
+      const credit = Number(rawCredit) || 0;
+
+      // Keep CRM mirror in sync so both surfaces always agree
+      try {
+        const existing = await storage.getCrmCustomerByBcId(bcCustomerId);
+        if (existing) {
+          await storage.upsertCrmCustomer({
+            bigcommerce_customer_id: existing.bigcommerce_customer_id,
+            company: existing.company, first_name: existing.first_name, last_name: existing.last_name,
+            email: existing.email, phone: existing.phone,
+            customer_group_id: existing.customer_group_id, customer_group_name: existing.customer_group_name,
+            billing_address: existing.billing_address as any, shipping_address: existing.shipping_address as any,
+            created_date: existing.created_date, is_active: existing.is_active,
+            store_credit_balance: String(credit),
+          });
+        }
+      } catch (_) { /* mirror sync failure is non-fatal */ }
+
+      res.json({ store_credit: credit });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── POS Enhancements: Below-Cost Price Protection (Audit) ─────────────────
+
+  // POST /api/pos/price-override-audit — logged only when cashier confirms a below-cost price
+  app.post("/api/pos/price-override-audit", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const { customer_id, customer_name, order_id, bigcommerce_order_id, product_id, product_name, sku, product_cost, selling_price } = req.body;
+      if (product_id == null || !sku || product_cost == null || selling_price == null) {
+        return res.status(400).json({ error: "product_id, sku, product_cost, selling_price are required" });
+      }
+      const loss = Number(product_cost) - Number(selling_price);
+      const created = await storage.createPosPriceOverrideAudit({
+        user_id: user.id,
+        customer_id: customer_id ? parseInt(String(customer_id)) : null,
+        customer_name: customer_name || null,
+        order_id: order_id ? parseInt(String(order_id)) : null,
+        bigcommerce_order_id: bigcommerce_order_id ? parseInt(String(bigcommerce_order_id)) : null,
+        product_id: parseInt(String(product_id)),
+        product_name: product_name || "",
+        sku,
+        product_cost: String(product_cost),
+        selling_price: String(selling_price),
+        loss_amount: String(loss > 0 ? loss : 0),
+      });
+      res.status(201).json(created);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/pos/price-override-audit — Reporting > Price Override Audit
+  app.get("/api/pos/price-override-audit", requirePermission("reporting_price_override_audit"), async (req, res) => {
+    try {
+      const { userId, customerId, sku, dateFrom, dateTo, sortBy, sortDir } = req.query as Record<string, string>;
+      const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
+      const offset = parseInt(String(req.query.offset ?? "0"));
+      const result = await storage.getPosPriceOverrideAudit({
+        userId: userId ? parseInt(userId) : undefined,
+        customerId: customerId ? parseInt(customerId) : undefined,
+        sku, dateFrom, dateTo, sortBy, sortDir, limit, offset,
+      });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── POS Enhancements: Store Credit Usage ──────────────────────────────────
+
+  // POST /api/pos/store-credit-usage — apply store credit at checkout: deduct in BC, log usage, create CRM note
+  app.post("/api/pos/store-credit-usage", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const { bigcommerce_customer_id, customer_name, order_id, bigcommerce_order_id, credit_used, order_total_before, final_order_total } = req.body;
+      if (!bigcommerce_customer_id || credit_used == null || order_total_before == null || final_order_total == null) {
+        return res.status(400).json({ error: "bigcommerce_customer_id, credit_used, order_total_before, final_order_total are required" });
+      }
+      const creditUsedNum = Number(credit_used);
+      if (creditUsedNum <= 0) return res.status(400).json({ error: "credit_used must be positive" });
+
+      const customer = await storage.getCrmCustomerByBcId(parseInt(String(bigcommerce_customer_id)));
+      if (!customer) return res.status(404).json({ error: "Customer not found in CRM" });
+      const customer_id = customer.id;
+      const creditBefore = Number(customer?.store_credit_balance ?? 0);
+      if (creditUsedNum > creditBefore + 0.005) {
+        return res.status(400).json({ error: "Applied store credit cannot exceed available store credit" });
+      }
+      if (creditUsedNum > Number(order_total_before) + 0.005) {
+        return res.status(400).json({ error: "Applied store credit cannot exceed order total" });
+      }
+      const creditRemaining = Math.max(0, creditBefore - creditUsedNum);
+
+      // Deduct from the real BigCommerce store credit balance (v2 API: negative amount = deduction)
+      const { storeHash, headers } = await getBcCreds();
+      const bcRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bigcommerce_customer_id}/storecredit`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ amount: -Math.abs(creditUsedNum) }),
+      });
+      if (!bcRes.ok) {
+        const errText = await bcRes.text().catch(() => "");
+        return res.status(502).json({ error: `Failed to update BigCommerce store credit: ${bcRes.status} ${errText}` });
+      }
+
+      // Sync local CRM mirror balance immediately
+      if (customer) {
+        await storage.upsertCrmCustomer({
+          bigcommerce_customer_id: customer.bigcommerce_customer_id,
+          company: customer.company, first_name: customer.first_name, last_name: customer.last_name,
+          email: customer.email, phone: customer.phone,
+          customer_group_id: customer.customer_group_id, customer_group_name: customer.customer_group_name,
+          billing_address: customer.billing_address as any, shipping_address: customer.shipping_address as any,
+          created_date: customer.created_date, is_active: customer.is_active,
+          store_credit_balance: String(creditRemaining),
+        });
+      }
+
+      const usage = await storage.createPosStoreCreditUsage({
+        order_id: order_id ? parseInt(String(order_id)) : null,
+        bigcommerce_order_id: bigcommerce_order_id ? parseInt(String(bigcommerce_order_id)) : null,
+        customer_id: parseInt(String(customer_id)),
+        customer_name: customer_name || null,
+        cashier_id: user.id,
+        credit_before: String(creditBefore),
+        credit_used: String(creditUsedNum),
+        credit_remaining: String(creditRemaining),
+        order_total_before: String(order_total_before),
+        final_order_total: String(final_order_total),
+      });
+
+      // System-generated CRM note (note_type "Store Credit" cannot be created manually)
+      try {
+        const orderRef = bigcommerce_order_id ? `#${bigcommerce_order_id}` : order_id ? `#${order_id}` : "(pending sync)";
+        const noteText = `Store Credit Applied\n\n$${creditUsedNum.toFixed(2)} applied during checkout.\nOrder ${orderRef}\n\nRemaining Store Credit:\n$${creditRemaining.toFixed(2)}`;
+        await storage.createCrmNote({
+          customer_id: parseInt(String(customer_id)),
+          note_type: "Store Credit",
+          note: noteText,
+          order_id: order_id ? parseInt(String(order_id)) : null,
+          created_by: user.id,
+        });
+      } catch (_) { /* note creation failure is non-fatal */ }
+
+      res.status(201).json({ ...usage, credit_remaining: creditRemaining });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/pos/store-credit-usage — Reporting > Store Credit Usage
+  app.get("/api/pos/store-credit-usage", requirePermission("reporting_store_credit_usage"), async (req, res) => {
+    try {
+      const { customerId, cashierId, orderSearch, dateFrom, dateTo, sortBy, sortDir } = req.query as Record<string, string>;
+      const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
+      const offset = parseInt(String(req.query.offset ?? "0"));
+      const result = await storage.getPosStoreCreditUsage({
+        customerId: customerId ? parseInt(customerId) : undefined,
+        cashierId: cashierId ? parseInt(cashierId) : undefined,
+        orderSearch, dateFrom, dateTo, sortBy, sortDir, limit, offset,
+      });
+      res.json(result);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

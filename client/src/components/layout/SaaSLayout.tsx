@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Monitor, ShoppingBag, Package, BookOpen,
   ShoppingCart, Settings, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, LogOut, Truck, Wifi, WifiOff, Menu, X,
-  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound,
+  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -148,6 +148,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("crm_notes") ? [{ label: "Notes", path: "/crm/notes" }] : []),
   ];
 
+  // Reporting children
+  const reportingChildren: NavLeaf[] = [
+    ...(hasPermission("reporting_price_override_audit") ? [{ label: "Price Override Audit", path: "/reports/price-override-audit" }] : []),
+    ...(hasPermission("reporting_store_credit_usage") ? [{ label: "Store Credit Usage", path: "/reports/store-credit-usage" }] : []),
+  ];
+
   // Build final nav list — only include items the user can access
   const navItems: NavGroup[] = [
     ...(hasPermission("dashboard") ? [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" }] : []),
@@ -159,6 +165,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("cart") ? [{ id: "cart", label: "Cart", icon: ShoppingCart, path: "/cart" }] : []),
     ...(toolsChildren.length > 0 ? [{ id: "tools", label: "Tools", icon: Wrench, children: toolsChildren }] : []),
     ...(crmChildren.length > 0 ? [{ id: "crm", label: "CRM", icon: ContactRound, children: crmChildren }] : []),
+    ...(reportingChildren.length > 0 ? [{ id: "reporting", label: "Reporting", icon: FileBarChart, children: reportingChildren }] : []),
   ];
 
   // Settings section: system admins always; agents with admin:view permission

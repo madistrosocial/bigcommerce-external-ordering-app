@@ -223,6 +223,39 @@ export const crmAuditLog = pgTable("crm_audit_log", {
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── POS Enhancements (Price Protection / Store Credit) ───────────────────────
+
+export const posPriceOverrideAudit = pgTable("pos_price_override_audit", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").notNull().references(() => users.id),
+  customer_id: integer("customer_id"),
+  customer_name: text("customer_name"),
+  order_id: integer("order_id"),
+  bigcommerce_order_id: integer("bigcommerce_order_id"),
+  product_id: integer("product_id").notNull(),
+  product_name: text("product_name").notNull(),
+  sku: text("sku").notNull(),
+  product_cost: decimal("product_cost", { precision: 10, scale: 2 }).notNull(),
+  selling_price: decimal("selling_price", { precision: 10, scale: 2 }).notNull(),
+  loss_amount: decimal("loss_amount", { precision: 10, scale: 2 }).notNull(),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const posStoreCreditUsage = pgTable("pos_store_credit_usage", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  order_id: integer("order_id"),
+  bigcommerce_order_id: integer("bigcommerce_order_id"),
+  customer_id: integer("customer_id").notNull(),
+  customer_name: text("customer_name"),
+  cashier_id: integer("cashier_id").notNull().references(() => users.id),
+  credit_before: decimal("credit_before", { precision: 14, scale: 2 }).notNull(),
+  credit_used: decimal("credit_used", { precision: 14, scale: 2 }).notNull(),
+  credit_remaining: decimal("credit_remaining", { precision: 14, scale: 2 }).notNull(),
+  order_total_before: decimal("order_total_before", { precision: 10, scale: 2 }).notNull(),
+  final_order_total: decimal("final_order_total", { precision: 10, scale: 2 }).notNull(),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Insert schemas — RBAC
 export const insertRoleSchema = createInsertSchema(roles).omit({ id: true, created_at: true });
 export const insertPermissionSchema = createInsertSchema(permissions).omit({ id: true });
@@ -238,6 +271,10 @@ export const insertInventoryPushLogSchema = createInsertSchema(inventoryPushLogs
 export const insertProductLinkLogSchema = createInsertSchema(productLinkLogs).omit({ id: true, created_at: true });
 export const insertPromoFreeSkuTrackerSchema = createInsertSchema(promoFreeSkuTracker).omit({ id: true, created_at: true, updated_at: true });
 export const insertShipstationExportHistorySchema = createInsertSchema(shipstationExportHistory).omit({ id: true, created_at: true, export_date: true });
+
+// Insert schemas — POS Enhancements
+export const insertPosPriceOverrideAuditSchema = createInsertSchema(posPriceOverrideAudit).omit({ id: true, created_at: true });
+export const insertPosStoreCreditUsageSchema = createInsertSchema(posStoreCreditUsage).omit({ id: true, created_at: true });
 
 // Insert schemas — CRM
 export const insertCrmCustomerSchema = createInsertSchema(customersMirror).omit({ id: true, created_at: true, updated_at: true });
@@ -270,6 +307,12 @@ export type PromoFreeSkuTracker = typeof promoFreeSkuTracker.$inferSelect;
 
 export type InsertShipstationExportHistory = z.infer<typeof insertShipstationExportHistorySchema>;
 export type ShipstationExportHistory = typeof shipstationExportHistory.$inferSelect;
+
+// POS Enhancement types
+export type InsertPosPriceOverrideAudit = z.infer<typeof insertPosPriceOverrideAuditSchema>;
+export type PosPriceOverrideAudit = typeof posPriceOverrideAudit.$inferSelect;
+export type InsertPosStoreCreditUsage = z.infer<typeof insertPosStoreCreditUsageSchema>;
+export type PosStoreCreditUsage = typeof posStoreCreditUsage.$inferSelect;
 
 // CRM types
 export type InsertCrmCustomer = z.infer<typeof insertCrmCustomerSchema>;

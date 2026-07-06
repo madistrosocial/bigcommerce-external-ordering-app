@@ -45,6 +45,8 @@ export const MODULES = [
   { key: "inventory_logs",     label: "Inventory › Push Logs" },
   { key: "pricing",            label: "Price Tiers" },
   { key: "reports",            label: "Reports" },
+  { key: "reporting_price_override_audit", label: "Reporting › Price Override Audit" },
+  { key: "reporting_store_credit_usage",   label: "Reporting › Store Credit Usage" },
   { key: "tools_bc_link",      label: "Tools › BC Product Link" },
   { key: "tools_bc_link_logs", label: "Tools › Product Link Logs" },
   { key: "promo_sku_tracker",  label: "Tools › Promo SKU Tracker" },

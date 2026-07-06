@@ -5,6 +5,7 @@ export interface Product {
   name: string;
   sku: string;
   price: string;
+  cost_price?: string | null;
   image: string;
   description: string;
   stock_level: number;
@@ -425,6 +426,121 @@ export async function getCustomerAddresses(customerId: number): Promise<BigComme
     headers: getAuthHeaders()
   });
   if (!res.ok) throw new Error('Failed to fetch addresses');
+  return res.json();
+}
+
+export async function getCustomerStoreCredit(bcCustomerId: number): Promise<number> {
+  const res = await fetch(`${API_BASE}/pos/customer-store-credit/${bcCustomerId}`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) throw new Error('Failed to fetch store credit');
+  const data = await res.json();
+  return Number(data.store_credit) || 0;
+}
+
+export interface PriceOverrideAuditPayload {
+  customer_id?: number | null;
+  customer_name?: string | null;
+  order_id?: number | null;
+  bigcommerce_order_id?: number | null;
+  product_id: number;
+  product_name: string;
+  sku: string;
+  product_cost: string | number;
+  selling_price: string | number;
+}
+
+export async function createPriceOverrideAudit(payload: PriceOverrideAuditPayload): Promise<any> {
+  const res = await fetch(`${API_BASE}/pos/price-override-audit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to log price override' }));
+    throw new Error(error.error || 'Failed to log price override');
+  }
+  return res.json();
+}
+
+export interface StoreCreditUsagePayload {
+  bigcommerce_customer_id: number;
+  customer_name?: string | null;
+  order_id?: number | null;
+  bigcommerce_order_id?: number | null;
+  credit_used: number;
+  order_total_before: number;
+  final_order_total: number;
+}
+
+export async function applyStoreCreditUsage(payload: StoreCreditUsagePayload): Promise<any> {
+  const res = await fetch(`${API_BASE}/pos/store-credit-usage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to apply store credit' }));
+    throw new Error(error.error || 'Failed to apply store credit');
+  }
+  return res.json();
+}
+
+export interface PosPriceOverrideAuditRow {
+  id: number;
+  user_id: number;
+  customer_id: number | null;
+  customer_name: string | null;
+  order_id: number | null;
+  bigcommerce_order_id: number | null;
+  product_id: number;
+  product_name: string;
+  sku: string;
+  product_cost: string;
+  selling_price: string;
+  loss_amount: string;
+  created_at: string;
+}
+
+export interface PosStoreCreditUsageRow {
+  id: number;
+  order_id: number | null;
+  bigcommerce_order_id: number | null;
+  customer_id: number;
+  customer_name: string | null;
+  cashier_id: number;
+  credit_before: string;
+  credit_used: string;
+  credit_remaining: string;
+  order_total_before: string;
+  final_order_total: string;
+  created_at: string;
+}
+
+export interface PosReportQuery {
+  limit?: number;
+  offset?: number;
+  sortBy?: string;
+  sortDir?: "asc" | "desc";
+  dateFrom?: string;
+  dateTo?: string;
+  sku?: string;
+  orderSearch?: string;
+}
+
+export async function getPriceOverrideAudit(query: PosReportQuery = {}): Promise<{ rows: PosPriceOverrideAuditRow[]; total: number }> {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([k, v]) => { if (v !== undefined && v !== "") params.set(k, String(v)); });
+  const res = await fetch(`${API_BASE}/pos/price-override-audit?${params.toString()}`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error("Failed to fetch price override audit");
+  return res.json();
+}
+
+export async function getStoreCreditUsageReport(query: PosReportQuery = {}): Promise<{ rows: PosStoreCreditUsageRow[]; total: number }> {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([k, v]) => { if (v !== undefined && v !== "") params.set(k, String(v)); });
+  const res = await fetch(`${API_BASE}/pos/store-credit-usage?${params.toString()}`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error("Failed to fetch store credit usage");
   return res.json();
 }
 

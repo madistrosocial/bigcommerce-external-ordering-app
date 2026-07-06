@@ -1065,6 +1065,37 @@ export default function POSPage() {
   const [maxOverrideItems, setMaxOverrideItems] = useState<CartItem[]>([]);
   const [isOverriding, setIsOverriding] = useState(false);
 
+  // ── Store Credit (live, same source as CRM) ──────────────────────────────
+  const [liveStoreCredit, setLiveStoreCredit] = useState<number>(0);
+  const [isLoadingStoreCredit, setIsLoadingStoreCredit] = useState(false);
+
+  const refreshStoreCredit = useCallback(async (bcCustomerId: number | undefined | null) => {
+    if (!bcCustomerId) { setLiveStoreCredit(0); return; }
+    setIsLoadingStoreCredit(true);
+    try {
+      const credit = await api.getCustomerStoreCredit(bcCustomerId);
+      setLiveStoreCredit(credit);
+    } catch {
+      setLiveStoreCredit(0);
+    } finally {
+      setIsLoadingStoreCredit(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshStoreCredit(selectedCustomer?.id);
+  }, [selectedCustomer?.id, refreshStoreCredit]);
+
+  // ── Below-cost price protection ──────────────────────────────────────────
+  const [belowCostConfirm, setBelowCostConfirm] = useState<{
+    item: CartItem;
+    index: number;
+    price: number;
+    priceSource: CartItem["price_source"];
+    cost: number;
+    prevPriceInput: string | undefined;
+  } | null>(null);
+
   // ── Push inventory modal ───────────────────────────────────────────────────
   const [showPushInventoryModal, setShowPushInventoryModal] = useState(false);
 
@@ -1463,8 +1494,7 @@ export default function POSPage() {
   // ── Cart-level discount helper ─────────────────────────────────────────────
   const computeDiscountAmount = (subtotal: number): number => {
     if (!cartDiscount) return 0;
-    const credit =
-      parseFloat(String(selectedCustomer?.store_credit_amount ?? 0)) || 0;
+    const credit = liveStoreCredit;
     if (cartDiscount.type === "store_credit") return Math.min(credit, subtotal);
     if (cartDiscount.type === "percent")
       return Math.max(0, subtotal * (cartDiscount.value / 100));
@@ -1978,14 +2008,12 @@ export default function POSPage() {
     });
   };
 
-  const applyManualPrice = (
+  const commitManualPrice = (
     item: CartItem,
     index: number,
-    raw: string,
+    price: number,
     priceSource: CartItem["price_source"] = "custom",
   ) => {
-    const price = parseFloat(raw);
-    if (isNaN(price) || price < 0) return;
     setDiscountInputs((p) => {
       const n = { ...p };
       delete n[item.lineId];
@@ -1999,6 +2027,29 @@ export default function POSPage() {
       price_tier_label: undefined,
       price_tier_color: undefined,
     });
+  };
+
+  const applyManualPrice = (
+    item: CartItem,
+    index: number,
+    raw: string,
+    priceSource: CartItem["price_source"] = "custom",
+  ) => {
+    const price = parseFloat(raw);
+    if (isNaN(price) || price < 0) return;
+    const cost = parseFloat(String(item.product.cost_price ?? ""));
+    if (!isNaN(cost) && cost > 0 && price < cost) {
+      setBelowCostConfirm({
+        item,
+        index,
+        price,
+        priceSource,
+        cost,
+        prevPriceInput: manualPriceInputs[item.lineId],
+      });
+      return;
+    }
+    commitManualPrice(item, index, price, priceSource);
   };
 
   const clearLineDiscount = (item: CartItem, index: number) => {
@@ -2227,6 +2278,26 @@ export default function POSPage() {
           title: "Order Created",
           description: `BigCommerce Order #${response.bigcommerce.order_id}`,
         });
+        // Apply store credit usage (deducts in BC, logs usage, creates CRM note) — separate from Discount
+        if (cartDiscount?.type === "store_credit" && cartDiscountAmount > 0) {
+          try {
+            await api.applyStoreCreditUsage({
+              bigcommerce_customer_id: selectedCustomer.id,
+              customer_name: `${selectedCustomer.first_name} ${selectedCustomer.last_name}`,
+              order_id: response.order?.id,
+              bigcommerce_order_id: response.bigcommerce.order_id,
+              credit_used: cartDiscountAmount,
+              order_total_before: finalTotal,
+              final_order_total: adjustedTotal,
+            });
+          } catch (creditErr: any) {
+            toast({
+              title: "Store credit not recorded",
+              description: creditErr.message || "The order was created, but store credit usage could not be logged.",
+              variant: "destructive",
+            });
+          }
+        }
         clearCart();
         setActiveLineId(null);
         setDiscountInputs({});
@@ -2242,6 +2313,7 @@ export default function POSPage() {
         setCartDiscount(null);
         setDiscountTabInput("");
         setDiscountOpen(false);
+        setLiveStoreCredit(0);
         focusSearch();
         if (response.bigcommerce.order_id) {
           window.open(`/invoice/${response.bigcommerce.order_id}`, "_blank");
@@ -2431,10 +2503,7 @@ export default function POSPage() {
             {/* Store Credit panel */}
             {activeDiscountTab === "store_credit" &&
               (() => {
-                const credit =
-                  parseFloat(
-                    String(selectedCustomer?.store_credit_amount ?? 0),
-                  ) || 0;
+                const credit = liveStoreCredit;
                 return (
                   <div className="space-y-1.5">
                     <p className="text-xs text-slate-500">
@@ -2719,10 +2788,7 @@ export default function POSPage() {
         {/* Store credit badge */}
         {selectedCustomer &&
           (() => {
-            const credit =
-              parseFloat(
-                String(selectedCustomer.store_credit_amount ?? 0),
-              ) || 0;
+            const credit = liveStoreCredit;
             if (credit <= 0) return null;
             return (
               <div
@@ -2736,6 +2802,17 @@ export default function POSPage() {
               </div>
             );
           })()}
+
+        {/* Store Credit header display (always visible, matches CRM source) */}
+        <div
+          className="flex items-center gap-1 shrink-0 text-xs font-semibold text-slate-600"
+          data-testid="text-header-store-credit"
+        >
+          Store Credit:{" "}
+          <span className={liveStoreCredit > 0 ? "text-green-600" : "text-slate-400"}>
+            ${fmtPrice(liveStoreCredit)}
+          </span>
+        </div>
 
         {/* ── Fullscreen + Wholesale mode toggles ── */}
         <div className="flex items-center gap-1 ml-auto shrink-0">
@@ -4331,6 +4408,89 @@ export default function POSPage() {
               ) : (
                 "Proceed"
               )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Below-Cost Price Protection Modal ── */}
+      <AlertDialog
+        open={!!belowCostConfirm}
+        onOpenChange={(open) => {
+          if (!open) {
+            if (belowCostConfirm) {
+              setManualPriceInputs((p) => {
+                const n = { ...p };
+                if (belowCostConfirm.prevPriceInput) n[belowCostConfirm.item.lineId] = belowCostConfirm.prevPriceInput;
+                else delete n[belowCostConfirm.item.lineId];
+                return n;
+              });
+              setBelowCostConfirm(null);
+              focusSearch();
+            }
+          }
+        }}
+      >
+        <AlertDialogContent data-testid="dialog-below-cost">
+          <AlertDialogHeader>
+            <AlertDialogTitle>⚠ Price Below Product Cost</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              {belowCostConfirm && (
+                <div className="space-y-2">
+                  <div className="text-sm bg-red-50 border border-red-200 rounded p-2 space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Product</span>
+                      <span className="font-medium text-slate-800 truncate ml-2">{belowCostConfirm.item.product.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">SKU</span>
+                      <span className="font-medium text-slate-800">{belowCostConfirm.item.variant?.sku || belowCostConfirm.item.product.sku}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Product Cost</span>
+                      <span className="font-medium text-slate-800">${fmtPrice(belowCostConfirm.cost)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Entered Price</span>
+                      <span className="font-bold text-red-600">${fmtPrice(belowCostConfirm.price)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Difference</span>
+                      <span className="font-bold text-red-600">-${fmtPrice(belowCostConfirm.cost - belowCostConfirm.price)}</span>
+                    </div>
+                  </div>
+                  <p className="text-sm text-slate-600">This sale will generate a loss. Do you want to continue?</p>
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-below-cost-no">No</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              data-testid="button-below-cost-yes"
+              onClick={async () => {
+                if (!belowCostConfirm) return;
+                const { item, index, price, priceSource, cost } = belowCostConfirm;
+                commitManualPrice(item, index, price, priceSource);
+                setBelowCostConfirm(null);
+                try {
+                  await api.createPriceOverrideAudit({
+                    customer_id: selectedCustomer?.id ?? null,
+                    customer_name: selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : null,
+                    product_id: item.product.id,
+                    product_name: item.product.name,
+                    sku: item.variant?.sku || item.product.sku,
+                    product_cost: cost,
+                    selling_price: price,
+                  });
+                } catch {
+                  /* audit log failure should not block the sale */
+                }
+                focusSearch();
+              }}
+            >
+              Yes, Continue
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

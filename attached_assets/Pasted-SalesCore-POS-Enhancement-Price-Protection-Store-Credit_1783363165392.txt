@@ -1,0 +1,238 @@
+SalesCore POS Enhancement
+Price Protection + Store Credit + Audit Reporting
+Objective
+
+Implement four related POS enhancements as a single checkout improvement:
+
+Below Cost Price Protection
+Store Credit Display
+Store Credit Usage
+Audit Reporting
+
+This update extends the existing POS only. Do not rewrite or replace the checkout flow.
+
+IMPORTANT
+
+This update touches the POS.
+
+After implementation:
+
+Do not implement any new feature anywhere in the application until the POS completes full checkout UAT.
+
+1. BELOW COST PRICE PROTECTION
+Trigger
+
+Validate whenever the cashier manually edits the Price ($) field.
+
+Compare:
+
+Manual Price
+Product Cost (BigCommerce Cost field only)
+
+Do not compare against selling price, MSRP, customer price or sale price.
+
+Rules
+
+If:
+
+Manual Price >= Product Cost
+
+Proceed normally.
+
+If:
+
+Manual Price < Product Cost
+
+Display a confirmation dialog.
+
+Warning Dialog
+
+Title
+
+⚠ Price Below Product Cost
+
+Display:
+
+Product
+SKU
+Product Cost
+Entered Price
+Difference
+
+Message:
+
+This sale will generate a loss. Do you want to continue?
+
+Buttons:
+
+No
+Yes, Continue
+No
+Restore previous valid price
+Clear manual override
+Return focus to Price field
+No audit log
+Yes
+Accept override
+Continue existing checkout flow
+Historical pricing continues to save the selling price
+Create audit log
+2. STORE CREDIT DISPLAY
+
+Use the exact same Store Credit source used by the CRM Customer Profile.
+
+The displayed balance must always match CRM.
+
+POS Header
+
+Display before the Wholesale button:
+
+Store Credit: $68.40
+
+If no customer:
+
+Store Credit: $0.00
+Discount Section
+
+Replace the static value with the customer's actual available Store Credit.
+
+3. STORE CREDIT USAGE
+
+Allow cashiers to apply:
+
+Full Store Credit
+Partial Store Credit
+
+Validation:
+
+Applied Store Credit cannot exceed:
+
+Available Store Credit
+Order Total
+
+Display checkout summary as:
+
+Subtotal
+Store Credit
+Discount
+Tax
+Total
+
+Store Credit must remain separate from Discounts.
+
+Reuse BigCommerce's Store Credit implementation.
+
+Do not create a custom Store Credit system.
+
+After successful checkout automatically refresh Store Credit in:
+
+Header
+Discount panel
+Customer summary
+
+without page refresh.
+
+4. REPORTING
+A. Price Override Audit
+
+Create new module:
+
+Reporting
+└── Price Override Audit
+
+Log only when the cashier confirms a below-cost price.
+
+Fields:
+
+Date & Time
+User
+Customer
+Order #
+Product
+SKU
+Product Cost
+Selling Price
+Loss Amount
+
+Features:
+
+Pagination
+Sorting
+Date Filter
+User Filter
+Customer Filter
+SKU Search
+
+Permission:
+
+Reporting
+View Price Override Audit
+
+Supports both User and User Group permissions.
+
+B. Store Credit Usage
+
+Create new module:
+
+Reporting
+└── Store Credit Usage
+
+Create an entry whenever Store Credit is applied during checkout.
+
+Fields:
+
+Date & Time
+Order #
+Customer
+Cashier
+Store Credit Before
+Store Credit Used
+Store Credit Remaining
+Order Total Before Credit
+Final Order Total
+BigCommerce Order ID
+
+Features:
+
+Pagination
+Sorting
+Date Filter
+Customer Filter
+User Filter
+Order Search
+CRM Integration
+
+Whenever Store Credit is used, automatically create a system-generated CRM Note.
+
+New note type:
+
+Store Credit
+
+Example:
+
+Store Credit Applied
+
+$20.00 applied during checkout.
+
+Order #103884
+
+Remaining Store Credit:
+$48.40
+
+This note type is system-generated only and cannot be manually created.
+
+Architecture Requirements
+Reuse existing confirmation dialogs.
+Reuse existing pricing, discount, Store Credit and checkout logic.
+Do not duplicate business logic.
+Keep implementation modular and reusable.
+Create shared services/components whenever applicable.
+Avoid growing large monolithic files.
+Do Not Modify
+BigCommerce checkout workflow
+Order creation logic
+Inventory logic
+Customer pricing
+Historical pricing (except allowing legitimate below-cost prices after confirmation)
+
+Only extend existing functionality.

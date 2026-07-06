@@ -38,6 +38,8 @@ import CRMCustomers from "@/pages/crm/Customers";
 import CustomerProfile from "@/pages/crm/CustomerProfile";
 import CRMReactivation from "@/pages/crm/Reactivation";
 import CRMNotes from "@/pages/crm/CRMNotes";
+import PriceOverrideAuditPage from "@/pages/admin/reports/PriceOverrideAudit";
+import StoreCreditUsageReportPage from "@/pages/admin/reports/StoreCreditUsageReport";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -190,6 +192,14 @@ function Router() {
       </Route>
       <Route path="/admin/crm">
         {() => <ProtectedRoute component={CRMSettings} role="admin" />}
+      </Route>
+
+      {/* ── Reporting routes ── */}
+      <Route path="/reports/price-override-audit">
+        {() => <ProtectedRoute component={PriceOverrideAuditPage} />}
+      </Route>
+      <Route path="/reports/store-credit-usage">
+        {() => <ProtectedRoute component={StoreCreditUsageReportPage} />}
       </Route>
 
       <Route component={NotFound} />
