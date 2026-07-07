@@ -875,7 +875,8 @@ export async function registerRoutes(
             const firstName = nameParts[0] || "Customer";
             const lastName = nameParts.slice(1).join(" ") || "Customer";
 
-            const cartDiscountAmt = parseFloat((req.body as any).cart_discount_amount ?? "0") || 0;
+            const cartDiscountAmt   = parseFloat((req.body as any).cart_discount_amount   ?? "0") || 0;
+            const storeCreditAmt    = parseFloat((req.body as any).store_credit_amount     ?? "0") || 0;
             const bcOrderData: any = {
               status_id: 1,
               customer_id: order.bigcommerce_customer_id || 0,
@@ -904,8 +905,13 @@ export async function registerRoutes(
                 return productData;
               }),
             };
+            // Regular line-item discount (percent / dollar off)
             if (cartDiscountAmt > 0) {
               bcOrderData.discount_amount = cartDiscountAmt.toFixed(4);
+            }
+            // Native BC store credit — shown as "Store Credit" deduction in BC order history
+            if (storeCreditAmt > 0) {
+              bcOrderData.store_credit_amount = storeCreditAmt.toFixed(4);
             }
 
             // ── Pre-flight stock check (prevents BC partial inventory deduction) ──
@@ -5498,17 +5504,9 @@ export async function registerRoutes(
       }
       const creditRemaining = Math.max(0, creditBefore - creditUsedNum);
 
-      // Deduct from the real BigCommerce store credit balance (v2 API: negative amount = deduction)
-      const { storeHash, headers } = await getBcCreds();
-      const bcRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bigcommerce_customer_id}/storecredit`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ amount: -Math.abs(creditUsedNum) }),
-      });
-      if (!bcRes.ok) {
-        const errText = await bcRes.text().catch(() => "");
-        return res.status(502).json({ error: `Failed to update BigCommerce store credit: ${bcRes.status} ${errText}` });
-      }
+      // Note: BigCommerce automatically deducts the customer's store credit balance when
+      // store_credit_amount is included in the order payload (v2 POST /orders).
+      // No separate manual deduction is needed — doing so would double-deduct.
 
       // Sync local CRM mirror balance immediately
       if (customer) {

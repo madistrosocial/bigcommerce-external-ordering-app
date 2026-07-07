@@ -2396,7 +2396,11 @@ export default function POSPage() {
           getCartTotal() - computeDiscountAmount(getCartTotal()),
         ).toFixed(2),
         created_by_user_id: currentUser?.id || 0,
-        cart_discount_amount: cartDiscountAmount > 0 ? cartDiscountAmount.toFixed(4) : undefined,
+        ...(cartDiscountAmount > 0
+          ? cartDiscount?.type === "store_credit"
+            ? { store_credit_amount: cartDiscountAmount.toFixed(4) }
+            : { cart_discount_amount: cartDiscountAmount.toFixed(4) }
+          : {}),
       } as any);
       if (response.bigcommerce?.success) {
         toast({
