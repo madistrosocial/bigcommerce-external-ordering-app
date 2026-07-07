@@ -768,7 +768,10 @@ function VariantPopupDialog({
         if (!open) cancelBelowCostReview();
       }}
     >
-      <AlertDialogContent data-testid="dialog-below-cost-popup">
+      <AlertDialogContent
+        data-testid="dialog-below-cost-popup"
+        className="w-[95vw] sm:max-w-xl"
+      >
         <AlertDialogHeader>
           <AlertDialogTitle className="text-red-600 flex items-center gap-2">
             <AlertCircle className="h-5 w-5" />
@@ -2907,37 +2910,28 @@ export default function POSPage() {
           </div>
         )}
 
-        {/* Store credit badge */}
-        {selectedCustomer &&
-          (() => {
-            const credit = liveStoreCredit;
-            if (credit <= 0) return null;
-            return (
-              <div
-                className="flex items-center gap-1 shrink-0 bg-green-50 border border-green-200 rounded px-2 py-0.5"
-                data-testid="badge-store-credit"
-              >
-                <Wallet className="h-3 w-3 text-green-600" />
-                <span className="text-[10px] font-bold text-green-700">
-                  ${fmtPrice(credit)}
-                </span>
-              </div>
-            );
-          })()}
-
-        {/* Store Credit header display (always visible, matches CRM source) */}
-        <div
-          className="flex items-center gap-1 shrink-0 text-xs font-semibold text-slate-600"
-          data-testid="text-header-store-credit"
-        >
-          Store Credit:{" "}
-          <span className={liveStoreCredit > 0 ? "text-green-600" : "text-slate-400"}>
-            ${fmtPrice(liveStoreCredit)}
-          </span>
-        </div>
-
         {/* ── Fullscreen + Wholesale mode toggles ── */}
-        <div className="flex items-center gap-1 ml-auto shrink-0">
+        <div className="flex items-center gap-2 ml-auto shrink-0">
+          {/* Store credit badge */}
+          {selectedCustomer &&
+            (() => {
+              const credit = liveStoreCredit;
+              if (credit <= 0) return null;
+              return (
+                <div
+                  className="flex items-center gap-1.5 shrink-0 bg-green-50 border border-green-200 rounded px-2 py-1"
+                  data-testid="badge-store-credit"
+                >
+                  <Wallet className="h-4 w-4 text-green-600" />
+                  <span
+                    className="font-bold text-green-700"
+                    style={{ fontSize: "16px" }}
+                  >
+                    ${fmtPrice(credit)}
+                  </span>
+                </div>
+              );
+            })()}
           <button
             onClick={toggleWholesaleMode}
             className={`h-8 w-8 flex items-center justify-center rounded border text-xs transition-colors ${wholesaleMode ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"}`}
@@ -3365,7 +3359,19 @@ export default function POSPage() {
                               </div>
                             </td>
                             <td className="px-3 py-1.5 text-right">
-                              <span className={`text-sm font-bold ${isDiscounted || isFree ? "text-red-600" : "text-slate-900"}`}>${fmtPrice(item.price_at_sale)}</span>
+                              <div className="flex items-center justify-end gap-1">
+                                <span className={`text-sm font-bold ${isDiscounted || isFree ? "text-red-600" : "text-slate-900"}`}>${fmtPrice(item.price_at_sale)}</span>
+                                {(isDiscounted || isFree || wsManualInput) && (
+                                  <button
+                                    className="text-slate-400 hover:text-slate-700 transition-colors"
+                                    title="Reset to default price"
+                                    onClick={() => clearLineDiscount(item, index)}
+                                    data-testid={`button-ws-reset-price-${item.lineId}`}
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                              </div>
                               {(isDiscounted || isFree) && <p className="text-[10px] text-slate-400 line-through">${fmtPrice(item.original_price)}</p>}
                             </td>
                             <td className="px-2 py-1.5">
@@ -4553,16 +4559,19 @@ export default function POSPage() {
           }
         }}
       >
-        <AlertDialogContent data-testid="dialog-below-cost">
+        <AlertDialogContent
+          data-testid="dialog-below-cost"
+          className="w-[95vw] sm:max-w-xl"
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>⚠ Price Below Product Cost</AlertDialogTitle>
             <AlertDialogDescription asChild>
               {belowCostConfirm && (
                 <div className="space-y-2">
                   <div className="text-sm bg-red-50 border border-red-200 rounded p-2 space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Product</span>
-                      <span className="font-medium text-slate-800 truncate ml-2">{belowCostConfirm.item.product.name}</span>
+                    <div className="flex justify-between gap-2">
+                      <span className="text-slate-500 shrink-0">Product</span>
+                      <span className="font-medium text-slate-800 text-right break-words">{belowCostConfirm.item.product.name}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">SKU</span>
