@@ -379,7 +379,7 @@ export default function CRMCustomers() {
   };
 
   // ── Table helpers ─────────────────────────────────────────────────────────
-  const thBase = "relative px-1 py-1 sm:px-3 sm:py-2.5 text-left text-[8px] sm:text-[11px] font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap select-none";
+  const thBase = "relative px-1 py-1 sm:px-3 sm:py-2.5 text-left text-[10px] sm:text-[11px] font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap select-none";
   const stickyTh = `${thBase} sticky left-0 z-20 bg-slate-50`;
 
   const ResizeHandle = ({ col }: { col: ColKey }) => (
@@ -678,7 +678,7 @@ export default function CRMCustomers() {
           </div>
         ) : (
           <table
-            className="text-[8px] sm:text-sm border-collapse [&_td]:px-1 [&_td]:py-0.5 sm:[&_td]:px-3 sm:[&_td]:py-2.5"
+            className="text-[10px] sm:text-sm border-collapse [&_td]:px-1 [&_td]:py-0.5 sm:[&_td]:px-3 sm:[&_td]:py-2.5"
             style={{ tableLayout: "fixed", width: "max-content", minWidth: "100%" }}
           >
             <colgroup>
