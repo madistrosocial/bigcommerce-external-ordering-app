@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useStore } from "@/lib/store";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { getAuthHeaders } from "@/lib/api";
@@ -423,6 +424,9 @@ export default function CustomerProfile() {
   const queryClient = useQueryClient();
   const id = parseInt(params.id);
 
+  const currentUser      = useStore((s) => s.currentUser);
+  const currentUserId    = currentUser?.id ?? null;
+  const isAdmin          = currentUser?.role === "admin";
   const canCreateNote    = hasPermission("crm", "add_note");
   const canEditNote      = hasPermission("crm", "notes_edit");
   const canDeleteNote    = hasPermission("crm", "notes_delete");
@@ -1180,8 +1184,8 @@ export default function CustomerProfile() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1">
-                              {canEditNote && (
-                                <button className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-blue-600" onClick={() => setEditingNote(note)} data-testid={`btn-edit-note-${note.id}`}>
+                              {canEditNote && (isAdmin || note.created_by === currentUserId) && (
+                                <button className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-blue-600" onClick={() => setEditingNote(note)} data-testid={`btn-edit-note-${note.id}`} title="Edit note">
                                   <Pencil className="h-3.5 w-3.5" />
                                 </button>
                               )}

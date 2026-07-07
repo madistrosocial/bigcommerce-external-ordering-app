@@ -63,6 +63,7 @@ export const CRM_ACTION_PERMS = [
   { module: "crm", action: "export",             label: "Export CRM Data",           description: "Can export the customer list to CSV or Excel." },
   { module: "crm", action: "add_note",           label: "Add CRM Notes",             description: "Can create CRM customer notes." },
   { module: "crm", action: "edit_customer_notes", label: "Edit Customer Account Notes", description: "Can edit and save BigCommerce customer account notes." },
+  { module: "crm", action: "notes_edit",          label: "Edit Own CRM Notes",          description: "Can edit CRM notes they personally created." },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
