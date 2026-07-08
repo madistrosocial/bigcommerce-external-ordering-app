@@ -18,6 +18,8 @@ export default function AdminIntegrationPage() {
   const [token, setToken] = useState("");
   const [channelId, setChannelId] = useState("1");
   const [storefrontUrl, setStorefrontUrl] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
   const [cutoffDate, setCutoffDate] = useState("");
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<string | null>(null);
@@ -34,6 +36,8 @@ export default function AdminIntegrationPage() {
         setToken(cfg.value.token ?? "");
         setChannelId(String(cfg.value.channelId ?? cfg.value.channel_id ?? "1"));
         setStorefrontUrl(cfg.value.storefrontUrl ?? "");
+        setClientId(cfg.value.clientId ?? "");
+        setClientSecret(cfg.value.clientSecret ?? "");
       }
       if (cutoff?.value) {
         setCutoffDate(cutoff.value);
@@ -103,6 +107,8 @@ export default function AdminIntegrationPage() {
         token,
         channelId: channelId ? parseInt(channelId) : 1,
         storefrontUrl: storefrontUrl.trim().replace(/\/$/, ""),
+        clientId: clientId.trim() || undefined,
+        clientSecret: clientSecret.trim() || undefined,
       });
       toast({ title: "Settings saved", description: "BigCommerce integration updated successfully." });
     } catch (err: any) {
@@ -314,6 +320,40 @@ export default function AdminIntegrationPage() {
                 <p className="text-[11px] text-slate-400">
                   Your public store URL (no trailing slash). Used by the BC Product Link tool to build product URLs in custom fields.
                 </p>
+              </div>
+              <div className="border-t pt-4 space-y-3">
+                <div>
+                  <p className="text-xs font-medium text-slate-700 mb-0.5">Native Store Credit (OAuth)</p>
+                  <p className="text-[11px] text-slate-400">
+                    Required for native BC store credit in POS checkout. Create an OAuth app at{" "}
+                    <a href="https://devtools.bigcommerce.com/" target="_blank" rel="noreferrer" className="text-blue-500 underline">devtools.bigcommerce.com</a>{" "}
+                    with the <strong>Customers Login</strong> scope and paste the credentials below.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="client_id">OAuth Client ID</Label>
+                  <Input
+                    id="client_id"
+                    placeholder="e.g. abc123..."
+                    value={clientId}
+                    onChange={(e) => setClientId(e.target.value)}
+                    data-testid="input-client-id"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="client_secret">OAuth Client Secret</Label>
+                  <Input
+                    id="client_secret"
+                    type="password"
+                    placeholder="••••••••••••••••"
+                    value={clientSecret}
+                    onChange={(e) => setClientSecret(e.target.value)}
+                    data-testid="input-client-secret"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    Store credit checkout will display an error if these are not configured.
+                  </p>
+                </div>
               </div>
               <Button
                 type="submit"

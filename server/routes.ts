@@ -1,4 +1,5 @@
 import type { Express, Request, Response, NextFunction } from "express";
+import { createHmac } from "crypto";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import {
@@ -186,150 +187,229 @@ async function checkBcStock(
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
-// ── Store Credit via Gift Certificate ─────────────────────────────────────────
-// BC's public API does not expose a writable store_credit_amount field on
-// customers (confirmed: returns 400 "field not supported"). We therefore
-// represent store credit using a one-time BC gift certificate:
-//   1. Create a GC for exactly storeCreditAmt
-//   2. Apply it to a v3 checkout → order is created with a GC payment line
-//      (shows as "Gift Certificate" payment, NOT a discount/coupon)
-//   3. If order creation fails, delete the GC so it isn't stranded.
-// The local CRM balance is the authoritative credit ledger; BC balance is
-// not maintained via API (it is read-only from the public API).
-async function createBcOrderViaV3Checkout(
+// ── Native BC Store Credit via OAuth Customer Login JWT ───────────────────────
+// Flow:
+//   1. Sync CRM balance → BC via PUT /v3/customers store_credit_amounts
+//   2. Get storefront impersonation token (for GraphQL auth)
+//   3. Create management API cart with price overrides (preserves POS pricing)
+//   4. Sign Customer Login JWT with OAuth client_secret (HMAC-SHA256 / HS256)
+//   5. GraphQL loginWithCustomerLoginJwt → customerAccessToken (server-to-server)
+//   6. POST /api/storefront/checkouts/{id}/store-credit with customerAccessToken
+//   7. POST /v3/checkouts/{id}/orders → BC order with native store_credit_amount
+//   8. Read updated BC balance and return it (BC is authoritative after checkout)
+// BigCommerce is the authoritative store credit ledger.
+// CRM mirrors BC balance after successful checkout.
+// Requires bc_client_id + bc_client_secret in bigcommerce_config settings.
+// Create an OAuth app at https://devtools.bigcommerce.com/ with scope:
+//   Customers Login (write) — needed to sign Customer Login JWTs.
+async function createBcOrderNativeStoreCredit(
   storeHash: string,
   token: string,
+  storefrontDomain: string,
+  clientId: string | null,
+  clientSecret: string | null,
+  channelId: number,
   order: any,
   storeCreditAmt: number,
-): Promise<number> {
+): Promise<{ bcOrderId: number; bcCreditRemaining: number }> {
   const h: Record<string, string> = {
     "X-Auth-Token": token,
     "Content-Type": "application/json",
     Accept: "application/json",
   };
-  const bcCustomerId = order.bigcommerce_customer_id;
+  const bcCustomerId = order.bigcommerce_customer_id as number;
 
-  // 1. Fetch customer email/name for gift certificate creation
-  const custRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
-    { headers: h },
+  // 1. Read CRM balance and write it to BC (makes BC authoritative balance match CRM)
+  const crmCustomer = await storage.getCrmCustomerByBcId(bcCustomerId);
+  const crmBalance  = Number(crmCustomer?.store_credit_balance ?? 0);
+  console.log(`[sc_native] customer=${bcCustomerId} crmBalance=$${crmBalance} toApply=$${storeCreditAmt}`);
+
+  const setBalRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/customers`,
+    {
+      method: "PUT",
+      headers: h,
+      body: JSON.stringify([{ id: bcCustomerId, store_credit_amounts: [{ amount: crmBalance }] }]),
+    },
   );
-  if (!custRes.ok) throw new Error(`Could not fetch BC customer (${custRes.status})`);
-  const custData = await custRes.json();
-  const custEmail = custData.email || "noreply@store.com";
-  const custName  = `${custData.first_name || ""} ${custData.last_name || ""}`.trim() || "Customer";
-  console.log(`[gc_sc] customer=${bcCustomerId} email=${custEmail} toApply=$${storeCreditAmt}`);
+  if (!setBalRes.ok)
+    throw new Error(`Failed to write BC store credit balance (${setBalRes.status}): ${await setBalRes.text()}`);
+  console.log(`[sc_native] BC balance set to $${crmBalance}`);
 
-  // 2. Create a one-time gift certificate for exactly storeCreditAmt
-  const gcCode = `SCRDT-${bcCustomerId}-${Date.now()}`;
-  const gcRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v2/gift_certificates`,
+  // 2. Validate OAuth credentials (required for customerAccessToken)
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      "Native store credit checkout requires BigCommerce OAuth credentials " +
+      "(Client ID + Client Secret). Please configure these in Admin → Integration Settings. " +
+      "Create an OAuth app at https://devtools.bigcommerce.com/ with the 'Customers Login' scope.",
+    );
+  }
+
+  // 3. Get storefront customer impersonation token (used as GraphQL Bearer auth)
+  const impRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/storefront/api-token-customer-impersonation`,
+    {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify({ channel_id: channelId, expires_at: Math.floor(Date.now() / 1000) + 3600 }),
+    },
+  );
+  if (!impRes.ok)
+    throw new Error(`Storefront impersonation token failed (${impRes.status}): ${await impRes.text()}`);
+  const impData = await impRes.json();
+  const impToken = impData?.data?.token as string | undefined;
+  if (!impToken) throw new Error("Storefront impersonation token missing from response");
+
+  // 4. Create management API cart with price overrides (preserves POS custom pricing)
+  const lineItems = (order.items as any[]).map((item: any) => {
+    const li: any = {
+      product_id: item.bigcommerce_product_id,
+      quantity:   item.quantity,
+      list_price: parseFloat(item.price_at_sale),
+    };
+    if (item.variant_id) li.variant_id = item.variant_id;
+    return li;
+  });
+  const cartRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/carts`,
+    { method: "POST", headers: h, body: JSON.stringify({ customer_id: bcCustomerId, line_items: lineItems }) },
+  );
+  if (!cartRes.ok)
+    throw new Error(`Cart creation failed (${cartRes.status}): ${await cartRes.text()}`);
+  const cartData = await cartRes.json();
+  const cartId   = cartData.data.id as string;
+  console.log(`[sc_native] Cart created: ${cartId}`);
+
+  // 5. Add billing address (non-fatal — checkout engine uses it for order record)
+  const a = order.billing_address || {};
+  await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/billing-address`,
     {
       method: "POST",
       headers: h,
       body: JSON.stringify({
-        code:       gcCode,
-        to_name:    custName,
-        to_email:   custEmail,
-        from_name:  "Store Credit",
-        from_email: custEmail,
-        amount:     parseFloat(storeCreditAmt.toFixed(4)),
+        first_name:             a.first_name  || "",
+        last_name:              a.last_name   || "",
+        email:                  a.email || crmCustomer?.email || "noreply@store.com",
+        company:                a.company     || "",
+        address1:               a.address1    || a.street_1 || "",
+        address2:               a.address2    || a.street_2 || "",
+        city:                   a.city        || "",
+        state_or_province:      a.state_or_province      || a.state || "",
+        state_or_province_code: a.state_or_province_code || a.state || "",
+        postal_code:            a.postal_code || a.zip    || "",
+        country:                a.country     || "",
+        country_code:           a.country_code || a.country_iso2 || "US",
+        phone:                  a.phone       || "",
       }),
     },
-  );
-  if (!gcRes.ok) throw new Error(`Gift certificate creation failed: ${await gcRes.text()}`);
-  const gcData = await gcRes.json();
-  const gcId   = gcData.id as number;
-  console.log(`[gc_sc] Created GC id=${gcId} code=${gcCode} amount=$${storeCreditAmt}`);
+  ).catch((e) => console.warn("[sc_native] billing-address non-fatal:", e));
 
-  let orderCreated = false;
-  try {
-    // 3. Create v3 cart — list_price overrides the catalog price per item
-    const lineItems = (order.items as any[]).map((item: any) => {
-      const li: any = {
-        product_id: item.bigcommerce_product_id,
-        quantity:   item.quantity,
-        list_price: parseFloat(item.price_at_sale),
-      };
-      if (item.variant_id) li.variant_id = item.variant_id;
-      return li;
-    });
-    const cartRes = await fetch(
-      `https://api.bigcommerce.com/stores/${storeHash}/v3/carts`,
-      { method: "POST", headers: h, body: JSON.stringify({ customer_id: bcCustomerId, line_items: lineItems }) },
-    );
-    if (!cartRes.ok) throw new Error(`v3 cart creation failed: ${await cartRes.text()}`);
-    const cartData   = await cartRes.json();
-    const checkoutId = cartData.data.id; // checkoutId === cartId in BC
-    console.log(`[gc_sc] Cart/checkout created: ${checkoutId}`);
+  // 6. Sign Customer Login JWT (HS256) with OAuth client_secret
+  //    Spec: https://developer.bigcommerce.com/api-docs/storefront/customer-login-api
+  const jti     = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const nowSec  = Math.floor(Date.now() / 1000);
+  const jwtHdr  = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const jwtBody = Buffer.from(JSON.stringify({
+    iss:         clientId,
+    iat:         nowSec,
+    jti,
+    operation:   "customer_login",
+    store_hash:  storeHash,
+    customer_id: bcCustomerId,
+    channel_id:  channelId,
+  })).toString("base64url");
+  const jwtSig   = createHmac("sha256", clientSecret).update(`${jwtHdr}.${jwtBody}`).digest("base64url");
+  const loginJwt = `${jwtHdr}.${jwtBody}.${jwtSig}`;
 
-    // 4. Add billing address (map v2 field names → v3; non-fatal if absent)
-    const a = order.billing_address || {};
-    const billingV3 = {
-      first_name:             a.first_name  || "",
-      last_name:              a.last_name   || "",
-      email:                  a.email || custEmail,
-      company:                a.company     || "",
-      address1:               a.address1    || a.street_1 || "",
-      address2:               a.address2    || a.street_2 || "",
-      city:                   a.city        || "",
-      state_or_province:      a.state_or_province      || a.state || "",
-      state_or_province_code: a.state_or_province_code || a.state || "",
-      postal_code:            a.postal_code || a.zip    || "",
-      country:                a.country     || "",
-      country_code:           a.country_code || a.country_iso2 || "US",
-      phone:                  a.phone       || "",
-    };
-    await fetch(
-      `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${checkoutId}/billing-address`,
-      { method: "POST", headers: h, body: JSON.stringify(billingV3) },
-    ).catch((e) => console.warn(`[gc_sc] billing-address non-fatal:`, e));
-
-    // 5. Apply gift certificate to checkout
-    const applyGcRes = await fetch(
-      `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${checkoutId}/gift-certificates`,
-      { method: "POST", headers: h, body: JSON.stringify({ giftCertificateCode: gcCode }) },
-    );
-    if (!applyGcRes.ok) throw new Error(`GC checkout application failed: ${await applyGcRes.text()}`);
-    console.log(`[gc_sc] GC applied to checkout ${checkoutId}`);
-
-    // 6. Convert checkout → BC order
-    const orderRes = await fetch(
-      `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${checkoutId}/orders`,
-      { method: "POST", headers: h },
-    );
-    if (!orderRes.ok) throw new Error(`Checkout→order failed: ${await orderRes.text()}`);
-    const { data: { id: bcOrderId } } = await orderRes.json();
-    orderCreated = true;
-    console.log(`[gc_sc] BC order ${bcOrderId} created via GC checkout`);
-
-    // 7. Patch order: set status=Pending + staff notes (v3 creates Incomplete by default)
-    const staffNote = [`Store Credit Applied: $${storeCreditAmt.toFixed(2)}`, order.order_note || ""]
-      .filter(Boolean).join("\n\n");
-    await fetch(
-      `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`,
-      {
-        method: "PUT",
-        headers: h,
-        body: JSON.stringify({
-          status_id:        1,
-          staff_notes:      staffNote,
-          customer_message: (order as any).customer_note || undefined,
-        }),
-      },
-    ).catch((e) => console.warn(`[gc_sc] status-patch non-fatal:`, e));
-
-    return bcOrderId;
-  } finally {
-    // 8. If the order was NOT created, delete the stranded GC so it can't be redeemed
-    if (!orderCreated) {
-      await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v2/gift_certificates/${gcId}`,
-        { method: "DELETE", headers: h },
-      ).catch((e) => console.error(`[gc_sc] GC cleanup FAILED (gc=${gcId}):`, e));
-      console.log(`[gc_sc] Cleaned up unused GC ${gcId}`);
-    }
+  // 7. GraphQL loginWithCustomerLoginJwt → customerAccessToken (server-to-server field)
+  const gqlRes = await fetch(`${storefrontDomain}/graphql`, {
+    method: "POST",
+    headers: {
+      Accept:        "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${impToken}`,
+    },
+    body: JSON.stringify({
+      query: `mutation LoginCustomer($jwt: String!) {
+        loginWithCustomerLoginJwt(jwt: $jwt) {
+          customerAccessToken
+        }
+      }`,
+      variables: { jwt: loginJwt },
+    }),
+  });
+  if (!gqlRes.ok)
+    throw new Error(`GraphQL login request failed (${gqlRes.status})`);
+  const gqlData = await gqlRes.json();
+  const customerAccessToken = gqlData?.data?.loginWithCustomerLoginJwt?.customerAccessToken as string | undefined;
+  if (!customerAccessToken) {
+    const detail = JSON.stringify(gqlData?.errors ?? gqlData).slice(0, 400);
+    throw new Error(`Customer login failed — could not obtain customerAccessToken: ${detail}`);
   }
+  console.log(`[sc_native] customerAccessToken obtained`);
+
+  // 8. Apply store credit to checkout via REST storefront API using customerAccessToken
+  //    (customerAccessToken provides proper customer session context server-to-server)
+  const scRes = await fetch(
+    `${storefrontDomain}/api/storefront/checkouts/${cartId}/store-credit`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${customerAccessToken}`,
+        "Content-Type": "application/json",
+        Accept:         "application/json",
+      },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!scRes.ok) {
+    const scErr = await scRes.text();
+    throw new Error(`Store credit application failed (${scRes.status}): ${scErr}`);
+  }
+  console.log(`[sc_native] Store credit applied to checkout ${cartId}`);
+
+  // 9. Convert checkout → BC order (store_credit_amount populated natively by BC)
+  const bcOrderRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/orders`,
+    { method: "POST", headers: h },
+  );
+  if (!bcOrderRes.ok)
+    throw new Error(`Checkout→order failed (${bcOrderRes.status}): ${await bcOrderRes.text()}`);
+  const { data: { id: bcOrderId } } = await bcOrderRes.json();
+  console.log(`[sc_native] BC order ${bcOrderId} created with native store credit`);
+
+  // 10. Patch order status=Pending + staff notes (checkout creates Incomplete by default)
+  const staffNote = [`Store Credit Applied: $${storeCreditAmt.toFixed(2)}`, order.order_note || ""]
+    .filter(Boolean).join("\n\n");
+  await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`,
+    {
+      method: "PUT",
+      headers: h,
+      body: JSON.stringify({
+        status_id:        1,
+        staff_notes:      staffNote,
+        customer_message: (order as any).customer_note || undefined,
+      }),
+    },
+  ).catch((e) => console.warn("[sc_native] status patch non-fatal:", e));
+
+  // 11. Read updated BC balance (BC deducted store credit during checkout completion)
+  let bcCreditRemaining = 0;
+  try {
+    const custReadRes = await fetch(
+      `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
+      { headers: h },
+    );
+    if (custReadRes.ok) {
+      const custReadData = await custReadRes.json();
+      bcCreditRemaining = Number(custReadData?.store_credit_amount ?? custReadData?.store_credit ?? 0);
+      console.log(`[sc_native] BC balance after order: $${bcCreditRemaining}`);
+    }
+  } catch (_) { /* non-fatal — CRM sync will use bc_credit_remaining=0 as fallback */ }
+
+  return { bcOrderId, bcCreditRemaining };
 }
 
 export async function registerRoutes(
@@ -1003,6 +1083,7 @@ export async function registerRoutes(
       let bcSuccess = false;
       let bcOrderId: number | undefined;
       let bcError = "";
+      let bcCreditRemainingAfterOrder: number | undefined;
       let sheetsSuccess = false;
       let sheetsError = "";
 
@@ -1017,10 +1098,6 @@ export async function registerRoutes(
 
         if (storeHash && token) {
           try {
-            const nameParts = order.customer_name.trim().split(/\s+/);
-            const firstName = nameParts[0] || "Customer";
-            const lastName = nameParts.slice(1).join(" ") || "Customer";
-
             const cartDiscountAmt = parseFloat((req.body as any).cart_discount_amount ?? "0") || 0;
             const storeCreditAmt = parseFloat((req.body as any).store_credit_amount  ?? "0") || 0;
 
@@ -1032,37 +1109,30 @@ export async function registerRoutes(
               bcError = `[{"status":409,"message":"Quantities of one or more products are out of stock or did not meet quantity requirements.","details":{"errors":[{"type":"OutOfStock","message":"Pre-validation: ${stockErrors.length} item(s) with insufficient stock: ${preview}${suffix}"}]}}]`;
               await storage.updateOrderSyncError(order.id!, bcError);
             } else {
-              // ── v2 Orders API path (standard + store credit fallback) ─────────────
-              // Store credit is applied as discount_amount on v2 orders. This reduces
-              // the order total correctly. Staff notes label it as store credit.
-              // NOTE: The preferred path uses BC Gift Certificates via v3 checkout,
-              // but requires BC admin to enable Gift Certificates for USD in:
-              //   BC Admin → Products → Gift Certificates → Enable
-              // Until enabled, this fallback ensures orders always go through.
-              let usedGcPath = false;
               if (storeCreditAmt > 0) {
-                try {
-                  bcOrderId = await createBcOrderViaV3Checkout(storeHash, String(token), order, storeCreditAmt);
-                  bcSuccess = true;
-                  usedGcPath = true;
-                  await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
-                } catch (gcErr: any) {
-                  console.warn(`[sc] GC path failed (${gcErr.message}), falling back to v2 discount`);
-                }
-              }
-
-              if (!bcSuccess) {
-                const effectiveDiscount = storeCreditAmt > 0 ? storeCreditAmt : cartDiscountAmt;
-                const staffNotePrefix   = storeCreditAmt > 0
-                  ? `Store Credit Applied: $${storeCreditAmt.toFixed(2)}\n\n`
-                  : "";
+                // ── Native BC store credit (OAuth required — no discount/GC fallback) ──
+                // Throws on failure; error is surfaced to cashier. Cart stays intact.
+                const nativeResult = await createBcOrderNativeStoreCredit(
+                  storeHash,
+                  String(token),
+                  String(config.storefrontUrl || ""),
+                  config.clientId   ? String(config.clientId)   : null,
+                  config.clientSecret ? String(config.clientSecret) : null,
+                  Number(config.channelId ?? 1),
+                  order,
+                  storeCreditAmt,
+                );
+                bcOrderId = nativeResult.bcOrderId;
+                bcSuccess = true;
+                bcCreditRemainingAfterOrder = nativeResult.bcCreditRemaining;
+                await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
+              } else {
+                // ── Standard v2 Orders API path (no store credit) ────────────────────
                 const bcOrderData: any = {
                   status_id:        1,
                   customer_id:      order.bigcommerce_customer_id || 0,
                   billing_address:  order.billing_address,
-                  staff_notes:      order.order_note
-                    ? `${staffNotePrefix}${order.order_note}`
-                    : staffNotePrefix || undefined,
+                  staff_notes:      order.order_note || undefined,
                   customer_message: (order as any).customer_note || undefined,
                   products: (order.items as any[]).map((item) => {
                     const productData: any = {
@@ -1079,20 +1149,20 @@ export async function registerRoutes(
                     return productData;
                   }),
                 };
-                if (effectiveDiscount > 0) bcOrderData.discount_amount = effectiveDiscount.toFixed(4);
+                if (cartDiscountAmt > 0) bcOrderData.discount_amount = cartDiscountAmt.toFixed(4);
 
-                const response = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders`, {
+                const v2Res = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders`, {
                   method: "POST",
                   headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
                   body: JSON.stringify(bcOrderData),
                 });
-                if (response.ok) {
-                  const data = await response.json();
+                if (v2Res.ok) {
+                  const data = await v2Res.json();
                   bcOrderId = data.id;
                   bcSuccess = true;
                   await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
                 } else {
-                  const errorText = await response.text();
+                  const errorText = await v2Res.text();
                   bcError = `BigCommerce sync failed: ${errorText}`;
                   await storage.updateOrderSyncError(order.id!, bcError);
                 }
@@ -1146,6 +1216,7 @@ export async function registerRoutes(
         bigcommerce: {
           success: bcSuccess,
           order_id: bcOrderId,
+          bc_credit_remaining: bcCreditRemainingAfterOrder,
           error: bcError || undefined,
         },
         google_sheets: {
@@ -5640,16 +5711,23 @@ export async function registerRoutes(
       if (!customer) return res.status(404).json({ error: "Customer not found in CRM" });
       const customer_id = customer.id;
       const creditBefore = Number(customer?.store_credit_balance ?? 0);
-      if (creditUsedNum > creditBefore + 0.005) {
+
+      // bc_updated_balance is passed from the native BC checkout flow.
+      // When present, BC has already deducted the credit — trust BC as authoritative.
+      // When absent (non-SC orders calling this endpoint), compute from CRM.
+      const bcUpdatedBalance = req.body.bc_updated_balance != null ? Number(req.body.bc_updated_balance) : null;
+
+      if (bcUpdatedBalance === null && creditUsedNum > creditBefore + 0.005) {
         return res.status(400).json({ error: "Applied store credit cannot exceed available store credit" });
       }
       if (creditUsedNum > Number(order_total_before) + 0.005) {
         return res.status(400).json({ error: "Applied store credit cannot exceed order total" });
       }
-      const creditRemaining = Math.max(0, creditBefore - creditUsedNum);
 
-      // BC balance is managed by createBcOrderViaV3Checkout (temporarily set to creditUsedNum,
-      // then restored to creditRemaining in its finally block). No separate BC API call needed here.
+      // BC is authoritative: use BC's post-checkout balance if available
+      const creditRemaining = bcUpdatedBalance !== null
+        ? Math.max(0, bcUpdatedBalance)
+        : Math.max(0, creditBefore - creditUsedNum);
 
       // Sync local CRM mirror balance immediately
       if (customer) {

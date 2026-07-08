@@ -1,0 +1,172 @@
+SalesCore POS – Replace Current Store Credit Implementation with Native BigCommerce Store Credit
+Objective
+
+Completely replace the current Store Credit implementation in the POS.
+
+The current implementation uses Gift Certificates and ultimately appears as Discount in the resulting BigCommerce order. This is not the behavior we want.
+
+The new implementation must use BigCommerce's native Store Credit workflow so that orders created through the POS are financially and functionally equivalent to orders created through the native BigCommerce storefront.
+
+BigCommerce is the source of truth.
+
+Replace Existing Implementation
+
+Remove the current Store Credit checkout implementation including:
+
+Gift Certificate workaround
+Gift Certificate creation/application
+Discount-based Store Credit logic
+Any code that converts Store Credit into Discounts
+Any fallback logic related to the old Store Credit implementation
+
+This feature is replacing the existing implementation, not extending it.
+
+Native Store Credit Flow
+
+Implement the native Store Credit flow identified during the investigation.
+
+The checkout flow should:
+
+Read the customer's current native BigCommerce Store Credit balance.
+Display the available balance inside the POS.
+Allow the cashier to choose whether Store Credit should be used.
+Execute the native BigCommerce checkout flow using the supported APIs discovered during the investigation.
+Complete checkout.
+Read the customer's remaining Store Credit balance from BigCommerce.
+Synchronize the updated balance back into our CRM/database.
+
+BigCommerce remains the authoritative Store Credit ledger.
+
+CRM mirrors BigCommerce after checkout.
+
+Required Order Behavior
+
+The resulting BigCommerce order should match native storefront behavior.
+
+Specifically:
+
+Product prices remain unchanged.
+Line item prices remain unchanged.
+Historical pricing remains unchanged.
+Last $ remains unchanged.
+Customer pricing history remains unchanged.
+Gross sales remain unchanged.
+Store Credit appears as Store Credit, not Discount.
+Store Credit is not represented as:
+Discount
+Coupon
+Gift Certificate
+Manual price adjustment
+Native payment information should be created exactly as native BigCommerce checkout does.
+
+The objective is that a POS-created order is indistinguishable from a storefront-created order.
+
+POS UI
+
+The Store Credit feature must work identically in both POS layouts.
+
+Regular POS
+
+Continue supporting:
+
+Store Credit balance display
+Store Credit selection
+Checkout using Store Credit
+Wholesale POS
+
+Support the exact same functionality.
+
+Store Credit behavior, validation, calculations, and checkout must behave identically to the Regular POS.
+
+Do not maintain two different Store Credit implementations.
+
+Both layouts must call the same reusable checkout/service logic.
+
+Only the UI presentation should differ.
+
+Code Reuse
+
+This implementation must be modular.
+
+Do not duplicate Store Credit logic.
+
+Create reusable services/helpers where appropriate.
+
+Regular POS and Wholesale POS must both call the same implementation.
+
+Future Store Credit updates should only require changes in one place.
+
+Preserve Existing Functionality
+
+Do not change:
+
+Checkout process unrelated to Store Credit
+Pricing engine
+Inventory
+Tax calculation
+Shipping
+Customer search
+Product search
+POS layouts
+Draft Orders
+Wholesale Mode
+Fullscreen Mode
+
+Only replace the Store Credit implementation.
+
+Reporting
+
+Continue supporting Store Credit reporting.
+
+Update reports if necessary so Store Credit continues to be reported correctly after the new implementation.
+
+Do not treat Store Credit as Discount anywhere in the application.
+
+CRM
+
+Continue displaying Store Credit as Store Credit.
+
+After successful checkout:
+
+Read the remaining BigCommerce Store Credit balance.
+Update the CRM mirror balance.
+
+CRM should never become the authoritative Store Credit balance.
+
+Error Handling
+
+If native Store Credit checkout fails:
+
+Display the API error.
+Do not modify Store Credit.
+Do not create the order.
+Leave the cart intact.
+Allow the cashier to retry after resolving the issue.
+
+Do not silently fall back to Discounts or Gift Certificates.
+
+Validation
+
+Before considering this complete, verify:
+
+Store Credit works in Regular POS.
+Store Credit works in Wholesale POS.
+Both layouts use the same checkout/service implementation.
+Product prices remain unchanged.
+Historical pricing remains unchanged.
+Last $ remains unchanged.
+Customer pricing history remains unchanged.
+BigCommerce order displays Store Credit instead of Discount.
+Store Credit balance updates correctly after checkout.
+CRM mirror balance updates correctly after checkout.
+Deliverables
+
+Provide:
+
+Architecture summary.
+Files modified.
+Checkout flow diagram.
+How the native Store Credit flow works.
+Confirmation that the Gift Certificate implementation has been completely removed.
+Confirmation that both POS layouts share the same Store Credit implementation.
+Any remaining BigCommerce API limitations discovered during implementation.

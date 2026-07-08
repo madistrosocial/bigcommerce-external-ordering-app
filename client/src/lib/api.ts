@@ -260,7 +260,7 @@ export async function login(username: string, password: string): Promise<User> {
 
 export async function createOrder(order: Omit<Order, 'id' | 'date'>): Promise<{
   order: Order;
-  bigcommerce: { success: boolean; order_id?: number; error?: string };
+  bigcommerce: { success: boolean; order_id?: number; bc_credit_remaining?: number | null; error?: string };
   google_sheets: { success: boolean; error?: string };
 }> {
   const res = await fetch(`${API_BASE}/orders`, {
@@ -321,7 +321,7 @@ export async function submitDraftOrder(orderId: number, customerData: {
   billing_address: any;
 }): Promise<{
   order: Order;
-  bigcommerce: { success: boolean; order_id?: number; error?: string };
+  bigcommerce: { success: boolean; order_id?: number; bc_credit_remaining?: number | null; error?: string };
   google_sheets: { success: boolean; error?: string };
 }> {
   const res = await fetch(`${API_BASE}/orders/${orderId}/submit-draft`, {
@@ -471,6 +471,7 @@ export interface StoreCreditUsagePayload {
   credit_used: number;
   order_total_before: number;
   final_order_total: number;
+  bc_updated_balance?: number | null;
 }
 
 export async function applyStoreCreditUsage(payload: StoreCreditUsagePayload): Promise<any> {

@@ -2418,6 +2418,7 @@ export default function POSPage() {
               credit_used: cartDiscountAmount,
               order_total_before: finalTotal,
               final_order_total: adjustedTotal,
+              bc_updated_balance: response.bigcommerce?.bc_credit_remaining ?? null,
             });
           } catch (creditErr: any) {
             toast({
