@@ -877,11 +877,20 @@ export async function registerRoutes(
 
             const cartDiscountAmt   = parseFloat((req.body as any).cart_discount_amount   ?? "0") || 0;
             const storeCreditAmt    = parseFloat((req.body as any).store_credit_amount     ?? "0") || 0;
+            // BC v2 Orders API does not support store_credit_amount as a writable field (read-only
+            // on both POST and PUT). We apply store credit as discount_amount so the order total is
+            // correctly reduced, and clearly label it in staff_notes. The customer's BC balance is
+            // deducted separately via /api/pos/store-credit-usage after the order is created.
+            const effectiveDiscountAmt = storeCreditAmt > 0 ? storeCreditAmt : cartDiscountAmt;
+            const staffNoteBase = order.order_note || undefined;
+            const staffNotePrefix = storeCreditAmt > 0
+              ? `Store Credit Applied: $${storeCreditAmt.toFixed(2)}\n\n`
+              : "";
             const bcOrderData: any = {
               status_id: 1,
               customer_id: order.bigcommerce_customer_id || 0,
               billing_address: order.billing_address,
-              staff_notes: order.order_note || undefined,
+              staff_notes: staffNoteBase ? `${staffNotePrefix}${staffNoteBase}` : (staffNotePrefix || undefined),
               customer_message: (order as any).customer_note || undefined,
               products: (order.items as any[]).map((item) => {
                 const productData: any = {
@@ -905,11 +914,9 @@ export async function registerRoutes(
                 return productData;
               }),
             };
-            // Regular line-item discount (percent / dollar off)
-            if (cartDiscountAmt > 0) {
-              bcOrderData.discount_amount = cartDiscountAmt.toFixed(4);
+            if (effectiveDiscountAmt > 0) {
+              bcOrderData.discount_amount = effectiveDiscountAmt.toFixed(4);
             }
-            // store_credit_amount is NOT writable on POST — applied via PUT after order creation
 
             // ── Pre-flight stock check (prevents BC partial inventory deduction) ──
             const stockErrors = await checkBcStock(
@@ -946,30 +953,6 @@ export async function registerRoutes(
                 bcSuccess = true;
                 await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
 
-                // ── Apply store credit via PUT (BC requires two-step: POST then PUT) ──
-                console.log(`[store_credit] storeCreditAmt=${storeCreditAmt} bcOrderId=${bcOrderId}`);
-                if (storeCreditAmt > 0 && bcOrderId) {
-                  try {
-                    const putBody = { store_credit_amount: storeCreditAmt.toFixed(4) };
-                    console.log(`[store_credit] PUT /v2/orders/${bcOrderId} body=`, JSON.stringify(putBody));
-                    const putRes = await fetch(
-                      `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`,
-                      {
-                        method: "PUT",
-                        headers: {
-                          "X-Auth-Token": String(token),
-                          "Content-Type": "application/json",
-                          Accept: "application/json",
-                        },
-                        body: JSON.stringify(putBody),
-                      },
-                    );
-                    const putBody2 = await putRes.text();
-                    console.log(`[store_credit] PUT response status=${putRes.status} body=${putBody2.slice(0, 500)}`);
-                  } catch (putErr: any) {
-                    console.error(`[store_credit] PUT threw:`, putErr?.message);
-                  }
-                }
               } else {
                 const errorText = await response.text();
                 bcError = `BigCommerce sync failed: ${errorText}`;
@@ -5526,9 +5509,19 @@ export async function registerRoutes(
       }
       const creditRemaining = Math.max(0, creditBefore - creditUsedNum);
 
-      // Note: BigCommerce automatically deducts the customer's store credit balance when
-      // store_credit_amount is included in the order payload (v2 POST /orders).
-      // No separate manual deduction is needed — doing so would double-deduct.
+      // Deduct from the real BigCommerce store credit balance (v2 API: negative amount = deduction).
+      // BC's v2 Orders API does not support store_credit_amount as a writable field, so we
+      // apply store credit as discount_amount on the order and deduct the balance manually here.
+      const { storeHash, headers } = await getBcCreds();
+      const bcRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bigcommerce_customer_id}/storecredit`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ amount: -Math.abs(creditUsedNum) }),
+      });
+      if (!bcRes.ok) {
+        const errText = await bcRes.text().catch(() => "");
+        return res.status(502).json({ error: `Failed to update BigCommerce store credit: ${bcRes.status} ${errText}` });
+      }
 
       // Sync local CRM mirror balance immediately
       if (customer) {
