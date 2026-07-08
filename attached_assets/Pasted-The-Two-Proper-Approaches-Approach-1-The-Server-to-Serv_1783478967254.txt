@@ -1,0 +1,41 @@
+The Two Proper Approaches
+Approach 1: The Server-to-Server v3 Checkout API (The Native Way)
+If you want the order to natively show "Store Credit" in the BigCommerce Control Panel breakdown (instead of a discount), you must route the order creation through the v3 Checkout/Carts API rather than directly injecting an order via v2.
+
+How it works: You create a cart, change it to a checkout, and apply store credit to the checkout session.
+
+The Endpoint: POST /v3/checkouts/{checkoutId}/store-credit
+
+The Catch: BigCommerce’s native checkout store-credit endpoint is all-or-nothing. It will automatically apply either the maximum available customer credit or the maximum amount needed to cover the order total. It does not natively support custom partial amounts (e.g., a customer has $100, but only wants to use $20).
+
+Approach 2: The Hybrid API Walkaround (Best for Custom/Partial UX)
+If your app's UX requires custom partial store credit application, or if your backend is heavily reliant on the v2 Orders API (common in custom POS or PWA builds), you have to handle it manually through a multi-step logic loop:
+
+Step 1: Deduct the Order Total using discount_amount
+When creating or updating the order via the v2 Orders API, pass the applied store credit value into the discount_amount field. This ensures the order math matches up perfectly (Subtotal - Discount = Grand Total).
+
+JSON
+// POST /v2/orders
+{
+  "customer_id": 123,
+  "discount_amount": "25.00", 
+  "staff_notes": "Store Credit Applied: $25.00"
+}
+Step 2: Manually Deduct the Customer's BigCommerce Balance
+Because the v2 Orders API won't automatically decrement the customer's actual account balance, you must immediately make a separate API call to update their profile balance using the v2 Customer Store Credit endpoint:
+
+Endpoint: POST /v2/customers/{customer_id}/store_credit
+
+Payload: You pass a payload containing the relative adjustment value.
+
+JSON
+{
+  "amount": "-25.00"
+}
+Step 3: Log it for Admins
+Because the order summary line item will technically say "Discount" instead of "Store Credit", prepend a clear log to the order's staff_notes or customer_notes (e.g., "Store Credit Applied: $25.00"). This bridges the visibility gap for administrative or fulfillment teams reviewing the order in the BigCommerce control panel.
+
+Summary Recommendation
+If your PWA is experiencing sluggishness, it is likely caused by the app getting hung up on retrying the broken v2 store_credit_amount PUT block or attempting a complex v3 checkout fallback loop.
+
+Reverting your order creation to Approach 2 (Discount + Manual Balance Update) is the cleanest, lowest-latency fix for a custom POS workflow and prevents API blockage.
