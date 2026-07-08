@@ -236,7 +236,13 @@ async function createBcOrderNativeStoreCredit(
     throw new Error(`Failed to write BC store credit balance (${setBalRes.status}): ${await setBalRes.text()}`);
   console.log(`[sc_native] BC balance set to $${crmBalance}`);
 
-  // 2. Validate OAuth credentials (required for customerAccessToken)
+  // 2. Validate all required config (Storefront URL + OAuth credentials)
+  if (!storefrontDomain || !storefrontDomain.startsWith("http")) {
+    throw new Error(
+      "Native store credit checkout requires a Storefront URL " +
+      "(e.g. https://yourdomain.com). Please set it in Admin → Integration Settings.",
+    );
+  }
   if (!clientId || !clientSecret) {
     throw new Error(
       "Native store credit checkout requires BigCommerce OAuth credentials " +
