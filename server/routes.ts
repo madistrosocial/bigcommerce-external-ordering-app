@@ -204,7 +204,7 @@ async function createBcOrderViaV3Checkout(
   };
   const bcCustomerId = order.bigcommerce_customer_id;
 
-  // 1. Fetch live BC balance so we can compute the correct remaining after checkout
+  // 1. Fetch live BC balance so we can compute creditRemaining and validate
   const custRes = await fetch(
     `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
     { headers: h },
@@ -213,17 +213,40 @@ async function createBcOrderViaV3Checkout(
   const custData = await custRes.json();
   const originalBalance = parseFloat(custData.store_credit_amount ?? "0") || 0;
   const creditRemaining = Math.max(0, originalBalance - storeCreditAmt);
+  console.log(`[v3_sc] customer=${bcCustomerId} bcBalance=${originalBalance} toApply=${storeCreditAmt} restoreTo=${creditRemaining}`);
 
-  // 2. Temporarily set BC balance = storeCreditAmt (work-around for all-or-nothing checkout)
-  const setBalRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
-    {
-      method: "PUT",
-      headers: h,
-      body: JSON.stringify({ store_credit_amount: storeCreditAmt.toFixed(4) }),
-    },
+  // 2. Partial-amount workaround: BC's store-credit checkout is all-or-nothing — it applies
+  //    min(available, orderTotal). When storeCreditAmt < orderTotal (user pays part with credit,
+  //    part cash), BC would over-apply. We temporarily set the BC balance to exactly the requested
+  //    amount so the all-or-nothing logic consumes the right value.
+  //    When storeCreditAmt >= orderTotal the order is fully covered and BC naturally applies the
+  //    correct amount — no temp balance manipulation needed.
+  const orderTotal = (order.items as any[]).reduce(
+    (sum: number, item: any) => sum + parseFloat(item.price_at_sale) * Number(item.quantity), 0,
   );
-  if (!setBalRes.ok) throw new Error(`Could not set temp store credit balance (${setBalRes.status})`);
+  const needsTempBalance = storeCreditAmt < orderTotal - 0.005; // 0.5¢ tolerance for float rounding
+  let tempBalanceSet = false;
+
+  if (needsTempBalance) {
+    console.log(`[v3_sc] Partial credit ($${storeCreditAmt} < orderTotal $${orderTotal.toFixed(2)}) — setting temp BC balance`);
+    const setBalRes = await fetch(
+      `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
+      {
+        method: "PUT",
+        headers: h,
+        body: JSON.stringify({ store_credit_amount: parseFloat(storeCreditAmt.toFixed(4)) }),
+      },
+    );
+    if (!setBalRes.ok) {
+      const errText = await setBalRes.text().catch(() => "");
+      console.error(`[v3_sc] SET temp balance FAILED: status=${setBalRes.status} body=${errText}`);
+      throw new Error(`Could not set temp store credit balance (${setBalRes.status}): ${errText.slice(0, 400)}`);
+    }
+    tempBalanceSet = true;
+    console.log(`[v3_sc] Temp balance set to ${storeCreditAmt}`);
+  } else {
+    console.log(`[v3_sc] Full-order credit ($${storeCreditAmt} >= orderTotal $${orderTotal.toFixed(2)}) — no temp balance needed`);
+  }
 
   try {
     // 3. Create v3 cart — list_price overrides the catalog price per item
@@ -241,10 +264,10 @@ async function createBcOrderViaV3Checkout(
       { method: "POST", headers: h, body: JSON.stringify({ customer_id: bcCustomerId, line_items: lineItems }) },
     );
     if (!cartRes.ok) throw new Error(`v3 cart creation failed: ${await cartRes.text()}`);
-    const cartData  = await cartRes.json();
+    const cartData   = await cartRes.json();
     const checkoutId = cartData.data.id; // checkoutId === cartId in BC
 
-    // 4. Add billing address (map v2 field names → v3 names; non-fatal if missing)
+    // 4. Add billing address (map v2 field names → v3 field names; non-fatal if absent)
     const a = order.billing_address || {};
     const billingV3 = {
       first_name:             a.first_name  || "",
@@ -264,14 +287,15 @@ async function createBcOrderViaV3Checkout(
     await fetch(
       `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${checkoutId}/billing-address`,
       { method: "POST", headers: h, body: JSON.stringify(billingV3) },
-    ).catch(() => {});
+    ).catch((e) => console.warn(`[v3_sc] billing-address non-fatal:`, e));
 
-    // 5. Apply store credit — BC consumes exactly storeCreditAmt (that's the full balance now)
+    // 5. Apply store credit — BC consumes exactly storeCreditAmt (that's now the full balance)
     const scRes = await fetch(
       `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${checkoutId}/store-credit`,
       { method: "POST", headers: h },
     );
     if (!scRes.ok) throw new Error(`Store-credit checkout application failed: ${await scRes.text()}`);
+    console.log(`[v3_sc] Store credit applied to checkout ${checkoutId}`);
 
     // 6. Convert checkout → BC order
     const orderRes = await fetch(
@@ -280,8 +304,9 @@ async function createBcOrderViaV3Checkout(
     );
     if (!orderRes.ok) throw new Error(`Checkout→order failed: ${await orderRes.text()}`);
     const { data: { id: bcOrderId } } = await orderRes.json();
+    console.log(`[v3_sc] BC order ${bcOrderId} created via v3 checkout`);
 
-    // 7. Patch: set status + notes (v3 checkout creates Incomplete orders by default)
+    // 7. Patch order: set status=Pending + staff notes (v3 creates Incomplete by default)
     const staffNote = [`Store Credit Applied: $${storeCreditAmt.toFixed(2)}`, order.order_note || ""]
       .filter(Boolean).join("\n\n");
     await fetch(
@@ -295,19 +320,23 @@ async function createBcOrderViaV3Checkout(
           customer_message: (order as any).customer_note || undefined,
         }),
       },
-    ).catch(() => {});
+    ).catch((e) => console.warn(`[v3_sc] status-patch non-fatal:`, e));
 
     return bcOrderId;
   } finally {
-    // 8. Always restore correct remaining balance (runs even on throw)
-    await fetch(
-      `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
-      {
-        method: "PUT",
-        headers: h,
-        body: JSON.stringify({ store_credit_amount: creditRemaining.toFixed(4) }),
-      },
-    ).catch(() => {});
+    // 8. Restore correct remaining balance — but ONLY if step 2 actually succeeded.
+    //    If step 2 failed, the BC balance was never changed, so we must not touch it.
+    if (tempBalanceSet) {
+      await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
+        {
+          method: "PUT",
+          headers: h,
+          body: JSON.stringify({ store_credit_amount: parseFloat(creditRemaining.toFixed(4)) }),
+        },
+      ).catch((e) => console.error(`[v3_sc] Balance restore FAILED:`, e));
+      console.log(`[v3_sc] Balance restored to ${creditRemaining}`);
+    }
   }
 }
 
