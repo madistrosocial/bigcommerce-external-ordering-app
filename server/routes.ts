@@ -909,10 +909,7 @@ export async function registerRoutes(
             if (cartDiscountAmt > 0) {
               bcOrderData.discount_amount = cartDiscountAmt.toFixed(4);
             }
-            // Native BC store credit — shown as "Store Credit" deduction in BC order history
-            if (storeCreditAmt > 0) {
-              bcOrderData.store_credit_amount = storeCreditAmt.toFixed(4);
-            }
+            // store_credit_amount is NOT writable on POST — applied via PUT after order creation
 
             // ── Pre-flight stock check (prevents BC partial inventory deduction) ──
             const stockErrors = await checkBcStock(
@@ -948,6 +945,27 @@ export async function registerRoutes(
                 bcOrderId = data.id;
                 bcSuccess = true;
                 await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
+
+                // ── Apply store credit via PUT (BC requires two-step: POST then PUT) ──
+                // store_credit_amount is read-only on POST but writable on PUT.
+                // BC will display this as a native "Store Credit" line and auto-deduct
+                // the customer's balance.
+                if (storeCreditAmt > 0 && bcOrderId) {
+                  try {
+                    await fetch(
+                      `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`,
+                      {
+                        method: "PUT",
+                        headers: {
+                          "X-Auth-Token": String(token),
+                          "Content-Type": "application/json",
+                          Accept: "application/json",
+                        },
+                        body: JSON.stringify({ store_credit_amount: storeCreditAmt.toFixed(4) }),
+                      },
+                    );
+                  } catch (_) { /* non-fatal — order already created; credit logged separately */ }
+                }
               } else {
                 const errorText = await response.text();
                 bcError = `BigCommerce sync failed: ${errorText}`;
