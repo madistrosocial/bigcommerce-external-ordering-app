@@ -343,7 +343,6 @@ async function createBcOrderNativeStoreCredit(
             value
             expiresAt
           }
-          result
         }
       }`,
       variables: { jwt: loginJwt },
