@@ -1031,55 +1031,71 @@ export async function registerRoutes(
               const suffix  = stockErrors.length > 5 ? ` …and ${stockErrors.length - 5} more` : "";
               bcError = `[{"status":409,"message":"Quantities of one or more products are out of stock or did not meet quantity requirements.","details":{"errors":[{"type":"OutOfStock","message":"Pre-validation: ${stockErrors.length} item(s) with insufficient stock: ${preview}${suffix}"}]}}]`;
               await storage.updateOrderSyncError(order.id!, bcError);
-            } else if (storeCreditAmt > 0) {
-              // ── Store credit path: v3 Cart → Checkout → Store Credit → Order ─────
-              // This produces a native "Store Credit" deduction line in BC (not "Discount"),
-              // which correctly syncs to Xero via Parex Bridge as store credit, not a discount.
-              try {
-                bcOrderId = await createBcOrderViaV3Checkout(storeHash, String(token), order, storeCreditAmt);
-                bcSuccess = true;
-                await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
-              } catch (scErr: any) {
-                bcError = `BigCommerce sync failed (v3 checkout): ${scErr.message}`;
-                await storage.updateOrderSyncError(order.id!, bcError);
-              }
             } else {
-              // ── Standard path: v2 Orders API ─────────────────────────────────────
-              const bcOrderData: any = {
-                status_id: 1,
-                customer_id: order.bigcommerce_customer_id || 0,
-                billing_address: order.billing_address,
-                staff_notes: order.order_note || undefined,
-                customer_message: (order as any).customer_note || undefined,
-                products: (order.items as any[]).map((item) => {
-                  const productData: any = {
-                    product_id:    item.bigcommerce_product_id,
-                    quantity:      item.quantity,
-                    price_inc_tax: parseFloat(item.price_at_sale),
-                    price_ex_tax:  parseFloat(item.price_at_sale),
-                  };
-                  if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
-                    productData.product_options = item.variant_option_values.map((ov: any) => ({ id: ov.option_id, value: String(ov.id) }));
-                  }
-                  return productData;
-                }),
-              };
-              if (cartDiscountAmt > 0) bcOrderData.discount_amount = cartDiscountAmt.toFixed(4);
+              // ── v2 Orders API path (standard + store credit fallback) ─────────────
+              // Store credit is applied as discount_amount on v2 orders. This reduces
+              // the order total correctly. Staff notes label it as store credit.
+              // NOTE: The preferred path uses BC Gift Certificates via v3 checkout,
+              // but requires BC admin to enable Gift Certificates for USD in:
+              //   BC Admin → Products → Gift Certificates → Enable
+              // Until enabled, this fallback ensures orders always go through.
+              let usedGcPath = false;
+              if (storeCreditAmt > 0) {
+                try {
+                  bcOrderId = await createBcOrderViaV3Checkout(storeHash, String(token), order, storeCreditAmt);
+                  bcSuccess = true;
+                  usedGcPath = true;
+                  await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
+                } catch (gcErr: any) {
+                  console.warn(`[sc] GC path failed (${gcErr.message}), falling back to v2 discount`);
+                }
+              }
 
-              const response = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders`, {
-                method: "POST",
-                headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
-                body: JSON.stringify(bcOrderData),
-              });
-              if (response.ok) {
-                const data = await response.json();
-                bcOrderId = data.id;
-                bcSuccess = true;
-                await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
-              } else {
-                const errorText = await response.text();
-                bcError = `BigCommerce sync failed: ${errorText}`;
-                await storage.updateOrderSyncError(order.id!, bcError);
+              if (!bcSuccess) {
+                const effectiveDiscount = storeCreditAmt > 0 ? storeCreditAmt : cartDiscountAmt;
+                const staffNotePrefix   = storeCreditAmt > 0
+                  ? `Store Credit Applied: $${storeCreditAmt.toFixed(2)}\n\n`
+                  : "";
+                const bcOrderData: any = {
+                  status_id:        1,
+                  customer_id:      order.bigcommerce_customer_id || 0,
+                  billing_address:  order.billing_address,
+                  staff_notes:      order.order_note
+                    ? `${staffNotePrefix}${order.order_note}`
+                    : staffNotePrefix || undefined,
+                  customer_message: (order as any).customer_note || undefined,
+                  products: (order.items as any[]).map((item) => {
+                    const productData: any = {
+                      product_id:    item.bigcommerce_product_id,
+                      quantity:      item.quantity,
+                      price_inc_tax: parseFloat(item.price_at_sale),
+                      price_ex_tax:  parseFloat(item.price_at_sale),
+                    };
+                    if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
+                      productData.product_options = item.variant_option_values.map(
+                        (ov: any) => ({ id: ov.option_id, value: String(ov.id) }),
+                      );
+                    }
+                    return productData;
+                  }),
+                };
+                if (effectiveDiscount > 0) bcOrderData.discount_amount = effectiveDiscount.toFixed(4);
+
+                const response = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders`, {
+                  method: "POST",
+                  headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
+                  body: JSON.stringify(bcOrderData),
+                });
+                if (response.ok) {
+                  const data = await response.json();
+                  bcOrderId = data.id;
+                  bcSuccess = true;
+                  await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
+                } else {
+                  const errorText = await response.text();
+                  bcError = `BigCommerce sync failed: ${errorText}`;
+                  await storage.updateOrderSyncError(order.id!, bcError);
+                }
               }
             }
           } catch (e: any) {
