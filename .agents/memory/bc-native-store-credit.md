@@ -20,6 +20,15 @@ description: How the POS creates BC orders with native store_credit_amount inste
 11. Reads updated BC balance from `GET /v2/customers/{id}` (`store_credit_amount` field)
 12. Returns `{ bcOrderId, bcCreditRemaining }`
 
+## CRITICAL: OAuth app must be installed on the store
+
+`loginWithCustomerLoginJwt` returns "Invalid login" until the OAuth app completes the /auth OAuth handshake on the store:
+- devtools.bigcommerce.com → your app → App Actions → "Preview in Store" → Install
+- This is a one-time step per store. Creating the app in devtools is NOT sufficient.
+- The `clientId`/`clientSecret` are recognized only after installation.
+
+**Why:** BC's Customer Login JWT API enforces that the signing app is authorized for the target store. Merely having a draft app with valid credentials is not enough — BC validates the relationship between `iss` (clientId) and the store_hash in the JWT against installed apps.
+
 ## Key findings from API investigation
 
 - `POST /v3/checkouts/{id}/store-credit` returns 404 when called with API Account token (even on Enterprise). Requires a real customer session (customerAccessToken from Customer Login JWT).

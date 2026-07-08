@@ -354,7 +354,6 @@ async function createBcOrderNativeStoreCredit(
       operation:   "customer_login",
       store_hash:  storeHash,
       customer_id: bcCustomerId,
-      channel_id:  channelId,
     })).toString("base64url");
     const jwtSig   = createHmac("sha256", cleanSecret).update(`${jwtHdr}.${jwtBody}`).digest("base64url");
     const loginJwt = `${jwtHdr}.${jwtBody}.${jwtSig}`;
@@ -392,8 +391,9 @@ async function createBcOrderNativeStoreCredit(
     if (!customerAccessToken) {
       const detail = JSON.stringify(gqlData?.errors ?? gqlData).slice(0, 300);
       throw new Error(
-        `Customer login failed (OAuth JWT rejected by BC). ` +
-        `Verify the OAuth app is installed on the store via the /auth callback. Detail: ${detail}`,
+        `Store credit checkout requires the OAuth app to be installed on the BC store. ` +
+        `Go to devtools.bigcommerce.com → open your app → App Actions → "Preview in Store" → Install. ` +
+        `This is a one-time setup. BC error: ${detail}`,
       );
     }
     console.log(`[sc_native] customerAccessToken obtained via OAuth fallback`);
