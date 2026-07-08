@@ -186,11 +186,16 @@ async function checkBcStock(
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
-// ── v3 Checkout path: creates a BC order with native Store Credit display ──────
-// Solves the all-or-nothing limitation by temporarily setting the customer's
-// BC store credit balance to exactly the amount being applied, so BC's checkout
-// consumes all of it. The finally block always restores the correct remaining
-// balance, even if any intermediate step throws.
+// ── Store Credit via Gift Certificate ─────────────────────────────────────────
+// BC's public API does not expose a writable store_credit_amount field on
+// customers (confirmed: returns 400 "field not supported"). We therefore
+// represent store credit using a one-time BC gift certificate:
+//   1. Create a GC for exactly storeCreditAmt
+//   2. Apply it to a v3 checkout → order is created with a GC payment line
+//      (shows as "Gift Certificate" payment, NOT a discount/coupon)
+//   3. If order creation fails, delete the GC so it isn't stranded.
+// The local CRM balance is the authoritative credit ledger; BC balance is
+// not maintained via API (it is read-only from the public API).
 async function createBcOrderViaV3Checkout(
   storeHash: string,
   token: string,
@@ -204,50 +209,41 @@ async function createBcOrderViaV3Checkout(
   };
   const bcCustomerId = order.bigcommerce_customer_id;
 
-  // 1. Fetch live BC balance so we can compute creditRemaining and validate
+  // 1. Fetch customer email/name for gift certificate creation
   const custRes = await fetch(
     `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
     { headers: h },
   );
   if (!custRes.ok) throw new Error(`Could not fetch BC customer (${custRes.status})`);
   const custData = await custRes.json();
-  const originalBalance = parseFloat(custData.store_credit_amount ?? "0") || 0;
-  const creditRemaining = Math.max(0, originalBalance - storeCreditAmt);
-  console.log(`[v3_sc] customer=${bcCustomerId} bcBalance=${originalBalance} toApply=${storeCreditAmt} restoreTo=${creditRemaining}`);
+  const custEmail = custData.email || "noreply@store.com";
+  const custName  = `${custData.first_name || ""} ${custData.last_name || ""}`.trim() || "Customer";
+  console.log(`[gc_sc] customer=${bcCustomerId} email=${custEmail} toApply=$${storeCreditAmt}`);
 
-  // 2. Partial-amount workaround: BC's store-credit checkout is all-or-nothing — it applies
-  //    min(available, orderTotal). When storeCreditAmt < orderTotal (user pays part with credit,
-  //    part cash), BC would over-apply. We temporarily set the BC balance to exactly the requested
-  //    amount so the all-or-nothing logic consumes the right value.
-  //    When storeCreditAmt >= orderTotal the order is fully covered and BC naturally applies the
-  //    correct amount — no temp balance manipulation needed.
-  const orderTotal = (order.items as any[]).reduce(
-    (sum: number, item: any) => sum + parseFloat(item.price_at_sale) * Number(item.quantity), 0,
+  // 2. Create a one-time gift certificate for exactly storeCreditAmt
+  const gcCode = `SCRDT-${bcCustomerId}-${Date.now()}`;
+  const gcRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v2/gift_certificates`,
+    {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify({
+        code:      gcCode,
+        to_name:   custName,
+        to_email:  custEmail,
+        from_name: "Store Credit",
+        from_email: custEmail,
+        amount:    parseFloat(storeCreditAmt.toFixed(4)),
+        enabled:   true,
+      }),
+    },
   );
-  const needsTempBalance = storeCreditAmt < orderTotal - 0.005; // 0.5¢ tolerance for float rounding
-  let tempBalanceSet = false;
+  if (!gcRes.ok) throw new Error(`Gift certificate creation failed: ${await gcRes.text()}`);
+  const gcData = await gcRes.json();
+  const gcId   = gcData.id as number;
+  console.log(`[gc_sc] Created GC id=${gcId} code=${gcCode} amount=$${storeCreditAmt}`);
 
-  if (needsTempBalance) {
-    console.log(`[v3_sc] Partial credit ($${storeCreditAmt} < orderTotal $${orderTotal.toFixed(2)}) — setting temp BC balance`);
-    const setBalRes = await fetch(
-      `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
-      {
-        method: "PUT",
-        headers: h,
-        body: JSON.stringify({ store_credit_amount: parseFloat(storeCreditAmt.toFixed(4)) }),
-      },
-    );
-    if (!setBalRes.ok) {
-      const errText = await setBalRes.text().catch(() => "");
-      console.error(`[v3_sc] SET temp balance FAILED: status=${setBalRes.status} body=${errText}`);
-      throw new Error(`Could not set temp store credit balance (${setBalRes.status}): ${errText.slice(0, 400)}`);
-    }
-    tempBalanceSet = true;
-    console.log(`[v3_sc] Temp balance set to ${storeCreditAmt}`);
-  } else {
-    console.log(`[v3_sc] Full-order credit ($${storeCreditAmt} >= orderTotal $${orderTotal.toFixed(2)}) — no temp balance needed`);
-  }
-
+  let orderCreated = false;
   try {
     // 3. Create v3 cart — list_price overrides the catalog price per item
     const lineItems = (order.items as any[]).map((item: any) => {
@@ -266,13 +262,14 @@ async function createBcOrderViaV3Checkout(
     if (!cartRes.ok) throw new Error(`v3 cart creation failed: ${await cartRes.text()}`);
     const cartData   = await cartRes.json();
     const checkoutId = cartData.data.id; // checkoutId === cartId in BC
+    console.log(`[gc_sc] Cart/checkout created: ${checkoutId}`);
 
-    // 4. Add billing address (map v2 field names → v3 field names; non-fatal if absent)
+    // 4. Add billing address (map v2 field names → v3; non-fatal if absent)
     const a = order.billing_address || {};
     const billingV3 = {
       first_name:             a.first_name  || "",
       last_name:              a.last_name   || "",
-      email:                  a.email       || "",
+      email:                  a.email || custEmail,
       company:                a.company     || "",
       address1:               a.address1    || a.street_1 || "",
       address2:               a.address2    || a.street_2 || "",
@@ -287,15 +284,15 @@ async function createBcOrderViaV3Checkout(
     await fetch(
       `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${checkoutId}/billing-address`,
       { method: "POST", headers: h, body: JSON.stringify(billingV3) },
-    ).catch((e) => console.warn(`[v3_sc] billing-address non-fatal:`, e));
+    ).catch((e) => console.warn(`[gc_sc] billing-address non-fatal:`, e));
 
-    // 5. Apply store credit — BC consumes exactly storeCreditAmt (that's now the full balance)
-    const scRes = await fetch(
-      `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${checkoutId}/store-credit`,
-      { method: "POST", headers: h },
+    // 5. Apply gift certificate to checkout
+    const applyGcRes = await fetch(
+      `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${checkoutId}/gift-certificates`,
+      { method: "POST", headers: h, body: JSON.stringify({ giftCertificateCode: gcCode }) },
     );
-    if (!scRes.ok) throw new Error(`Store-credit checkout application failed: ${await scRes.text()}`);
-    console.log(`[v3_sc] Store credit applied to checkout ${checkoutId}`);
+    if (!applyGcRes.ok) throw new Error(`GC checkout application failed: ${await applyGcRes.text()}`);
+    console.log(`[gc_sc] GC applied to checkout ${checkoutId}`);
 
     // 6. Convert checkout → BC order
     const orderRes = await fetch(
@@ -304,7 +301,8 @@ async function createBcOrderViaV3Checkout(
     );
     if (!orderRes.ok) throw new Error(`Checkout→order failed: ${await orderRes.text()}`);
     const { data: { id: bcOrderId } } = await orderRes.json();
-    console.log(`[v3_sc] BC order ${bcOrderId} created via v3 checkout`);
+    orderCreated = true;
+    console.log(`[gc_sc] BC order ${bcOrderId} created via GC checkout`);
 
     // 7. Patch order: set status=Pending + staff notes (v3 creates Incomplete by default)
     const staffNote = [`Store Credit Applied: $${storeCreditAmt.toFixed(2)}`, order.order_note || ""]
@@ -315,27 +313,22 @@ async function createBcOrderViaV3Checkout(
         method: "PUT",
         headers: h,
         body: JSON.stringify({
-          status_id: 1,
-          staff_notes: staffNote,
+          status_id:        1,
+          staff_notes:      staffNote,
           customer_message: (order as any).customer_note || undefined,
         }),
       },
-    ).catch((e) => console.warn(`[v3_sc] status-patch non-fatal:`, e));
+    ).catch((e) => console.warn(`[gc_sc] status-patch non-fatal:`, e));
 
     return bcOrderId;
   } finally {
-    // 8. Restore correct remaining balance — but ONLY if step 2 actually succeeded.
-    //    If step 2 failed, the BC balance was never changed, so we must not touch it.
-    if (tempBalanceSet) {
+    // 8. If the order was NOT created, delete the stranded GC so it can't be redeemed
+    if (!orderCreated) {
       await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
-        {
-          method: "PUT",
-          headers: h,
-          body: JSON.stringify({ store_credit_amount: parseFloat(creditRemaining.toFixed(4)) }),
-        },
-      ).catch((e) => console.error(`[v3_sc] Balance restore FAILED:`, e));
-      console.log(`[v3_sc] Balance restored to ${creditRemaining}`);
+        `https://api.bigcommerce.com/stores/${storeHash}/v2/gift_certificates/${gcId}`,
+        { method: "DELETE", headers: h },
+      ).catch((e) => console.error(`[gc_sc] GC cleanup FAILED (gc=${gcId}):`, e));
+      console.log(`[gc_sc] Cleaned up unused GC ${gcId}`);
     }
   }
 }

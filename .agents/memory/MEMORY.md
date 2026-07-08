@@ -4,4 +4,4 @@
 - [CRM auth pattern](crm-auth-pattern.md) — `requireAuth` sets `authUser`, NOT `userId`; using `(req as any).userId` silently breaks all CRM endpoints (returns 401 → shows 0 customers).
 - [CRM Visibility RBAC](crm-visibility-rbac.md) — crm:view_all is the canonical "see all customers" perm; CRM_ACTION_PERMS in AdminUsers.tsx; health cards and reactivation both now pass visibility scope.
 - [POS store credit lookup](pos-store-credit-lookup.md) — POS-side CRM writes should take bigcommerce_customer_id from client and resolve internal CRM id server-side, not the reverse.
-- [BC store credit API](bc-store-credit-api.md) — store_credit_amount is read-only on orders (POST+PUT); deduct balance via PUT /v2/customers/{id} with new absolute balance.
+- [BC store credit API limitations](bc-store-credit-api.md) — store_credit_amount is read-only everywhere: 400 on orders (POST+PUT) AND on PUT /v2/customers/{id}. Use Gift Certificate workaround for native payment display.
