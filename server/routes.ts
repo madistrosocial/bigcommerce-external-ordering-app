@@ -339,21 +339,31 @@ async function createBcOrderNativeStoreCredit(
     body: JSON.stringify({
       query: `mutation LoginCustomer($jwt: String!) {
         loginWithCustomerLoginJwt(jwt: $jwt) {
-          customerAccessToken
+          customerAccessToken {
+            value
+            expiresAt
+          }
+          result
         }
       }`,
       variables: { jwt: loginJwt },
     }),
   });
-  if (!gqlRes.ok)
-    throw new Error(`GraphQL login request failed (${gqlRes.status})`);
+  if (!gqlRes.ok) {
+    const gqlErrBody = await gqlRes.text().catch(() => "(unreadable)");
+    console.error(`[sc_native] GraphQL ${gqlRes.status} body:`, gqlErrBody.slice(0, 600));
+    throw new Error(`GraphQL login request failed (${gqlRes.status}): ${gqlErrBody.slice(0, 300)}`);
+  }
   const gqlData = await gqlRes.json();
-  const customerAccessToken = gqlData?.data?.loginWithCustomerLoginJwt?.customerAccessToken as string | undefined;
+  console.log(`[sc_native] GraphQL response:`, JSON.stringify(gqlData).slice(0, 400));
+  // customerAccessToken is an object { value, expiresAt } in the storefront GraphQL schema
+  const loginResult = gqlData?.data?.loginWithCustomerLoginJwt;
+  const customerAccessToken = (loginResult?.customerAccessToken?.value ?? loginResult?.customerAccessToken) as string | undefined;
   if (!customerAccessToken) {
     const detail = JSON.stringify(gqlData?.errors ?? gqlData).slice(0, 400);
     throw new Error(`Customer login failed — could not obtain customerAccessToken: ${detail}`);
   }
-  console.log(`[sc_native] customerAccessToken obtained`);
+  console.log(`[sc_native] customerAccessToken obtained (result=${loginResult?.result})`);
 
   // 8. Apply store credit to checkout via REST storefront API using customerAccessToken
   //    (customerAccessToken provides proper customer session context server-to-server)
@@ -1121,7 +1131,7 @@ export async function registerRoutes(
                 const nativeResult = await createBcOrderNativeStoreCredit(
                   storeHash,
                   String(token),
-                  String(config.storefrontUrl || ""),
+                  String(config.storefrontUrl || "").replace(/\/+$/, ""),
                   config.clientId   ? String(config.clientId)   : null,
                   config.clientSecret ? String(config.clientSecret) : null,
                   Number(config.channelId ?? 1),
