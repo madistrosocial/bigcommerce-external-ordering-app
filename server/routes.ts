@@ -186,6 +186,131 @@ async function checkBcStock(
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ── v3 Checkout path: creates a BC order with native Store Credit display ──────
+// Solves the all-or-nothing limitation by temporarily setting the customer's
+// BC store credit balance to exactly the amount being applied, so BC's checkout
+// consumes all of it. The finally block always restores the correct remaining
+// balance, even if any intermediate step throws.
+async function createBcOrderViaV3Checkout(
+  storeHash: string,
+  token: string,
+  order: any,
+  storeCreditAmt: number,
+): Promise<number> {
+  const h: Record<string, string> = {
+    "X-Auth-Token": token,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  const bcCustomerId = order.bigcommerce_customer_id;
+
+  // 1. Fetch live BC balance so we can compute the correct remaining after checkout
+  const custRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
+    { headers: h },
+  );
+  if (!custRes.ok) throw new Error(`Could not fetch BC customer (${custRes.status})`);
+  const custData = await custRes.json();
+  const originalBalance = parseFloat(custData.store_credit_amount ?? "0") || 0;
+  const creditRemaining = Math.max(0, originalBalance - storeCreditAmt);
+
+  // 2. Temporarily set BC balance = storeCreditAmt (work-around for all-or-nothing checkout)
+  const setBalRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
+    {
+      method: "PUT",
+      headers: h,
+      body: JSON.stringify({ store_credit_amount: storeCreditAmt.toFixed(4) }),
+    },
+  );
+  if (!setBalRes.ok) throw new Error(`Could not set temp store credit balance (${setBalRes.status})`);
+
+  try {
+    // 3. Create v3 cart — list_price overrides the catalog price per item
+    const lineItems = (order.items as any[]).map((item: any) => {
+      const li: any = {
+        product_id: item.bigcommerce_product_id,
+        quantity:   item.quantity,
+        list_price: parseFloat(item.price_at_sale),
+      };
+      if (item.variant_id) li.variant_id = item.variant_id;
+      return li;
+    });
+    const cartRes = await fetch(
+      `https://api.bigcommerce.com/stores/${storeHash}/v3/carts`,
+      { method: "POST", headers: h, body: JSON.stringify({ customer_id: bcCustomerId, line_items: lineItems }) },
+    );
+    if (!cartRes.ok) throw new Error(`v3 cart creation failed: ${await cartRes.text()}`);
+    const cartData  = await cartRes.json();
+    const checkoutId = cartData.data.id; // checkoutId === cartId in BC
+
+    // 4. Add billing address (map v2 field names → v3 names; non-fatal if missing)
+    const a = order.billing_address || {};
+    const billingV3 = {
+      first_name:             a.first_name  || "",
+      last_name:              a.last_name   || "",
+      email:                  a.email       || "",
+      company:                a.company     || "",
+      address1:               a.address1    || a.street_1 || "",
+      address2:               a.address2    || a.street_2 || "",
+      city:                   a.city        || "",
+      state_or_province:      a.state_or_province      || a.state || "",
+      state_or_province_code: a.state_or_province_code || a.state || "",
+      postal_code:            a.postal_code || a.zip    || "",
+      country:                a.country     || "",
+      country_code:           a.country_code || a.country_iso2 || "US",
+      phone:                  a.phone       || "",
+    };
+    await fetch(
+      `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${checkoutId}/billing-address`,
+      { method: "POST", headers: h, body: JSON.stringify(billingV3) },
+    ).catch(() => {});
+
+    // 5. Apply store credit — BC consumes exactly storeCreditAmt (that's the full balance now)
+    const scRes = await fetch(
+      `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${checkoutId}/store-credit`,
+      { method: "POST", headers: h },
+    );
+    if (!scRes.ok) throw new Error(`Store-credit checkout application failed: ${await scRes.text()}`);
+
+    // 6. Convert checkout → BC order
+    const orderRes = await fetch(
+      `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${checkoutId}/orders`,
+      { method: "POST", headers: h },
+    );
+    if (!orderRes.ok) throw new Error(`Checkout→order failed: ${await orderRes.text()}`);
+    const { data: { id: bcOrderId } } = await orderRes.json();
+
+    // 7. Patch: set status + notes (v3 checkout creates Incomplete orders by default)
+    const staffNote = [`Store Credit Applied: $${storeCreditAmt.toFixed(2)}`, order.order_note || ""]
+      .filter(Boolean).join("\n\n");
+    await fetch(
+      `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`,
+      {
+        method: "PUT",
+        headers: h,
+        body: JSON.stringify({
+          status_id: 1,
+          staff_notes: staffNote,
+          customer_message: (order as any).customer_note || undefined,
+        }),
+      },
+    ).catch(() => {});
+
+    return bcOrderId;
+  } finally {
+    // 8. Always restore correct remaining balance (runs even on throw)
+    await fetch(
+      `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
+      {
+        method: "PUT",
+        headers: h,
+        body: JSON.stringify({ store_credit_amount: creditRemaining.toFixed(4) }),
+      },
+    ).catch(() => {});
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express,
@@ -875,84 +1000,61 @@ export async function registerRoutes(
             const firstName = nameParts[0] || "Customer";
             const lastName = nameParts.slice(1).join(" ") || "Customer";
 
-            const cartDiscountAmt   = parseFloat((req.body as any).cart_discount_amount   ?? "0") || 0;
-            const storeCreditAmt    = parseFloat((req.body as any).store_credit_amount     ?? "0") || 0;
-            // BC v2 Orders API does not support store_credit_amount as a writable field (read-only
-            // on both POST and PUT). We apply store credit as discount_amount so the order total is
-            // correctly reduced, and clearly label it in staff_notes. The customer's BC balance is
-            // deducted separately via /api/pos/store-credit-usage after the order is created.
-            const effectiveDiscountAmt = storeCreditAmt > 0 ? storeCreditAmt : cartDiscountAmt;
-            const staffNoteBase = order.order_note || undefined;
-            const staffNotePrefix = storeCreditAmt > 0
-              ? `Store Credit Applied: $${storeCreditAmt.toFixed(2)}\n\n`
-              : "";
-            const bcOrderData: any = {
-              status_id: 1,
-              customer_id: order.bigcommerce_customer_id || 0,
-              billing_address: order.billing_address,
-              staff_notes: staffNoteBase ? `${staffNotePrefix}${staffNoteBase}` : (staffNotePrefix || undefined),
-              customer_message: (order as any).customer_note || undefined,
-              products: (order.items as any[]).map((item) => {
-                const productData: any = {
-                  product_id: item.bigcommerce_product_id,
-                  quantity: item.quantity,
-                  price_inc_tax: parseFloat(item.price_at_sale),
-                  price_ex_tax: parseFloat(item.price_at_sale),
-                };
-                if (
-                  item.variant_option_values &&
-                  Array.isArray(item.variant_option_values) &&
-                  item.variant_option_values.length > 0
-                ) {
-                  productData.product_options = item.variant_option_values.map(
-                    (ov: any) => ({
-                      id: ov.option_id,
-                      value: String(ov.id),
-                    }),
-                  );
-                }
-                return productData;
-              }),
-            };
-            if (effectiveDiscountAmt > 0) {
-              bcOrderData.discount_amount = effectiveDiscountAmt.toFixed(4);
-            }
+            const cartDiscountAmt = parseFloat((req.body as any).cart_discount_amount ?? "0") || 0;
+            const storeCreditAmt = parseFloat((req.body as any).store_credit_amount  ?? "0") || 0;
 
             // ── Pre-flight stock check (prevents BC partial inventory deduction) ──
-            const stockErrors = await checkBcStock(
-              storeHash,
-              token,
-              order.items as any[],
-            );
-
+            const stockErrors = await checkBcStock(storeHash, token, order.items as any[]);
             if (stockErrors.length > 0) {
               const preview = stockErrors.slice(0, 5).join("; ");
-              const suffix =
-                stockErrors.length > 5
-                  ? ` …and ${stockErrors.length - 5} more`
-                  : "";
+              const suffix  = stockErrors.length > 5 ? ` …and ${stockErrors.length - 5} more` : "";
               bcError = `[{"status":409,"message":"Quantities of one or more products are out of stock or did not meet quantity requirements.","details":{"errors":[{"type":"OutOfStock","message":"Pre-validation: ${stockErrors.length} item(s) with insufficient stock: ${preview}${suffix}"}]}}]`;
               await storage.updateOrderSyncError(order.id!, bcError);
+            } else if (storeCreditAmt > 0) {
+              // ── Store credit path: v3 Cart → Checkout → Store Credit → Order ─────
+              // This produces a native "Store Credit" deduction line in BC (not "Discount"),
+              // which correctly syncs to Xero via Parex Bridge as store credit, not a discount.
+              try {
+                bcOrderId = await createBcOrderViaV3Checkout(storeHash, String(token), order, storeCreditAmt);
+                bcSuccess = true;
+                await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
+              } catch (scErr: any) {
+                bcError = `BigCommerce sync failed (v3 checkout): ${scErr.message}`;
+                await storage.updateOrderSyncError(order.id!, bcError);
+              }
             } else {
-              const response = await fetch(
-                `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
-                {
-                  method: "POST",
-                  headers: {
-                    "X-Auth-Token": String(token),
-                    "Content-Type": "application/json",
-                    Accept: "application/json",
-                  },
-                  body: JSON.stringify(bcOrderData),
-                },
-              );
+              // ── Standard path: v2 Orders API ─────────────────────────────────────
+              const bcOrderData: any = {
+                status_id: 1,
+                customer_id: order.bigcommerce_customer_id || 0,
+                billing_address: order.billing_address,
+                staff_notes: order.order_note || undefined,
+                customer_message: (order as any).customer_note || undefined,
+                products: (order.items as any[]).map((item) => {
+                  const productData: any = {
+                    product_id:    item.bigcommerce_product_id,
+                    quantity:      item.quantity,
+                    price_inc_tax: parseFloat(item.price_at_sale),
+                    price_ex_tax:  parseFloat(item.price_at_sale),
+                  };
+                  if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
+                    productData.product_options = item.variant_option_values.map((ov: any) => ({ id: ov.option_id, value: String(ov.id) }));
+                  }
+                  return productData;
+                }),
+              };
+              if (cartDiscountAmt > 0) bcOrderData.discount_amount = cartDiscountAmt.toFixed(4);
 
+              const response = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders`, {
+                method: "POST",
+                headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
+                body: JSON.stringify(bcOrderData),
+              });
               if (response.ok) {
                 const data = await response.json();
                 bcOrderId = data.id;
                 bcSuccess = true;
                 await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
-
               } else {
                 const errorText = await response.text();
                 bcError = `BigCommerce sync failed: ${errorText}`;
@@ -5509,19 +5611,8 @@ export async function registerRoutes(
       }
       const creditRemaining = Math.max(0, creditBefore - creditUsedNum);
 
-      // Deduct from the real BigCommerce store credit balance.
-      // The correct BC v2 endpoint is PUT /v2/customers/{id} with the new ABSOLUTE balance.
-      // (POST /v2/customers/{id}/storecredit does not exist — returns 404.)
-      const { storeHash, headers } = await getBcCreds();
-      const bcRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bigcommerce_customer_id}`, {
-        method: "PUT",
-        headers,
-        body: JSON.stringify({ store_credit_amount: creditRemaining.toFixed(4) }),
-      });
-      if (!bcRes.ok) {
-        const errText = await bcRes.text().catch(() => "");
-        return res.status(502).json({ error: `Failed to update BigCommerce store credit: ${bcRes.status} ${errText}` });
-      }
+      // BC balance is managed by createBcOrderViaV3Checkout (temporarily set to creditUsedNum,
+      // then restored to creditRemaining in its finally block). No separate BC API call needed here.
 
       // Sync local CRM mirror balance immediately
       if (customer) {
