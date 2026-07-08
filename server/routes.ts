@@ -228,13 +228,12 @@ async function createBcOrderViaV3Checkout(
       method: "POST",
       headers: h,
       body: JSON.stringify({
-        code:      gcCode,
-        to_name:   custName,
-        to_email:  custEmail,
-        from_name: "Store Credit",
+        code:       gcCode,
+        to_name:    custName,
+        to_email:   custEmail,
+        from_name:  "Store Credit",
         from_email: custEmail,
-        amount:    parseFloat(storeCreditAmt.toFixed(4)),
-        enabled:   true,
+        amount:     parseFloat(storeCreditAmt.toFixed(4)),
       }),
     },
   );
