@@ -947,12 +947,12 @@ export async function registerRoutes(
                 await storage.updateOrderStatus(order.id!, "synced", bcOrderId);
 
                 // ── Apply store credit via PUT (BC requires two-step: POST then PUT) ──
-                // store_credit_amount is read-only on POST but writable on PUT.
-                // BC will display this as a native "Store Credit" line and auto-deduct
-                // the customer's balance.
+                console.log(`[store_credit] storeCreditAmt=${storeCreditAmt} bcOrderId=${bcOrderId}`);
                 if (storeCreditAmt > 0 && bcOrderId) {
                   try {
-                    await fetch(
+                    const putBody = { store_credit_amount: storeCreditAmt.toFixed(4) };
+                    console.log(`[store_credit] PUT /v2/orders/${bcOrderId} body=`, JSON.stringify(putBody));
+                    const putRes = await fetch(
                       `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`,
                       {
                         method: "PUT",
@@ -961,10 +961,14 @@ export async function registerRoutes(
                           "Content-Type": "application/json",
                           Accept: "application/json",
                         },
-                        body: JSON.stringify({ store_credit_amount: storeCreditAmt.toFixed(4) }),
+                        body: JSON.stringify(putBody),
                       },
                     );
-                  } catch (_) { /* non-fatal — order already created; credit logged separately */ }
+                    const putBody2 = await putRes.text();
+                    console.log(`[store_credit] PUT response status=${putRes.status} body=${putBody2.slice(0, 500)}`);
+                  } catch (putErr: any) {
+                    console.error(`[store_credit] PUT threw:`, putErr?.message);
+                  }
                 }
               } else {
                 const errorText = await response.text();
