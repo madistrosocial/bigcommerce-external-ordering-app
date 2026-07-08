@@ -5509,14 +5509,14 @@ export async function registerRoutes(
       }
       const creditRemaining = Math.max(0, creditBefore - creditUsedNum);
 
-      // Deduct from the real BigCommerce store credit balance (v2 API: negative amount = deduction).
-      // BC's v2 Orders API does not support store_credit_amount as a writable field, so we
-      // apply store credit as discount_amount on the order and deduct the balance manually here.
+      // Deduct from the real BigCommerce store credit balance.
+      // The correct BC v2 endpoint is PUT /v2/customers/{id} with the new ABSOLUTE balance.
+      // (POST /v2/customers/{id}/storecredit does not exist — returns 404.)
       const { storeHash, headers } = await getBcCreds();
-      const bcRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bigcommerce_customer_id}/storecredit`, {
-        method: "POST",
+      const bcRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bigcommerce_customer_id}`, {
+        method: "PUT",
         headers,
-        body: JSON.stringify({ amount: -Math.abs(creditUsedNum) }),
+        body: JSON.stringify({ store_credit_amount: creditRemaining.toFixed(4) }),
       });
       if (!bcRes.ok) {
         const errText = await bcRes.text().catch(() => "");
