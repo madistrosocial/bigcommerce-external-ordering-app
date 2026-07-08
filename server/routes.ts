@@ -1110,6 +1110,99 @@ export async function registerRoutes(
     }
   });
 
+  // ===== BIGCOMMERCE OAUTH APP CALLBACKS =====
+  // These endpoints complete the one-time OAuth handshake that "installs" the
+  // Salescore-OAuth app on the BC store, enabling the Customer Login JWT API.
+  //
+  // In BigCommerce devtools, set:
+  //   Auth URL  → https://<your-deployed-url>/api/bc/auth
+  //   Load URL  → https://<your-deployed-url>/api/bc/load
+
+  app.get("/api/bc/auth", async (req, res) => {
+    try {
+      const { code, scope, context } = req.query as Record<string, string>;
+      if (!code || !context) {
+        return res.status(400).send("Missing code or context from BigCommerce");
+      }
+
+      // Read OAuth credentials from the stored bigcommerce_config setting
+      const cfg = await storage.getSetting("bigcommerce_config").catch(() => null);
+      const clientId     = cfg?.value?.clientId     ? String(cfg.value.clientId).trim()     : "";
+      const clientSecret = cfg?.value?.clientSecret ? String(cfg.value.clientSecret).trim() : "";
+
+      if (!clientId || !clientSecret) {
+        return res.status(500).send(
+          "OAuth credentials not configured. " +
+          "Add Client ID and Client Secret in Admin → Integration Settings first.",
+        );
+      }
+
+      // Determine the redirect_uri that BC will validate against (must match devtools setting)
+      const host = req.headers["x-forwarded-host"] || req.headers.host || "";
+      const proto = req.headers["x-forwarded-proto"] || "https";
+      const redirectUri = `${proto}://${host}/api/bc/auth`;
+
+      // Exchange auth code for access token
+      const tokenRes = await fetch("https://login.bigcommerce.com/oauth2/token", {
+        method:  "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id:     clientId,
+          client_secret: clientSecret,
+          grant_type:    "authorization_code",
+          code:          String(code),
+          scope:         String(scope ?? ""),
+          context:       String(context),
+          redirect_uri:  redirectUri,
+        }),
+      });
+
+      const tokenBody = await tokenRes.text();
+      console.log(`[bc/auth] Token exchange: ${tokenRes.status} ${tokenBody.slice(0, 200)}`);
+
+      if (!tokenRes.ok) {
+        return res.status(502).send(
+          `BC token exchange failed (${tokenRes.status}): ${tokenBody.slice(0, 300)}`,
+        );
+      }
+
+      // App is now installed — persist the access token for future use
+      try {
+        const tokenData = JSON.parse(tokenBody);
+        await storage.setSetting("bc_oauth_token", {
+          access_token:  tokenData.access_token,
+          scope:         tokenData.scope,
+          context:       tokenData.context,
+          installed_at:  new Date().toISOString(),
+        });
+      } catch (_) { /* non-fatal — handshake is complete regardless */ }
+
+      console.log(`[bc/auth] OAuth handshake complete — app installed on store (context=${context})`);
+      res.send(
+        "<html><body style='font-family:sans-serif;padding:40px'>" +
+        "<h2>✓ Salescore OAuth App Installed</h2>" +
+        "<p>The app has been successfully installed on your BigCommerce store.</p>" +
+        "<p>Store credit POS checkout is now enabled. You can close this tab.</p>" +
+        "</body></html>",
+      );
+    } catch (err: any) {
+      console.error("[bc/auth] Error:", err.message);
+      res.status(500).send(`OAuth callback error: ${err.message}`);
+    }
+  });
+
+  app.get("/api/bc/load", async (req, res) => {
+    // BC calls this URL when the app is opened in the store control panel.
+    // For this internal app it's not used, but the endpoint must exist.
+    console.log("[bc/load] Load callback received");
+    res.send(
+      "<html><body style='font-family:sans-serif;padding:40px'>" +
+      "<h2>Salescore POS</h2>" +
+      "<p>This app runs as a standalone POS — open it directly at your deployed URL.</p>" +
+      "</body></html>",
+    );
+  });
+
   // ===== ORDER ROUTES =====
 
   // Create order with immediate sync attempt
