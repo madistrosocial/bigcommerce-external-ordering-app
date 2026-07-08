@@ -1120,29 +1120,52 @@ export async function registerRoutes(
 
   app.get("/api/bc/auth", async (req, res) => {
     try {
-      const { code, scope, context } = req.query as Record<string, string>;
+      // DIAG-1: Request received
+      console.log("[bc/auth][1] Request received");
+      console.log("[bc/auth][1] Method:", req.method);
+      console.log("[bc/auth][1] Host header:", req.headers.host);
+      console.log("[bc/auth][1] x-forwarded-host:", req.headers["x-forwarded-host"]);
+      console.log("[bc/auth][1] x-forwarded-proto:", req.headers["x-forwarded-proto"]);
+      console.log("[bc/auth][1] Full URL:", req.protocol + "://" + req.get("host") + req.originalUrl);
+
+      // DIAG-2: Query parameters
+      const { code, scope, context, state } = req.query as Record<string, string>;
+      console.log("[bc/auth][2] Query params received:");
+      console.log("[bc/auth][2]   code present:", !!code, "| length:", code?.length ?? 0);
+      console.log("[bc/auth][2]   scope:", scope ?? "(none)");
+      console.log("[bc/auth][2]   context:", context ?? "(none)");
+      console.log("[bc/auth][2]   state:", state ?? "(none)");
+
       if (!code || !context) {
+        console.log("[bc/auth][2] STOP: missing code or context — returning 400");
         return res.status(400).send("Missing code or context from BigCommerce");
       }
 
-      // Read OAuth credentials from the stored bigcommerce_config setting
+      // DIAG-3: Credentials lookup
+      console.log("[bc/auth][3] Reading bigcommerce_config from database...");
       const cfg = await storage.getSetting("bigcommerce_config").catch(() => null);
       const clientId     = cfg?.value?.clientId     ? String(cfg.value.clientId).trim()     : "";
       const clientSecret = cfg?.value?.clientSecret ? String(cfg.value.clientSecret).trim() : "";
+      console.log("[bc/auth][3] clientId present:", !!clientId, "| length:", clientId.length);
+      console.log("[bc/auth][3] clientSecret present:", !!clientSecret, "| length:", clientSecret.length);
 
       if (!clientId || !clientSecret) {
+        console.log("[bc/auth][3] STOP: credentials missing — returning 500");
         return res.status(500).send(
           "OAuth credentials not configured. " +
           "Add Client ID and Client Secret in Admin → Integration Settings first.",
         );
       }
 
-      // Determine the redirect_uri that BC will validate against (must match devtools setting)
+      // DIAG-4: redirect_uri construction
       const host = req.headers["x-forwarded-host"] || req.headers.host || "";
       const proto = req.headers["x-forwarded-proto"] || "https";
       const redirectUri = `${proto}://${host}/api/bc/auth`;
+      console.log("[bc/auth][4] Constructed redirect_uri:", redirectUri);
+      console.log("[bc/auth][4] *** Compare this EXACTLY to the Auth Callback URL in BC devtools ***");
 
-      // Exchange auth code for access token
+      // DIAG-5: Token exchange starting
+      console.log("[bc/auth][5] Starting token exchange with https://login.bigcommerce.com/oauth2/token");
       const tokenRes = await fetch("https://login.bigcommerce.com/oauth2/token", {
         method:  "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -1157,16 +1180,21 @@ export async function registerRoutes(
         }),
       });
 
+      // DIAG-6: Token exchange response
       const tokenBody = await tokenRes.text();
-      console.log(`[bc/auth] Token exchange: ${tokenRes.status} ${tokenBody.slice(0, 200)}`);
+      console.log("[bc/auth][6] Token exchange completed");
+      console.log("[bc/auth][6] BC response status:", tokenRes.status);
+      console.log("[bc/auth][6] BC response body:", tokenBody.slice(0, 500));
 
       if (!tokenRes.ok) {
+        console.log("[bc/auth][6] STOP: BC rejected token exchange — returning 502");
         return res.status(502).send(
-          `BC token exchange failed (${tokenRes.status}): ${tokenBody.slice(0, 300)}`,
+          `BC token exchange failed (${tokenRes.status}): ${tokenBody.slice(0, 500)}`,
         );
       }
 
-      // App is now installed — persist the access token for future use
+      // DIAG-7: Writing token to database
+      console.log("[bc/auth][7] Token exchange successful — writing bc_oauth_token to database...");
       try {
         const tokenData = JSON.parse(tokenBody);
         await storage.setSetting("bc_oauth_token", {
@@ -1175,9 +1203,13 @@ export async function registerRoutes(
           context:       tokenData.context,
           installed_at:  new Date().toISOString(),
         });
-      } catch (_) { /* non-fatal — handshake is complete regardless */ }
+        console.log("[bc/auth][7] bc_oauth_token written successfully");
+      } catch (dbErr: any) {
+        console.error("[bc/auth][7] WARNING: failed to write token to DB:", dbErr.message);
+      }
 
-      console.log(`[bc/auth] OAuth handshake complete — app installed on store (context=${context})`);
+      // DIAG-8: Sending success response
+      console.log("[bc/auth][8] Sending 200 HTML success response to browser");
       res.send(
         "<html><body style='font-family:sans-serif;padding:40px'>" +
         "<h2>✓ Salescore OAuth App Installed</h2>" +
@@ -1185,22 +1217,25 @@ export async function registerRoutes(
         "<p>Store credit POS checkout is now enabled. You can close this tab.</p>" +
         "</body></html>",
       );
+      console.log("[bc/auth][8] Response sent — handshake complete (context=" + context + ")");
     } catch (err: any) {
-      console.error("[bc/auth] Error:", err.message);
+      console.error("[bc/auth][ERR] Unhandled exception:", err.message);
+      console.error("[bc/auth][ERR] Stack:", err.stack);
       res.status(500).send(`OAuth callback error: ${err.message}`);
     }
   });
 
   app.get("/api/bc/load", async (req, res) => {
-    // BC calls this URL when the app is opened in the store control panel.
-    // For this internal app it's not used, but the endpoint must exist.
-    console.log("[bc/load] Load callback received");
+    console.log("[bc/load][1] Load callback received");
+    console.log("[bc/load][1] Query params:", JSON.stringify(req.query));
+    console.log("[bc/load][1] signed_payload_jwt present:", !!req.query.signed_payload_jwt);
     res.send(
       "<html><body style='font-family:sans-serif;padding:40px'>" +
       "<h2>Salescore POS</h2>" +
       "<p>This app runs as a standalone POS — open it directly at your deployed URL.</p>" +
       "</body></html>",
     );
+    console.log("[bc/load][2] Response sent");
   });
 
   // ===== ORDER ROUTES =====
