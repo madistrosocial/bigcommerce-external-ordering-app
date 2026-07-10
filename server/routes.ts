@@ -243,31 +243,10 @@ async function createBcOrderNativeStoreCredit(
     throw new Error(`Failed to sync BC store credit balance (${setBalRes.status}): ${await setBalRes.text()}`);
   console.log(`[sc_native] BC balance synced to $${crmBalance}`);
 
-  // 2. Create a customer-scoped storefront Bearer token (no OAuth/Token Login scope needed)
-  //    BC allows this with just the admin X-Auth-Token + customer_id.
-  //    This token lets us call storefront checkout endpoints on behalf of the customer.
-  const sfTokenRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/storefront/api-token`,
-    {
-      method: "POST",
-      headers: h,
-      body: JSON.stringify({
-        channel_id:   channelId,
-        expires_at:   Math.floor(Date.now() / 1000) + 3600,
-        customer_id:  bcCustomerId,
-        allowed_cors_origins: [],
-      }),
-    },
-  );
-  if (!sfTokenRes.ok)
-    throw new Error(`Storefront token creation failed (${sfTokenRes.status}): ${await sfTokenRes.text()}`);
-  const sfTokenData  = await sfTokenRes.json();
-  const customerToken = sfTokenData?.data?.token as string | undefined;
-  if (!customerToken)
-    throw new Error("Storefront customer token missing from response");
-  console.log(`[sc_native] Customer storefront token obtained`);
-
-  // 3. Create management API cart with customer_id + POS price overrides
+  // 2. Create management API cart with customer_id + POS price overrides.
+  //    Must happen BEFORE token creation so we can pass cart_id to the token endpoint —
+  //    BC requires cart_id in the storefront token to link a management API cart to the
+  //    storefront checkout context (without it, /api/storefront/checkouts/{id} returns 404).
   const lineItems = (order.items as any[]).map((item: any) => {
     const li: any = {
       product_id: item.bigcommerce_product_id,
@@ -286,9 +265,35 @@ async function createBcOrderNativeStoreCredit(
   const cartData = await cartRes.json();
   const cartId   = cartData.data.id as string;
   // Extract actual storefront domain from cart redirect URL (BC always includes the correct one)
-  const checkoutUrl  = cartData.data?.redirect_urls?.checkout_url as string | undefined;
+  const checkoutUrl   = cartData.data?.redirect_urls?.checkout_url as string | undefined;
   const derivedDomain = checkoutUrl ? new URL(checkoutUrl).origin : null;
   console.log(`[sc_native] Cart created: ${cartId} storefrontDomain=${derivedDomain || storefrontDomain || "fallback"}`);
+
+  // 3. Create a cart-scoped storefront Bearer token (customer_id + cart_id).
+  //    Including cart_id is critical: it tells BC's storefront to recognise this
+  //    management-API cart as a valid checkout so /api/storefront/checkouts/{id}/store-credit
+  //    returns 200 instead of 404 "Checkout does not exist".
+  const sfTokenRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/storefront/api-token`,
+    {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify({
+        channel_id:   channelId,
+        expires_at:   Math.floor(Date.now() / 1000) + 3600,
+        customer_id:  bcCustomerId,
+        cart_id:      cartId,
+        allowed_cors_origins: [],
+      }),
+    },
+  );
+  if (!sfTokenRes.ok)
+    throw new Error(`Storefront token creation failed (${sfTokenRes.status}): ${await sfTokenRes.text()}`);
+  const sfTokenData   = await sfTokenRes.json();
+  const customerToken = sfTokenData?.data?.token as string | undefined;
+  if (!customerToken)
+    throw new Error("Storefront customer token missing from response");
+  console.log(`[sc_native] Cart-scoped storefront token obtained`);
 
   // 4. Add billing address to checkout (non-fatal)
   const a = order.billing_address || {};
