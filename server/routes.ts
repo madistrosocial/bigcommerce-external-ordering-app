@@ -797,6 +797,153 @@ h2{color:#1a7f37}p{color:#555;margin-top:12px}</style>
     }
   });
 
+  /**
+   * GET /api/bc/auth/log
+   * PUBLIC — no auth required. Returns last 50 OAuth log entries from the in-memory buffer.
+   * Exists so the install flow can be monitored from a plain browser tab without app login.
+   * Only populated when DIAG_LOGGING=true.
+   */
+  app.get("/api/bc/auth/log", async (req: Request, res: Response) => {
+    try {
+      const all  = getLogBuffer();
+      const logs = all.filter((l) => l.module === DiagModule.OAuth).slice(-50);
+      res.json({
+        diag_logging_enabled: isDiagEnabled(),
+        note: isDiagEnabled()
+          ? "Showing last 50 OAuth events. Refresh after each install attempt."
+          : "DIAG_LOGGING is not enabled. Set DIAG_LOGGING=true env var and restart the server.",
+        total_entries: logs.length,
+        logs,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * GET /api/bc/load
+   * Public endpoint — BigCommerce redirects the merchant's browser here after app installation
+   * and every time they open the app from the BC Control Panel.
+   *
+   * BC sends a signed JWT in the `signed_payload_jwt` query parameter.
+   * We decode (but do not fully verify) the payload for logging, then redirect to the main app.
+   *
+   * Configure the Load Callback URL in your BC app as:
+   *   https://<your-domain>/api/bc/load
+   */
+  app.get("/api/bc/load", async (req: Request, res: Response) => {
+    const requestId   = makeRequestId();
+    const loadTimer   = makeTimer();
+    const { signed_payload_jwt } = req.query as Record<string, string>;
+
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[BC-LOAD] Load callback reached",
+      status:    DiagStatus.Info,
+      requestId,
+      data: {
+        jwt_present: !!signed_payload_jwt,
+        host:        req.get("host"),
+        user_agent:  req.get("user-agent"),
+      },
+    });
+
+    // Decode JWT payload (middle segment) for diagnostic visibility — no verification needed here
+    let jwtPayload: Record<string, any> = {};
+    if (signed_payload_jwt) {
+      try {
+        const parts = signed_payload_jwt.split(".");
+        if (parts.length === 3) {
+          jwtPayload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+        }
+      } catch (_) { /* non-fatal — payload decode is diagnostic only */ }
+    }
+
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[BC-LOAD] JWT payload decoded",
+      status:    DiagStatus.Info,
+      requestId,
+      data: {
+        store_hash: jwtPayload?.sub || jwtPayload?.context?.replace?.("stores/", "") || "unknown",
+        user_email: jwtPayload?.user?.email || "unknown",
+        channel_id: jwtPayload?.channel_id || "unknown",
+        owner_email: jwtPayload?.owner?.email || "unknown",
+      },
+    });
+
+    // Redirect to the main application
+    const proto      = req.get("x-forwarded-proto") || req.protocol || "https";
+    const hostHeader = req.get("x-forwarded-host")  || req.get("host") || "";
+    const appUrl     = `${proto}://${hostHeader}/`;
+
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[BC-LOAD] Redirecting to app",
+      status:    DiagStatus.Success,
+      requestId,
+      durationMs: loadTimer(),
+      data: { redirect_to: appUrl },
+    });
+
+    // BC expects the Load URL to either render a page (for iframe embedding)
+    // or redirect the merchant to the app. We return a redirect page.
+    return res.status(200).send(`<!DOCTYPE html>
+<html>
+<head>
+<title>VanSales Pro</title>
+<meta http-equiv="refresh" content="0;url=${appUrl}">
+<style>body{font-family:sans-serif;padding:40px;text-align:center}
+a{color:#1657be;text-decoration:none}</style>
+</head>
+<body>
+<p>Redirecting to VanSales Pro&hellip;</p>
+<p><a href="${appUrl}">Click here if not redirected automatically.</a></p>
+<script>window.location.href=${JSON.stringify(appUrl)};</script>
+</body>
+</html>`);
+  });
+
+  /**
+   * GET /api/bc/uninstall
+   * Public endpoint — BigCommerce calls this when the merchant uninstalls the app.
+   * BC sends a signed JWT in the `signed_payload_jwt` query parameter.
+   * We log the event and return 200 to acknowledge.
+   *
+   * Configure the Uninstall Callback URL in your BC app as:
+   *   https://<your-domain>/api/bc/uninstall
+   */
+  app.get("/api/bc/uninstall", async (req: Request, res: Response) => {
+    const requestId = makeRequestId();
+    const { signed_payload_jwt } = req.query as Record<string, string>;
+
+    let jwtPayload: Record<string, any> = {};
+    if (signed_payload_jwt) {
+      try {
+        const parts = signed_payload_jwt.split(".");
+        if (parts.length === 3) {
+          jwtPayload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+        }
+      } catch (_) { /* non-fatal */ }
+    }
+
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[BC-UNINSTALL] Uninstall callback received",
+      status:    DiagStatus.Warning,
+      requestId,
+      data: {
+        jwt_present:  !!signed_payload_jwt,
+        store_hash:   jwtPayload?.sub || jwtPayload?.context?.replace?.("stores/", "") || "unknown",
+        user_email:   jwtPayload?.user?.email || "unknown",
+        owner_email:  jwtPayload?.owner?.email || "unknown",
+      },
+    });
+
+    // BC requires a 200 response to confirm the uninstall was received
+    return res.status(200).json({ acknowledged: true });
+  });
+
   // ===== PRODUCT ROUTES =====
 
   // Get all products (for admin view)
