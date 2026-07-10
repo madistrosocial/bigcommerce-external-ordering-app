@@ -314,14 +314,8 @@ async function createBcOrderNativeStoreCredit(
 
   // 5. Apply store credit via storefront checkout API using the customer-scoped token.
   //    BC applies min(customer balance, checkout total) automatically — no amount specified.
-  //    Requires storefrontDomain (e.g. https://yourdomain.com) in Integration Settings.
-  if (!storefrontDomain) {
-    throw new Error(
-      "Storefront URL is required for native store credit checkout. " +
-      "Please set it in Admin → BC Integration → Storefront URL.",
-    );
-  }
-  const sfDomain = storefrontDomain.replace(/\/$/, "");
+  //    Falls back to the default BC subdomain if Storefront URL is not configured.
+  const sfDomain = (storefrontDomain || `https://store-${storeHash}.mybigcommerce.com`).replace(/\/$/, "");
   const scRes = await fetch(
     `${sfDomain}/api/storefront/checkouts/${cartId}/store-credit`,
     {
