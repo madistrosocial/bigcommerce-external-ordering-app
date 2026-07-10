@@ -196,23 +196,26 @@ async function checkBcStock(
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
-// ── Native BC Store Credit via V2 Orders Admin API ────────────────────────────
+// ── Native BC Store Credit via Storefront Checkout + Customer-scoped Token ────
 // Flow:
 //   1. Sync CRM balance → BC via PUT /v3/customers store_credit_amounts
-//      (ensures BC holds the correct balance before order creation)
-//   2. POST /v2/orders with store_credit_amount field set
-//      (BC deducts from customer balance natively — shows as store credit on order,
-//       not as a discount on line items; syncs correctly to Xero via Parex Bridge)
-//   3. Read updated BC balance (authoritative after order creation)
-//   4. Return bcOrderId + bcCreditRemaining for CRM ledger update
-// No OAuth app or Customer Login JWT required — uses the existing X-Auth-Token.
+//   2. POST /v3/storefront/api-token with customer_id → customer Bearer token
+//      (no OAuth app or Token Login scope required; uses existing X-Auth-Token)
+//   3. Create management API cart with customer_id + line items
+//   4. Add billing address to checkout
+//   5. POST {storefrontDomain}/api/storefront/checkouts/{id}/store-credit
+//      (BC applies min(balance, checkout total) natively — amount not specified)
+//   6. POST /v3/checkouts/{id}/orders → BC order with native store_credit_amount
+//   7. PATCH /v2/orders/{id} → set status=Pending + staff notes
+//   8. Read updated BC balance; return bcOrderId + bcCreditRemaining
+// BC is the authoritative store credit ledger; CRM mirrors after successful order.
 async function createBcOrderNativeStoreCredit(
   storeHash: string,
   token: string,
-  _storefrontDomain: string,
+  storefrontDomain: string,
   _clientId: string | null,
   _clientSecret: string | null,
-  _channelId: number,
+  channelId: number,
   order: any,
   storeCreditAmt: number,
 ): Promise<{ bcOrderId: number; bcCreditRemaining: number }> {
@@ -223,7 +226,7 @@ async function createBcOrderNativeStoreCredit(
   };
   const bcCustomerId = order.bigcommerce_customer_id as number;
 
-  // 1. Sync CRM balance → BC so BC holds the correct balance before order creation
+  // 1. Sync CRM balance → BC so BC holds the correct balance before applying credit
   const crmCustomer = await storage.getCrmCustomerByBcId(bcCustomerId);
   const crmBalance  = Number(crmCustomer?.store_credit_balance ?? 0);
   console.log(`[sc_native] customer=${bcCustomerId} crmBalance=$${crmBalance} toApply=$${storeCreditAmt}`);
@@ -240,50 +243,130 @@ async function createBcOrderNativeStoreCredit(
     throw new Error(`Failed to sync BC store credit balance (${setBalRes.status}): ${await setBalRes.text()}`);
   console.log(`[sc_native] BC balance synced to $${crmBalance}`);
 
-  // 2. Build order payload with store_credit_amount (BC V2 Admin Orders API)
-  //    BC deducts store_credit_amount from the customer's balance natively.
-  //    The deduction appears as a store credit line on the order (not a discount),
-  //    which syncs correctly to Xero as a store credit account entry via Parex Bridge.
-  const amtToApply = Math.min(storeCreditAmt, crmBalance);
-  const staffNote  = [`Store Credit Applied: $${amtToApply.toFixed(2)}`, order.order_note || ""]
-    .filter(Boolean).join("\n\n");
-
-  const bcOrderData: any = {
-    status_id:           1,
-    customer_id:         bcCustomerId,
-    billing_address:     order.billing_address,
-    staff_notes:         staffNote,
-    customer_message:    (order as any).customer_note || undefined,
-    store_credit_amount: amtToApply.toFixed(4),
-    products: (order.items as any[]).map((item: any) => {
-      const productData: any = {
-        product_id:    item.bigcommerce_product_id,
-        quantity:      item.quantity,
-        price_inc_tax: parseFloat(item.price_at_sale),
-        price_ex_tax:  parseFloat(item.price_at_sale),
-      };
-      if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
-        productData.product_options = item.variant_option_values.map(
-          (ov: any) => ({ id: ov.option_id, value: String(ov.id) }),
-        );
-      }
-      return productData;
-    }),
-  };
-
-  const v2Res = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
-    { method: "POST", headers: h, body: JSON.stringify(bcOrderData) },
+  // 2. Create a customer-scoped storefront Bearer token (no OAuth/Token Login scope needed)
+  //    BC allows this with just the admin X-Auth-Token + customer_id.
+  //    This token lets us call storefront checkout endpoints on behalf of the customer.
+  const sfTokenRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/storefront/api-token`,
+    {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify({
+        channel_id:   channelId,
+        expires_at:   Math.floor(Date.now() / 1000) + 3600,
+        customer_id:  bcCustomerId,
+        allowed_cors_origins: [],
+      }),
+    },
   );
-  if (!v2Res.ok) {
-    const errText = await v2Res.text();
-    throw new Error(`BC order creation with store credit failed (${v2Res.status}): ${errText}`);
-  }
-  const orderData = await v2Res.json();
-  const bcOrderId  = orderData.id as number;
-  console.log(`[sc_native] BC order ${bcOrderId} created with store_credit_amount=$${amtToApply}`);
+  if (!sfTokenRes.ok)
+    throw new Error(`Storefront token creation failed (${sfTokenRes.status}): ${await sfTokenRes.text()}`);
+  const sfTokenData  = await sfTokenRes.json();
+  const customerToken = sfTokenData?.data?.token as string | undefined;
+  if (!customerToken)
+    throw new Error("Storefront customer token missing from response");
+  console.log(`[sc_native] Customer storefront token obtained`);
 
-  // 3. Read updated BC balance (authoritative after order creation)
+  // 3. Create management API cart with customer_id + POS price overrides
+  const lineItems = (order.items as any[]).map((item: any) => {
+    const li: any = {
+      product_id: item.bigcommerce_product_id,
+      quantity:   item.quantity,
+      list_price: parseFloat(item.price_at_sale),
+    };
+    if (item.variant_id) li.variant_id = item.variant_id;
+    return li;
+  });
+  const cartRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/carts`,
+    { method: "POST", headers: h, body: JSON.stringify({ customer_id: bcCustomerId, line_items: lineItems }) },
+  );
+  if (!cartRes.ok)
+    throw new Error(`Cart creation failed (${cartRes.status}): ${await cartRes.text()}`);
+  const cartData = await cartRes.json();
+  const cartId   = cartData.data.id as string;
+  console.log(`[sc_native] Cart created: ${cartId}`);
+
+  // 4. Add billing address to checkout (non-fatal)
+  const a = order.billing_address || {};
+  await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/billing-address`,
+    {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify({
+        first_name:             a.first_name  || "",
+        last_name:              a.last_name   || "",
+        email:                  a.email || crmCustomer?.email || "noreply@store.com",
+        company:                a.company     || "",
+        address1:               a.address1    || a.street_1 || "",
+        address2:               a.address2    || a.street_2 || "",
+        city:                   a.city        || "",
+        state_or_province:      a.state_or_province      || a.state || "",
+        state_or_province_code: a.state_or_province_code || a.state || "",
+        postal_code:            a.postal_code || a.zip    || "",
+        country:                a.country     || "",
+        country_code:           a.country_code || a.country_iso2 || "US",
+        phone:                  a.phone       || "",
+      }),
+    },
+  ).catch((e) => console.warn("[sc_native] billing-address non-fatal:", e));
+
+  // 5. Apply store credit via storefront checkout API using the customer-scoped token.
+  //    BC applies min(customer balance, checkout total) automatically — no amount specified.
+  //    Requires storefrontDomain (e.g. https://yourdomain.com) in Integration Settings.
+  if (!storefrontDomain) {
+    throw new Error(
+      "Storefront URL is required for native store credit checkout. " +
+      "Please set it in Admin → BC Integration → Storefront URL.",
+    );
+  }
+  const sfDomain = storefrontDomain.replace(/\/$/, "");
+  const scRes = await fetch(
+    `${sfDomain}/api/storefront/checkouts/${cartId}/store-credit`,
+    {
+      method: "POST",
+      headers: {
+        Authorization:  `Bearer ${customerToken}`,
+        "Content-Type": "application/json",
+        Accept:         "application/json",
+      },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!scRes.ok) {
+    const scErr = await scRes.text();
+    throw new Error(`Store credit application failed (${scRes.status}): ${scErr}`);
+  }
+  console.log(`[sc_native] Store credit applied to checkout ${cartId}`);
+
+  // 6. Convert checkout → BC order (BC populates store_credit_amount natively)
+  const bcOrderRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/orders`,
+    { method: "POST", headers: h },
+  );
+  if (!bcOrderRes.ok)
+    throw new Error(`Checkout→order failed (${bcOrderRes.status}): ${await bcOrderRes.text()}`);
+  const { data: { id: bcOrderId } } = await bcOrderRes.json();
+  console.log(`[sc_native] BC order ${bcOrderId} created with native store credit`);
+
+  // 7. Patch order: set status=Pending + staff notes (checkout creates Incomplete by default)
+  const staffNote = [`Store Credit Applied: $${storeCreditAmt.toFixed(2)}`, order.order_note || ""]
+    .filter(Boolean).join("\n\n");
+  await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`,
+    {
+      method: "PUT",
+      headers: h,
+      body: JSON.stringify({
+        status_id:        1,
+        staff_notes:      staffNote,
+        customer_message: (order as any).customer_note || undefined,
+      }),
+    },
+  ).catch((e) => console.warn("[sc_native] status patch non-fatal:", e));
+
+  // 8. Read updated BC balance (BC deducted store credit during checkout conversion)
   let bcCreditRemaining = 0;
   try {
     const custReadRes = await fetch(
@@ -295,7 +378,7 @@ async function createBcOrderNativeStoreCredit(
       bcCreditRemaining = Number(custReadData?.store_credit_amount ?? custReadData?.store_credit ?? 0);
       console.log(`[sc_native] BC balance after order: $${bcCreditRemaining}`);
     }
-  } catch (_) { /* non-fatal — CRM sync will use 0 as fallback */ }
+  } catch (_) { /* non-fatal — CRM will use 0 as fallback */ }
 
   return { bcOrderId, bcCreditRemaining };
 }
