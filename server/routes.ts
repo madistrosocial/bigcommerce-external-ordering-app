@@ -253,7 +253,6 @@ async function createBcOrderNativeStoreCredit(
         from_name:  "POS Store Credit",
         from_email: customerEmail,
         amount:     amtToApply.toFixed(2),
-        theme:      "general",
         message:    `POS store credit applied — order ${order.order_reference || ""}`.trim(),
       }),
     },
