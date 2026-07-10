@@ -285,7 +285,10 @@ async function createBcOrderNativeStoreCredit(
     throw new Error(`Cart creation failed (${cartRes.status}): ${await cartRes.text()}`);
   const cartData = await cartRes.json();
   const cartId   = cartData.data.id as string;
-  console.log(`[sc_native] Cart created: ${cartId}`);
+  // Extract actual storefront domain from cart redirect URL (BC always includes the correct one)
+  const checkoutUrl  = cartData.data?.redirect_urls?.checkout_url as string | undefined;
+  const derivedDomain = checkoutUrl ? new URL(checkoutUrl).origin : null;
+  console.log(`[sc_native] Cart created: ${cartId} storefrontDomain=${derivedDomain || storefrontDomain || "fallback"}`);
 
   // 4. Add billing address to checkout (non-fatal)
   const a = order.billing_address || {};
@@ -314,8 +317,8 @@ async function createBcOrderNativeStoreCredit(
 
   // 5. Apply store credit via storefront checkout API using the customer-scoped token.
   //    BC applies min(customer balance, checkout total) automatically — no amount specified.
-  //    Falls back to the default BC subdomain if Storefront URL is not configured.
-  const sfDomain = (storefrontDomain || `https://store-${storeHash}.mybigcommerce.com`).replace(/\/$/, "");
+  //    Priority: domain from cart redirect_url (authoritative) → admin config → BC default subdomain.
+  const sfDomain = (derivedDomain || storefrontDomain || `https://store-${storeHash}.mybigcommerce.com`).replace(/\/$/, "");
   const scRes = await fetch(
     `${sfDomain}/api/storefront/checkouts/${cartId}/store-credit`,
     {
