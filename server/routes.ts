@@ -3,6 +3,16 @@ import { createHmac } from "crypto";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import {
+  diagLog,
+  DiagModule,
+  DiagStatus,
+  makeTimer,
+  makeRequestId,
+  getLogBuffer,
+  clearLogBuffer,
+  isDiagEnabled,
+} from "./logger";
+import {
   insertProductSchema,
   insertOrderSchema,
   type InsertProduct,
@@ -494,6 +504,298 @@ export async function registerRoutes(
       (req as any).authUser = user;
       next();
     };
+
+  // ===== BIGCOMMERCE OAUTH INSTALLATION CALLBACK =====
+
+  /**
+   * GET /api/bc/auth
+   * Public endpoint — BigCommerce redirects here after the merchant installs/authorizes
+   * the app in the BC Control Panel. No session authentication is required.
+   *
+   * Fully instrumented with the diagnostic logging framework (DIAG_LOGGING=true).
+   * Configure the Auth Callback URL in your BC app as:
+   *   https://<your-domain>/api/bc/auth
+   */
+  app.get("/api/bc/auth", async (req: Request, res: Response) => {
+    const requestId  = makeRequestId();
+    const handlerTimer = makeTimer();
+
+    // ── OAUTH-1: Callback reached ─────────────────────────────────────────────
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[OAUTH-1] Callback reached",
+      status:    DiagStatus.Info,
+      requestId,
+      data: {
+        method:       req.method,
+        path:         req.path,
+        host:         req.get("host"),
+        forwarded_for: req.get("x-forwarded-for"),
+        user_agent:   req.get("user-agent"),
+      },
+    });
+
+    const { code, context, scope, state } = req.query as Record<string, string>;
+
+    // ── OAUTH-2: Query parameters ─────────────────────────────────────────────
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[OAUTH-2] Query parameters received",
+      status:    code && context ? DiagStatus.Info : DiagStatus.Warning,
+      requestId,
+      data: {
+        code_present:    !!code,
+        context_present: !!context,
+        scope_present:   !!scope,
+        state_present:   !!state,
+        context,
+        scope,
+        // code is intentionally NOT logged — treat as secret
+      },
+    });
+
+    // ── OAUTH-3: Configuration ────────────────────────────────────────────────
+    let cfg: Record<string, any> = {};
+    try {
+      const setting = await storage.getSetting("bigcommerce_config");
+      cfg = (setting?.value as Record<string, any>) ?? {};
+    } catch (e: any) {
+      diagLog({
+        module:    DiagModule.OAuth,
+        event:     "[OAUTH-3] Configuration load failed",
+        status:    DiagStatus.Error,
+        requestId,
+        error:     e.message,
+        stack:     e.stack,
+      });
+    }
+
+    // Reconstruct the exact callback URL this server is reachable at
+    const proto       = req.get("x-forwarded-proto") || req.protocol || "https";
+    const hostHeader  = req.get("x-forwarded-host")  || req.get("host") || "";
+    const callbackUrl = `${proto}://${hostHeader}/api/bc/auth`;
+
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[OAUTH-3] Configuration loaded",
+      status:    DiagStatus.Info,
+      requestId,
+      data: {
+        callback_url_used:      callbackUrl,
+        client_id_loaded:       !!(cfg.clientId),
+        client_secret_loaded:   !!(cfg.clientSecret),
+        storefront_url_loaded:  !!(cfg.storefrontUrl),
+        store_hash_loaded:      !!(cfg.storeHash),
+      },
+    });
+
+    // Guard: must have authorization code
+    if (!code) {
+      const msg = "Missing 'code' query parameter — BigCommerce did not send an authorization code.";
+      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-7] Final response sent", status: DiagStatus.Failure, requestId, error: msg });
+      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-8] Handler completed",   status: DiagStatus.Failure, requestId, durationMs: handlerTimer() });
+      return res.status(400).send(`<html><body><h2>OAuth Error</h2><p>${msg}</p></body></html>`);
+    }
+
+    // Guard: must have OAuth credentials configured
+    if (!cfg.clientId || !cfg.clientSecret) {
+      const msg = "OAuth Client ID and/or Client Secret not configured. Set them in Admin → Integration Settings.";
+      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-7] Final response sent", status: DiagStatus.Failure, requestId, error: msg });
+      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-8] Handler completed",   status: DiagStatus.Failure, requestId, durationMs: handlerTimer() });
+      return res.status(400).send(`<html><body><h2>OAuth Configuration Error</h2><p>${msg}</p></body></html>`);
+    }
+
+    // ── OAUTH-4: Beginning token exchange ─────────────────────────────────────
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[OAUTH-4] Beginning token exchange",
+      status:    DiagStatus.Info,
+      requestId,
+      data: {
+        endpoint:     "https://login.bigcommerce.com/oauth2/token",
+        grant_type:   "authorization_code",
+        redirect_uri: callbackUrl,
+        context,
+      },
+    });
+
+    let accessToken:    string | null = null;
+    let exchangeError:  string | null = null;
+    const exchangeTimer = makeTimer();
+
+    try {
+      const params = new URLSearchParams({
+        client_id:     cfg.clientId,
+        client_secret: cfg.clientSecret,
+        code,
+        scope:         scope   || "",
+        context:       context || "",
+        grant_type:    "authorization_code",
+        redirect_uri:  callbackUrl,
+      });
+
+      const tokenRes = await fetch("https://login.bigcommerce.com/oauth2/token", {
+        method:  "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        body:    params.toString(),
+      });
+
+      const rawBody = await tokenRes.text();
+      let parsed: Record<string, any> = {};
+      try { parsed = JSON.parse(rawBody); } catch (_) { /* non-JSON */ }
+
+      // ── OAUTH-5: Token exchange completed ─────────────────────────────────
+      diagLog({
+        module:    DiagModule.OAuth,
+        event:     "[OAUTH-5] Token exchange completed",
+        status:    tokenRes.ok ? DiagStatus.Success : DiagStatus.Failure,
+        requestId,
+        durationMs: exchangeTimer(),
+        data: {
+          http_status:           tokenRes.status,
+          access_token_present:  !!(parsed?.access_token),
+          scope_returned:        parsed?.scope,
+          context_returned:      parsed?.context,
+          // Only surface error fields — never log access_token
+          error:             parsed?.error,
+          error_description: parsed?.error_description,
+          // Raw body on failure (may contain redirect_uri mismatch detail etc.)
+          raw_response_on_failure: !tokenRes.ok
+            ? rawBody.substring(0, 800)
+            : undefined,
+        },
+      });
+
+      if (tokenRes.ok && parsed?.access_token) {
+        accessToken = parsed.access_token as string;
+      } else {
+        exchangeError = parsed?.error_description
+          || parsed?.error
+          || `HTTP ${tokenRes.status}: ${rawBody.substring(0, 300)}`;
+      }
+    } catch (e: any) {
+      exchangeError = e.message;
+      diagLog({
+        module:    DiagModule.OAuth,
+        event:     "[OAUTH-5] Token exchange exception",
+        status:    DiagStatus.Error,
+        requestId,
+        durationMs: exchangeTimer(),
+        error:     e.message,
+        stack:     e.stack,
+      });
+    }
+
+    if (!accessToken) {
+      const msg = `Token exchange failed: ${exchangeError}`;
+      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-7] Final response sent", status: DiagStatus.Failure, requestId, error: msg });
+      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-8] Handler completed",   status: DiagStatus.Failure, requestId, durationMs: handlerTimer() });
+      return res.status(400).send(`<html><body><h2>OAuth Token Exchange Failed</h2><p>${msg}</p></body></html>`);
+    }
+
+    // ── OAUTH-6: Persist to database ──────────────────────────────────────────
+    let persistSuccess = false;
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[OAUTH-6] Database persistence",
+      status:    DiagStatus.Info,
+      requestId,
+      data: { write_attempted: true },
+    });
+
+    try {
+      const existingCfgRaw = await storage.getSetting("bigcommerce_config");
+      const existingCfg    = (existingCfgRaw?.value as Record<string, any>) ?? {};
+
+      // Extract storeHash from context e.g. "stores/abc123" → "abc123"
+      const newStoreHash = context?.replace(/^stores\//, "") || existingCfg.storeHash || "";
+
+      await storage.setSetting("bigcommerce_config", {
+        ...existingCfg,
+        token:     accessToken,
+        storeHash: newStoreHash,
+      });
+      persistSuccess = true;
+
+      diagLog({
+        module:    DiagModule.OAuth,
+        event:     "[OAUTH-6] Database persistence",
+        status:    DiagStatus.Success,
+        requestId,
+        data: { write_successful: true, store_hash_updated: newStoreHash },
+      });
+    } catch (e: any) {
+      diagLog({
+        module:    DiagModule.OAuth,
+        event:     "[OAUTH-6] Database persistence",
+        status:    DiagStatus.Error,
+        requestId,
+        data:  { write_successful: false },
+        error: e.message,
+        stack: e.stack,
+      });
+    }
+
+    // ── OAUTH-7: Final response ───────────────────────────────────────────────
+    // BigCommerce expects HTTP 200; a redirect or HTML page both work.
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[OAUTH-7] Final response sent",
+      status:    DiagStatus.Success,
+      requestId,
+      data: { response_type: "html_200", persist_success: persistSuccess },
+    });
+
+    // ── OAUTH-8: Handler completed ────────────────────────────────────────────
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[OAUTH-8] Handler completed",
+      status:    DiagStatus.Success,
+      requestId,
+      durationMs: handlerTimer(),
+    });
+
+    return res.status(200).send(`<!DOCTYPE html>
+<html>
+<head><title>App Installed — VanSales Pro</title>
+<style>body{font-family:sans-serif;padding:40px;max-width:500px;margin:0 auto}
+h2{color:#1a7f37}p{color:#555;margin-top:12px}</style>
+</head>
+<body>
+<h2>&#10003; BigCommerce App Installed Successfully</h2>
+<p>VanSales Pro has been authorized. Your access token has been saved.</p>
+<p>You may close this window and return to the BigCommerce Control Panel.</p>
+</body>
+</html>`);
+  });
+
+  /**
+   * GET /api/bc/auth/diagnostics
+   * Admin-only — returns the in-memory diagnostic log buffer.
+   * Only populated when DIAG_LOGGING=true.
+   *
+   * Query params:
+   *   ?module=OAuth     filter by module name
+   *   ?clear=true       clear the buffer after returning
+   */
+  app.get("/api/bc/auth/diagnostics", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      let logs = getLogBuffer();
+      if (req.query.module) {
+        const filter = String(req.query.module).toLowerCase();
+        logs = logs.filter((l) => l.module.toLowerCase().includes(filter));
+      }
+      if (req.query.clear === "true") clearLogBuffer();
+      res.json({
+        diag_logging_enabled: isDiagEnabled(),
+        enable_with:          "Set environment variable DIAG_LOGGING=true and restart the server",
+        total_entries:        logs.length,
+        logs,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
   // ===== PRODUCT ROUTES =====
 

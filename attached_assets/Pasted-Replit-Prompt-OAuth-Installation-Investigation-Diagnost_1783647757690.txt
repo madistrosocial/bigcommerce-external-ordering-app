@@ -1,0 +1,129 @@
+Replit Prompt – OAuth Installation Investigation + Diagnostic Logging Framework
+
+We are pausing all work on the Native BigCommerce Store Credit feature.
+
+Do NOT modify any POS, Checkout, Order Creation, Store Credit, Gift Certificate, Discount, or OAuth business logic.
+
+The objective of this task is to investigate why the BigCommerce OAuth app installation does not complete, while also creating a reusable diagnostic logging framework for future troubleshooting.
+
+Part 1 – Investigate OAuth Installation
+
+Trace the complete OAuth installation flow:
+
+User clicks Install in the BigCommerce Control Panel.
+BigCommerce redirects to our configured Auth Callback URL.
+/api/bc/auth is invoked.
+Authorization code is received.
+Authorization code is exchanged for an access token.
+Access token is stored.
+Response is returned to BigCommerce.
+Installation completes.
+
+Determine exactly which step fails.
+
+Do not change business logic or implement workarounds.
+
+Part 2 – Build a Reusable Diagnostic Logging System
+
+Instead of temporary console.log() statements, build a lightweight logging framework that can be reused throughout the application.
+
+Requirements
+Logging must be enabled/disabled from a single configuration setting.
+No business logic changes.
+Minimal performance impact when disabled.
+Logs should be timestamped.
+Each log should include:
+Timestamp
+Module
+Event
+Status
+Duration (when applicable)
+Correlation ID / Request ID (for request tracing)
+Never log secrets (tokens, passwords, client secrets, JWTs, etc.). Redact sensitive values.
+
+Example format:
+
+[2026-07-10 14:32:15]
+Module: OAuth
+Event: Token Exchange
+Status: SUCCESS
+Duration: 182ms
+RequestId: 8f42b8...
+Modules
+
+Create log categories that can be reused later:
+
+OAuth
+Authentication
+BigCommerce API
+Xero
+POS Checkout
+Store Credit
+CRM
+Inventory
+Background Jobs
+Database
+Part 3 – OAuth Diagnostic Logs
+
+Instrument only the OAuth installation flow.
+
+Log the following events:
+
+[OAUTH-1] Callback reached
+
+[OAUTH-2] Query parameters received
+- code present?
+- context present?
+- scope present?
+- state present?
+
+[OAUTH-3] Configuration loaded
+- callback URL
+- client ID loaded?
+- client secret loaded?
+- storefront URL loaded?
+(redact sensitive values)
+
+[OAUTH-4] Beginning token exchange
+
+[OAUTH-5] Token exchange completed
+- HTTP status
+- response body (redacted)
+
+[OAUTH-6] Database persistence
+- write attempted
+- write successful?
+
+[OAUTH-7] Final response sent
+- redirect
+- HTML
+- error
+
+[OAUTH-8] Handler completed
+
+Also log:
+
+Total execution time.
+Exact callback URL received.
+Exact redirect URI used during token exchange.
+Any uncaught exceptions.
+Full stack trace for server errors.
+Deliverables
+
+Do not fix the OAuth installation yet.
+
+Instead, provide a report answering:
+
+Is /api/bc/auth ever reached?
+Is the authorization code received?
+Is context received?
+Does the token exchange execute?
+Does BigCommerce return an access token?
+Is the token successfully saved?
+Does the handler complete?
+Does BigCommerce acknowledge installation?
+Identify the exact failing step, supported by the diagnostic logs.
+
+If you believe a code change is necessary, stop and explain why based on the evidence collected.
+
+Do not implement workarounds or additional features until the root cause is identified.
