@@ -508,6 +508,39 @@ export async function registerRoutes(
   // ===== BIGCOMMERCE OAUTH INSTALLATION CALLBACK =====
 
   /**
+   * ALL /api/bc/auth — method-agnostic interceptor
+   * Fires before the GET handler to log EVERY request BC sends, regardless of HTTP method.
+   * This catches POST, PUT, or any non-GET method BC might use server-to-server.
+   */
+  app.all("/api/bc/auth", (req: Request, res: Response, next: Function) => {
+    const interceptId = makeRequestId();
+    diagLog({
+      module:    DiagModule.OAuth,
+      event:     "[BC-INTERCEPT] Any-method request received",
+      status:    DiagStatus.Info,
+      requestId: interceptId,
+      data: {
+        method:        req.method,
+        path:          req.path,
+        host:          req.get("host"),
+        forwarded_for: req.get("x-forwarded-for"),
+        user_agent:    req.get("user-agent"),
+        content_type:  req.get("content-type"),
+        accept:        req.get("accept"),
+        code_in_query: !!(req.query as any).code,
+        code_in_body:  !!(req.body as any)?.code,
+        query_keys:    Object.keys(req.query || {}),
+        body_keys:     Object.keys(req.body || {}),
+      },
+    });
+    // If BC used POST, handle it identically to GET by injecting body params into query
+    if (req.method === "POST" && req.body) {
+      Object.assign(req.query, req.body);
+    }
+    next();
+  });
+
+  /**
    * GET /api/bc/auth
    * Public endpoint — BigCommerce redirects here after the merchant installs/authorizes
    * the app in the BC Control Panel. No session authentication is required.
@@ -570,10 +603,16 @@ export async function registerRoutes(
       });
     }
 
-    // Reconstruct the exact callback URL this server is reachable at
-    const proto       = req.get("x-forwarded-proto") || req.protocol || "https";
+    // Reconstruct the exact callback URL this server is reachable at.
+    // Always use https — Replit serves all external traffic over HTTPS, and BC requires
+    // the redirect_uri to exactly match the registered Auth Callback URL (https://...).
+    // Do NOT fall back to req.protocol: Express defaults to "http" behind a proxy,
+    // which causes a redirect_uri_mismatch error when BC does its server-to-server call.
+    const proto       = req.get("x-forwarded-proto") || "https";
     const hostHeader  = req.get("x-forwarded-host")  || req.get("host") || "";
-    const callbackUrl = `${proto}://${hostHeader}/api/bc/auth`;
+    const callbackUrl = hostHeader.includes("localhost")
+      ? `http://${hostHeader}/api/bc/auth`          // local dev only
+      : `${proto}://${hostHeader}/api/bc/auth`;     // production (always https)
 
     diagLog({
       module:    DiagModule.OAuth,
