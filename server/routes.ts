@@ -314,7 +314,7 @@ async function createBcOrderNativeStoreCredit(
   //    on the resulting order — a single order-level deduction, not spread across items.
   const gcApplyRes = await fetch(
     `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/gift-certificates`,
-    { method: "POST", headers: h, body: JSON.stringify({ giftCertificateCode: gcCode }) },
+    { method: "POST", headers: h, body: JSON.stringify({ gift_certificate_code: gcCode }) },
   );
   if (!gcApplyRes.ok) {
     const gcApplyErr = await gcApplyRes.text();
