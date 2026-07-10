@@ -196,27 +196,17 @@ async function checkBcStock(
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
-// ── BC Store Credit via Gift Certificate (server-to-server headless checkout) ──
-// Background: BC's /api/storefront/checkouts/{id}/store-credit is a browser-only
-// endpoint that returns 404 for management-API carts regardless of token type.
-// BC's V2 Orders store_credit_amount field is read-only.
-// Customer Login JWT (OAuth) requires BC Pro/Enterprise — blocked on this plan.
+// ── BC Store Credit Order Creation ─────────────────────────────────────────
+// BC's store_credit_amount on orders is read-only (set only by BC's own checkout).
+// All server-to-server paths to native store_credit_amount are blocked on this store:
+//   - V2 Customers store_credit_amount: 400 "field not supported by this resource"
+//   - V3/checkouts/{id}/store-credit: 404 (requires native BC credit, can't be written)
+//   - V3/checkouts/{id}/gift-certificates: 404 (gift certs not enabled in store)
+//   - GraphQL updateCheckout useStoreCredit: field not in this store's schema
 //
-// Working approach: create a one-time BC gift certificate for the exact credit amount,
-// apply it to the checkout via the management API (POST /v3/checkouts/{id}/gift-certificates),
-// then convert to order. BC deducts the GC amount and sets gift_certificate_amount on the
-// order. After order creation the GC is deleted so the code can't be reused.
-// CRM balance (not BC's store_credit_amount) is the authoritative credit ledger.
-//
-// Flow:
-//   1. Create one-time gift certificate for min(creditAmt, orderTotal)
-//   2. Create management API cart with customer_id + POS price overrides
-//   3. Add billing address to checkout
-//   4. POST /v3/checkouts/{cartId}/gift-certificates → apply GC to checkout
-//   5. POST /v3/checkouts/{cartId}/orders → order with gift_certificate_amount set
-//   6. PATCH /v2/orders/{id} → status=Pending + staff notes
-//   7. DELETE /v2/gift_certificates/{gcId} → prevent reuse
-//   8. Return bcOrderId; bcCreditRemaining = CRM balance − amount applied
+// Working approach: standard V2 Orders API with discount_amount = credit applied.
+// The BC order total is correctly reduced. Staff notes document the store credit.
+// CRM balance (store_credit_balance on crm_customers) is the authoritative ledger.
 async function createBcOrderNativeStoreCredit(
   storeHash: string,
   token: string,
@@ -237,128 +227,47 @@ async function createBcOrderNativeStoreCredit(
   const crmCustomer = await storage.getCrmCustomerByBcId(bcCustomerId);
   const crmBalance  = Number(crmCustomer?.store_credit_balance ?? 0);
   const amtToApply  = Math.min(storeCreditAmt, crmBalance);
-  console.log(`[sc_gc] customer=${bcCustomerId} crmBalance=$${crmBalance} applying=$${amtToApply}`);
+  console.log(`[sc] customer=${bcCustomerId} crmBalance=$${crmBalance} applying=$${amtToApply}`);
 
-  // 1. Create a one-time BC gift certificate for the exact credit amount.
-  //    We use the customer's email so BC records it against them.
-  const customerEmail = crmCustomer?.email || `customer-${bcCustomerId}@store.internal`;
-  const gcRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v2/gift_certificates`,
-    {
-      method: "POST",
-      headers: h,
-      body: JSON.stringify({
-        to_name:    `${order.billing_address?.first_name || "Customer"} ${order.billing_address?.last_name || ""}`.trim(),
-        to_email:   customerEmail,
-        from_name:  "POS Store Credit",
-        from_email: customerEmail,
-        amount:     amtToApply.toFixed(2),
-        message:    `POS store credit applied — order ${order.order_reference || ""}`.trim(),
-      }),
-    },
+  const staffNote = [
+    `Store Credit Applied: $${amtToApply.toFixed(2)}`,
+    order.order_note || "",
+  ].filter(Boolean).join("\n\n");
+
+  const bcOrderData: any = {
+    status_id:        1,
+    customer_id:      bcCustomerId,
+    billing_address:  order.billing_address,
+    staff_notes:      staffNote,
+    customer_message: (order as any).customer_note || undefined,
+    discount_amount:  amtToApply.toFixed(4),
+    products: (order.items as any[]).map((item: any) => {
+      const p: any = {
+        product_id:    item.bigcommerce_product_id,
+        quantity:      item.quantity,
+        price_inc_tax: parseFloat(item.price_at_sale),
+        price_ex_tax:  parseFloat(item.price_at_sale),
+      };
+      if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
+        p.product_options = item.variant_option_values.map(
+          (ov: any) => ({ id: ov.option_id, value: String(ov.id) }),
+        );
+      }
+      return p;
+    }),
+  };
+
+  const v2Res = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
+    { method: "POST", headers: h, body: JSON.stringify(bcOrderData) },
   );
-  if (!gcRes.ok)
-    throw new Error(`Gift certificate creation failed (${gcRes.status}): ${await gcRes.text()}`);
-  const gcData = await gcRes.json();
-  const gcCode = gcData.code as string;
-  const gcId   = gcData.id as number;
-  console.log(`[sc_gc] Gift certificate ${gcCode} (id=${gcId}) created for $${amtToApply}`);
+  if (!v2Res.ok)
+    throw new Error(`BC order creation failed (${v2Res.status}): ${await v2Res.text()}`);
 
-  // 2. Create management API cart with customer_id + POS price overrides
-  const lineItems = (order.items as any[]).map((item: any) => {
-    const li: any = {
-      product_id: item.bigcommerce_product_id,
-      quantity:   item.quantity,
-      list_price: parseFloat(item.price_at_sale),
-    };
-    if (item.variant_id) li.variant_id = item.variant_id;
-    return li;
-  });
-  const cartRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/carts`,
-    { method: "POST", headers: h, body: JSON.stringify({ customer_id: bcCustomerId, line_items: lineItems }) },
-  );
-  if (!cartRes.ok)
-    throw new Error(`Cart creation failed (${cartRes.status}): ${await cartRes.text()}`);
-  const cartData = await cartRes.json();
-  const cartId   = cartData.data.id as string;
-  console.log(`[sc_gc] Cart created: ${cartId}`);
+  const data = await v2Res.json();
+  const bcOrderId = data.id as number;
+  console.log(`[sc] BC order ${bcOrderId} created; discount_amount=$${amtToApply} (store credit)`);
 
-  // 3. Add billing address to checkout (non-fatal)
-  const a = order.billing_address || {};
-  await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/billing-address`,
-    {
-      method: "POST",
-      headers: h,
-      body: JSON.stringify({
-        first_name:             a.first_name  || "",
-        last_name:              a.last_name   || "",
-        email:                  a.email || customerEmail,
-        company:                a.company     || "",
-        address1:               a.address1    || a.street_1 || "",
-        address2:               a.address2    || a.street_2 || "",
-        city:                   a.city        || "",
-        state_or_province:      a.state_or_province      || a.state || "",
-        state_or_province_code: a.state_or_province_code || a.state || "",
-        postal_code:            a.postal_code || a.zip    || "",
-        country:                a.country     || "",
-        country_code:           a.country_code || a.country_iso2 || "US",
-        phone:                  a.phone       || "",
-      }),
-    },
-  ).catch((e) => console.warn("[sc_gc] billing-address non-fatal:", e));
-
-  // 4. Apply gift certificate to checkout via management API (works server-to-server).
-  //    BC reduces the checkout total by the GC balance and sets gift_certificate_amount
-  //    on the resulting order — a single order-level deduction, not spread across items.
-  const gcApplyRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/gift-certificates`,
-    { method: "POST", headers: h, body: JSON.stringify({ gift_certificate_code: gcCode }) },
-  );
-  if (!gcApplyRes.ok) {
-    const gcApplyErr = await gcApplyRes.text();
-    // Clean up the unused GC before throwing
-    await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/gift_certificates/${gcId}`,
-      { method: "DELETE", headers: h }).catch(() => {});
-    throw new Error(`Gift certificate application failed (${gcApplyRes.status}): ${gcApplyErr}`);
-  }
-  console.log(`[sc_gc] Gift certificate applied to checkout ${cartId}`);
-
-  // 5. Convert checkout → BC order
-  const bcOrderRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/orders`,
-    { method: "POST", headers: h },
-  );
-  if (!bcOrderRes.ok)
-    throw new Error(`Checkout→order failed (${bcOrderRes.status}): ${await bcOrderRes.text()}`);
-  const { data: { id: bcOrderId } } = await bcOrderRes.json();
-  console.log(`[sc_gc] BC order ${bcOrderId} created; gift_certificate_amount=$${amtToApply}`);
-
-  // 6. Patch order: status=Pending + staff notes
-  const staffNote = [`Store Credit Applied: $${amtToApply.toFixed(2)}`, order.order_note || ""]
-    .filter(Boolean).join("\n\n");
-  await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`,
-    {
-      method: "PUT",
-      headers: h,
-      body: JSON.stringify({
-        status_id:        1,
-        staff_notes:      staffNote,
-        customer_message: (order as any).customer_note || undefined,
-      }),
-    },
-  ).catch((e) => console.warn("[sc_gc] status patch non-fatal:", e));
-
-  // 7. Delete the gift certificate so it cannot be reused by any other order
-  await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v2/gift_certificates/${gcId}`,
-    { method: "DELETE", headers: h },
-  ).catch((e) => console.warn("[sc_gc] GC delete non-fatal:", e));
-  console.log(`[sc_gc] Gift certificate ${gcId} deleted (single-use)`);
-
-  // CRM is the authoritative credit ledger; caller will deduct amtToApply
   const bcCreditRemaining = Math.max(0, crmBalance - amtToApply);
   return { bcOrderId, bcCreditRemaining };
 }

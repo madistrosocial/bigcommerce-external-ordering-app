@@ -3,4 +3,4 @@
 - [Duplicate getBcCreds hoisting bug](duplicate-function-hoisting.md) — two same-named async functions in registerRoutes(); JS hoisting lets the second silently win and break all callers.
 - [CRM auth pattern](crm-auth-pattern.md) — `requireAuth` sets `authUser`, NOT `userId`; using `(req as any).userId` silently breaks all CRM endpoints (returns 401 → shows 0 customers).
 - [CRM Visibility RBAC](crm-visibility-rbac.md) — crm:view_all is the canonical "see all customers" perm; CRM_ACTION_PERMS in AdminUsers.tsx; health cards and reactivation both now pass visibility scope.
-- [BC store credit — no OAuth needed](bc-store-credit-v2.md) — Customer Login scope requires BC Pro/Enterprise; use V2 Orders store_credit_amount instead.
+- [BC store credit — all server-side paths blocked](bc-store-credit-definitive.md) — every path to native store_credit_amount on BC orders is blocked; use discount_amount instead.
