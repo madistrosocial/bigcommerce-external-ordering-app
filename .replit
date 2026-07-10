@@ -81,3 +81,8 @@ waitForPort = 5000
 
 [agent]
 mockupState = "FULLSTACK"
+
+[userenv]
+
+[userenv.development]
+DIAG_LOGGING = "true"
