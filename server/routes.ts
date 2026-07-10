@@ -236,15 +236,16 @@ async function createBcOrderNativeStoreCredit(
     throw new Error(`Failed to write BC store credit balance (${setBalRes.status}): ${await setBalRes.text()}`);
   console.log(`[sc_native] BC balance set to $${crmBalance}`);
 
-  // 2. Validate storefront URL
-  if (!storefrontDomain || !storefrontDomain.startsWith("http")) {
+  // 2. Validate OAuth credentials (required for customerAccessToken)
+  if (!clientId || !clientSecret) {
     throw new Error(
-      "Native store credit checkout requires a Storefront URL " +
-      "(e.g. https://yourdomain.com). Please set it in Admin → Integration Settings.",
+      "Native store credit checkout requires BigCommerce OAuth credentials " +
+      "(Client ID + Client Secret). Please configure these in Admin → Integration Settings. " +
+      "Create an OAuth app at https://devtools.bigcommerce.com/ with the 'Customers Login' scope.",
     );
   }
 
-  // 3. Get storefront customer impersonation token
+  // 3. Get storefront customer impersonation token (used as GraphQL Bearer auth)
   const impRes = await fetch(
     `https://api.bigcommerce.com/stores/${storeHash}/v3/storefront/api-token-customer-impersonation`,
     {
@@ -304,122 +305,69 @@ async function createBcOrderNativeStoreCredit(
     },
   ).catch((e) => console.warn("[sc_native] billing-address non-fatal:", e));
 
-  // 6. Apply store credit — try impersonation token first, then OAuth JWT fallback
-  //
-  // Primary path: X-Bc-Storefront-Api-Token (impersonation token, no OAuth app needed)
-  // BC server-to-server storefront API auth: https://developer.bigcommerce.com/docs/storefront-auth
-  let scApplied = false;
+  // 6. Sign Customer Login JWT (HS256) with OAuth client_secret
+  //    Spec: https://developer.bigcommerce.com/api-docs/storefront/customer-login-api
+  const jti     = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const nowSec  = Math.floor(Date.now() / 1000);
+  const jwtHdr  = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const jwtBody = Buffer.from(JSON.stringify({
+    iss:         clientId,
+    iat:         nowSec,
+    jti,
+    operation:   "customer_login",
+    store_hash:  storeHash,
+    customer_id: bcCustomerId,
+    channel_id:  channelId,
+  })).toString("base64url");
+  const jwtSig   = createHmac("sha256", clientSecret).update(`${jwtHdr}.${jwtBody}`).digest("base64url");
+  const loginJwt = `${jwtHdr}.${jwtBody}.${jwtSig}`;
 
-  const scResImp = await fetch(
+  // 7. GraphQL loginWithCustomerLoginJwt → customerAccessToken (server-to-server field)
+  const gqlRes = await fetch(`${storefrontDomain}/graphql`, {
+    method: "POST",
+    headers: {
+      Accept:        "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${impToken}`,
+    },
+    body: JSON.stringify({
+      query: `mutation LoginCustomer($jwt: String!) {
+        loginWithCustomerLoginJwt(jwt: $jwt) {
+          customerAccessToken
+        }
+      }`,
+      variables: { jwt: loginJwt },
+    }),
+  });
+  if (!gqlRes.ok)
+    throw new Error(`GraphQL login request failed (${gqlRes.status})`);
+  const gqlData = await gqlRes.json();
+  const customerAccessToken = gqlData?.data?.loginWithCustomerLoginJwt?.customerAccessToken as string | undefined;
+  if (!customerAccessToken) {
+    const detail = JSON.stringify(gqlData?.errors ?? gqlData).slice(0, 400);
+    throw new Error(`Customer login failed — could not obtain customerAccessToken: ${detail}`);
+  }
+  console.log(`[sc_native] customerAccessToken obtained`);
+
+  // 8. Apply store credit to checkout via REST storefront API using customerAccessToken
+  //    (customerAccessToken provides proper customer session context server-to-server)
+  const scRes = await fetch(
     `${storefrontDomain}/api/storefront/checkouts/${cartId}/store-credit`,
     {
       method: "POST",
       headers: {
-        "X-Bc-Storefront-Api-Token": impToken,
+        Authorization: `Bearer ${customerAccessToken}`,
         "Content-Type": "application/json",
         Accept:         "application/json",
       },
       body: JSON.stringify({}),
     },
   );
-  console.log(`[sc_native] Store credit (impersonation token): ${scResImp.status}`);
-
-  if (scResImp.ok || scResImp.status === 200) {
-    scApplied = true;
-    console.log(`[sc_native] Store credit applied via impersonation token`);
-  } else {
-    const impScErr = await scResImp.text().catch(() => "");
-    console.warn(`[sc_native] Impersonation token approach failed (${scResImp.status}): ${impScErr.slice(0, 200)}`);
-
-    // Fallback: OAuth Customer Login JWT → customerAccessToken → store-credit REST endpoint
-    if (!clientId || !clientSecret) {
-      throw new Error(
-        `Store credit could not be applied (${scResImp.status}). ` +
-        "To enable the OAuth fallback, add Client ID + Client Secret in Admin → Integration Settings. " +
-        `BC error: ${impScErr.slice(0, 200)}`,
-      );
-    }
-
-    // Sign Customer Login JWT (HS256) with OAuth client_secret
-    // Spec: https://developer.bigcommerce.com/api-docs/storefront/customer-login-api
-    const cleanSecret = String(clientSecret).trim();
-    const cleanClientId = String(clientId).trim();
-    const jti     = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const nowSec  = Math.floor(Date.now() / 1000);
-    const jwtHdr  = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
-    const jwtBody = Buffer.from(JSON.stringify({
-      iss:         cleanClientId,
-      iat:         nowSec,
-      jti,
-      operation:   "customer_login",
-      store_hash:  storeHash,
-      customer_id: bcCustomerId,
-    })).toString("base64url");
-    const jwtSig   = createHmac("sha256", cleanSecret).update(`${jwtHdr}.${jwtBody}`).digest("base64url");
-    const loginJwt = `${jwtHdr}.${jwtBody}.${jwtSig}`;
-    console.log(`[sc_native] OAuth fallback: clientId=${cleanClientId.slice(0, 8)}... secretLen=${cleanSecret.length}`);
-
-    // GraphQL loginWithCustomerLoginJwt → customerAccessToken
-    const gqlRes = await fetch(`${storefrontDomain}/graphql`, {
-      method: "POST",
-      headers: {
-        Accept:         "application/json",
-        "Content-Type": "application/json",
-        Authorization:  `Bearer ${impToken}`,
-      },
-      body: JSON.stringify({
-        query: `mutation LoginCustomer($jwt: String!) {
-          loginWithCustomerLoginJwt(jwt: $jwt) {
-            customerAccessToken {
-              value
-              expiresAt
-            }
-          }
-        }`,
-        variables: { jwt: loginJwt },
-      }),
-    });
-    if (!gqlRes.ok) {
-      const gqlErrBody = await gqlRes.text().catch(() => "(unreadable)");
-      console.error(`[sc_native] GraphQL ${gqlRes.status}:`, gqlErrBody.slice(0, 400));
-      throw new Error(`GraphQL login failed (${gqlRes.status}): ${gqlErrBody.slice(0, 200)}`);
-    }
-    const gqlData = await gqlRes.json();
-    console.log(`[sc_native] GraphQL response:`, JSON.stringify(gqlData).slice(0, 300));
-    const loginResult = gqlData?.data?.loginWithCustomerLoginJwt;
-    const customerAccessToken = (loginResult?.customerAccessToken?.value ?? loginResult?.customerAccessToken) as string | undefined;
-    if (!customerAccessToken) {
-      const detail = JSON.stringify(gqlData?.errors ?? gqlData).slice(0, 300);
-      throw new Error(
-        `Store credit checkout requires the OAuth app to be installed on the BC store. ` +
-        `Go to devtools.bigcommerce.com → open your app → App Actions → "Preview in Store" → Install. ` +
-        `This is a one-time setup. BC error: ${detail}`,
-      );
-    }
-    console.log(`[sc_native] customerAccessToken obtained via OAuth fallback`);
-
-    // Apply store credit with customerAccessToken
-    const scResOauth = await fetch(
-      `${storefrontDomain}/api/storefront/checkouts/${cartId}/store-credit`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${customerAccessToken}`,
-          "Content-Type": "application/json",
-          Accept:         "application/json",
-        },
-        body: JSON.stringify({}),
-      },
-    );
-    if (!scResOauth.ok) {
-      const scOauthErr = await scResOauth.text();
-      throw new Error(`Store credit application failed via OAuth path (${scResOauth.status}): ${scOauthErr}`);
-    }
-    scApplied = true;
-    console.log(`[sc_native] Store credit applied via OAuth customerAccessToken`);
+  if (!scRes.ok) {
+    const scErr = await scRes.text();
+    throw new Error(`Store credit application failed (${scRes.status}): ${scErr}`);
   }
-
-  if (!scApplied) throw new Error("Store credit could not be applied through any available method");
+  console.log(`[sc_native] Store credit applied to checkout ${cartId}`);
 
   // 9. Convert checkout → BC order (store_credit_amount populated natively by BC)
   const bcOrderRes = await fetch(
@@ -1110,134 +1058,6 @@ export async function registerRoutes(
     }
   });
 
-  // ===== BIGCOMMERCE OAUTH APP CALLBACKS =====
-  // These endpoints complete the one-time OAuth handshake that "installs" the
-  // Salescore-OAuth app on the BC store, enabling the Customer Login JWT API.
-  //
-  // In BigCommerce devtools, set:
-  //   Auth URL  → https://<your-deployed-url>/api/bc/auth
-  //   Load URL  → https://<your-deployed-url>/api/bc/load
-
-  app.get("/api/bc/auth", async (req, res) => {
-    try {
-      // DIAG-1: Request received
-      console.log("[bc/auth][1] Request received");
-      console.log("[bc/auth][1] Method:", req.method);
-      console.log("[bc/auth][1] Host header:", req.headers.host);
-      console.log("[bc/auth][1] x-forwarded-host:", req.headers["x-forwarded-host"]);
-      console.log("[bc/auth][1] x-forwarded-proto:", req.headers["x-forwarded-proto"]);
-      console.log("[bc/auth][1] Full URL:", req.protocol + "://" + req.get("host") + req.originalUrl);
-
-      // DIAG-2: Query parameters
-      const { code, scope, context, state } = req.query as Record<string, string>;
-      console.log("[bc/auth][2] Query params received:");
-      console.log("[bc/auth][2]   code present:", !!code, "| length:", code?.length ?? 0);
-      console.log("[bc/auth][2]   scope:", scope ?? "(none)");
-      console.log("[bc/auth][2]   context:", context ?? "(none)");
-      console.log("[bc/auth][2]   state:", state ?? "(none)");
-
-      if (!code || !context) {
-        console.log("[bc/auth][2] STOP: missing code or context — returning 400");
-        return res.status(400).send("Missing code or context from BigCommerce");
-      }
-
-      // DIAG-3: Credentials lookup
-      console.log("[bc/auth][3] Reading bigcommerce_config from database...");
-      const cfg = await storage.getSetting("bigcommerce_config").catch(() => null);
-      const clientId     = cfg?.value?.clientId     ? String(cfg.value.clientId).trim()     : "";
-      const clientSecret = cfg?.value?.clientSecret ? String(cfg.value.clientSecret).trim() : "";
-      console.log("[bc/auth][3] clientId present:", !!clientId, "| length:", clientId.length);
-      console.log("[bc/auth][3] clientSecret present:", !!clientSecret, "| length:", clientSecret.length);
-
-      if (!clientId || !clientSecret) {
-        console.log("[bc/auth][3] STOP: credentials missing — returning 500");
-        return res.status(500).send(
-          "OAuth credentials not configured. " +
-          "Add Client ID and Client Secret in Admin → Integration Settings first.",
-        );
-      }
-
-      // DIAG-4: redirect_uri construction
-      const host = req.headers["x-forwarded-host"] || req.headers.host || "";
-      const proto = req.headers["x-forwarded-proto"] || "https";
-      const redirectUri = `${proto}://${host}/api/bc/auth`;
-      console.log("[bc/auth][4] Constructed redirect_uri:", redirectUri);
-      console.log("[bc/auth][4] *** Compare this EXACTLY to the Auth Callback URL in BC devtools ***");
-
-      // DIAG-5: Token exchange starting
-      console.log("[bc/auth][5] Starting token exchange with https://login.bigcommerce.com/oauth2/token");
-      const tokenRes = await fetch("https://login.bigcommerce.com/oauth2/token", {
-        method:  "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id:     clientId,
-          client_secret: clientSecret,
-          grant_type:    "authorization_code",
-          code:          String(code),
-          scope:         String(scope ?? ""),
-          context:       String(context),
-          redirect_uri:  redirectUri,
-        }),
-      });
-
-      // DIAG-6: Token exchange response
-      const tokenBody = await tokenRes.text();
-      console.log("[bc/auth][6] Token exchange completed");
-      console.log("[bc/auth][6] BC response status:", tokenRes.status);
-      console.log("[bc/auth][6] BC response body:", tokenBody.slice(0, 500));
-
-      if (!tokenRes.ok) {
-        console.log("[bc/auth][6] STOP: BC rejected token exchange — returning 502");
-        return res.status(502).send(
-          `BC token exchange failed (${tokenRes.status}): ${tokenBody.slice(0, 500)}`,
-        );
-      }
-
-      // DIAG-7: Writing token to database
-      console.log("[bc/auth][7] Token exchange successful — writing bc_oauth_token to database...");
-      try {
-        const tokenData = JSON.parse(tokenBody);
-        await storage.setSetting("bc_oauth_token", {
-          access_token:  tokenData.access_token,
-          scope:         tokenData.scope,
-          context:       tokenData.context,
-          installed_at:  new Date().toISOString(),
-        });
-        console.log("[bc/auth][7] bc_oauth_token written successfully");
-      } catch (dbErr: any) {
-        console.error("[bc/auth][7] WARNING: failed to write token to DB:", dbErr.message);
-      }
-
-      // DIAG-8: Sending success response
-      console.log("[bc/auth][8] Sending 200 HTML success response to browser");
-      res.send(
-        "<html><body style='font-family:sans-serif;padding:40px'>" +
-        "<h2>✓ Salescore OAuth App Installed</h2>" +
-        "<p>The app has been successfully installed on your BigCommerce store.</p>" +
-        "<p>Store credit POS checkout is now enabled. You can close this tab.</p>" +
-        "</body></html>",
-      );
-      console.log("[bc/auth][8] Response sent — handshake complete (context=" + context + ")");
-    } catch (err: any) {
-      console.error("[bc/auth][ERR] Unhandled exception:", err.message);
-      console.error("[bc/auth][ERR] Stack:", err.stack);
-      res.status(500).send(`OAuth callback error: ${err.message}`);
-    }
-  });
-
-  app.get("/api/bc/load", async (req, res) => {
-    console.log("[bc/load][1] Load callback received");
-    console.log("[bc/load][1] Query params:", JSON.stringify(req.query));
-    console.log("[bc/load][1] signed_payload_jwt present:", !!req.query.signed_payload_jwt);
-    res.send(
-      "<html><body style='font-family:sans-serif;padding:40px'>" +
-      "<h2>Salescore POS</h2>" +
-      "<p>This app runs as a standalone POS — open it directly at your deployed URL.</p>" +
-      "</body></html>",
-    );
-    console.log("[bc/load][2] Response sent");
-  });
-
   // ===== ORDER ROUTES =====
 
   // Create order with immediate sync attempt
@@ -1295,7 +1115,7 @@ export async function registerRoutes(
                 const nativeResult = await createBcOrderNativeStoreCredit(
                   storeHash,
                   String(token),
-                  String(config.storefrontUrl || "").replace(/\/+$/, ""),
+                  String(config.storefrontUrl || ""),
                   config.clientId   ? String(config.clientId)   : null,
                   config.clientSecret ? String(config.clientSecret) : null,
                   Number(config.channelId ?? 1),
