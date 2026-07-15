@@ -309,17 +309,16 @@ async function createBcOrderNativeStoreCredit(
   if (!payRes.ok)
     throw new Error(`Store credit payment failed (${payRes.status}): ${payBody.slice(0, 400)}`);
 
-  // 6. Patch staff notes only (Payments API already moves order to Awaiting Fulfillment)
-  const staffNote = [`Store Credit Applied: $${storeCreditAmt.toFixed(2)}`, order.order_note || ""]
-    .filter(Boolean).join("\n\n");
+  // 6. Patch staff notes only (Payments API already moves order to Awaiting Fulfillment).
+  //    order.order_note is built by the frontend as:
+  //      "Checkout by: <name>\nStore Credit Applied: $X.XX\nNotes: <note>"
   await fetch(
     `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`,
     {
       method: "PUT",
       headers: h,
       body: JSON.stringify({
-        status_id:        1,
-        staff_notes:      staffNote,
+        staff_notes:      order.order_note || undefined,
         customer_message: (order as any).customer_note || undefined,
       }),
     },

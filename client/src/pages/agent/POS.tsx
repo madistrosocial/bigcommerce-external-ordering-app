@@ -1630,10 +1630,7 @@ export default function POSPage() {
   const buildCheckoutNote = (note: string) => {
     const subtotal = getCartTotal();
     const discAmt = computeDiscountAmount(subtotal);
-    const lines = [
-      `Checkout by: ${currentUser?.name || ""}`,
-      `Notes: ${note}`,
-    ];
+    const lines = [`Checkout by: ${currentUser?.name || ""}`];
     if (cartDiscount && discAmt > 0) {
       if (cartDiscount.type === "store_credit") {
         lines.push(`Store Credit Applied: $${discAmt.toFixed(2)}`);
@@ -1643,6 +1640,7 @@ export default function POSPage() {
         lines.push(`Discount Applied: $${discAmt.toFixed(2)}`);
       }
     }
+    lines.push(`Notes: ${note}`);
     return lines.join("\n");
   };
 
