@@ -300,26 +300,21 @@ async function createBcOrderNativeStoreCredit(
     },
   ).catch((e) => console.warn("[sc_native] billing-address non-fatal:", e));
 
-  // 6. Apply store credit using impersonation token + X-Bc-Customer-Id (server-to-server pattern)
-  //    The loginWithCustomerLoginJwt GQL mutation is browser-only; the REST storefront API
-  //    accepts the impersonation token directly when paired with X-Bc-Customer-Id.
-  console.log(`[sc_native] applying store credit: customer=${bcCustomerId} cart=${cartId}`);
+  // 6. Apply store credit via Management API v3 checkout endpoint
+  //    Cart was created with customer_id + billing address — store-credit endpoint requires both.
+  console.log(`[sc_native] applying store credit (mgmt API): customer=${bcCustomerId} cart=${cartId}`);
   const scRes = await fetch(
-    `${storefrontDomain}/api/storefront/checkouts/${cartId}/store-credit`,
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/store-credit`,
     {
       method: "POST",
-      headers: {
-        Authorization:        `Bearer ${impToken}`,
-        "X-Bc-Customer-Id":   String(bcCustomerId),
-        "Content-Type":       "application/json",
-        Accept:               "application/json",
-      },
+      headers: h,
       body: JSON.stringify({}),
     },
   );
+  const scBody = await scRes.text();
+  console.log(`[sc_native] store-credit response (${scRes.status}): ${scBody.slice(0, 400)}`);
   if (!scRes.ok) {
-    const scErr = await scRes.text();
-    throw new Error(`Store credit application failed (${scRes.status}): ${scErr}`);
+    throw new Error(`Store credit application failed (${scRes.status}): ${scBody.slice(0, 400)}`);
   }
   console.log(`[sc_native] Store credit applied to checkout ${cartId}`);
 
