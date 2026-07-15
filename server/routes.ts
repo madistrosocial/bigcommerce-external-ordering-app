@@ -236,7 +236,13 @@ async function createBcOrderNativeStoreCredit(
     throw new Error(`Failed to write BC store credit balance (${setBalRes.status}): ${await setBalRes.text()}`);
   console.log(`[sc_native] BC balance set to $${crmBalance}`);
 
-  // 2. Validate OAuth credentials (required for customerAccessToken)
+  // 2. Validate required config fields
+  if (!storefrontDomain) {
+    throw new Error(
+      "Storefront URL is not configured. Go to Admin → Integration Settings and set it " +
+      "(e.g. https://yourdomain.com) then save.",
+    );
+  }
   if (!clientId || !clientSecret) {
     throw new Error(
       "Native store credit checkout requires BigCommerce OAuth credentials " +
@@ -259,6 +265,7 @@ async function createBcOrderNativeStoreCredit(
   const impData = await impRes.json();
   const impToken = impData?.data?.token as string | undefined;
   if (!impToken) throw new Error("Storefront impersonation token missing from response");
+  console.log(`[sc_native] impersonation token obtained (len=${impToken.length})`);
 
   // 4. Create management API cart with price overrides (preserves POS custom pricing)
   const lineItems = (order.items as any[]).map((item: any) => {
@@ -323,6 +330,7 @@ async function createBcOrderNativeStoreCredit(
   const loginJwt = `${jwtHdr}.${jwtBody}.${jwtSig}`;
 
   // 7. GraphQL loginWithCustomerLoginJwt → customerAccessToken (server-to-server field)
+  console.log(`[sc_native] GQL login: customer=${bcCustomerId} iss=${clientId} store=${storeHash} channel=${channelId}`);
   const gqlRes = await fetch(`${storefrontDomain}/graphql`, {
     method: "POST",
     headers: {
@@ -339,8 +347,10 @@ async function createBcOrderNativeStoreCredit(
       variables: { jwt: loginJwt },
     }),
   });
-  if (!gqlRes.ok)
-    throw new Error(`GraphQL login request failed (${gqlRes.status})`);
+  if (!gqlRes.ok) {
+    const gqlErrBody = await gqlRes.text().catch(() => "");
+    throw new Error(`GraphQL login request failed (${gqlRes.status}): ${gqlErrBody.slice(0, 600)}`);
+  }
   const gqlData = await gqlRes.json();
   const customerAccessToken = gqlData?.data?.loginWithCustomerLoginJwt?.customerAccessToken as string | undefined;
   if (!customerAccessToken) {
