@@ -233,31 +233,7 @@ async function createBcOrderNativeStoreCredit(
     throw new Error(`Failed to write BC store credit balance (${setBalRes.status}): ${await setBalRes.text()}`);
   console.log(`[sc_native] BC balance set to $${crmBalance}`);
 
-  // 2. Validate storefront domain (OAuth creds no longer required for this approach)
-  if (!storefrontDomain) {
-    throw new Error(
-      "Storefront URL is not configured. Go to Admin → Integration Settings and set it " +
-      "(e.g. https://yourdomain.com) then save.",
-    );
-  }
-
-  // 3. Get customer impersonation token (server-side — no browser session needed)
-  //    This token lets the Storefront GraphQL API act as a specific customer.
-  const impRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/storefront/api-token-customer-impersonation`,
-    {
-      method:  "POST",
-      headers: h,
-      body:    JSON.stringify({ channel_id: channelId, expires_at: Math.floor(Date.now() / 1000) + 3600 }),
-    },
-  );
-  if (!impRes.ok)
-    throw new Error(`Impersonation token failed (${impRes.status}): ${await impRes.text()}`);
-  const impToken = (await impRes.json())?.data?.token as string | undefined;
-  if (!impToken) throw new Error("Impersonation token missing from response");
-  console.log(`[sc_native] impersonation token obtained (len=${impToken.length})`);
-
-  // 4. Create management API cart with POS price overrides (list_price)
+  // 2. Create management API cart with POS price overrides (list_price)
   const lineItems = (order.items as any[]).map((item: any) => {
     const li: any = {
       product_id: item.bigcommerce_product_id,
@@ -301,47 +277,7 @@ async function createBcOrderNativeStoreCredit(
     },
   ).catch((e) => console.warn("[sc_native] billing-address non-fatal:", e));
 
-  // 6. Apply store credit via Storefront GraphQL API with customer impersonation.
-  //    POST /v3/checkouts/{id}/store-credit → 404 on this store (management API not available).
-  //    All storefront REST endpoints (/api/storefront/...) require a real browser session (403).
-  //    The GraphQL impersonation token is the only server-side mechanism for this operation.
-  const gqlMutation = `
-    mutation ApplyStoreCredit($checkoutId: String!) {
-      checkout {
-        applyStoreCreditToCheckout(checkoutEntityId: $checkoutId) {
-          checkout {
-            entityId
-            appliedStoreCreditAmount { value }
-            grandTotal { value }
-          }
-        }
-      }
-    }
-  `;
-  console.log(`[sc_native] applying store credit via GraphQL: cart=${cartId}`);
-  const gqlRes = await fetch(`${storefrontDomain}/graphql`, {
-    method:  "POST",
-    headers: {
-      "Content-Type":    "application/json",
-      Authorization:     `Bearer ${impToken}`,
-      "X-Bc-Customer-Id": String(bcCustomerId),
-    },
-    body: JSON.stringify({ query: gqlMutation, variables: { checkoutId: cartId } }),
-  });
-  const gqlBody = await gqlRes.text();
-  console.log(`[sc_native] GraphQL store-credit (${gqlRes.status}): ${gqlBody.slice(0, 600)}`);
-  if (!gqlRes.ok)
-    throw new Error(`Store credit GraphQL failed (${gqlRes.status}): ${gqlBody.slice(0, 400)}`);
-
-  const gqlData = JSON.parse(gqlBody);
-  const gqlErrors = gqlData?.errors;
-  if (gqlErrors?.length)
-    throw new Error(`Store credit application failed: ${JSON.stringify(gqlErrors).slice(0, 400)}`);
-
-  const appliedAmt = gqlData?.data?.checkout?.applyStoreCreditToCheckout?.checkout?.appliedStoreCreditAmount?.value;
-  console.log(`[sc_native] store credit applied: $${appliedAmt ?? "?"}`);
-
-  // 7. Convert checkout → BC order (store_credit_amount populated natively by BC)
+  // 3. Convert checkout → BC order (creates Incomplete / status_id=0, required for Payments API)
   const bcOrderRes = await fetch(
     `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/orders`,
     { method: "POST", headers: h },
@@ -349,9 +285,49 @@ async function createBcOrderNativeStoreCredit(
   if (!bcOrderRes.ok)
     throw new Error(`Checkout→order failed (${bcOrderRes.status}): ${await bcOrderRes.text()}`);
   const { data: { id: bcOrderId } } = await bcOrderRes.json();
-  console.log(`[sc_native] BC order ${bcOrderId} created with native store credit`);
+  console.log(`[sc_native] BC order ${bcOrderId} created (Incomplete)`);
 
-  // 10. Patch order status=Pending + staff notes (checkout creates Incomplete by default)
+  // 4. Get a single-use Payment Access Token (PAT) scoped to this order
+  const patRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/payments/access_tokens`,
+    {
+      method:  "POST",
+      headers: h,
+      body:    JSON.stringify({ order: { id: bcOrderId } }),
+    },
+  );
+  if (!patRes.ok)
+    throw new Error(`Payment access token failed (${patRes.status}): ${await patRes.text()}`);
+  const paymentAccessToken = (await patRes.json())?.data?.id as string | undefined;
+  if (!paymentAccessToken) throw new Error("Payment access token missing from response");
+  console.log(`[sc_native] PAT obtained (len=${paymentAccessToken.length})`);
+
+  // 5. Apply store credit via Payments API (verified live: HTTP 201, store_credit_amount populated,
+  //    order moves to Awaiting Fulfillment, customer BC balance decreases).
+  //    instrument.type="store_credit" is required — empty {} causes 422 "Type is invalid".
+  const payRes = await fetch(
+    `https://payments.bigcommerce.com/stores/${storeHash}/payments`,
+    {
+      method:  "POST",
+      headers: {
+        Authorization:  `PAT ${paymentAccessToken}`,
+        Accept:         "application/vnd.bc.v1+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        payment: {
+          instrument:        { type: "store_credit" },
+          payment_method_id: "bigcommerce.store_credit",
+        },
+      }),
+    },
+  );
+  const payBody = await payRes.text();
+  console.log(`[sc_native] Payments API (${payRes.status}): ${payBody.slice(0, 300)}`);
+  if (!payRes.ok)
+    throw new Error(`Store credit payment failed (${payRes.status}): ${payBody.slice(0, 400)}`);
+
+  // 6. Patch staff notes only (Payments API already moves order to Awaiting Fulfillment)
   const staffNote = [`Store Credit Applied: $${storeCreditAmt.toFixed(2)}`, order.order_note || ""]
     .filter(Boolean).join("\n\n");
   await fetch(
