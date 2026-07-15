@@ -248,43 +248,103 @@ async function createBcOrderNativeStoreCredit(
     );
   }
 
-  // 3. Get storefront customer impersonation token
-  const impRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/storefront/api-token-customer-impersonation`,
-    {
-      method: "POST",
-      headers: h,
-      body: JSON.stringify({ channel_id: channelId, expires_at: Math.floor(Date.now() / 1000) + 3600 }),
-    },
-  );
-  if (!impRes.ok)
-    throw new Error(`Storefront impersonation token failed (${impRes.status}): ${await impRes.text()}`);
-  const impData = await impRes.json();
-  const impToken = impData?.data?.token as string | undefined;
-  if (!impToken) throw new Error("Storefront impersonation token missing from response");
-  console.log(`[sc_native] impersonation token obtained (len=${impToken.length})`);
+  // 3. Sign Customer Login JWT (HS256) and exchange it for a browser session cookie.
+  //    This must happen BEFORE cart creation so the cart is session-owned (required for
+  //    the storefront store-credit endpoint to see the checkout).
+  const jti    = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const jwtHdr  = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const jwtBody = Buffer.from(JSON.stringify({
+    iss:         clientId,
+    iat:         nowSec,
+    jti,
+    operation:   "customer_login",
+    store_hash:  storeHash,
+    customer_id: bcCustomerId,
+    channel_id:  channelId,
+  })).toString("base64url");
+  const { createHmac } = await import("crypto");
+  const jwtSig   = createHmac("sha256", clientSecret).update(`${jwtHdr}.${jwtBody}`).digest("base64url");
+  const loginJwt = `${jwtHdr}.${jwtBody}.${jwtSig}`;
 
-  // 4. Create management API cart with price overrides (preserves POS custom pricing)
-  const lineItems = (order.items as any[]).map((item: any) => {
-    const li: any = {
-      product_id: item.bigcommerce_product_id,
-      quantity:   item.quantity,
-      list_price: parseFloat(item.price_at_sale),
-    };
-    if (item.variant_id) li.variant_id = item.variant_id;
-    return li;
+  console.log(`[sc_native] fetching login/token for customer=${bcCustomerId}`);
+  const loginRes = await fetch(`${storefrontDomain}/login/token/${loginJwt}`, {
+    method:   "GET",
+    redirect: "manual",
   });
-  const cartRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/carts`,
-    { method: "POST", headers: h, body: JSON.stringify({ customer_id: bcCustomerId, line_items: lineItems }) },
-  );
-  if (!cartRes.ok)
-    throw new Error(`Cart creation failed (${cartRes.status}): ${await cartRes.text()}`);
-  const cartData = await cartRes.json();
-  const cartId   = cartData.data.id as string;
-  console.log(`[sc_native] Cart created: ${cartId}`);
+  const rawCookies: string[] =
+    (loginRes.headers as any).getSetCookie?.() ??
+    (loginRes.headers.get("set-cookie") ? [loginRes.headers.get("set-cookie")!] : []);
+  const cookieStr = rawCookies.map((c) => c.split(";")[0]).join("; ");
+  console.log(`[sc_native] login/token status=${loginRes.status} cookies=${rawCookies.length}`);
+  if (!cookieStr) {
+    throw new Error(
+      `Customer Login JWT did not produce a session cookie (HTTP ${loginRes.status}). ` +
+      "Verify the OAuth app's Client Secret and that the Customers Login scope is enabled.",
+    );
+  }
 
-  // 5. Add billing address (non-fatal — checkout engine uses it for order record)
+  // Shared headers for storefront REST API calls (session-cookie + AJAX markers)
+  const sfH = {
+    Cookie:             cookieStr,
+    "Content-Type":     "application/json",
+    Accept:             "application/json",
+    Origin:             storefrontDomain,
+    Referer:            `${storefrontDomain}/`,
+    "X-Requested-With": "XMLHttpRequest",
+  };
+
+  // 4. Create cart via STOREFRONT API (session-owned — required for store-credit endpoint).
+  //    Management-API carts are invisible to the storefront session (confirmed: 401).
+  const sfLineItems = (order.items as any[]).map((item: any) => ({
+    productId: item.bigcommerce_product_id,
+    quantity:  item.quantity,
+    ...(item.variant_id ? { variantId: item.variant_id } : {}),
+  }));
+  const sfCartRes = await fetch(`${storefrontDomain}/api/storefront/cart`, {
+    method:  "POST",
+    headers: sfH,
+    body:    JSON.stringify({ lineItems: sfLineItems }),
+  });
+  if (!sfCartRes.ok) {
+    const err = await sfCartRes.text();
+    throw new Error(`Storefront cart creation failed (${sfCartRes.status}): ${err.slice(0, 400)}`);
+  }
+  const sfCartData = await sfCartRes.json();
+  const cartId        = sfCartData.id as string;
+  const physicalItems = (sfCartData.lineItems?.physicalItems ?? []) as any[];
+  console.log(`[sc_native] Storefront cart created: ${cartId}, items: ${physicalItems.length}`);
+
+  // 5. Update each line item price via MANAGEMENT API (list_price override for POS pricing).
+  //    Both APIs share the same cart; management API can patch prices on session-created carts.
+  for (const sfItem of physicalItems) {
+    const orderItem = (order.items as any[]).find(
+      (oi: any) =>
+        oi.bigcommerce_product_id === sfItem.productId &&
+        (!sfItem.variantId || oi.variant_id === sfItem.variantId),
+    );
+    if (!orderItem) continue;
+    const listPrice = parseFloat(orderItem.price_at_sale);
+    const updRes = await fetch(
+      `https://api.bigcommerce.com/stores/${storeHash}/v3/carts/${cartId}/items/${sfItem.id}`,
+      {
+        method:  "PUT",
+        headers: h,
+        body:    JSON.stringify({
+          line_item: {
+            product_id: sfItem.productId,
+            quantity:   sfItem.quantity,
+            list_price: listPrice,
+          },
+        }),
+      },
+    );
+    if (!updRes.ok)
+      console.warn(`[sc_native] price update for ${sfItem.id} failed (${updRes.status}): ${(await updRes.text()).slice(0, 200)}`);
+  }
+  console.log(`[sc_native] cart ${cartId} prices updated`);
+
+  // 6. Add billing address via MANAGEMENT API (non-fatal)
   const a = order.billing_address || {};
   await fetch(
     `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/billing-address`,
@@ -309,84 +369,16 @@ async function createBcOrderNativeStoreCredit(
     },
   ).catch((e) => console.warn("[sc_native] billing-address non-fatal:", e));
 
-  // 6. Sign Customer Login JWT (HS256) — grants a real browser session via /login/token/
-  //    BC's /v3/checkouts/{id}/store-credit management API returns 404 on this store.
-  //    The storefront REST API requires a browser session cookie; we get one here.
-  const jti    = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const nowSec = Math.floor(Date.now() / 1000);
-  const jwtHdr  = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
-  const jwtBody = Buffer.from(JSON.stringify({
-    iss:         clientId,
-    iat:         nowSec,
-    jti,
-    operation:   "customer_login",
-    store_hash:  storeHash,
-    customer_id: bcCustomerId,
-    channel_id:  channelId,
-  })).toString("base64url");
-  const { createHmac } = await import("crypto");
-  const jwtSig   = createHmac("sha256", clientSecret).update(`${jwtHdr}.${jwtBody}`).digest("base64url");
-  const loginJwt = `${jwtHdr}.${jwtBody}.${jwtSig}`;
-
-  // 7. Exchange Customer Login JWT for a browser session cookie
-  //    GET /login/token/{jwt} → BC validates JWT, sets httpOnly session cookie, redirects.
-  //    We capture the Set-Cookie header without following the redirect.
-  console.log(`[sc_native] fetching login/token for customer=${bcCustomerId}`);
-  const loginRes = await fetch(`${storefrontDomain}/login/token/${loginJwt}`, {
-    method:   "GET",
-    redirect: "manual",
-  });
-  const rawCookies: string[] =
-    (loginRes.headers as any).getSetCookie?.() ??
-    (loginRes.headers.get("set-cookie") ? [loginRes.headers.get("set-cookie")!] : []);
-  const cookieStr = rawCookies.map((c) => c.split(";")[0]).join("; ");
-  console.log(`[sc_native] login/token status=${loginRes.status} cookies=${rawCookies.length}`);
-  if (!cookieStr) {
-    throw new Error(
-      `Customer Login JWT did not produce a session cookie (HTTP ${loginRes.status}). ` +
-      "Verify the OAuth app's Client Secret and that the Customers Login scope is enabled.",
-    );
-  }
-
-  // 8. Verify the checkout is visible in the customer session before applying store credit
-  const chkGetRes = await fetch(
-    `${storefrontDomain}/api/storefront/checkouts/${cartId}`,
-    {
-      headers: {
-        Cookie:             cookieStr,
-        Accept:             "application/json",
-        Origin:             storefrontDomain,
-        Referer:            `${storefrontDomain}/checkout`,
-        "X-Requested-With": "XMLHttpRequest",
-      },
-    },
-  );
-  const chkGetBody = await chkGetRes.text();
-  console.log(`[sc_native] checkout GET (${chkGetRes.status}): ${chkGetBody.slice(0, 300)}`);
-
-  // Apply store credit via storefront REST API using the session cookie.
-  console.log(`[sc_native] applying store credit (storefront cookie): cart=${cartId}`);
+  // 7. Apply store credit via STOREFRONT API (cart is session-owned — this should now work)
+  console.log(`[sc_native] applying store credit: cart=${cartId}`);
   const scRes = await fetch(
     `${storefrontDomain}/api/storefront/checkouts/${cartId}/store-credit`,
-    {
-      method:  "POST",
-      headers: {
-        Cookie:                   cookieStr,
-        "Content-Type":           "application/json",
-        Accept:                   "application/json",
-        Origin:                   storefrontDomain,
-        Referer:                  `${storefrontDomain}/checkout`,
-        "X-Requested-With":       "XMLHttpRequest",
-      },
-      body: JSON.stringify({}),
-    },
+    { method: "POST", headers: sfH, body: JSON.stringify({}) },
   );
   const scBody = await scRes.text();
-  console.log(`[sc_native] store-credit response (${scRes.status}): ${scBody.slice(0, 400)}`);
-  if (!scRes.ok) {
+  console.log(`[sc_native] store-credit (${scRes.status}): ${scBody.slice(0, 400)}`);
+  if (!scRes.ok)
     throw new Error(`Store credit application failed (${scRes.status}): ${scBody.slice(0, 400)}`);
-  }
-  console.log(`[sc_native] Store credit applied to checkout ${cartId}`);
 
   // 9. Convert checkout → BC order (store_credit_amount populated natively by BC)
   const bcOrderRes = await fetch(
