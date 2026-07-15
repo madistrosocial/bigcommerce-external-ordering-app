@@ -348,9 +348,23 @@ async function createBcOrderNativeStoreCredit(
     );
   }
 
-  // 8. Apply store credit via storefront REST API using the session cookie.
-  //    BC's storefront REST API has CSRF protection; mimic a browser AJAX call with
-  //    Origin + Referer (same-origin) and X-Requested-With headers.
+  // 8. Verify the checkout is visible in the customer session before applying store credit
+  const chkGetRes = await fetch(
+    `${storefrontDomain}/api/storefront/checkouts/${cartId}`,
+    {
+      headers: {
+        Cookie:             cookieStr,
+        Accept:             "application/json",
+        Origin:             storefrontDomain,
+        Referer:            `${storefrontDomain}/checkout`,
+        "X-Requested-With": "XMLHttpRequest",
+      },
+    },
+  );
+  const chkGetBody = await chkGetRes.text();
+  console.log(`[sc_native] checkout GET (${chkGetRes.status}): ${chkGetBody.slice(0, 300)}`);
+
+  // Apply store credit via storefront REST API using the session cookie.
   console.log(`[sc_native] applying store credit (storefront cookie): cart=${cartId}`);
   const scRes = await fetch(
     `${storefrontDomain}/api/storefront/checkouts/${cartId}/store-credit`,
