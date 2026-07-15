@@ -52,6 +52,7 @@ export const products = pgTable("products", {
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   image: text("image").notNull(),
   description: text("description").notNull(),
+  cost_price: decimal("cost_price", { precision: 10, scale: 2 }),
   stock_level: integer("stock_level").notNull().default(0),
   is_pinned: boolean("is_pinned").notNull().default(false),
   is_promotion: boolean("is_promotion").notNull().default(false),

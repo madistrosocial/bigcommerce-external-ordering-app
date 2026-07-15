@@ -508,6 +508,7 @@ export async function registerRoutes(
               ...product,
               name: p.name ?? product.name,
               price: p.price?.toString() ?? product.price,
+              cost_price: p.cost_price != null ? p.cost_price.toString() : (product.cost_price ?? null),
               stock_level: p.inventory_level ?? product.stock_level,
               min_purchase_quantity: p.order_quantity_minimum ?? product.min_purchase_quantity ?? null,
               max_purchase_quantity: p.order_quantity_maximum ?? product.max_purchase_quantity ?? null,
@@ -795,6 +796,7 @@ export async function registerRoutes(
           await storage.updateProductByBigCommerceId(product.bigcommerce_id, {
             variants,
             price: p.price?.toString() || product.price,
+            cost_price: p.cost_price != null ? p.cost_price.toString() : null,
             stock_level: p.inventory_level || 0,
             name: p.name || product.name,
             sku: p.sku || product.sku,
