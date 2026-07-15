@@ -206,6 +206,10 @@ export default function InvoicePrintPage() {
     const discount = fmt(order.discount_amount);
     const tax = fmt(order.total_tax);
     const total = fmt(order.total_ex_tax ?? order.total_inc_tax);
+    const storeCreditAmt = parseFloat(order.store_credit_amount ?? "0");
+    const storeCreditRow = storeCreditAmt > 0
+      ? `<tr class="store-credit-row"><td>Store Credit</td><td>-${fmt(storeCreditAmt)}</td></tr>`
+      : "";
     const unpaidAmt = order.payment_status !== "paid" ? fmt(order.total_inc_tax) : "$0.00";
     const outstanding = order.payment_status !== "paid" ? fmt(order.total_inc_tax) : "$0.00";
 
@@ -251,6 +255,7 @@ export default function InvoicePrintPage() {
       discount,
       tax,
       total,
+      store_credit_row: storeCreditRow,
       unpaid: unpaidAmt,
       outstanding,
       total_items: String(totalItems),

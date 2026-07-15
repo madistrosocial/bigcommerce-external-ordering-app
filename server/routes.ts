@@ -49,6 +49,7 @@ table.totals { width: 275px; border-collapse: collapse; }
 table.totals td { padding: 4px 8px; font-size: 12px; }
 table.totals td:last-child { text-align: right; }
 .grand-total td { font-weight: bold; font-size: 13px; border-top: 2px solid #222; border-bottom: 2px solid #222; padding: 6px 8px; }
+.store-credit-row td { color: #1a7f4b; font-weight: 600; }
 .outstanding-row { display: flex; justify-content: space-between; align-items: baseline; padding: 9px 0; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; margin-bottom: 14px; }
 .outstanding-label { font-weight: bold; font-size: 13px; }
 .outstanding-amount { font-weight: bold; font-size: 13px; margin-left: 10px; }
@@ -91,6 +92,7 @@ table.totals td:last-child { text-align: right; }
     <tr><td>Discount</td><td>{{discount}}</td></tr>
     <tr><td>Tax</td><td>{{tax}}</td></tr>
     <tr class="grand-total"><td>Total</td><td>{{total}}</td></tr>
+    {{store_credit_row}}
     <tr><td>Unpaid</td><td>{{unpaid}}</td></tr>
   </table>
 </div>
