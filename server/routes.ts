@@ -1,5 +1,4 @@
 import type { Express, Request, Response, NextFunction } from "express";
-import { createHmac } from "crypto";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import {
@@ -197,17 +196,13 @@ async function checkBcStock(
 //   6. POST /api/storefront/checkouts/{id}/store-credit with customerAccessToken
 //   7. POST /v3/checkouts/{id}/orders → BC order with native store_credit_amount
 //   8. Read updated BC balance and return it (BC is authoritative after checkout)
-// BigCommerce is the authoritative store credit ledger.
-// CRM mirrors BC balance after successful checkout.
-// Requires bc_client_id + bc_client_secret in bigcommerce_config settings.
-// Create an OAuth app at https://devtools.bigcommerce.com/ with scope:
-//   Customers Login (write) — needed to sign Customer Login JWTs.
+// OAuth credentials (clientId/clientSecret) no longer needed.
+// Uses impersonation token + X-Bc-Customer-Id directly on the storefront REST API,
+// bypassing the loginWithCustomerLoginJwt GQL mutation (which only works browser-side).
 async function createBcOrderNativeStoreCredit(
   storeHash: string,
   token: string,
   storefrontDomain: string,
-  clientId: string | null,
-  clientSecret: string | null,
   channelId: number,
   order: any,
   storeCreditAmt: number,
@@ -236,22 +231,15 @@ async function createBcOrderNativeStoreCredit(
     throw new Error(`Failed to write BC store credit balance (${setBalRes.status}): ${await setBalRes.text()}`);
   console.log(`[sc_native] BC balance set to $${crmBalance}`);
 
-  // 2. Validate required config fields
+  // 2. Validate required config
   if (!storefrontDomain) {
     throw new Error(
       "Storefront URL is not configured. Go to Admin → Integration Settings and set it " +
       "(e.g. https://yourdomain.com) then save.",
     );
   }
-  if (!clientId || !clientSecret) {
-    throw new Error(
-      "Native store credit checkout requires BigCommerce OAuth credentials " +
-      "(Client ID + Client Secret). Please configure these in Admin → Integration Settings. " +
-      "Create an OAuth app at https://devtools.bigcommerce.com/ with the 'Customers Login' scope.",
-    );
-  }
 
-  // 3. Get storefront customer impersonation token (used as GraphQL Bearer auth)
+  // 3. Get storefront customer impersonation token
   const impRes = await fetch(
     `https://api.bigcommerce.com/stores/${storeHash}/v3/storefront/api-token-customer-impersonation`,
     {
@@ -312,66 +300,19 @@ async function createBcOrderNativeStoreCredit(
     },
   ).catch((e) => console.warn("[sc_native] billing-address non-fatal:", e));
 
-  // 6. Sign Customer Login JWT (HS256) with OAuth client_secret
-  //    Spec: https://developer.bigcommerce.com/api-docs/storefront/customer-login-api
-  const jti     = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const nowSec  = Math.floor(Date.now() / 1000);
-  const jwtHdr  = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
-  const jwtBody = Buffer.from(JSON.stringify({
-    iss:         clientId,
-    iat:         nowSec,
-    jti,
-    operation:   "customer_login",
-    store_hash:  storeHash,
-    customer_id: bcCustomerId,
-    channel_id:  channelId,
-  })).toString("base64url");
-  const jwtSig   = createHmac("sha256", clientSecret).update(`${jwtHdr}.${jwtBody}`).digest("base64url");
-  const loginJwt = `${jwtHdr}.${jwtBody}.${jwtSig}`;
-
-  // 7. GraphQL loginWithCustomerLoginJwt → customerAccessToken (server-to-server field)
-  console.log(`[sc_native] GQL login: customer=${bcCustomerId} iss=${clientId} store=${storeHash} channel=${channelId}`);
-  const gqlRes = await fetch(`${storefrontDomain}/graphql`, {
-    method: "POST",
-    headers: {
-      Accept:        "application/json",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${impToken}`,
-    },
-    body: JSON.stringify({
-      query: `mutation LoginCustomer($jwt: String!) {
-        loginWithCustomerLoginJwt(jwt: $jwt) {
-          customerAccessToken {
-            value
-            expiresAt
-          }
-        }
-      }`,
-      variables: { jwt: loginJwt },
-    }),
-  });
-  if (!gqlRes.ok) {
-    const gqlErrBody = await gqlRes.text().catch(() => "");
-    throw new Error(`GraphQL login request failed (${gqlRes.status}): ${gqlErrBody.slice(0, 600)}`);
-  }
-  const gqlData = await gqlRes.json();
-  const customerAccessToken = gqlData?.data?.loginWithCustomerLoginJwt?.customerAccessToken?.value as string | undefined;
-  if (!customerAccessToken) {
-    const detail = JSON.stringify(gqlData?.errors ?? gqlData).slice(0, 400);
-    throw new Error(`Customer login failed — could not obtain customerAccessToken: ${detail}`);
-  }
-  console.log(`[sc_native] customerAccessToken obtained`);
-
-  // 8. Apply store credit to checkout via REST storefront API using customerAccessToken
-  //    (customerAccessToken provides proper customer session context server-to-server)
+  // 6. Apply store credit using impersonation token + X-Bc-Customer-Id (server-to-server pattern)
+  //    The loginWithCustomerLoginJwt GQL mutation is browser-only; the REST storefront API
+  //    accepts the impersonation token directly when paired with X-Bc-Customer-Id.
+  console.log(`[sc_native] applying store credit: customer=${bcCustomerId} cart=${cartId}`);
   const scRes = await fetch(
     `${storefrontDomain}/api/storefront/checkouts/${cartId}/store-credit`,
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${customerAccessToken}`,
-        "Content-Type": "application/json",
-        Accept:         "application/json",
+        Authorization:        `Bearer ${impToken}`,
+        "X-Bc-Customer-Id":   String(bcCustomerId),
+        "Content-Type":       "application/json",
+        Accept:               "application/json",
       },
       body: JSON.stringify({}),
     },
@@ -1129,8 +1070,6 @@ export async function registerRoutes(
                   storeHash,
                   String(token),
                   String(config.storefrontUrl || ""),
-                  config.clientId   ? String(config.clientId)   : null,
-                  config.clientSecret ? String(config.clientSecret) : null,
                   Number(config.channelId ?? 1),
                   order,
                   storeCreditAmt,
