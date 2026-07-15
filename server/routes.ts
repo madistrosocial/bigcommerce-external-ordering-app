@@ -341,7 +341,10 @@ async function createBcOrderNativeStoreCredit(
     body: JSON.stringify({
       query: `mutation LoginCustomer($jwt: String!) {
         loginWithCustomerLoginJwt(jwt: $jwt) {
-          customerAccessToken
+          customerAccessToken {
+            value
+            expiresAt
+          }
         }
       }`,
       variables: { jwt: loginJwt },
@@ -352,7 +355,7 @@ async function createBcOrderNativeStoreCredit(
     throw new Error(`GraphQL login request failed (${gqlRes.status}): ${gqlErrBody.slice(0, 600)}`);
   }
   const gqlData = await gqlRes.json();
-  const customerAccessToken = gqlData?.data?.loginWithCustomerLoginJwt?.customerAccessToken as string | undefined;
+  const customerAccessToken = gqlData?.data?.loginWithCustomerLoginJwt?.customerAccessToken?.value as string | undefined;
   if (!customerAccessToken) {
     const detail = JSON.stringify(gqlData?.errors ?? gqlData).slice(0, 400);
     throw new Error(`Customer login failed — could not obtain customerAccessToken: ${detail}`);
