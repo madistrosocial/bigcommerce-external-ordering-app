@@ -1,16 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
+import { createHmac } from "crypto";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import {
-  diagLog,
-  DiagModule,
-  DiagStatus,
-  makeTimer,
-  makeRequestId,
-  getLogBuffer,
-  clearLogBuffer,
-  isDiagEnabled,
-} from "./logger";
 import {
   insertProductSchema,
   insertOrderSchema,
@@ -196,24 +187,28 @@ async function checkBcStock(
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
-// ── BC Store Credit Order Creation ─────────────────────────────────────────
-// BC's store_credit_amount on orders is read-only (set only by BC's own checkout).
-// All server-to-server paths to native store_credit_amount are blocked on this store:
-//   - V2 Customers store_credit_amount: 400 "field not supported by this resource"
-//   - V3/checkouts/{id}/store-credit: 404 (requires native BC credit, can't be written)
-//   - V3/checkouts/{id}/gift-certificates: 404 (gift certs not enabled in store)
-//   - GraphQL updateCheckout useStoreCredit: field not in this store's schema
-//
-// Working approach: standard V2 Orders API with discount_amount = credit applied.
-// The BC order total is correctly reduced. Staff notes document the store credit.
-// CRM balance (store_credit_balance on crm_customers) is the authoritative ledger.
+// ── Native BC Store Credit via OAuth Customer Login JWT ───────────────────────
+// Flow:
+//   1. Sync CRM balance → BC via PUT /v3/customers store_credit_amounts
+//   2. Get storefront impersonation token (for GraphQL auth)
+//   3. Create management API cart with price overrides (preserves POS pricing)
+//   4. Sign Customer Login JWT with OAuth client_secret (HMAC-SHA256 / HS256)
+//   5. GraphQL loginWithCustomerLoginJwt → customerAccessToken (server-to-server)
+//   6. POST /api/storefront/checkouts/{id}/store-credit with customerAccessToken
+//   7. POST /v3/checkouts/{id}/orders → BC order with native store_credit_amount
+//   8. Read updated BC balance and return it (BC is authoritative after checkout)
+// BigCommerce is the authoritative store credit ledger.
+// CRM mirrors BC balance after successful checkout.
+// Requires bc_client_id + bc_client_secret in bigcommerce_config settings.
+// Create an OAuth app at https://devtools.bigcommerce.com/ with scope:
+//   Customers Login (write) — needed to sign Customer Login JWTs.
 async function createBcOrderNativeStoreCredit(
   storeHash: string,
   token: string,
-  _storefrontDomain: string,
-  _clientId: string | null,
-  _clientSecret: string | null,
-  _channelId: number,
+  storefrontDomain: string,
+  clientId: string | null,
+  clientSecret: string | null,
+  channelId: number,
   order: any,
   storeCreditAmt: number,
 ): Promise<{ bcOrderId: number; bcCreditRemaining: number }> {
@@ -224,51 +219,196 @@ async function createBcOrderNativeStoreCredit(
   };
   const bcCustomerId = order.bigcommerce_customer_id as number;
 
+  // 1. Read CRM balance and write it to BC (makes BC authoritative balance match CRM)
   const crmCustomer = await storage.getCrmCustomerByBcId(bcCustomerId);
   const crmBalance  = Number(crmCustomer?.store_credit_balance ?? 0);
-  const amtToApply  = Math.min(storeCreditAmt, crmBalance);
-  console.log(`[sc] customer=${bcCustomerId} crmBalance=$${crmBalance} applying=$${amtToApply}`);
+  console.log(`[sc_native] customer=${bcCustomerId} crmBalance=$${crmBalance} toApply=$${storeCreditAmt}`);
 
-  const staffNote = [
-    `Store Credit Applied: $${amtToApply.toFixed(2)}`,
-    order.order_note || "",
-  ].filter(Boolean).join("\n\n");
-
-  const bcOrderData: any = {
-    status_id:        1,
-    customer_id:      bcCustomerId,
-    billing_address:  order.billing_address,
-    staff_notes:      staffNote,
-    customer_message: (order as any).customer_note || undefined,
-    discount_amount:  amtToApply.toFixed(4),
-    products: (order.items as any[]).map((item: any) => {
-      const p: any = {
-        product_id:    item.bigcommerce_product_id,
-        quantity:      item.quantity,
-        price_inc_tax: parseFloat(item.price_at_sale),
-        price_ex_tax:  parseFloat(item.price_at_sale),
-      };
-      if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
-        p.product_options = item.variant_option_values.map(
-          (ov: any) => ({ id: ov.option_id, value: String(ov.id) }),
-        );
-      }
-      return p;
-    }),
-  };
-
-  const v2Res = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
-    { method: "POST", headers: h, body: JSON.stringify(bcOrderData) },
+  const setBalRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/customers`,
+    {
+      method: "PUT",
+      headers: h,
+      body: JSON.stringify([{ id: bcCustomerId, store_credit_amounts: [{ amount: crmBalance }] }]),
+    },
   );
-  if (!v2Res.ok)
-    throw new Error(`BC order creation failed (${v2Res.status}): ${await v2Res.text()}`);
+  if (!setBalRes.ok)
+    throw new Error(`Failed to write BC store credit balance (${setBalRes.status}): ${await setBalRes.text()}`);
+  console.log(`[sc_native] BC balance set to $${crmBalance}`);
 
-  const data = await v2Res.json();
-  const bcOrderId = data.id as number;
-  console.log(`[sc] BC order ${bcOrderId} created; discount_amount=$${amtToApply} (store credit)`);
+  // 2. Validate OAuth credentials (required for customerAccessToken)
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      "Native store credit checkout requires BigCommerce OAuth credentials " +
+      "(Client ID + Client Secret). Please configure these in Admin → Integration Settings. " +
+      "Create an OAuth app at https://devtools.bigcommerce.com/ with the 'Customers Login' scope.",
+    );
+  }
 
-  const bcCreditRemaining = Math.max(0, crmBalance - amtToApply);
+  // 3. Get storefront customer impersonation token (used as GraphQL Bearer auth)
+  const impRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/storefront/api-token-customer-impersonation`,
+    {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify({ channel_id: channelId, expires_at: Math.floor(Date.now() / 1000) + 3600 }),
+    },
+  );
+  if (!impRes.ok)
+    throw new Error(`Storefront impersonation token failed (${impRes.status}): ${await impRes.text()}`);
+  const impData = await impRes.json();
+  const impToken = impData?.data?.token as string | undefined;
+  if (!impToken) throw new Error("Storefront impersonation token missing from response");
+
+  // 4. Create management API cart with price overrides (preserves POS custom pricing)
+  const lineItems = (order.items as any[]).map((item: any) => {
+    const li: any = {
+      product_id: item.bigcommerce_product_id,
+      quantity:   item.quantity,
+      list_price: parseFloat(item.price_at_sale),
+    };
+    if (item.variant_id) li.variant_id = item.variant_id;
+    return li;
+  });
+  const cartRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/carts`,
+    { method: "POST", headers: h, body: JSON.stringify({ customer_id: bcCustomerId, line_items: lineItems }) },
+  );
+  if (!cartRes.ok)
+    throw new Error(`Cart creation failed (${cartRes.status}): ${await cartRes.text()}`);
+  const cartData = await cartRes.json();
+  const cartId   = cartData.data.id as string;
+  console.log(`[sc_native] Cart created: ${cartId}`);
+
+  // 5. Add billing address (non-fatal — checkout engine uses it for order record)
+  const a = order.billing_address || {};
+  await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/billing-address`,
+    {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify({
+        first_name:             a.first_name  || "",
+        last_name:              a.last_name   || "",
+        email:                  a.email || crmCustomer?.email || "noreply@store.com",
+        company:                a.company     || "",
+        address1:               a.address1    || a.street_1 || "",
+        address2:               a.address2    || a.street_2 || "",
+        city:                   a.city        || "",
+        state_or_province:      a.state_or_province      || a.state || "",
+        state_or_province_code: a.state_or_province_code || a.state || "",
+        postal_code:            a.postal_code || a.zip    || "",
+        country:                a.country     || "",
+        country_code:           a.country_code || a.country_iso2 || "US",
+        phone:                  a.phone       || "",
+      }),
+    },
+  ).catch((e) => console.warn("[sc_native] billing-address non-fatal:", e));
+
+  // 6. Sign Customer Login JWT (HS256) with OAuth client_secret
+  //    Spec: https://developer.bigcommerce.com/api-docs/storefront/customer-login-api
+  const jti     = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const nowSec  = Math.floor(Date.now() / 1000);
+  const jwtHdr  = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const jwtBody = Buffer.from(JSON.stringify({
+    iss:         clientId,
+    iat:         nowSec,
+    jti,
+    operation:   "customer_login",
+    store_hash:  storeHash,
+    customer_id: bcCustomerId,
+    channel_id:  channelId,
+  })).toString("base64url");
+  const jwtSig   = createHmac("sha256", clientSecret).update(`${jwtHdr}.${jwtBody}`).digest("base64url");
+  const loginJwt = `${jwtHdr}.${jwtBody}.${jwtSig}`;
+
+  // 7. GraphQL loginWithCustomerLoginJwt → customerAccessToken (server-to-server field)
+  const gqlRes = await fetch(`${storefrontDomain}/graphql`, {
+    method: "POST",
+    headers: {
+      Accept:        "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${impToken}`,
+    },
+    body: JSON.stringify({
+      query: `mutation LoginCustomer($jwt: String!) {
+        loginWithCustomerLoginJwt(jwt: $jwt) {
+          customerAccessToken
+        }
+      }`,
+      variables: { jwt: loginJwt },
+    }),
+  });
+  if (!gqlRes.ok)
+    throw new Error(`GraphQL login request failed (${gqlRes.status})`);
+  const gqlData = await gqlRes.json();
+  const customerAccessToken = gqlData?.data?.loginWithCustomerLoginJwt?.customerAccessToken as string | undefined;
+  if (!customerAccessToken) {
+    const detail = JSON.stringify(gqlData?.errors ?? gqlData).slice(0, 400);
+    throw new Error(`Customer login failed — could not obtain customerAccessToken: ${detail}`);
+  }
+  console.log(`[sc_native] customerAccessToken obtained`);
+
+  // 8. Apply store credit to checkout via REST storefront API using customerAccessToken
+  //    (customerAccessToken provides proper customer session context server-to-server)
+  const scRes = await fetch(
+    `${storefrontDomain}/api/storefront/checkouts/${cartId}/store-credit`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${customerAccessToken}`,
+        "Content-Type": "application/json",
+        Accept:         "application/json",
+      },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!scRes.ok) {
+    const scErr = await scRes.text();
+    throw new Error(`Store credit application failed (${scRes.status}): ${scErr}`);
+  }
+  console.log(`[sc_native] Store credit applied to checkout ${cartId}`);
+
+  // 9. Convert checkout → BC order (store_credit_amount populated natively by BC)
+  const bcOrderRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/orders`,
+    { method: "POST", headers: h },
+  );
+  if (!bcOrderRes.ok)
+    throw new Error(`Checkout→order failed (${bcOrderRes.status}): ${await bcOrderRes.text()}`);
+  const { data: { id: bcOrderId } } = await bcOrderRes.json();
+  console.log(`[sc_native] BC order ${bcOrderId} created with native store credit`);
+
+  // 10. Patch order status=Pending + staff notes (checkout creates Incomplete by default)
+  const staffNote = [`Store Credit Applied: $${storeCreditAmt.toFixed(2)}`, order.order_note || ""]
+    .filter(Boolean).join("\n\n");
+  await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`,
+    {
+      method: "PUT",
+      headers: h,
+      body: JSON.stringify({
+        status_id:        1,
+        staff_notes:      staffNote,
+        customer_message: (order as any).customer_note || undefined,
+      }),
+    },
+  ).catch((e) => console.warn("[sc_native] status patch non-fatal:", e));
+
+  // 11. Read updated BC balance (BC deducted store credit during checkout completion)
+  let bcCreditRemaining = 0;
+  try {
+    const custReadRes = await fetch(
+      `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustomerId}`,
+      { headers: h },
+    );
+    if (custReadRes.ok) {
+      const custReadData = await custReadRes.json();
+      bcCreditRemaining = Number(custReadData?.store_credit_amount ?? custReadData?.store_credit ?? 0);
+      console.log(`[sc_native] BC balance after order: $${bcCreditRemaining}`);
+    }
+  } catch (_) { /* non-fatal — CRM sync will use bc_credit_remaining=0 as fallback */ }
+
   return { bcOrderId, bcCreditRemaining };
 }
 
@@ -354,484 +494,6 @@ export async function registerRoutes(
       (req as any).authUser = user;
       next();
     };
-
-  // ===== BIGCOMMERCE OAUTH INSTALLATION CALLBACK =====
-
-  /**
-   * ALL /api/bc/auth — method-agnostic interceptor
-   * Fires before the GET handler to log EVERY request BC sends, regardless of HTTP method.
-   * This catches POST, PUT, or any non-GET method BC might use server-to-server.
-   */
-  app.all("/api/bc/auth", (req: Request, res: Response, next: Function) => {
-    const interceptId = makeRequestId();
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[BC-INTERCEPT] Any-method request received",
-      status:    DiagStatus.Info,
-      requestId: interceptId,
-      data: {
-        method:        req.method,
-        path:          req.path,
-        host:          req.get("host"),
-        forwarded_for: req.get("x-forwarded-for"),
-        user_agent:    req.get("user-agent"),
-        content_type:  req.get("content-type"),
-        accept:        req.get("accept"),
-        code_in_query: !!(req.query as any).code,
-        code_in_body:  !!(req.body as any)?.code,
-        query_keys:    Object.keys(req.query || {}),
-        body_keys:     Object.keys(req.body || {}),
-      },
-    });
-    // If BC used POST, handle it identically to GET by injecting body params into query
-    if (req.method === "POST" && req.body) {
-      Object.assign(req.query, req.body);
-    }
-    next();
-  });
-
-  /**
-   * GET /api/bc/auth
-   * Public endpoint — BigCommerce redirects here after the merchant installs/authorizes
-   * the app in the BC Control Panel. No session authentication is required.
-   *
-   * Fully instrumented with the diagnostic logging framework (DIAG_LOGGING=true).
-   * Configure the Auth Callback URL in your BC app as:
-   *   https://<your-domain>/api/bc/auth
-   */
-  app.get("/api/bc/auth", async (req: Request, res: Response) => {
-    const requestId  = makeRequestId();
-    const handlerTimer = makeTimer();
-
-    // ── OAUTH-1: Callback reached ─────────────────────────────────────────────
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[OAUTH-1] Callback reached",
-      status:    DiagStatus.Info,
-      requestId,
-      data: {
-        method:       req.method,
-        path:         req.path,
-        host:         req.get("host"),
-        forwarded_for: req.get("x-forwarded-for"),
-        user_agent:   req.get("user-agent"),
-      },
-    });
-
-    const { code, context, scope, state } = req.query as Record<string, string>;
-
-    // ── OAUTH-2: Query parameters ─────────────────────────────────────────────
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[OAUTH-2] Query parameters received",
-      status:    code && context ? DiagStatus.Info : DiagStatus.Warning,
-      requestId,
-      data: {
-        code_present:    !!code,
-        context_present: !!context,
-        scope_present:   !!scope,
-        state_present:   !!state,
-        context,
-        scope,
-        // code is intentionally NOT logged — treat as secret
-      },
-    });
-
-    // ── OAUTH-3: Configuration ────────────────────────────────────────────────
-    let cfg: Record<string, any> = {};
-    try {
-      const setting = await storage.getSetting("bigcommerce_config");
-      cfg = (setting?.value as Record<string, any>) ?? {};
-    } catch (e: any) {
-      diagLog({
-        module:    DiagModule.OAuth,
-        event:     "[OAUTH-3] Configuration load failed",
-        status:    DiagStatus.Error,
-        requestId,
-        error:     e.message,
-        stack:     e.stack,
-      });
-    }
-
-    // Reconstruct the exact callback URL this server is reachable at.
-    // Always use https — Replit serves all external traffic over HTTPS, and BC requires
-    // the redirect_uri to exactly match the registered Auth Callback URL (https://...).
-    // Do NOT fall back to req.protocol: Express defaults to "http" behind a proxy,
-    // which causes a redirect_uri_mismatch error when BC does its server-to-server call.
-    const proto       = req.get("x-forwarded-proto") || "https";
-    const hostHeader  = req.get("x-forwarded-host")  || req.get("host") || "";
-    const callbackUrl = hostHeader.includes("localhost")
-      ? `http://${hostHeader}/api/bc/auth`          // local dev only
-      : `${proto}://${hostHeader}/api/bc/auth`;     // production (always https)
-
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[OAUTH-3] Configuration loaded",
-      status:    DiagStatus.Info,
-      requestId,
-      data: {
-        callback_url_used:      callbackUrl,
-        client_id_loaded:       !!(cfg.clientId),
-        client_secret_loaded:   !!(cfg.clientSecret),
-        storefront_url_loaded:  !!(cfg.storefrontUrl),
-        store_hash_loaded:      !!(cfg.storeHash),
-      },
-    });
-
-    // Guard: must have authorization code
-    if (!code) {
-      const msg = "Missing 'code' query parameter — BigCommerce did not send an authorization code.";
-      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-7] Final response sent", status: DiagStatus.Failure, requestId, error: msg });
-      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-8] Handler completed",   status: DiagStatus.Failure, requestId, durationMs: handlerTimer() });
-      return res.status(400).send(`<html><body><h2>OAuth Error</h2><p>${msg}</p></body></html>`);
-    }
-
-    // Guard: must have OAuth credentials configured
-    if (!cfg.clientId || !cfg.clientSecret) {
-      const msg = "OAuth Client ID and/or Client Secret not configured. Set them in Admin → Integration Settings.";
-      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-7] Final response sent", status: DiagStatus.Failure, requestId, error: msg });
-      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-8] Handler completed",   status: DiagStatus.Failure, requestId, durationMs: handlerTimer() });
-      return res.status(400).send(`<html><body><h2>OAuth Configuration Error</h2><p>${msg}</p></body></html>`);
-    }
-
-    // ── OAUTH-4: Beginning token exchange ─────────────────────────────────────
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[OAUTH-4] Beginning token exchange",
-      status:    DiagStatus.Info,
-      requestId,
-      data: {
-        endpoint:     "https://login.bigcommerce.com/oauth2/token",
-        grant_type:   "authorization_code",
-        redirect_uri: callbackUrl,
-        context,
-      },
-    });
-
-    let accessToken:    string | null = null;
-    let exchangeError:  string | null = null;
-    const exchangeTimer = makeTimer();
-
-    try {
-      const params = new URLSearchParams({
-        client_id:     cfg.clientId,
-        client_secret: cfg.clientSecret,
-        code,
-        scope:         scope   || "",
-        context:       context || "",
-        grant_type:    "authorization_code",
-        redirect_uri:  callbackUrl,
-      });
-
-      const tokenRes = await fetch("https://login.bigcommerce.com/oauth2/token", {
-        method:  "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-        body:    params.toString(),
-      });
-
-      const rawBody = await tokenRes.text();
-      let parsed: Record<string, any> = {};
-      try { parsed = JSON.parse(rawBody); } catch (_) { /* non-JSON */ }
-
-      // ── OAUTH-5: Token exchange completed ─────────────────────────────────
-      diagLog({
-        module:    DiagModule.OAuth,
-        event:     "[OAUTH-5] Token exchange completed",
-        status:    tokenRes.ok ? DiagStatus.Success : DiagStatus.Failure,
-        requestId,
-        durationMs: exchangeTimer(),
-        data: {
-          http_status:           tokenRes.status,
-          access_token_present:  !!(parsed?.access_token),
-          scope_returned:        parsed?.scope,
-          context_returned:      parsed?.context,
-          // Only surface error fields — never log access_token
-          error:             parsed?.error,
-          error_description: parsed?.error_description,
-          // Raw body on failure (may contain redirect_uri mismatch detail etc.)
-          raw_response_on_failure: !tokenRes.ok
-            ? rawBody.substring(0, 800)
-            : undefined,
-        },
-      });
-
-      if (tokenRes.ok && parsed?.access_token) {
-        accessToken = parsed.access_token as string;
-      } else {
-        exchangeError = parsed?.error_description
-          || parsed?.error
-          || `HTTP ${tokenRes.status}: ${rawBody.substring(0, 300)}`;
-      }
-    } catch (e: any) {
-      exchangeError = e.message;
-      diagLog({
-        module:    DiagModule.OAuth,
-        event:     "[OAUTH-5] Token exchange exception",
-        status:    DiagStatus.Error,
-        requestId,
-        durationMs: exchangeTimer(),
-        error:     e.message,
-        stack:     e.stack,
-      });
-    }
-
-    if (!accessToken) {
-      const msg = `Token exchange failed: ${exchangeError}`;
-      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-7] Final response sent", status: DiagStatus.Failure, requestId, error: msg });
-      diagLog({ module: DiagModule.OAuth, event: "[OAUTH-8] Handler completed",   status: DiagStatus.Failure, requestId, durationMs: handlerTimer() });
-      return res.status(400).send(`<html><body><h2>OAuth Token Exchange Failed</h2><p>${msg}</p></body></html>`);
-    }
-
-    // ── OAUTH-6: Persist to database ──────────────────────────────────────────
-    let persistSuccess = false;
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[OAUTH-6] Database persistence",
-      status:    DiagStatus.Info,
-      requestId,
-      data: { write_attempted: true },
-    });
-
-    try {
-      const existingCfgRaw = await storage.getSetting("bigcommerce_config");
-      const existingCfg    = (existingCfgRaw?.value as Record<string, any>) ?? {};
-
-      // Extract storeHash from context e.g. "stores/abc123" → "abc123"
-      const newStoreHash = context?.replace(/^stores\//, "") || existingCfg.storeHash || "";
-
-      await storage.setSetting("bigcommerce_config", {
-        ...existingCfg,
-        token:     accessToken,
-        storeHash: newStoreHash,
-      });
-      persistSuccess = true;
-
-      diagLog({
-        module:    DiagModule.OAuth,
-        event:     "[OAUTH-6] Database persistence",
-        status:    DiagStatus.Success,
-        requestId,
-        data: { write_successful: true, store_hash_updated: newStoreHash },
-      });
-    } catch (e: any) {
-      diagLog({
-        module:    DiagModule.OAuth,
-        event:     "[OAUTH-6] Database persistence",
-        status:    DiagStatus.Error,
-        requestId,
-        data:  { write_successful: false },
-        error: e.message,
-        stack: e.stack,
-      });
-    }
-
-    // ── OAUTH-7: Final response ───────────────────────────────────────────────
-    // BigCommerce expects HTTP 200; a redirect or HTML page both work.
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[OAUTH-7] Final response sent",
-      status:    DiagStatus.Success,
-      requestId,
-      data: { response_type: "html_200", persist_success: persistSuccess },
-    });
-
-    // ── OAUTH-8: Handler completed ────────────────────────────────────────────
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[OAUTH-8] Handler completed",
-      status:    DiagStatus.Success,
-      requestId,
-      durationMs: handlerTimer(),
-    });
-
-    return res.status(200).send(`<!DOCTYPE html>
-<html>
-<head><title>App Installed — VanSales Pro</title>
-<style>body{font-family:sans-serif;padding:40px;max-width:500px;margin:0 auto}
-h2{color:#1a7f37}p{color:#555;margin-top:12px}</style>
-</head>
-<body>
-<h2>&#10003; BigCommerce App Installed Successfully</h2>
-<p>VanSales Pro has been authorized. Your access token has been saved.</p>
-<p>You may close this window and return to the BigCommerce Control Panel.</p>
-</body>
-</html>`);
-  });
-
-  /**
-   * GET /api/bc/auth/diagnostics
-   * Admin-only — returns the in-memory diagnostic log buffer.
-   * Only populated when DIAG_LOGGING=true.
-   *
-   * Query params:
-   *   ?module=OAuth     filter by module name
-   *   ?clear=true       clear the buffer after returning
-   */
-  app.get("/api/bc/auth/diagnostics", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      let logs = getLogBuffer();
-      if (req.query.module) {
-        const filter = String(req.query.module).toLowerCase();
-        logs = logs.filter((l) => l.module.toLowerCase().includes(filter));
-      }
-      if (req.query.clear === "true") clearLogBuffer();
-      res.json({
-        diag_logging_enabled: isDiagEnabled(),
-        enable_with:          "Set environment variable DIAG_LOGGING=true and restart the server",
-        total_entries:        logs.length,
-        logs,
-      });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  /**
-   * GET /api/bc/auth/log
-   * PUBLIC — no auth required. Returns last 50 OAuth log entries from the in-memory buffer.
-   * Exists so the install flow can be monitored from a plain browser tab without app login.
-   * Only populated when DIAG_LOGGING=true.
-   */
-  app.get("/api/bc/auth/log", async (req: Request, res: Response) => {
-    try {
-      const all  = getLogBuffer();
-      const logs = all.filter((l) => l.module === DiagModule.OAuth).slice(-50);
-      res.json({
-        diag_logging_enabled: isDiagEnabled(),
-        note: isDiagEnabled()
-          ? "Showing last 50 OAuth events. Refresh after each install attempt."
-          : "DIAG_LOGGING is not enabled. Set DIAG_LOGGING=true env var and restart the server.",
-        total_entries: logs.length,
-        logs,
-      });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  /**
-   * GET /api/bc/load
-   * Public endpoint — BigCommerce redirects the merchant's browser here after app installation
-   * and every time they open the app from the BC Control Panel.
-   *
-   * BC sends a signed JWT in the `signed_payload_jwt` query parameter.
-   * We decode (but do not fully verify) the payload for logging, then redirect to the main app.
-   *
-   * Configure the Load Callback URL in your BC app as:
-   *   https://<your-domain>/api/bc/load
-   */
-  app.get("/api/bc/load", async (req: Request, res: Response) => {
-    const requestId   = makeRequestId();
-    const loadTimer   = makeTimer();
-    const { signed_payload_jwt } = req.query as Record<string, string>;
-
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[BC-LOAD] Load callback reached",
-      status:    DiagStatus.Info,
-      requestId,
-      data: {
-        jwt_present: !!signed_payload_jwt,
-        host:        req.get("host"),
-        user_agent:  req.get("user-agent"),
-      },
-    });
-
-    // Decode JWT payload (middle segment) for diagnostic visibility — no verification needed here
-    let jwtPayload: Record<string, any> = {};
-    if (signed_payload_jwt) {
-      try {
-        const parts = signed_payload_jwt.split(".");
-        if (parts.length === 3) {
-          jwtPayload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-        }
-      } catch (_) { /* non-fatal — payload decode is diagnostic only */ }
-    }
-
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[BC-LOAD] JWT payload decoded",
-      status:    DiagStatus.Info,
-      requestId,
-      data: {
-        store_hash: jwtPayload?.sub || jwtPayload?.context?.replace?.("stores/", "") || "unknown",
-        user_email: jwtPayload?.user?.email || "unknown",
-        channel_id: jwtPayload?.channel_id || "unknown",
-        owner_email: jwtPayload?.owner?.email || "unknown",
-      },
-    });
-
-    // Redirect to the main application
-    const proto      = req.get("x-forwarded-proto") || req.protocol || "https";
-    const hostHeader = req.get("x-forwarded-host")  || req.get("host") || "";
-    const appUrl     = `${proto}://${hostHeader}/`;
-
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[BC-LOAD] Redirecting to app",
-      status:    DiagStatus.Success,
-      requestId,
-      durationMs: loadTimer(),
-      data: { redirect_to: appUrl },
-    });
-
-    // BC expects the Load URL to either render a page (for iframe embedding)
-    // or redirect the merchant to the app. We return a redirect page.
-    return res.status(200).send(`<!DOCTYPE html>
-<html>
-<head>
-<title>VanSales Pro</title>
-<meta http-equiv="refresh" content="0;url=${appUrl}">
-<style>body{font-family:sans-serif;padding:40px;text-align:center}
-a{color:#1657be;text-decoration:none}</style>
-</head>
-<body>
-<p>Redirecting to VanSales Pro&hellip;</p>
-<p><a href="${appUrl}">Click here if not redirected automatically.</a></p>
-<script>window.location.href=${JSON.stringify(appUrl)};</script>
-</body>
-</html>`);
-  });
-
-  /**
-   * GET /api/bc/uninstall
-   * Public endpoint — BigCommerce calls this when the merchant uninstalls the app.
-   * BC sends a signed JWT in the `signed_payload_jwt` query parameter.
-   * We log the event and return 200 to acknowledge.
-   *
-   * Configure the Uninstall Callback URL in your BC app as:
-   *   https://<your-domain>/api/bc/uninstall
-   */
-  app.get("/api/bc/uninstall", async (req: Request, res: Response) => {
-    const requestId = makeRequestId();
-    const { signed_payload_jwt } = req.query as Record<string, string>;
-
-    let jwtPayload: Record<string, any> = {};
-    if (signed_payload_jwt) {
-      try {
-        const parts = signed_payload_jwt.split(".");
-        if (parts.length === 3) {
-          jwtPayload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-        }
-      } catch (_) { /* non-fatal */ }
-    }
-
-    diagLog({
-      module:    DiagModule.OAuth,
-      event:     "[BC-UNINSTALL] Uninstall callback received",
-      status:    DiagStatus.Warning,
-      requestId,
-      data: {
-        jwt_present:  !!signed_payload_jwt,
-        store_hash:   jwtPayload?.sub || jwtPayload?.context?.replace?.("stores/", "") || "unknown",
-        user_email:   jwtPayload?.user?.email || "unknown",
-        owner_email:  jwtPayload?.owner?.email || "unknown",
-      },
-    });
-
-    // BC requires a 200 response to confirm the uninstall was received
-    return res.status(200).json({ acknowledged: true });
-  });
 
   // ===== PRODUCT ROUTES =====
 
