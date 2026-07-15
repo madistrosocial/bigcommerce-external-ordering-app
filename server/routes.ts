@@ -196,13 +196,15 @@ async function checkBcStock(
 //   6. POST /api/storefront/checkouts/{id}/store-credit with customerAccessToken
 //   7. POST /v3/checkouts/{id}/orders → BC order with native store_credit_amount
 //   8. Read updated BC balance and return it (BC is authoritative after checkout)
-// OAuth credentials (clientId/clientSecret) no longer needed.
-// Uses impersonation token + X-Bc-Customer-Id directly on the storefront REST API,
-// bypassing the loginWithCustomerLoginJwt GQL mutation (which only works browser-side).
+// Uses Customer Login JWT (/login/token/{jwt}) to get a real browser session cookie,
+// then applies store credit via the storefront REST API with that cookie.
+// The /v3/checkouts/{id}/store-credit management API returns 404 on this store.
 async function createBcOrderNativeStoreCredit(
   storeHash: string,
   token: string,
   storefrontDomain: string,
+  clientId: string | null,
+  clientSecret: string | null,
   channelId: number,
   order: any,
   storeCreditAmt: number,
@@ -236,6 +238,13 @@ async function createBcOrderNativeStoreCredit(
     throw new Error(
       "Storefront URL is not configured. Go to Admin → Integration Settings and set it " +
       "(e.g. https://yourdomain.com) then save.",
+    );
+  }
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      "Native store credit requires OAuth credentials (Client ID + Client Secret). " +
+      "Configure them in Admin → Integration Settings. " +
+      "Create an OAuth app at https://devtools.bigcommerce.com/ with the 'Customers Login' scope.",
     );
   }
 
@@ -300,14 +309,58 @@ async function createBcOrderNativeStoreCredit(
     },
   ).catch((e) => console.warn("[sc_native] billing-address non-fatal:", e));
 
-  // 6. Apply store credit via Management API v3 checkout endpoint
-  //    Cart was created with customer_id + billing address — store-credit endpoint requires both.
-  console.log(`[sc_native] applying store credit (mgmt API): customer=${bcCustomerId} cart=${cartId}`);
+  // 6. Sign Customer Login JWT (HS256) — grants a real browser session via /login/token/
+  //    BC's /v3/checkouts/{id}/store-credit management API returns 404 on this store.
+  //    The storefront REST API requires a browser session cookie; we get one here.
+  const jti    = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const jwtHdr  = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const jwtBody = Buffer.from(JSON.stringify({
+    iss:         clientId,
+    iat:         nowSec,
+    jti,
+    operation:   "customer_login",
+    store_hash:  storeHash,
+    customer_id: bcCustomerId,
+    channel_id:  channelId,
+  })).toString("base64url");
+  const { createHmac } = await import("crypto");
+  const jwtSig   = createHmac("sha256", clientSecret).update(`${jwtHdr}.${jwtBody}`).digest("base64url");
+  const loginJwt = `${jwtHdr}.${jwtBody}.${jwtSig}`;
+
+  // 7. Exchange Customer Login JWT for a browser session cookie
+  //    GET /login/token/{jwt} → BC validates JWT, sets httpOnly session cookie, redirects.
+  //    We capture the Set-Cookie header without following the redirect.
+  console.log(`[sc_native] fetching login/token for customer=${bcCustomerId}`);
+  const loginRes = await fetch(`${storefrontDomain}/login/token/${loginJwt}`, {
+    method:   "GET",
+    redirect: "manual",
+  });
+  const rawCookies: string[] =
+    (loginRes.headers as any).getSetCookie?.() ??
+    (loginRes.headers.get("set-cookie") ? [loginRes.headers.get("set-cookie")!] : []);
+  const cookieStr = rawCookies.map((c) => c.split(";")[0]).join("; ");
+  console.log(`[sc_native] login/token status=${loginRes.status} cookies=${rawCookies.length}`);
+  if (!cookieStr) {
+    throw new Error(
+      `Customer Login JWT did not produce a session cookie (HTTP ${loginRes.status}). ` +
+      "Verify the OAuth app's Client Secret and that the Customers Login scope is enabled.",
+    );
+  }
+
+  // 8. Apply store credit via storefront REST API using the session cookie
+  //    The storefront API can see management-API-created carts when the customer is logged in.
+  console.log(`[sc_native] applying store credit (storefront cookie): cart=${cartId}`);
   const scRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/store-credit`,
+    `${storefrontDomain}/api/storefront/checkouts/${cartId}/store-credit`,
     {
-      method: "POST",
-      headers: h,
+      method:  "POST",
+      headers: {
+        Cookie:           cookieStr,
+        "Content-Type":   "application/json",
+        Accept:           "application/json",
+        "X-Bc-Store-Id":  storeHash,
+      },
       body: JSON.stringify({}),
     },
   );
@@ -1065,6 +1118,8 @@ export async function registerRoutes(
                   storeHash,
                   String(token),
                   String(config.storefrontUrl || ""),
+                  config.clientId    ? String(config.clientId)    : null,
+                  config.clientSecret ? String(config.clientSecret) : null,
                   Number(config.channelId ?? 1),
                   order,
                   storeCreditAmt,
