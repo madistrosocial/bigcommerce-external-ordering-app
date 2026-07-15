@@ -233,59 +233,41 @@ async function createBcOrderNativeStoreCredit(
     throw new Error(`Failed to write BC store credit balance (${setBalRes.status}): ${await setBalRes.text()}`);
   console.log(`[sc_native] BC balance set to $${crmBalance}`);
 
-  // 2. Create management API cart with POS price overrides (list_price)
-  const lineItems = (order.items as any[]).map((item: any) => {
-    const li: any = {
-      product_id: item.bigcommerce_product_id,
-      quantity:   item.quantity,
-      list_price: parseFloat(item.price_at_sale),
+  // 2. Create BC order directly via v2 Orders API with status_id=0 (Incomplete).
+  //    This mirrors the standard non-store-credit path (price_inc_tax/price_ex_tax overrides)
+  //    and requires no shipping zones or cart/checkout session — the v2 API accepts billing_address
+  //    only. status_id=0 is required so the Payments API can accept the order.
+  const v2Products = (order.items as any[]).map((item: any) => {
+    const productData: any = {
+      product_id:    item.bigcommerce_product_id,
+      quantity:      item.quantity,
+      price_inc_tax: parseFloat(item.price_at_sale),
+      price_ex_tax:  parseFloat(item.price_at_sale),
     };
-    if (item.variant_id) li.variant_id = item.variant_id;
-    return li;
+    if (item.variant_option_values && Array.isArray(item.variant_option_values) && item.variant_option_values.length > 0) {
+      productData.product_options = item.variant_option_values.map(
+        (ov: any) => ({ id: ov.option_id, value: String(ov.id) }),
+      );
+    }
+    return productData;
   });
-  const cartRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/carts`,
-    { method: "POST", headers: h, body: JSON.stringify({ customer_id: bcCustomerId, line_items: lineItems }) },
-  );
-  if (!cartRes.ok)
-    throw new Error(`Cart creation failed (${cartRes.status}): ${await cartRes.text()}`);
-  const cartId = (await cartRes.json()).data.id as string;
-  console.log(`[sc_native] Cart created: ${cartId}`);
-
-  // 5. Add billing address (non-fatal)
-  const a = order.billing_address || {};
-  await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/billing-address`,
+  const v2OrderRes = await fetch(
+    `https://api.bigcommerce.com/stores/${storeHash}/v2/orders`,
     {
       method: "POST",
       headers: h,
       body: JSON.stringify({
-        first_name:             a.first_name  || "",
-        last_name:              a.last_name   || "",
-        email:                  a.email || crmCustomer?.email || "noreply@store.com",
-        company:                a.company     || "",
-        address1:               a.address1    || a.street_1 || "",
-        address2:               a.address2    || a.street_2 || "",
-        city:                   a.city        || "",
-        state_or_province:      a.state_or_province      || a.state || "",
-        state_or_province_code: a.state_or_province_code || a.state || "",
-        postal_code:            a.postal_code || a.zip    || "",
-        country:                a.country     || "",
-        country_code:           a.country_code || a.country_iso2 || "US",
-        phone:                  a.phone       || "",
+        status_id:       0,
+        customer_id:     bcCustomerId,
+        billing_address: order.billing_address,
+        products:        v2Products,
       }),
     },
-  ).catch((e) => console.warn("[sc_native] billing-address non-fatal:", e));
-
-  // 3. Convert checkout → BC order (creates Incomplete / status_id=0, required for Payments API)
-  const bcOrderRes = await fetch(
-    `https://api.bigcommerce.com/stores/${storeHash}/v3/checkouts/${cartId}/orders`,
-    { method: "POST", headers: h },
   );
-  if (!bcOrderRes.ok)
-    throw new Error(`Checkout→order failed (${bcOrderRes.status}): ${await bcOrderRes.text()}`);
-  const { data: { id: bcOrderId } } = await bcOrderRes.json();
-  console.log(`[sc_native] BC order ${bcOrderId} created (Incomplete)`);
+  if (!v2OrderRes.ok)
+    throw new Error(`Order creation failed (${v2OrderRes.status}): ${await v2OrderRes.text()}`);
+  const bcOrderId = (await v2OrderRes.json()).id as number;
+  console.log(`[sc_native] BC order ${bcOrderId} created via v2 API (Incomplete)`);
 
   // 4. Get a single-use Payment Access Token (PAT) scoped to this order
   const patRes = await fetch(
