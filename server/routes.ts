@@ -698,6 +698,7 @@ export async function registerRoutes(
           name: p.name,
           sku: p.sku,
           price: p.price?.toString() ?? "0",
+          cost_price: p.cost_price != null ? p.cost_price.toString() : null,
           image: primaryImage?.url_standard ?? "",
           description: p.description ? p.description.replace(/<[^>]*>?/gm, "") : "",
           stock_level: p.inventory_level ?? 0,
