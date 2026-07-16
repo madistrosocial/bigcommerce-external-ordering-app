@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -72,6 +73,7 @@ function InvNumber({ inv, t }: { inv: number | null | undefined; t: Thresholds }
 }
 
 export default function PromoSkuTracker() {
+  const fmt = useTimeService();
   const { toast } = useToast();
 
   const [skus, setSkus] = useState<SkuEntry[]>([]);
@@ -121,7 +123,7 @@ export default function PromoSkuTracker() {
       const entries: SkuEntry[] = (Array.isArray(skuData) ? skuData : []).map((s: any) => ({
         ...s,
         inventory: invMap[s.id] ?? null,
-        last_refreshed: new Date().toLocaleTimeString(),
+        last_refreshed: fmt.time(new Date()),
       }));
       setSkus(entries);
       setLastRefreshed(new Date());
@@ -277,7 +279,7 @@ export default function PromoSkuTracker() {
         <div className="flex items-center gap-2 flex-wrap">
           {lastRefreshed && (
             <span className="text-[11px] text-slate-400">
-              Refreshed {lastRefreshed.toLocaleTimeString()}
+              Refreshed {fmt.time(lastRefreshed)}
             </span>
           )}
           <Button data-testid="button-refresh" size="sm" variant="outline" onClick={() => loadSkusAndInventory(true)} disabled={refreshing}>

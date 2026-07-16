@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +69,7 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function ShipStationExport() {
+  const fmt = useTimeService();
   const { toast } = useToast();
 
   // ShipStation config
@@ -200,7 +202,7 @@ export default function ShipStationExport() {
       });
       if (!d.success) throw new Error(d.error ?? "Failed");
       toast({ title: "Connected!", description: d.message });
-      setLastSync(new Date().toLocaleString());
+      setLastSync(new Date().toISOString());
     } catch (e: any) {
       toast({ title: "Connection failed", description: e.message, variant: "destructive" });
     } finally { setSsTestLoading(false); }
@@ -293,7 +295,6 @@ export default function ShipStationExport() {
       .catch(() => toast({ title: "Download failed", variant: "destructive" }));
   };
 
-  const fmtDate = (s: string | null) => s ? new Date(s).toLocaleString() : "—";
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
@@ -327,8 +328,8 @@ export default function ShipStationExport() {
               Save Settings
             </Button>
             <div className="flex flex-col gap-0.5 ml-auto text-right">
-              <span className="text-[11px] text-slate-400">Last Sync: <span className="text-slate-600">{fmtDate(lastSync)}</span></span>
-              <span className="text-[11px] text-slate-400">Last Export: <span className="text-slate-600">{fmtDate(lastExport)}</span></span>
+              <span className="text-[11px] text-slate-400">Last Sync: <span className="text-slate-600">{fmt.dateTime(lastSync)}</span></span>
+              <span className="text-[11px] text-slate-400">Last Export: <span className="text-slate-600">{fmt.dateTime(lastExport)}</span></span>
             </div>
           </div>
         </div>
@@ -558,7 +559,7 @@ export default function ShipStationExport() {
                 <TableBody>
                   {history.map((h) => (
                     <TableRow key={h.id} data-testid={`row-export-history-${h.id}`}>
-                      <TableCell className="text-xs text-slate-600 py-2">{fmtDate(h.export_date)}</TableCell>
+                      <TableCell className="text-xs text-slate-600 py-2">{fmt.dateTime(h.export_date)}</TableCell>
                       <TableCell className="text-xs font-mono text-slate-700 py-2 max-w-[180px] truncate">{h.file_name}</TableCell>
                       <TableCell className="text-xs text-slate-600 py-2 text-right">{h.record_count.toLocaleString()}</TableCell>
                       <TableCell className="py-2">

@@ -11,12 +11,13 @@ import {
   RefreshCw, Users, ShoppingBag, Database, Clock, BarChart2, Info,
   HeartPulse, Save, Zap, Trash2, PlayCircle, StopCircle,
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 
 function LastSync({ ts }: { ts: string | null }) {
+  const fmt = useTimeService();
   if (!ts) return <span className="text-slate-400">Never</span>;
   try {
-    return <span className="text-slate-500">{formatDistanceToNow(new Date(ts), { addSuffix: true })}</span>;
+    return <span className="text-slate-500">{fmt.relative(ts)}</span>;
   } catch {
     return <span className="text-slate-400">—</span>;
   }

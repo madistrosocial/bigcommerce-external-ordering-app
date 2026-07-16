@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MessageSquare, ChevronLeft, ChevronRight, Search, X, Filter } from "lucide-react";
-import { format } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 import { useLocation } from "wouter";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -16,11 +16,6 @@ import { useLocation } from "wouter";
 function fmtCurrency(v: number | string | null | undefined): string {
   const n = Number(v ?? 0);
   return Number.isNaN(n) ? "—" : `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-function fmtDateTime(v: string | null | undefined): string {
-  if (!v) return "—";
-  try { return format(new Date(v), "MM/dd/yy h:mm a"); }
-  catch { return "—"; }
 }
 
 // ─── Types/Constants ──────────────────────────────────────────────────────────
@@ -79,7 +74,7 @@ function NoteExpandModal({ note, onClose }: { note: any; onClose: () => void }) 
         </DialogHeader>
         <div className="space-y-2">
           <div className="flex flex-wrap gap-2 text-xs text-slate-400">
-            <span>{fmtDateTime(note.created_at)}</span>
+            <span>{fmt.dateTimeCompact(note.created_at)}</span>
             {note.created_by_name && <span>by <span className="text-slate-600 font-medium">{note.created_by_name}</span></span>}
             {note.order_id && <span className="text-indigo-500 font-medium">Order #{note.order_id}</span>}
           </div>
@@ -103,6 +98,7 @@ function NoteExpandModal({ note, onClose }: { note: any; onClose: () => void }) 
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function CRMNotes() {
+  const fmt = useTimeService();
   const [expandedNote, setExpandedNote] = useState<any | null>(null);
   const [page, setPage]                 = useState(1);
   const LIMIT = 50;
@@ -385,7 +381,7 @@ export default function CRMNotes() {
                           data-testid={`note-row-${note.id}`}
                           className="border-b last:border-0 hover:bg-slate-50 transition-colors align-top"
                         >
-                          <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmtDateTime(note.created_at)}</td>
+                          <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmt.dateTimeCompact(note.created_at)}</td>
                           <td className="px-4 py-3"><NoteTypePill type={note.note_type} /></td>
                           <td className="px-4 py-3">
                             {(note.customer_first_name || note.customer_last_name)

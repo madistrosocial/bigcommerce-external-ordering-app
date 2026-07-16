@@ -1,7 +1,7 @@
 import { useStore } from "@/lib/store";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { format } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,7 @@ function getStatusBadge(order: api.Order) {
 
 export default function Orders() {
   const { currentUser, isOfflineMode, addToCart, clearCart } = useStore();
+  const fmt = useTimeService();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
@@ -368,7 +369,7 @@ export default function Orders() {
                     <div className="flex items-center justify-between w-full text-sm text-slate-500 font-normal">
                       <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {order.date && format(new Date(order.date), "MMM d, h:mm a")}
+                        {order.date && fmt.dateTimeShort(order.date)}
                       </span>
                       <span className="font-bold text-slate-900" data-testid={`total-${order.id}`}>${parseFloat(order.total).toFixed(2)}</span>
                     </div>

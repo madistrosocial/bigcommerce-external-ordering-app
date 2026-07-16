@@ -15,7 +15,7 @@ import {
   ChevronLeft, ChevronRight, User, Settings2, X, Users, AlertTriangle,
   TrendingUp, HeartPulse, Activity, Phone, Mail, Filter,
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
 
 type SortField =
@@ -141,6 +141,7 @@ const HEALTH_CARDS = [
 
 export default function CRMCustomers() {
   const [, setLocation] = useLocation();
+  const fmt = useTimeService();
   const { toast } = useToast();
   const { currentUser } = useStore();
   const { hasPermission } = usePermissions();
@@ -806,7 +807,7 @@ export default function CRMCustomers() {
                     )}
                     {vis("last_order")     && (
                       <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">
-                        {c.last_order_date ? formatDistanceToNow(new Date(c.last_order_date), { addSuffix: true }) : "—"}
+                        {c.last_order_date ? fmt.relative(c.last_order_date) : "—"}
                       </td>
                     )}
                     {vis("days_since")     && <td className={`px-3 py-2.5 whitespace-nowrap ${daysColor}`}>{days != null ? `${days}d` : "—"}</td>}
@@ -822,7 +823,7 @@ export default function CRMCustomers() {
                         {followUpDate ? (
                           <div>
                             <span className="text-slate-700 whitespace-nowrap text-xs font-medium">
-                              {formatDistanceToNow(new Date(followUpDate), { addSuffix: true })}
+                              {fmt.relative(followUpDate)}
                             </span>
                             {followUpBy && (
                               <div className="text-[11px] text-slate-400 truncate">{followUpBy}</div>

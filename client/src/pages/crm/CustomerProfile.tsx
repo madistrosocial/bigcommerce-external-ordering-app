@@ -18,7 +18,7 @@ import {
   UserCheck, UserMinus, AlertTriangle, Clock, ChevronLeft, ChevronRight,
   FileText, CreditCard, Edit3, RefreshCw, BookOpen, Save,
 } from "lucide-react";
-import { format, formatDistanceToNow, differenceInHours } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,26 +38,6 @@ function fmtCurrency(v: string | number | null | undefined): string {
   const n = Number(v ?? 0);
   if (isNaN(n)) return "$0.00";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
-}
-function fmtDate(d: string | Date | null | undefined): string {
-  if (!d) return "—";
-  try { return format(new Date(d as any), "MMM d, yyyy"); } catch { return "—"; }
-}
-function fmtDateTime(d: string | Date | null | undefined): string {
-  if (!d) return "—";
-  try { return format(new Date(d as any), "MMM d, yyyy h:mm a"); } catch { return "—"; }
-}
-
-/** < 24 h → relative; ≥ 24 h → full timestamp */
-function smartDate(d: string | Date | null | undefined): string {
-  if (!d) return "—";
-  try {
-    const date = new Date(d as any);
-    if (differenceInHours(new Date(), date) < 24) {
-      return formatDistanceToNow(date, { addSuffix: true });
-    }
-    return format(date, "MMM d, yyyy h:mm a");
-  } catch { return "—"; }
 }
 
 /**
@@ -326,7 +306,7 @@ function OrderNotesModal({ order, customerId, onClose, onSaved }: { order: any; 
           <DialogTitle>Order #{order?.order_number ?? order?.bigcommerce_order_id}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-wrap gap-2 text-sm text-slate-500 mb-3 shrink-0">
-          {order?.order_date && <span>{fmtDateTime(order.order_date)}</span>}
+          {order?.order_date && <span>{fmt.dateTime(order.order_date)}</span>}
           {order?.status && <Badge variant={statusColor(order.status)} className="capitalize text-xs">{order.status}</Badge>}
           {order?.order_total && <span className="font-semibold text-slate-800">{fmtCurrency(order.order_total)}</span>}
         </div>
@@ -384,7 +364,7 @@ function OrdersTable({ orders, onRowClick }: { orders: any[]; onRowClick: (o: an
                   #{o.order_number ?? o.bigcommerce_order_id}
                   {(o.staff_notes || o.customer_order_notes) && <span className="ml-1 text-amber-500 text-[10px]">📝</span>}
                 </td>
-                <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap text-xs w-32">{fmtDateTime(o.order_date)}</td>
+                <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap text-xs w-32">{fmt.dateTime(o.order_date)}</td>
                 <td className="px-3 py-2.5 w-24">
                   <Badge variant={statusColor(o.status)} className="text-xs capitalize">{o.status ?? "—"}</Badge>
                 </td>
@@ -417,6 +397,7 @@ type Tab = "overview" | "orders" | "notes" | "timeline";
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function CustomerProfile() {
+  const fmt = useTimeService();
   const params = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
   const { hasPermission } = usePermissions();
@@ -737,7 +718,7 @@ export default function CustomerProfile() {
                   {customer.email && <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 shrink-0" />{customer.email}</span>}
                   {customer.phone && <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" />{customer.phone}</span>}
                   <span className="flex items-center gap-1.5"><Hash className="h-3.5 w-3.5 shrink-0" />BC ID: {customer.bigcommerce_customer_id}</span>
-                  {customer.created_date && <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 shrink-0" />Joined {fmtDate(customer.created_date)}</span>}
+                  {customer.created_date && <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 shrink-0" />Joined {fmt.date(customer.created_date)}</span>}
                   {customer.customer_group_name && (
                     <span className="flex items-center gap-1.5">
                       <Users className="h-3.5 w-3.5 shrink-0" />
@@ -871,7 +852,7 @@ export default function CustomerProfile() {
           <SummaryCard icon={<DollarSign className="h-4 w-4 text-green-500" />} label="Lifetime Revenue" value={fmtCurrency(customer.lifetime_revenue)} testId="text-lifetime-revenue" />
           <SummaryCard icon={<ShoppingBag className="h-4 w-4 text-blue-500" />} label="Lifetime Orders" value={lifetimeOrders.toLocaleString()} testId="text-lifetime-orders" />
           <SummaryCard icon={<TrendingUp className="h-4 w-4 text-purple-500" />} label="Avg Order Value" value={fmtCurrency(avgOrderValue)} />
-          <SummaryCard icon={<Calendar className="h-4 w-4 text-amber-500" />} label="Last Order" value={customer.last_order_date ? fmtDate(customer.last_order_date) : "—"} testId="text-last-order-date" />
+          <SummaryCard icon={<Calendar className="h-4 w-4 text-amber-500" />} label="Last Order" value={customer.last_order_date ? fmt.date(customer.last_order_date) : "—"} testId="text-last-order-date" />
           <StoreCreditCard
             value={fmtCurrency(customer.store_credit_balance ?? 0)}
             updatedAt={customer.updated_at}
@@ -956,7 +937,7 @@ export default function CustomerProfile() {
                             <NoteTypePill type={note.note_type} />
                           </div>
                           <p className="text-xs font-semibold text-slate-700 mb-0.5">{createdBy(note.created_by_name, note.created_by)}</p>
-                          <p className="text-[11px] text-slate-400 mb-1">{fmtDateTime(note.created_at)}</p>
+                          <p className="text-[11px] text-slate-400 mb-1">{fmt.dateTime(note.created_at)}</p>
                           <p className="text-xs text-slate-600 line-clamp-2">{note.note}</p>
                         </div>
                       ))}
@@ -993,7 +974,7 @@ export default function CustomerProfile() {
                               {!isLast && <div className="w-px flex-1 bg-slate-200 my-1" />}
                             </div>
                             <div className={`pb-3 flex-1 min-w-0 ${isLast ? "pb-0" : ""}`}>
-                              <p className="text-[10px] text-slate-400 mb-0.5">{smartDate(entry.date)}</p>
+                              <p className="text-[10px] text-slate-400 mb-0.5">{fmt.relative(entry.date)}</p>
                               <TimelineDescription entry={entry} />
                             </div>
                           </div>
@@ -1171,7 +1152,7 @@ export default function CustomerProfile() {
                     <tbody>
                       {(notes as any[]).map((note: any) => (
                         <tr key={note.id} data-testid={`note-row-${note.id}`} className="border-b last:border-0 hover:bg-slate-50 align-top">
-                          <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmtDateTime(note.created_at)}</td>
+                          <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmt.dateTime(note.created_at)}</td>
                           <td className="px-4 py-3"><NoteTypePill type={note.note_type} /></td>
                           <td className="px-4 py-3 text-xs text-indigo-600 font-mono whitespace-nowrap">
                             {note.order_id ? `#${note.order_id}` : <span className="text-slate-300">—</span>}
@@ -1238,7 +1219,7 @@ export default function CustomerProfile() {
                           <TimelineDescription entry={entry} />
                           <p className="text-[11px] text-slate-400 mt-0.5">
                             <span className="font-medium text-slate-500">{actor}</span>
-                            {" · "}{smartDate(entry.date)}
+                            {" · "}{fmt.relative(entry.date)}
                           </p>
                         </div>
                       </div>
@@ -1368,7 +1349,7 @@ function StoreCreditCard({ value, updatedAt, onRefresh, isRefreshing }: {
       </div>
       <p className="text-lg font-bold text-slate-900" data-testid="text-store-credit">{value}</p>
       {updatedAt && (
-        <p className="text-[10px] text-slate-400 mt-0.5">Updated {smartDate(updatedAt)}</p>
+        <p className="text-[10px] text-slate-400 mt-0.5">Updated {fmt.relative(updatedAt)}</p>
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { useTimeService } from "@/hooks/useTimeService";
 import * as api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +9,7 @@ import { ArrowLeft, TrendingDown, Loader2 } from "lucide-react";
 
 export default function PriceOverrideAuditPage() {
   const [, navigate] = useLocation();
+  const fmt = useTimeService();
   const [sku, setSku] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -119,9 +121,7 @@ export default function PriceOverrideAuditPage() {
                 {rows.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50" data-testid={`row-audit-${row.id}`}>
                     <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap text-xs">
-                      {new Date(row.created_at).toLocaleString("en-US", {
-                        month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
-                      })}
+                      {fmt.dateTime(row.created_at)}
                     </td>
                     <td className="px-4 py-2.5 font-medium text-slate-700">{userMap.get(row.user_id) || `User #${row.user_id}`}</td>
                     <td className="px-4 py-2.5 text-slate-700">{row.customer_name || "—"}</td>

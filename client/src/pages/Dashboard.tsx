@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { format } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 
 // ─── Period filter ────────────────────────────────────────────────────────────
 
@@ -132,6 +132,7 @@ function QuickAction({ label, icon: Icon, path, description, color = "bg-blue-50
 
 export default function DashboardPage() {
   const { currentUser } = useStore();
+  const fmt = useTimeService();
   const [, setLocation] = useLocation();
   const [period, setPeriod] = useState<Period>("month");
 
@@ -375,7 +376,7 @@ export default function DashboardPage() {
                       {order.customer_name || "Unknown Customer"}
                     </span>
                     <span className="text-[11px] text-slate-400">
-                      {order.date ? format(new Date(order.date), "MMM d, yyyy h:mm a") : "—"}
+                      {order.date ? fmt.dateTime(order.date) : "—"}
                       {isAdmin && order.user_id && (
                         <span className="ml-2 text-slate-300">Agent #{order.user_id}</span>
                       )}

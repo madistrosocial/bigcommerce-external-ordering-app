@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRoute } from "wouter";
 import { useStore } from "@/lib/store";
+import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -111,6 +112,7 @@ export default function InvoicePrintPage() {
   const orderId = params?.orderId;
   const { currentUser } = useStore();
   const { toast } = useToast();
+  const timeFmt = useTimeService();
 
   const [invoiceHtml, setInvoiceHtml] = useState<string | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
@@ -188,13 +190,7 @@ export default function InvoicePrintPage() {
       ? `<img src="${settings.logo_base64}" alt="Logo" style="max-height:75px;max-width:180px;object-fit:contain" />`
       : "";
 
-    const orderDate = order.date_created
-      ? new Date(order.date_created).toLocaleDateString("en-US", {
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        })
-      : "";
+    const orderDate = order.date_created ? timeFmt.dateLong(order.date_created) : "";
 
     const itemsRows = buildItemsRows(products);
     const totalItems = products.reduce(
@@ -227,16 +223,7 @@ export default function InvoicePrintPage() {
     const servedBy = checkoutLine
       ? checkoutLine.replace(/^Checkout by:\s*/, "").trim()
       : ((currentUser as any)?.name || currentUser?.username || "Agent");
-    const now = new Date();
-    const timestamp = `${now.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    })}, ${now.toLocaleDateString("en-US", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    })}`;
+    const timestamp = timeFmt.timestamp(new Date());
 
     const vars: Record<string, string> = {
       company_name: escHtml(settings.company_name || ""),

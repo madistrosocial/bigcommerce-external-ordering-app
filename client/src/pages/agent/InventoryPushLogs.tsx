@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import * as api from "@/lib/api";
+import { useTimeService } from "@/hooks/useTimeService";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Package, Loader2 } from "lucide-react";
 
 export default function InventoryPushLogs() {
   const [, navigate] = useLocation();
+  const fmt = useTimeService();
 
   const { data: logs = [], isLoading } = useQuery({
     queryKey: ["inventory-push-logs"],
@@ -68,13 +70,7 @@ export default function InventoryPushLogs() {
                 {logs.map((log) => (
                   <tr key={log.id} className="hover:bg-slate-50" data-testid={`log-row-${log.id}`}>
                     <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap text-xs">
-                      {new Date(log.created_at).toLocaleString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
+                      {fmt.dateTime(log.created_at)}
                     </td>
                     <td className="px-4 py-2.5 font-medium text-slate-700">
                       {log.username || `User #${log.user_id}`}

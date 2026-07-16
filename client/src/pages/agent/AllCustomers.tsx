@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 import * as api from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Loader2, Users, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from "lucide-react";
@@ -122,10 +122,10 @@ function CustomerRow({ customer, groupName }: { customer: BcCustomer; groupName?
             <div><span className="text-slate-400">Phone</span><br /><span className="font-medium text-slate-700">{customer.phone}</span></div>
           )}
           {customer.date_created && (
-            <div><span className="text-slate-400">Registered</span><br /><span className="font-medium text-slate-700">{format(new Date(customer.date_created), "MMM d, yyyy")}</span></div>
+            <div><span className="text-slate-400">Registered</span><br /><span className="font-medium text-slate-700">{fmt.date(customer.date_created)}</span></div>
           )}
           {customer.date_last_order_placed && (
-            <div><span className="text-slate-400">Last Order</span><br /><span className="font-medium text-slate-700">{format(new Date(customer.date_last_order_placed), "MMM d, yyyy")}</span></div>
+            <div><span className="text-slate-400">Last Order</span><br /><span className="font-medium text-slate-700">{fmt.date(customer.date_last_order_placed)}</span></div>
           )}
           <div><span className="text-slate-400">BC ID</span><br /><span className="font-mono text-slate-500">#{customer.id}</span></div>
           {customer.customer_group_id != null && (
@@ -148,6 +148,7 @@ function CustomerRow({ customer, groupName }: { customer: BcCustomer; groupName?
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AllCustomers() {
+  const fmt = useTimeService();
   const [sort, setSort] = useState<SortKey>("newest");
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState<string>("all");

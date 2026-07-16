@@ -61,6 +61,7 @@ import {
   Columns2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useTimeService } from "@/hooks/useTimeService";
 import * as api from "@/lib/api";
 import type { CartItem } from "@/lib/store";
 import {
@@ -662,16 +663,7 @@ function VariantPopupDialog({
                                     ${fmtPrice(parseFloat(h.price))}
                                   </p>
                                   <p className="text-xs text-slate-400">
-                                    {h.date
-                                      ? new Date(h.date).toLocaleDateString(
-                                          "en-US",
-                                          {
-                                            month: "short",
-                                            day: "numeric",
-                                            year: "numeric",
-                                          },
-                                        )
-                                      : ""}
+                                    {h.date ? fmt.date(h.date) : ""}
                                     {h.orderId ? ` | #${h.orderId}` : ""}
                                   </p>
                                 </button>
@@ -1009,6 +1001,7 @@ function ProductTabList({
 // ─── Main POS Page ────────────────────────────────────────────────────────────
 
 export default function POSPage() {
+  const fmt = useTimeService();
   const {
     currentUser,
     cart,
@@ -3453,7 +3446,7 @@ export default function POSPage() {
                                                 >
                                                   <p className="text-sm font-bold text-green-600">${fmtPrice(parseFloat(h.price))}</p>
                                                   <p className="text-xs text-slate-400">
-                                                    {h.date ? new Date(h.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : ""}
+                                                    {h.date ? fmt.date(h.date) : ""}
                                                     {h.orderId ? ` | #${h.orderId}` : ""}
                                                   </p>
                                                 </button>
@@ -3872,15 +3865,7 @@ export default function POSPage() {
                                           ${fmtPrice(parseFloat(h.price))}
                                         </p>
                                         <p className="text-xs text-slate-400">
-                                          {h.date
-                                            ? new Date(
-                                                h.date,
-                                              ).toLocaleDateString("en-US", {
-                                                month: "short",
-                                                day: "numeric",
-                                                year: "numeric",
-                                              })
-                                            : ""}
+                                          {h.date ? fmt.date(h.date) : ""}
                                           {h.orderId ? ` | #${h.orderId}` : ""}
                                         </p>
                                       </button>

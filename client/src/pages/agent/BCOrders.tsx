@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -149,6 +149,7 @@ function PriceControls({
   onDeleted: () => void;
 }) {
   const { toast } = useToast();
+  const fmt = useTimeService();
   const [qty, setQty] = useState(lineItem.quantity);
   const [price, setPrice] = useState(parseFloat(lineItem.price_inc_tax || lineItem.base_price).toFixed(2));
   const [discPct, setDiscPct] = useState("");
@@ -266,7 +267,7 @@ function PriceControls({
                       onClick={() => { setPrice(parseFloat(h.price).toFixed(2)); setDiscPct(""); setHistoryOpen(false); }}>
                       <p className="text-sm font-bold text-green-600">${parseFloat(h.price).toFixed(2)}</p>
                       <p className="text-xs text-slate-400">
-                        {h.date ? format(new Date(h.date), "MMM d, yyyy") : ""}
+                        {h.date ? fmt.date(h.date) : ""}
                         {h.orderId ? ` · #${h.orderId}` : ""}
                       </p>
                     </button>
@@ -517,6 +518,7 @@ function AddProductSearch({ orderId, onAdded }: { orderId: number; onAdded: () =
 
 function BCOrderDetailModal({ orderId, onClose }: { orderId: number; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const fmt = useTimeService();
   const [expandedLine, setExpandedLine] = useState<number | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -557,7 +559,7 @@ function BCOrderDetailModal({ orderId, onClose }: { orderId: number; onClose: ()
             <p className="text-xs text-slate-500 mt-1">
               {order.billing_address?.first_name} {order.billing_address?.last_name}
               {order.billing_address?.email && ` · ${order.billing_address.email}`}
-              {order.date_created && ` · ${format(new Date(order.date_created), "MMM d, yyyy")}`}
+              {order.date_created && ` · ${fmt.date(order.date_created)}`}
               {" · "}<span className="font-semibold text-slate-800">${parseFloat(order.total_inc_tax || "0").toFixed(2)}</span>
             </p>
           )}
@@ -640,6 +642,7 @@ const FILTER_OPTIONS = [
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 export default function BCOrders() {
+  const fmt = useTimeService();
   const [filter, setFilter] = useState("newest");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
@@ -742,7 +745,7 @@ export default function BCOrders() {
                     </span>
                   </p>
                   <p className="text-xs text-slate-400">
-                    {order.date_created && format(new Date(order.date_created), "MMM d, yyyy · h:mm a")}
+                    {order.date_created && fmt.dateTime(order.date_created)}
                     <span className="ml-2">{BC_STATUSES[order.status_id] ?? order.status}</span>
                     {order.items_total > 0 && <span className="ml-2">{order.items_total} item{order.items_total !== 1 ? "s" : ""}</span>}
                   </p>

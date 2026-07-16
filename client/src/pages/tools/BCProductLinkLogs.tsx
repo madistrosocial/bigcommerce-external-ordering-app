@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { useTimeService } from "@/hooks/useTimeService";
 import { getAuthHeaders } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,14 +48,6 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function formatDate(iso: string) {
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      month: "short", day: "numeric", year: "numeric",
-      hour: "numeric", minute: "2-digit", hour12: true,
-    }).format(new Date(iso));
-  } catch { return iso; }
-}
 
 async function fetchLogs(): Promise<ProductLinkLog[]> {
   const res = await fetch("/api/tools/bc/product-link-logs", { headers: getAuthHeaders() });
@@ -66,6 +59,7 @@ async function fetchLogs(): Promise<ProductLinkLog[]> {
 
 export default function BCProductLinkLogs() {
   const [, setLocation] = useLocation();
+  const fmt = useTimeService();
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
@@ -181,7 +175,7 @@ export default function BCProductLinkLogs() {
                         </div>
                         <div className="flex items-center gap-3 mt-1 flex-wrap">
                           <span className="text-[11px] text-slate-500">by <strong>{log.created_by_name}</strong></span>
-                          <span className="text-[11px] text-slate-400">{formatDate(log.created_at)}</span>
+                          <span className="text-[11px] text-slate-400">{fmt.dateTime(log.created_at)}</span>
                         </div>
                       </div>
 
@@ -221,7 +215,7 @@ export default function BCProductLinkLogs() {
                         <div><span className="text-slate-400">Linked Product ID:</span> {log.linked_product_id}</div>
                         <div><span className="text-slate-400">Direction:</span> {log.bidirectional ? "Bidirectional" : "One-way"}</div>
                         <div><span className="text-slate-400">Created by:</span> {log.created_by_name}</div>
-                        <div className="col-span-2"><span className="text-slate-400">Date:</span> {formatDate(log.created_at)}</div>
+                        <div className="col-span-2"><span className="text-slate-400">Date:</span> {fmt.dateTime(log.created_at)}</div>
                       </div>
                     </div>
                   )}

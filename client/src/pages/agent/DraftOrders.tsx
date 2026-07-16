@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useStore } from "@/lib/store";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { format } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 import * as api from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,7 @@ interface DraftRowProps {
 
 function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onDelete, isSubmitting }: DraftRowProps) {
   const [open, setOpen] = useState(false);
+  const fmt = useTimeService();
 
   return (
     <div className="border-b last:border-b-0" data-testid={`draft-row-${order.id}`}>
@@ -48,7 +49,7 @@ function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onDele
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-slate-800 truncate">{order.customer_name}</p>
           <p className="text-xs text-slate-400">
-            {order.date && format(new Date(order.date), "MMM d, yyyy · h:mm a")}
+            {order.date && fmt.dateTime(order.date)}
             {order.customer_email && (
               <span className="ml-2 text-slate-400">{order.customer_email}</span>
             )}

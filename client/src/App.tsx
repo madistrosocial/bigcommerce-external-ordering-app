@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useStore } from "@/lib/store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { SaaSLayout } from "@/components/layout/SaaSLayout";
+import { TimezoneProvider } from "@/contexts/TimezoneContext";
 
 import Login from "@/pages/Login";
 import DashboardPage from "@/pages/Dashboard";
@@ -223,10 +224,12 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Router />
-        <Toaster />
-      </TooltipProvider>
+      <TimezoneProvider>
+        <TooltipProvider>
+          <Router />
+          <Toaster />
+        </TooltipProvider>
+      </TimezoneProvider>
     </QueryClientProvider>
   );
 }

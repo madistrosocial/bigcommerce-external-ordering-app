@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { format, startOfDay, startOfWeek, startOfMonth, startOfYear } from "date-fns";
+import { startOfDay, startOfWeek, startOfMonth, startOfYear } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 import * as api from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -88,7 +89,7 @@ function AllOrderRow({ order, storeHash }: RowProps) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-slate-800 truncate">{order.customer_name}</p>
           <p className="text-xs text-slate-400">
-            {order.date && format(new Date(order.date), "MMM d, yyyy · h:mm a")}
+            {order.date && fmt.dateTime(order.date)}
             {(order as any).created_by_name && (
               <span className="ml-2 inline-flex items-center gap-0.5 text-slate-400">
                 <User className="h-2.5 w-2.5" />
@@ -179,6 +180,7 @@ function AllOrderRow({ order, storeHash }: RowProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AllOrders() {
+  const fmt = useTimeService();
   const [period, setPeriod] = useState<Period>("week");
 
   const { data: bcConfig } = useQuery({

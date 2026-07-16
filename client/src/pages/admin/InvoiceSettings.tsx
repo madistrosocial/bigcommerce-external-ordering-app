@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useTimeService } from "@/hooks/useTimeService";
 import * as api from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import {
 
 export default function InvoiceSettingsPage() {
   const { toast } = useToast();
+  const fmt = useTimeService();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -160,7 +162,7 @@ export default function InvoiceSettingsPage() {
       customer_phone: "555-1234",
       company_address: (companyAddress || "").split("\n").join("<br>"),
       invoice_number: "CNC0007573",
-      order_date: new Date().toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" }),
+      order_date: fmt.dateLong(new Date()),
       items_rows: `
         <tr>
           <td>
@@ -191,7 +193,7 @@ export default function InvoiceSettingsPage() {
       notes_html: `<div class="notes-section">Notes: prices are adjusted / sample preview</div>`,
       barcode_svg: `<svg width="200" height="55"><rect width="200" height="55" fill="#eee" rx="4"/><text x="100" y="33" text-anchor="middle" font-size="11" fill="#aaa">Barcode Preview</text></svg>`,
       served_by: "Admin",
-      timestamp: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) + ", " + new Date().toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" }),
+      timestamp: fmt.timestamp(new Date()),
       terms: terms || "",
     };
     let html = htmlTemplate;

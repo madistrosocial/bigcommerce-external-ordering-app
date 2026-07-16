@@ -2617,6 +2617,29 @@ export async function registerRoutes(
     }
   });
 
+  // ===== COMPANY TIMEZONE =====
+  app.get("/api/settings/company-timezone", requireAuth, async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("company_timezone");
+      res.json({ timezone: (setting?.value as string) ?? "America/New_York" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/settings/company-timezone", requireAdmin, async (req, res) => {
+    try {
+      const { timezone } = req.body;
+      if (!timezone || typeof timezone !== "string") {
+        return res.status(400).json({ error: "timezone is required" });
+      }
+      await storage.setSetting("company_timezone", timezone);
+      res.json({ success: true, timezone });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ===== BIGCOMMERCE PRODUCT MAX QTY OVERRIDE =====
 
   // Set (or remove) max_purchase_quantity at PRODUCT level (not variant)

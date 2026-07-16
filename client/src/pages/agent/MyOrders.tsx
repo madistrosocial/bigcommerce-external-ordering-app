@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useStore } from "@/lib/store";
 import { useQuery } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 import * as api from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,7 @@ interface RowProps {
 
 function OrderRow({ order, storeHash }: RowProps) {
   const [open, setOpen] = useState(false);
+  const fmt = useTimeService();
 
   const printInvoice = () => {
     const id = order.bigcommerce_order_id || order.id;
@@ -66,7 +67,7 @@ function OrderRow({ order, storeHash }: RowProps) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-slate-800 truncate">{order.customer_name}</p>
           <p className="text-xs text-slate-400">
-            {order.date && format(new Date(order.date), "MMM d, yyyy · h:mm a")}
+            {order.date && fmt.dateTime(order.date)}
             {order.bigcommerce_order_id && (
               <span className="ml-2 font-mono text-slate-400">BC #{order.bigcommerce_order_id}</span>
             )}

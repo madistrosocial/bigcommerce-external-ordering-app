@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, CheckCircle2, AlertCircle, Plug, ExternalLink, CalendarClock, ImageIcon, Trash2, Upload } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Plug, ExternalLink, CalendarClock, ImageIcon, Trash2, Upload, Globe } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function AdminIntegrationPage() {
   const { toast } = useToast();
@@ -23,6 +24,8 @@ export default function AdminIntegrationPage() {
   const [cutoffDate, setCutoffDate] = useState("");
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<string | null>(null);
+  const [timezone, setTimezone] = useState("America/New_York");
+  const [savingTimezone, setSavingTimezone] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -30,7 +33,8 @@ export default function AdminIntegrationPage() {
       getSetting("bigcommerce_config").catch(() => null),
       getSetting("bc_scan_cutoff_date").catch(() => null),
       getSetting("business_logo").catch(() => null),
-    ]).then(([cfg, cutoff, logo]) => {
+      fetch("/api/settings/company-timezone", { headers: { "Authorization": `Bearer ${localStorage.getItem("user") ? JSON.parse(localStorage.getItem("user")!).token : ""}` } }).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([cfg, cutoff, logo, tzData]) => {
       if (cfg?.value) {
         setStoreHash(cfg.value.storeHash ?? "");
         setToken(cfg.value.token ?? "");
@@ -46,6 +50,7 @@ export default function AdminIntegrationPage() {
         setLogoPreview(logo.value);
         setLogoFile(logo.value);
       }
+      if (tzData?.timezone) setTimezone(tzData.timezone);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -440,6 +445,74 @@ export default function AdminIntegrationPage() {
                 )}
               </div>
             </form>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Company Timezone */}
+      <Card className="shadow-sm">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <Globe className="h-4 w-4 text-slate-500" />
+            <CardTitle className="text-sm">Company Timezone</CardTitle>
+          </div>
+          <CardDescription className="text-xs">
+            All timestamps across the app will display in this timezone for every user, regardless of their device's local time.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="h-8 flex items-center"><Loader2 className="h-4 w-4 animate-spin text-slate-400" /></div>
+          ) : (
+            <div className="flex items-center gap-3 flex-wrap">
+              <Select value={timezone} onValueChange={setTimezone}>
+                <SelectTrigger className="w-64 h-8 text-sm" data-testid="select-company-timezone">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="America/New_York">Eastern Time (ET)</SelectItem>
+                  <SelectItem value="America/Chicago">Central Time (CT)</SelectItem>
+                  <SelectItem value="America/Denver">Mountain Time (MT)</SelectItem>
+                  <SelectItem value="America/Phoenix">Arizona (no DST)</SelectItem>
+                  <SelectItem value="America/Los_Angeles">Pacific Time (PT)</SelectItem>
+                  <SelectItem value="America/Anchorage">Alaska Time (AKT)</SelectItem>
+                  <SelectItem value="Pacific/Honolulu">Hawaii Time (HT)</SelectItem>
+                  <SelectItem value="America/Puerto_Rico">Atlantic Time (AT)</SelectItem>
+                  <SelectItem value="UTC">UTC</SelectItem>
+                  <SelectItem value="Europe/London">London (GMT/BST)</SelectItem>
+                  <SelectItem value="Europe/Paris">Central Europe (CET)</SelectItem>
+                  <SelectItem value="Asia/Dubai">Dubai (GST)</SelectItem>
+                  <SelectItem value="Asia/Kolkata">India (IST)</SelectItem>
+                  <SelectItem value="Asia/Singapore">Singapore (SGT)</SelectItem>
+                  <SelectItem value="Australia/Sydney">Sydney (AEDT)</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                className="h-8"
+                disabled={savingTimezone}
+                data-testid="button-save-timezone"
+                onClick={async () => {
+                  setSavingTimezone(true);
+                  try {
+                    const user = localStorage.getItem("user") ? JSON.parse(localStorage.getItem("user")!) : null;
+                    await fetch("/api/settings/company-timezone", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${user?.token ?? ""}` },
+                      body: JSON.stringify({ timezone }),
+                    });
+                    toast({ title: "Timezone saved", description: `All timestamps will now display in ${timezone}.` });
+                  } catch (err: any) {
+                    toast({ title: "Save failed", description: err.message, variant: "destructive" });
+                  } finally {
+                    setSavingTimezone(false);
+                  }
+                }}
+              >
+                {savingTimezone ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+                Save Timezone
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

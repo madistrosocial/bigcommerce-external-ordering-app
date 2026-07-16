@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, FileText, ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight, AlertTriangle, X, User } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
 
 const PAGE_SIZE = 50;
@@ -24,10 +24,6 @@ function fmtCurrency(v: string | number | null): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(v));
 }
 
-function fmtDate(d: string | null): string {
-  if (!d) return "—";
-  try { return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); } catch { return "—"; }
-}
 
 const HEALTH_COLORS: Record<string, string> = {
   "At Risk":  "bg-orange-100 text-orange-700 border-orange-200",
@@ -47,6 +43,7 @@ function HealthBadge({ health }: { health: string | null }) {
 
 export default function CRMReactivation() {
   const [, setLocation] = useLocation();
+  const fmt = useTimeService();
   const { toast } = useToast();
 
   const [search, setSearch] = useState("");
@@ -124,7 +121,7 @@ export default function CRMReactivation() {
         return [
           c.company ?? "", c.first_name ?? "", c.last_name ?? "", c.email ?? "", c.phone ?? "",
           state, c.customer_group_name ?? "",
-          c.last_order_date ? fmtDate(c.last_order_date) : "",
+          c.last_order_date ? fmt.date(c.last_order_date) : "",
           days != null ? String(days) : "",
           c.lifetime_orders ?? 0,
           c.lifetime_revenue ?? "0",
@@ -269,7 +266,7 @@ export default function CRMReactivation() {
                     <td className="px-3 py-2.5 text-slate-700">{[c.first_name, c.last_name].filter(Boolean).join(" ") || "—"}</td>
                     <td className="px-3 py-2.5 text-slate-600">{stateVal || <span className="text-slate-400">—</span>}</td>
                     <td className="px-3 py-2.5 text-slate-600 max-w-[150px] truncate">{c.customer_group_name || <span className="text-slate-400">—</span>}</td>
-                    <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{c.last_order_date ? formatDistanceToNow(new Date(c.last_order_date), { addSuffix: true }) : "—"}</td>
+                    <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{c.last_order_date ? fmt.relative(c.last_order_date) : "—"}</td>
                     <td className={`px-3 py-2.5 whitespace-nowrap ${daysColor}`}>{days != null ? `${days}d` : "—"}</td>
                     <td className="px-3 py-2.5 text-right text-slate-700">{(c.lifetime_orders ?? 0).toLocaleString()}</td>
                     <td className="px-3 py-2.5 text-right font-medium text-slate-800">{fmtCurrency(c.lifetime_revenue)}</td>
