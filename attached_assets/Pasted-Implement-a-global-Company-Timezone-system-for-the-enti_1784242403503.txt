@@ -1,0 +1,94 @@
+Implement a global Company Timezone system for the entire SalesCore application.
+
+This is an infrastructure feature that should become the single source of truth for all timestamps throughout the application.
+
+Goals
+
+1. Every user, regardless of their local computer timezone or browser timezone, must see the exact same date and time throughout the application.
+
+2. The system must not rely on the user's browser timezone for displaying transaction dates, CRM activity, reports, invoices, audit logs, or any business data.
+
+3. All business timestamps should use one configurable Company Timezone.
+
+Default timezone:
+America/New_York (Eastern Time)
+
+Requirements
+
+Before writing any code:
+
+• Investigate how timestamps are currently created, stored, and displayed throughout the application.
+• Identify every place that currently uses browser/local time.
+• Identify whether timestamps are already stored in UTC or local time.
+• Produce a short implementation plan listing every module that will be affected.
+• Wait for my approval before modifying code if any data migration or destructive change is required.
+
+Architecture Requirements
+
+Do NOT scatter timezone conversion logic throughout the codebase.
+
+Create a reusable Time Service (or equivalent shared module) responsible for:
+
+- Getting the current time
+- Formatting dates
+- Formatting date/time
+- Relative time ("5 minutes ago")
+- UTC conversion
+- Company timezone conversion
+
+Every module should call this shared service instead of creating its own date logic.
+
+Configuration
+
+Add a new setting under Admin Settings:
+
+Company Timezone
+
+Default:
+America/New_York
+
+Only administrators can change it.
+
+The timezone should be stored in the application's settings so it can be changed in the future without modifying code.
+
+Storage
+
+Use UTC as the canonical storage format whenever possible.
+
+Display should always convert UTC into the configured Company Timezone.
+
+Scope
+
+This should apply consistently to all business timestamps, including but not limited to:
+
+• POS transactions
+• Orders
+• CRM Notes
+• CRM Recent Actions
+• CRM Timeline
+• To Do module (current and future)
+• Customer Next Follow Up
+• Inventory adjustments
+• Price history
+• User activity logs
+• Login history
+• Audit logs
+• Reports
+• Dashboard widgets
+• Invoice timestamps
+• Store credit transactions
+• Any future business events
+
+Do NOT change unrelated functionality.
+
+Do NOT change business logic.
+
+Keep the implementation modular, reusable, and easy to extend.
+
+At the end, provide:
+
+1. Files added
+2. Files modified
+3. Database changes (if any)
+4. Settings added
+5. Any timestamps that still need future migration

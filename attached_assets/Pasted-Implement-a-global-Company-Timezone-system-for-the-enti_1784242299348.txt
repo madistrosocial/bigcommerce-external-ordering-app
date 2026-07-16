@@ -1,0 +1,104 @@
+Implement a global Company Timezone system for the entire SalesCore application.
+
+This is an infrastructure feature that should become the single source of truth for all timestamps throughout the application.
+
+Goals
+
+1. Every user, regardless of their local computer timezone or browser timezone, must see the exact same date and time throughout the application.
+
+2. The system must not rely on the user's browser timezone for displaying transaction dates, CRM activity, reports, invoices, audit logs, or any business data.
+
+3. All business timestamps should use one configurable Company Timezone.
+
+Default Company Timezone
+
+America/New_York (North Carolina, Eastern Time)
+
+This should be the default timezone used immediately after deployment.
+
+Requirements
+
+Before writing any code:
+
+• Investigate how timestamps are currently created, stored, and displayed throughout the application.
+• Identify every place that currently uses browser/local time.
+• Identify whether timestamps are already stored in UTC or local time.
+• Produce a concise implementation plan listing every module that will be affected.
+• If any database migration or existing timestamp conversion is required, stop and present the plan for approval before making changes.
+
+Architecture Requirements
+
+Do NOT scatter timezone conversion logic throughout the codebase.
+
+Create a reusable shared Time Service responsible for:
+
+• Getting the current company time
+• Formatting dates
+• Formatting date/time
+• Relative time ("5 minutes ago")
+• UTC conversion
+• Company timezone conversion
+
+Every module must use this shared service instead of implementing its own date/time logic.
+
+Configuration
+
+Add a Company Timezone setting under Admin → System Settings.
+
+Default value:
+
+America/New_York
+
+(Display label: North Carolina (Eastern Time))
+
+Only administrators can modify this setting.
+
+Store the timezone in application settings so it can be changed later without code changes.
+
+Storage
+
+Use UTC as the canonical storage format whenever possible.
+
+All displayed dates and times must be converted from UTC into the configured Company Timezone.
+
+Scope
+
+Apply this consistently to all business timestamps including:
+
+• POS transactions
+• Orders
+• CRM customer pages
+• CRM Notes
+• CRM Recent Actions
+• CRM Timeline
+• To Do module
+• Next Follow Up
+• Inventory adjustments
+• Price history
+• User activity logs
+• Login history
+• Audit logs
+• Reports
+• Dashboard widgets
+• Invoice timestamps
+• Store Credit transactions
+• Any future business events
+
+Important
+
+This feature should only affect business timestamps.
+
+Do not change unrelated functionality.
+
+Do not modify business logic.
+
+Keep the implementation modular, reusable, and easy to extend.
+
+At completion provide:
+
+1. Files added
+2. Files modified
+3. Database changes (if any)
+4. Settings added
+5. Any legacy timestamps that may require future migration
+6. Any remaining places still using browser time
