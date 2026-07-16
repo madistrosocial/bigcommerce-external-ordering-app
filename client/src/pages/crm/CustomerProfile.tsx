@@ -276,6 +276,7 @@ function NoteModal({ open, onClose, onSave, saving, initial, title, orders = [] 
 // ─── Order Notes Modal (editable) ─────────────────────────────────────────────
 
 function OrderNotesModal({ order, customerId, onClose, onSaved }: { order: any; customerId: number; onClose: () => void; onSaved: () => void }) {
+  const fmt = useTimeService();
   const { toast } = useToast();
   const [custNote, setCustNote]   = useState(order?.customer_order_notes ?? "");
   const [staffNote, setStaffNote] = useState(order?.staff_notes ?? "");
@@ -334,6 +335,7 @@ function OrderNotesModal({ order, customerId, onClose, onSaved }: { order: any; 
 // ─── Orders Table ─────────────────────────────────────────────────────────────
 
 function OrdersTable({ orders, onRowClick }: { orders: any[]; onRowClick: (o: any) => void }) {
+  const fmt = useTimeService();
   if (orders.length === 0) {
     return <div className="flex items-center justify-center h-32 text-slate-400 text-sm">No orders found.</div>;
   }
@@ -1330,6 +1332,7 @@ function StoreCreditCard({ value, updatedAt, onRefresh, isRefreshing }: {
   onRefresh: () => void;
   isRefreshing: boolean;
 }) {
+  const fmt = useTimeService();
   return (
     <div className="rounded-xl border px-3 py-2.5 bg-white shadow-sm">
       <div className="flex items-center justify-between mb-1">
