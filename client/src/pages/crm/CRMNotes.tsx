@@ -56,6 +56,7 @@ function KpiCard({ label, value, color }: { label: string; value: number; color:
 // ─── Note Expand Modal ────────────────────────────────────────────────────────
 
 function NoteExpandModal({ note, onClose }: { note: any; onClose: () => void }) {
+  const fmt = useTimeService();
   const [, setLocation] = useLocation();
   if (!note) return null;
   return (

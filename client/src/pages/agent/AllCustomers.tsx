@@ -81,6 +81,7 @@ function sortCustomers(customers: BcCustomer[], sort: SortKey): BcCustomer[] {
 // ─── CustomerRow ──────────────────────────────────────────────────────────────
 
 function CustomerRow({ customer, groupName }: { customer: BcCustomer; groupName?: string }) {
+  const fmt = useTimeService();
   const [open, setOpen] = useState(false);
 
   return (

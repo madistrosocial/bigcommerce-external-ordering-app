@@ -158,6 +158,7 @@ function VariantPopupDialog({
   priceListPrices,
   matchedTier,
 }: VariantPopupProps) {
+  const fmt = useTimeService();
   const { toast } = useToast();
   const variants = getVariants(product);
   const rows = variants.length > 0 ? variants : [null];

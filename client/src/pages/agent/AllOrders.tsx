@@ -67,6 +67,7 @@ interface RowProps {
 }
 
 function AllOrderRow({ order, storeHash }: RowProps) {
+  const fmt = useTimeService();
   const [open, setOpen] = useState(false);
 
   const printInvoice = () => {
