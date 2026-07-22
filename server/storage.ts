@@ -1625,7 +1625,7 @@ export class DatabaseStorage implements IStorage {
           SUM(li.quantity)::int AS qty_sold,
           COALESCE(
             (
-              SELECT CAST(CAST(v->>'inventory_level' AS numeric) AS int)
+              SELECT CAST(CAST(v->>'stock_level' AS numeric) AS int)
               FROM jsonb_array_elements(p.variants) AS v
               WHERE v->>'id' IS NOT NULL
                 AND CAST(v->>'id' AS int) = li.variant_id

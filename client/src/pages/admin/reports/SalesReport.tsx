@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Calendar, ChevronDown, ChevronUp, Download, Search, X,
   Loader2, FileSpreadsheet, FileText, BarChart3, Settings2,
-  Package, ChevronRight, CheckSquare, Square, AlertCircle, RefreshCw
+  Package, ChevronRight, AlertCircle, RefreshCw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -184,7 +184,6 @@ interface ReportParams {
   brandId: string;
   categoryIds: number[];
   bcProductIds: number[];
-  selectAll: boolean;
 }
 
 interface ReportStats {
@@ -286,8 +285,14 @@ export default function SalesReport() {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [productSearch, setProductSearch] = useState("");
   const [selectedProducts, setSelectedProducts] = useState<ProductOption[]>([]);
-  const [selectAll, setSelectAll] = useState(false);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+
+  const clearFilters = () => {
+    setSelectedBrandId("");
+    setSelectedCategoryIds([]);
+    setProductSearch("");
+    setSelectedProducts([]);
+  };
 
   // ── Confirmed params (only update on "Generate Report") ────────────────
   const [reportParams, setReportParams] = useState<ReportParams | null>(null);
@@ -345,7 +350,6 @@ export default function SalesReport() {
     if (reportParams.brandId) p.brandId = reportParams.brandId;
     if (reportParams.categoryIds.length > 0) p.categoryIds = reportParams.categoryIds.join(",");
     if (reportParams.bcProductIds.length > 0) p.bcProductIds = reportParams.bcProductIds.join(",");
-    if (reportParams.selectAll) p.selectAll = "true";
     return new URLSearchParams(p).toString();
   };
 
@@ -382,7 +386,7 @@ export default function SalesReport() {
   // ─── Handlers ────────────────────────────────────────────────────────────
 
   const handleGenerate = () => {
-    setReportParams({ dateFrom, dateTo, brandId: selectedBrandId, categoryIds: selectedCategoryIds, bcProductIds: selectedProducts.map(p => p.bigcommerce_id), selectAll });
+    setReportParams({ dateFrom, dateTo, brandId: selectedBrandId, categoryIds: selectedCategoryIds, bcProductIds: selectedProducts.map(p => p.bigcommerce_id) });
     setPage(0);
     setExpandedProducts(new Set());
     setGeneratingKey(k => k + 1);
@@ -550,12 +554,17 @@ export default function SalesReport() {
                 </div>
               </div>
 
-              {/* Select All */}
+              {/* Clear Filters */}
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-slate-500">Products</label>
-                <button onClick={() => { setSelectAll(s => !s); if (!selectAll) setSelectedProducts([]); }} className={`flex items-center gap-1.5 border rounded-md px-3 py-1.5 text-sm transition-colors ${selectAll ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`} data-testid="button-select-all">
-                  {selectAll ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
-                  {selectAll ? "All Products" : "Select All"}
+                <label className="text-xs font-medium text-slate-500 invisible">Clear</label>
+                <button
+                  onClick={clearFilters}
+                  disabled={!selectedBrandId && selectedCategoryIds.length === 0 && selectedProducts.length === 0}
+                  className="flex items-center gap-1.5 border border-slate-200 rounded-md px-3 py-1.5 text-sm bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  data-testid="button-clear-filters"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Clear Filters
                 </button>
               </div>
 

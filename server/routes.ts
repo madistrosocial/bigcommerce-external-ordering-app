@@ -6104,14 +6104,13 @@ export async function registerRoutes(
   async function resolveReportProductIds(opts: {
     brandId?: string;
     categoryIdsRaw?: string;
-    selectAll?: string;
     bcProductIdsRaw?: string;
   }): Promise<number[] | undefined> {
-    const { brandId, categoryIdsRaw, selectAll, bcProductIdsRaw } = opts;
+    const { brandId, categoryIdsRaw, bcProductIdsRaw } = opts;
     const hasBrand = !!(brandId && brandId !== "");
     const catIds = (categoryIdsRaw ?? "").split(",").map(Number).filter(Boolean);
     const hasCategory = catIds.length > 0;
-    const hasIndividual = selectAll !== "true" && !!bcProductIdsRaw;
+    const hasIndividual = !!bcProductIdsRaw;
 
     if (!hasBrand && !hasCategory && !hasIndividual) return undefined; // no filter at all
 
@@ -6168,7 +6167,7 @@ export async function registerRoutes(
       const page = Math.max(0, parseInt(String(req.query.page ?? "0")));
       const limit = Math.min(parseInt(String(req.query.limit ?? "20")), 200);
 
-      const resolvedIds = await resolveReportProductIds({ brandId, categoryIdsRaw, selectAll, bcProductIdsRaw });
+      const resolvedIds = await resolveReportProductIds({ brandId, categoryIdsRaw, bcProductIdsRaw });
 
       const opts = { dateFrom, dateTo, bcProductIds: resolvedIds, page, limit, sortBy, sortDir };
       const [result, totalLineItems] = await Promise.all([
@@ -6189,9 +6188,9 @@ export async function registerRoutes(
   // GET /api/reports/sales/stats — aggregate stats for the report sidebar
   app.get("/api/reports/sales/stats", requirePermission("reporting_sales"), async (req, res) => {
     try {
-      const { dateFrom, dateTo, brandId, categoryIds: categoryIdsRaw, bcProductIds: raw, selectAll } = req.query as Record<string, string>;
+      const { dateFrom, dateTo, brandId, categoryIds: categoryIdsRaw, bcProductIds: raw } = req.query as Record<string, string>;
 
-      const resolvedIds = await resolveReportProductIds({ brandId, categoryIdsRaw, selectAll, bcProductIdsRaw: raw });
+      const resolvedIds = await resolveReportProductIds({ brandId, categoryIdsRaw, bcProductIdsRaw: raw });
 
       const stats = await storage.getSalesReportStats({ dateFrom, dateTo, bcProductIds: resolvedIds });
       res.json({ ...stats, dateFrom, dateTo });
