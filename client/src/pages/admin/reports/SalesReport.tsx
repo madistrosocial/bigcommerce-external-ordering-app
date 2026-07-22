@@ -509,9 +509,16 @@ export default function SalesReport() {
                 <span className="text-sm">Generating report…</span>
               </div>
             ) : reportError ? (
-              <div className="flex items-center justify-center py-20 gap-2 text-red-500">
-                <AlertCircle className="h-5 w-5" />
-                <span className="text-sm">Error loading report. Please try again.</span>
+              <div className="flex flex-col items-center justify-center py-20 gap-2 text-red-500">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5" />
+                  <span className="text-sm font-medium">Error loading report.</span>
+                </div>
+                {reportError instanceof Error && reportError.message && (
+                  <p className="text-xs text-red-400 max-w-lg text-center font-mono bg-red-50 rounded p-2 border border-red-200">
+                    {reportError.message}
+                  </p>
+                )}
               </div>
             ) : activeView === "summary" ? (
               summaryGroups.length === 0 ? <EmptyState hasParams={!!reportParams} noData={reportData?.noData} /> : (

@@ -6097,7 +6097,10 @@ export async function registerRoutes(
 
       const noData = totalLineItems === 0;
       res.json({ ...result, noData });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) {
+      console.error("[Sales Report] Error:", e.message, e.stack);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // GET /api/reports/sales/stats — aggregate stats for the report sidebar

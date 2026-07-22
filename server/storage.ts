@@ -1623,7 +1623,7 @@ export class DatabaseStorage implements IStorage {
           SUM(li.quantity)::int AS qty_sold,
           COALESCE(
             (
-              SELECT CAST(v->>'inventory_level' AS int)
+              SELECT CAST(CAST(v->>'inventory_level' AS numeric) AS int)
               FROM jsonb_array_elements(p.variants) AS v
               WHERE v->>'id' IS NOT NULL
                 AND CAST(v->>'id' AS int) = li.variant_id
@@ -1633,7 +1633,7 @@ export class DatabaseStorage implements IStorage {
             0
           ) AS current_stock
         ${baseFrom}
-        GROUP BY li.bigcommerce_product_id, product_name, brand_name, li.variant_id, li.variant_label, li.sku, p.stock_level, p.variants
+        GROUP BY li.bigcommerce_product_id, COALESCE(p.name, li.product_name), COALESCE(p.brand_name, ''), li.variant_id, li.variant_label, li.sku, p.stock_level, p.variants
         ORDER BY ${sortCol} ${dir}
         LIMIT ${limit} OFFSET ${offset}
       `)),
@@ -1741,7 +1741,7 @@ export class DatabaseStorage implements IStorage {
         COALESCE(SUM(
           COALESCE(
             (
-              SELECT CAST(v->>'inventory_level' AS int)
+              SELECT CAST(CAST(v->>'inventory_level' AS numeric) AS int)
               FROM jsonb_array_elements(p.variants) AS v
               WHERE v->>'id' IS NOT NULL
                 AND CAST(v->>'id' AS int) = li.variant_id
