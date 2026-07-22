@@ -4717,19 +4717,32 @@ export async function registerRoutes(
 
   // ── Order Line Items sync routes ──────────────────────────────────────────
 
-  // Helper: fetch and store line items for a single BC order
+  // Helper: fetch and store line items for a single BC order.
+  // Handles 429 rate-limit by waiting the reset window then retrying once.
   async function fetchAndStoreLineItems(
     orderId: number, orderDate: Date | null, customerName: string | null,
     customerEmail: string | null, bcCustomerId: number | null,
     storeHash: string, headers: Record<string, string>,
-  ): Promise<boolean> {
-    let bcItems: any[];
+  ): Promise<"ok" | "empty" | "error"> {
+    let fetchRes: Response;
     try {
-      const r = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}/products?limit=250`, { headers });
-      if (!r.ok) return false;
-      bcItems = await r.json();
-    } catch { return false; }
-    if (!Array.isArray(bcItems!) || bcItems!.length === 0) return false;
+      fetchRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}/products?limit=250`, { headers });
+    } catch { return "error"; }
+
+    // Rate limited — wait and retry once
+    if (fetchRes.status === 429) {
+      const waitMs = Number(fetchRes.headers.get("X-Rate-Limit-Time-Reset-Ms") ?? "10000");
+      await new Promise(r => setTimeout(r, waitMs + 200));
+      try {
+        fetchRes = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}/products?limit=250`, { headers });
+      } catch { return "error"; }
+    }
+
+    if (!fetchRes.ok) return "error";
+    let bcItems: any[];
+    try { bcItems = await fetchRes.json(); } catch { return "error"; }
+    if (!Array.isArray(bcItems!) || bcItems!.length === 0) return "empty";
+
     const newItems = bcItems!.map((item: any) => {
       const options = Array.isArray(item.product_options)
         ? item.product_options.map((o: any) => o.display_value ?? o.value ?? "").filter(Boolean).join(" / ")
@@ -4750,30 +4763,38 @@ export async function registerRoutes(
       };
     });
     await storage.insertBcOrderLineItems(newItems);
-    return true;
+    return "ok";
   }
 
-  // POST /api/crm/sync/line-items — full sync: reads customer_orders_mirror, fetches line items from BC
+  // POST /api/crm/sync/line-items — full sync:
+  // Truncates the local table, then re-syncs all orders from customer_orders_mirror.
+  // (Truncate+re-sync ensures stale/missed records are corrected on every full sync.)
   app.post("/api/crm/sync/line-items", requireAuth, async (_req, res) => {
     try {
       const { storeHash, token } = await getBcConfig();
       if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
       const headers = { "X-Auth-Token": String(token), "Accept": "application/json" };
+
+      // Truncate first so full sync is always a clean slate
+      await storage.truncateBcOrderLineItems();
+
       const orders = await storage.getCrmOrdersForLineItemSync();
-      const alreadySynced = await storage.getSyncedBcOrderIds();
       let synced = 0;
+      let failed = 0;
       for (const order of orders) {
-        if (alreadySynced.has(order.bigcommerce_order_id)) continue;
-        const ok = await fetchAndStoreLineItems(
+        const result = await fetchAndStoreLineItems(
           order.bigcommerce_order_id, order.order_date, order.customer_name,
           order.customer_email, order.bigcommerce_customer_id, storeHash, headers,
         );
-        if (ok) { alreadySynced.add(order.bigcommerce_order_id); synced++; }
+        if (result === "ok") synced++;
+        else if (result === "error") failed++;
+        // Pace calls to stay within BC's 150 req/30s rate limit
+        await new Promise(r => setTimeout(r, 220));
       }
       const now = new Date().toISOString();
       await storage.setSetting("crm_last_line_items_sync", now);
       await storage.setSetting("crm_last_line_items_incremental_sync", now);
-      res.json({ success: true, synced });
+      res.json({ success: true, synced, failed });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -4788,18 +4809,21 @@ export async function registerRoutes(
       const orders = await storage.getCrmOrdersForLineItemSync(since);
       const alreadySynced = await storage.getSyncedBcOrderIds(since);
       let synced = 0;
+      let failed = 0;
       for (const order of orders) {
         if (alreadySynced.has(order.bigcommerce_order_id)) continue;
-        const ok = await fetchAndStoreLineItems(
+        const result = await fetchAndStoreLineItems(
           order.bigcommerce_order_id, order.order_date, order.customer_name,
           order.customer_email, order.bigcommerce_customer_id, storeHash, headers,
         );
-        if (ok) { alreadySynced.add(order.bigcommerce_order_id); synced++; }
+        if (result === "ok") { alreadySynced.add(order.bigcommerce_order_id); synced++; }
+        else if (result === "error") failed++;
+        await new Promise(r => setTimeout(r, 220));
       }
       const now = new Date().toISOString();
       await storage.setSetting("crm_last_line_items_incremental_sync", now);
       await storage.setSetting("crm_last_line_items_sync", now);
-      res.json({ success: true, synced });
+      res.json({ success: true, synced, failed });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -4930,11 +4954,12 @@ export async function registerRoutes(
           const alreadySynced = await storage.getSyncedBcOrderIds(since);
           for (const order of orders) {
             if (alreadySynced.has(order.bigcommerce_order_id)) continue;
-            const ok = await fetchAndStoreLineItems(
+            const result = await fetchAndStoreLineItems(
               order.bigcommerce_order_id, order.order_date, order.customer_name,
               order.customer_email, order.bigcommerce_customer_id, storeHash, headers,
             );
-            if (ok) alreadySynced.add(order.bigcommerce_order_id);
+            if (result === "ok") alreadySynced.add(order.bigcommerce_order_id);
+            await new Promise(r => setTimeout(r, 220));
           }
           const now = new Date().toISOString();
           await storage.setSetting("crm_last_line_items_incremental_sync", now);
