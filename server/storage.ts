@@ -145,6 +145,9 @@ export interface IStorage {
   // Reports — BC Order Line Items mirror
   getSyncedBcOrderIds(dateFrom?: string, dateTo?: string): Promise<Set<number>>;
   insertBcOrderLineItems(items: InsertBcOrderLineItem[]): Promise<void>;
+  getBcOrderLineItemsCount(): Promise<number>;
+  truncateBcOrderLineItems(): Promise<void>;
+  getCrmOrdersForLineItemSync(since?: string): Promise<Array<{ bigcommerce_order_id: number; order_date: Date | null; customer_name: string | null; customer_email: string | null; bigcommerce_customer_id: number | null }>>;
   searchProductsForReport(query: string, limit?: number): Promise<Product[]>;
   getProductsByBrandId(brandId: number): Promise<Product[]>;
   getProductsByCategoryId(categoryId: number): Promise<Product[]>;
@@ -1269,6 +1272,29 @@ export class DatabaseStorage implements IStorage {
 
   async truncateCrmOrders(): Promise<void> {
     await db.delete(customerOrdersMirror);
+  }
+
+  async getBcOrderLineItemsCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)::int` }).from(bcOrderLineItems);
+    return result[0]?.count ?? 0;
+  }
+
+  async truncateBcOrderLineItems(): Promise<void> {
+    await db.delete(bcOrderLineItems);
+  }
+
+  async getCrmOrdersForLineItemSync(since?: string): Promise<Array<{ bigcommerce_order_id: number; order_date: Date | null; customer_name: string | null; customer_email: string | null; bigcommerce_customer_id: number | null }>> {
+    let q = db.select({
+      bigcommerce_order_id: customerOrdersMirror.bigcommerce_order_id,
+      order_date: customerOrdersMirror.order_date,
+      customer_name: customerOrdersMirror.customer_name,
+      customer_email: customerOrdersMirror.customer_email,
+      bigcommerce_customer_id: customerOrdersMirror.bigcommerce_customer_id,
+    }).from(customerOrdersMirror);
+    if (since) {
+      return q.where(sql`${customerOrdersMirror.order_date} >= ${since}::date`).orderBy(desc(customerOrdersMirror.order_date)) as unknown as any;
+    }
+    return q.orderBy(desc(customerOrdersMirror.order_date)) as unknown as any;
   }
 
   // ─── POS Enhancements — Price Override Audit ───────────────────────────────

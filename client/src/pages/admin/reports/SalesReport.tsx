@@ -497,7 +497,7 @@ export default function SalesReport() {
             {isLoading ? (
               <div className="flex items-center justify-center py-20 gap-2 text-slate-400">
                 <Loader2 className="h-5 w-5 animate-spin" />
-                <span className="text-sm">Syncing orders from BigCommerce…</span>
+                <span className="text-sm">Generating report…</span>
               </div>
             ) : reportError ? (
               <div className="flex items-center justify-center py-20 gap-2 text-red-500">

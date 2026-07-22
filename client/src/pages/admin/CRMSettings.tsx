@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   RefreshCw, Users, ShoppingBag, Database, Clock, BarChart2, Info,
-  HeartPulse, Save, Zap, Trash2, PlayCircle, StopCircle,
+  HeartPulse, Save, Zap, Trash2, PlayCircle, StopCircle, List,
 } from "lucide-react";
 import { useTimeService } from "@/hooks/useTimeService";
 
@@ -39,18 +39,23 @@ export default function CRMSettings() {
   // Sync states
   const [syncingCustomers, setSyncingCustomers] = useState(false);
   const [syncingOrders, setSyncingOrders] = useState(false);
+  const [syncingLineItems, setSyncingLineItems] = useState(false);
   const [incSyncingCustomers, setIncSyncingCustomers] = useState(false);
   const [incSyncingOrders, setIncSyncingOrders] = useState(false);
+  const [incSyncingLineItems, setIncSyncingLineItems] = useState(false);
   const [resettingCustomers, setResettingCustomers] = useState<"idle" | "confirm">("idle");
   const [resettingOrders, setResettingOrders] = useState<"idle" | "confirm">("idle");
+  const [resettingLineItems, setResettingLineItems] = useState<"idle" | "confirm">("idle");
   const [togglingAutoCustomers, setTogglingAutoCustomers] = useState(false);
   const [togglingAutoOrders, setTogglingAutoOrders] = useState(false);
+  const [togglingAutoLineItems, setTogglingAutoLineItems] = useState(false);
 
   const [recalculating, setRecalculating] = useState(false);
   const [savingThresholds, setSavingThresholds] = useState(false);
 
   const [customerLog, setCustomerLog] = useState<string | null>(null);
   const [orderLog, setOrderLog] = useState<string | null>(null);
+  const [lineItemLog, setLineItemLog] = useState<string | null>(null);
   const [recalcLog, setRecalcLog] = useState<string | null>(null);
   const [thresholdErrors, setThresholdErrors] = useState<string[]>([]);
 
@@ -60,12 +65,15 @@ export default function CRMSettings() {
       const r = await fetch("/api/crm/status", { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to fetch CRM status");
       return r.json() as Promise<{
-        customer_count: number; order_count: number;
+        customer_count: number; order_count: number; line_item_count: number;
         last_customer_sync: string | null; last_order_sync: string | null;
         last_stats_recalc: string | null;
         last_customer_incremental_sync: string | null;
         last_order_incremental_sync: string | null;
         auto_sync_customers: boolean; auto_sync_orders: boolean;
+        last_line_items_sync: string | null;
+        last_line_items_incremental_sync: string | null;
+        auto_sync_line_items: boolean;
       }>;
     },
     refetchInterval: 10_000,
@@ -117,8 +125,10 @@ export default function CRMSettings() {
 
   const syncCustomers    = () => runSync("/api/crm/sync/customers", "POST", setSyncingCustomers, setCustomerLog, "Full Customer Sync");
   const syncOrders       = () => runSync("/api/crm/sync/orders", "POST", setSyncingOrders, setOrderLog, "Full Order Sync");
+  const syncLineItems    = () => runSync("/api/crm/sync/line-items", "POST", setSyncingLineItems, setLineItemLog, "Full Line Items Sync");
   const incSyncCustomers = () => runSync("/api/crm/sync/customers/incremental", "POST", setIncSyncingCustomers, setCustomerLog, "Incremental Customer Sync");
   const incSyncOrders    = () => runSync("/api/crm/sync/orders/incremental", "POST", setIncSyncingOrders, setOrderLog, "Incremental Order Sync");
+  const incSyncLineItems = () => runSync("/api/crm/sync/line-items/incremental", "POST", setIncSyncingLineItems, setLineItemLog, "Incremental Line Items Sync");
 
   const resetCustomers = async () => {
     if (resettingCustomers === "idle") { setResettingCustomers("confirm"); return; }
@@ -129,6 +139,11 @@ export default function CRMSettings() {
     if (resettingOrders === "idle") { setResettingOrders("confirm"); return; }
     setResettingOrders("idle");
     await runSync("/api/crm/sync/orders/reset", "DELETE", setSyncingOrders, setOrderLog, "Order Reset");
+  };
+  const resetLineItems = async () => {
+    if (resettingLineItems === "idle") { setResettingLineItems("confirm"); return; }
+    setResettingLineItems("idle");
+    await runSync("/api/crm/sync/line-items/reset", "DELETE", setSyncingLineItems, setLineItemLog, "Line Items Reset");
   };
 
   const toggleAutoCustomers = async () => {
@@ -163,6 +178,23 @@ export default function CRMSettings() {
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally { setTogglingAutoOrders(false); }
+  };
+
+  const toggleAutoLineItems = async () => {
+    setTogglingAutoLineItems(true);
+    try {
+      const next = !status?.auto_sync_line_items;
+      const r = await fetch("/api/crm/sync/auto/line-items", {
+        method: "POST",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!r.ok) throw new Error("Failed to toggle auto-sync");
+      toast({ title: next ? "Line Items Auto-Sync Enabled" : "Line Items Auto-Sync Disabled", description: next ? "Incremental sync will run every 15 minutes." : "Auto-sync stopped." });
+      qc.invalidateQueries({ queryKey: ["crm", "status"] });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setTogglingAutoLineItems(false); }
   };
 
   const recalculateStats = async () => {
@@ -315,7 +347,7 @@ export default function CRMSettings() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center gap-3">
@@ -334,6 +366,17 @@ export default function CRMSettings() {
               <div>
                 <p className="text-2xl font-bold text-slate-800">{isLoading ? "—" : (status?.order_count ?? 0).toLocaleString()}</p>
                 <p className="text-xs text-slate-500">Mirrored Orders</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-purple-100 rounded-lg"><List className="h-5 w-5 text-purple-600" /></div>
+              <div>
+                <p className="text-2xl font-bold text-slate-800">{isLoading ? "—" : (status?.line_item_count ?? 0).toLocaleString()}</p>
+                <p className="text-xs text-slate-500">Mirrored Line Items</p>
               </div>
             </div>
           </CardContent>
@@ -438,6 +481,18 @@ export default function CRMSettings() {
             onFull={syncOrders} onInc={incSyncOrders} onAuto={toggleAutoOrders}
             onReset={resetOrders} resetState={resettingOrders}
             testPrefix="orders"
+          />
+          <SyncCard
+            icon={List} iconBg="bg-purple-100 text-purple-600"
+            title="Sync Order Line Items" description="Mirror order line items for the Sales Report. Requires orders to be synced first."
+            lastFull={status?.last_line_items_sync ?? null}
+            lastIncremental={status?.last_line_items_incremental_sync ?? null}
+            log={lineItemLog}
+            autoEnabled={status?.auto_sync_line_items ?? false}
+            busyFull={syncingLineItems} busyInc={incSyncingLineItems} busyAuto={togglingAutoLineItems}
+            onFull={syncLineItems} onInc={incSyncLineItems} onAuto={toggleAutoLineItems}
+            onReset={resetLineItems} resetState={resettingLineItems}
+            testPrefix="line-items"
           />
         </CardContent>
       </Card>

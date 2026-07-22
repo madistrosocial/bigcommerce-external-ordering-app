@@ -4375,10 +4375,12 @@ export async function registerRoutes(
   // GET /api/crm/status
   app.get("/api/crm/status", requireAuth, async (_req, res) => {
     try {
-      const [customer_count, order_count, lastCustSync, lastOrderSync, lastStatsRecalc,
-             lastCustIncSync, lastOrdIncSync, autoCustomers, autoOrders] = await Promise.all([
+      const [customer_count, order_count, line_item_count, lastCustSync, lastOrderSync, lastStatsRecalc,
+             lastCustIncSync, lastOrdIncSync, autoCustomers, autoOrders,
+             lastLineItemsSync, lastLineItemsIncSync, autoLineItems] = await Promise.all([
         storage.getCrmCustomerCount(),
         storage.getCrmOrderCount(),
+        storage.getBcOrderLineItemsCount(),
         storage.getSetting("crm_last_customer_sync"),
         storage.getSetting("crm_last_order_sync"),
         storage.getSetting("crm_last_stats_recalc"),
@@ -4386,10 +4388,14 @@ export async function registerRoutes(
         storage.getSetting("crm_last_order_incremental_sync"),
         storage.getSetting("crm_auto_sync_customers"),
         storage.getSetting("crm_auto_sync_orders"),
+        storage.getSetting("crm_last_line_items_sync"),
+        storage.getSetting("crm_last_line_items_incremental_sync"),
+        storage.getSetting("crm_auto_sync_line_items"),
       ]);
       res.json({
         customer_count,
         order_count,
+        line_item_count,
         last_customer_sync: lastCustSync?.value ?? null,
         last_order_sync: lastOrderSync?.value ?? null,
         last_stats_recalc: lastStatsRecalc?.value ?? null,
@@ -4397,6 +4403,9 @@ export async function registerRoutes(
         last_order_incremental_sync: lastOrdIncSync?.value ?? null,
         auto_sync_customers: autoCustomers?.value === true || autoCustomers?.value === "true",
         auto_sync_orders: autoOrders?.value === true || autoOrders?.value === "true",
+        last_line_items_sync: lastLineItemsSync?.value ?? null,
+        last_line_items_incremental_sync: lastLineItemsIncSync?.value ?? null,
+        auto_sync_line_items: autoLineItems?.value === true || autoLineItems?.value === "true",
       });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -4706,6 +4715,117 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // ── Order Line Items sync routes ──────────────────────────────────────────
+
+  // Helper: fetch and store line items for a single BC order
+  async function fetchAndStoreLineItems(
+    orderId: number, orderDate: Date | null, customerName: string | null,
+    customerEmail: string | null, bcCustomerId: number | null,
+    storeHash: string, headers: Record<string, string>,
+  ): Promise<boolean> {
+    let bcItems: any[];
+    try {
+      const r = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}/products?limit=250`, { headers });
+      if (!r.ok) return false;
+      bcItems = await r.json();
+    } catch { return false; }
+    if (!Array.isArray(bcItems!) || bcItems!.length === 0) return false;
+    const newItems = bcItems!.map((item: any) => {
+      const options = Array.isArray(item.product_options)
+        ? item.product_options.map((o: any) => o.display_value ?? o.value ?? "").filter(Boolean).join(" / ")
+        : null;
+      return {
+        bigcommerce_order_id: orderId,
+        bigcommerce_product_id: item.product_id,
+        variant_id: item.variant_id || null,
+        product_name: item.name ?? "",
+        sku: item.sku ?? "",
+        variant_label: options || null,
+        quantity: Number(item.quantity) || 0,
+        base_price: String(item.base_price ?? item.price_ex_tax ?? "0"),
+        order_date: orderDate,
+        customer_name: customerName,
+        customer_email: customerEmail,
+        bigcommerce_customer_id: bcCustomerId,
+      };
+    });
+    await storage.insertBcOrderLineItems(newItems);
+    return true;
+  }
+
+  // POST /api/crm/sync/line-items — full sync: reads customer_orders_mirror, fetches line items from BC
+  app.post("/api/crm/sync/line-items", requireAuth, async (_req, res) => {
+    try {
+      const { storeHash, token } = await getBcConfig();
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
+      const headers = { "X-Auth-Token": String(token), "Accept": "application/json" };
+      const orders = await storage.getCrmOrdersForLineItemSync();
+      const alreadySynced = await storage.getSyncedBcOrderIds();
+      let synced = 0;
+      for (const order of orders) {
+        if (alreadySynced.has(order.bigcommerce_order_id)) continue;
+        const ok = await fetchAndStoreLineItems(
+          order.bigcommerce_order_id, order.order_date, order.customer_name,
+          order.customer_email, order.bigcommerce_customer_id, storeHash, headers,
+        );
+        if (ok) { alreadySynced.add(order.bigcommerce_order_id); synced++; }
+      }
+      const now = new Date().toISOString();
+      await storage.setSetting("crm_last_line_items_sync", now);
+      await storage.setSetting("crm_last_line_items_incremental_sync", now);
+      res.json({ success: true, synced });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/crm/sync/line-items/incremental — only orders since last sync
+  app.post("/api/crm/sync/line-items/incremental", requireAuth, async (_req, res) => {
+    try {
+      const { storeHash, token } = await getBcConfig();
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
+      const headers = { "X-Auth-Token": String(token), "Accept": "application/json" };
+      const lastSync = await storage.getSetting("crm_last_line_items_sync");
+      const since = lastSync?.value ? String(lastSync.value).slice(0, 10) : undefined;
+      const orders = await storage.getCrmOrdersForLineItemSync(since);
+      const alreadySynced = await storage.getSyncedBcOrderIds(since);
+      let synced = 0;
+      for (const order of orders) {
+        if (alreadySynced.has(order.bigcommerce_order_id)) continue;
+        const ok = await fetchAndStoreLineItems(
+          order.bigcommerce_order_id, order.order_date, order.customer_name,
+          order.customer_email, order.bigcommerce_customer_id, storeHash, headers,
+        );
+        if (ok) { alreadySynced.add(order.bigcommerce_order_id); synced++; }
+      }
+      const now = new Date().toISOString();
+      await storage.setSetting("crm_last_line_items_incremental_sync", now);
+      await storage.setSetting("crm_last_line_items_sync", now);
+      res.json({ success: true, synced });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/crm/sync/auto/line-items — toggle auto-sync
+  app.post("/api/crm/sync/auto/line-items", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (user?.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+      const { enabled } = req.body as { enabled: boolean };
+      await storage.setSetting("crm_auto_sync_line_items", enabled);
+      res.json({ success: true, enabled });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/crm/sync/line-items/reset
+  app.delete("/api/crm/sync/line-items/reset", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (user?.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+      await storage.truncateBcOrderLineItems();
+      await storage.setSetting("crm_last_line_items_sync", null);
+      await storage.setSetting("crm_last_line_items_incremental_sync", null);
+      res.json({ success: true, message: "Order line items mirror cleared" });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // ── Auto-sync background job ──────────────────────────────────────────────
   // Runs every 15 minutes; performs incremental sync for whichever entities
   // have auto-sync enabled. No-op if BigCommerce is not configured.
@@ -4714,9 +4834,10 @@ export async function registerRoutes(
       const { storeHash, token } = await getBcConfig();
       if (!storeHash || !token) return;
 
-      const [autoC, autoO] = await Promise.all([
+      const [autoC, autoO, autoLI] = await Promise.all([
         storage.getSetting("crm_auto_sync_customers"),
         storage.getSetting("crm_auto_sync_orders"),
+        storage.getSetting("crm_auto_sync_line_items"),
       ]);
 
       if (autoC?.value === true || autoC?.value === "true") {
@@ -4798,6 +4919,27 @@ export async function registerRoutes(
           await storage.setSetting("crm_last_order_incremental_sync", now);
           await storage.setSetting("crm_last_order_sync", now);
         } catch (e) { console.error("[Auto-sync] orders error:", e); }
+      }
+
+      if (autoLI?.value === true || autoLI?.value === "true") {
+        try {
+          const headers = { "X-Auth-Token": String(token), "Accept": "application/json" };
+          const lastSync = await storage.getSetting("crm_last_line_items_sync");
+          const since = lastSync?.value ? String(lastSync.value).slice(0, 10) : undefined;
+          const orders = await storage.getCrmOrdersForLineItemSync(since);
+          const alreadySynced = await storage.getSyncedBcOrderIds(since);
+          for (const order of orders) {
+            if (alreadySynced.has(order.bigcommerce_order_id)) continue;
+            const ok = await fetchAndStoreLineItems(
+              order.bigcommerce_order_id, order.order_date, order.customer_name,
+              order.customer_email, order.bigcommerce_customer_id, storeHash, headers,
+            );
+            if (ok) alreadySynced.add(order.bigcommerce_order_id);
+          }
+          const now = new Date().toISOString();
+          await storage.setSetting("crm_last_line_items_incremental_sync", now);
+          await storage.setSetting("crm_last_line_items_sync", now);
+        } catch (e) { console.error("[Auto-sync] line-items error:", e); }
       }
     } catch (e) { console.error("[Auto-sync] config error:", e); }
   }, 15 * 60 * 1000); // every 15 minutes
@@ -5764,89 +5906,8 @@ export async function registerRoutes(
 
   // ─── Reports ───────────────────────────────────────────────────────────────
 
-  // Helper: sync BC order line items for orders not yet mirrored
-  async function syncBcOrderLineItemsForRange(
-    storeHash: string,
-    headers: Record<string, string>,
-    dateFrom?: string,
-    dateTo?: string,
-    bcProductIds?: number[],
-    maxNewOrders = 300,
-  ): Promise<number> {
-    const alreadySynced = await storage.getSyncedBcOrderIds(dateFrom, dateTo);
-
-    // Build BC API URL with date filters
-    let url = `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?limit=250&sort=date_created:desc`;
-    if (dateFrom) url += `&min_date_created=${encodeURIComponent(new Date(dateFrom + "T00:00:00Z").toUTCString())}`;
-    if (dateTo) url += `&max_date_created=${encodeURIComponent(new Date(dateTo + "T23:59:59Z").toUTCString())}`;
-
-    let page = 1;
-    let totalSynced = 0;
-    let morePages = true;
-
-    while (morePages && totalSynced < maxNewOrders) {
-      let bcOrders: any[];
-      try {
-        const fetchRes = await fetch(`${url}&page=${page}`, { headers });
-        if (fetchRes.status === 204) break;
-        if (!fetchRes.ok) break;
-        bcOrders = await fetchRes.json();
-      } catch { break; }
-      if (!Array.isArray(bcOrders!) || bcOrders!.length === 0) break;
-      if (bcOrders!.length < 250) morePages = false;
-
-      for (const bcOrder of bcOrders!) {
-        if (alreadySynced.has(bcOrder.id)) continue;
-        if (totalSynced >= maxNewOrders) { morePages = false; break; }
-
-        let bcItems: any[];
-        try {
-          const itemsFetchRes = await fetch(
-            `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrder.id}/products?limit=250`,
-            { headers },
-          );
-          if (!itemsFetchRes.ok) continue;
-          bcItems = await itemsFetchRes.json();
-        } catch { continue; }
-        if (!Array.isArray(bcItems!) || bcItems!.length === 0) continue;
-
-        const billingAddr = bcOrder.billing_address ?? {};
-        const customerName = `${billingAddr.first_name ?? ""} ${billingAddr.last_name ?? ""}`.trim() ||
-          bcOrder.customer_name || null;
-        const orderDate = bcOrder.date_created ? new Date(bcOrder.date_created) : null;
-
-        const newItems = bcItems
-          .filter(item => !bcProductIds || bcProductIds.includes(item.product_id))
-          .map((item: any) => {
-            const options = Array.isArray(item.product_options)
-              ? item.product_options.map((o: any) => o.display_value ?? o.value ?? "").filter(Boolean).join(" / ")
-              : null;
-            return {
-              bigcommerce_order_id: bcOrder.id,
-              bigcommerce_product_id: item.product_id,
-              variant_id: item.variant_id || null,
-              product_name: item.name ?? "",
-              sku: item.sku ?? "",
-              variant_label: options || null,
-              quantity: Number(item.quantity) || 0,
-              base_price: String(item.base_price ?? item.price_ex_tax ?? "0"),
-              order_date: orderDate,
-              customer_name: customerName,
-              customer_email: billingAddr.email ?? null,
-              bigcommerce_customer_id: bcOrder.customer_id ? Number(bcOrder.customer_id) : null,
-            };
-          });
-
-        if (newItems.length > 0) {
-          await storage.insertBcOrderLineItems(newItems);
-          alreadySynced.add(bcOrder.id);
-          totalSynced++;
-        }
-      }
-      page++;
-    }
-    return totalSynced;
-  }
+  // Note: line items are populated via the managed sync routes in CRM Settings.
+  // The sales report reads only from the local bc_order_line_items table.
 
   // GET /api/reports/bc-brands — fetch brands from BigCommerce (cached 1 hour)
   app.get("/api/reports/bc-brands", requirePermission("reporting_sales"), async (req, res) => {
@@ -5965,12 +6026,6 @@ export async function registerRoutes(
           resolvedIds = [...ids];
         }
       }
-
-      // Sync missing orders from BC API (silently — skip if BC not configured)
-      try {
-        const { storeHash, headers } = await getBcCreds();
-        await syncBcOrderLineItemsForRange(storeHash, headers, dateFrom, dateTo, resolvedIds, 300);
-      } catch { /* BC not configured or error — query whatever is locally cached */ }
 
       const opts = { dateFrom, dateTo, bcProductIds: resolvedIds, page, limit, sortBy, sortDir };
       const result = view === "summary"
