@@ -1580,9 +1580,11 @@ export class DatabaseStorage implements IStorage {
       ? `AND li.order_date < '${dateTo}'::date + interval '1 day'`
       : "";
     const productCond =
-      bcProductIds && bcProductIds.length > 0
-        ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
-        : "";
+      bcProductIds === undefined
+        ? ""
+        : bcProductIds.length > 0
+          ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
+          : "AND 1=0";
 
     const sortColMap: Record<string, string> = {
       qty_sold: "qty_sold",
@@ -1664,9 +1666,11 @@ export class DatabaseStorage implements IStorage {
       ? `AND li.order_date < '${dateTo}'::date + interval '1 day'`
       : "";
     const productCond =
-      bcProductIds && bcProductIds.length > 0
-        ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
-        : "";
+      bcProductIds === undefined
+        ? ""
+        : bcProductIds.length > 0
+          ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
+          : "AND 1=0";
 
     const sortColMap: Record<string, string> = {
       order_date: "li.order_date",
@@ -1729,9 +1733,11 @@ export class DatabaseStorage implements IStorage {
     const dateFromCond = dateFrom ? `AND li.order_date >= '${dateFrom}'::date` : "";
     const dateToCond = dateTo ? `AND li.order_date < '${dateTo}'::date + interval '1 day'` : "";
     const productCond =
-      bcProductIds && bcProductIds.length > 0
-        ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
-        : "";
+      bcProductIds === undefined
+        ? ""
+        : bcProductIds.length > 0
+          ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
+          : "AND 1=0";
 
     const res = await db.execute(sql.raw(`
       SELECT
