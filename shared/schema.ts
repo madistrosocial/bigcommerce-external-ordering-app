@@ -57,6 +57,9 @@ export const products = pgTable("products", {
   is_pinned: boolean("is_pinned").notNull().default(false),
   is_promotion: boolean("is_promotion").notNull().default(false),
   variants: jsonb("variants").notNull().default([]), // Array of variants
+  brand_id: integer("brand_id"),
+  brand_name: text("brand_name"),
+  categories: jsonb("categories").default([]), // Array of category IDs
 });
 
 export const orders = pgTable("orders", {
@@ -326,6 +329,29 @@ export type InsertCrmNote = z.infer<typeof insertCrmNoteSchema>;
 export type CrmNote = typeof crmCustomerNotes.$inferSelect;
 export type InsertCrmAuditLog = z.infer<typeof insertCrmAuditLogSchema>;
 export type CrmAuditLogEntry = typeof crmAuditLog.$inferSelect;
+
+// ─── BigCommerce Order Line Items Mirror ──────────────────────────────────────
+
+export const bcOrderLineItems = pgTable("bc_order_line_items", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  bigcommerce_order_id: integer("bigcommerce_order_id").notNull(),
+  bigcommerce_product_id: integer("bigcommerce_product_id").notNull(),
+  variant_id: integer("variant_id"),
+  product_name: text("product_name").notNull().default(""),
+  sku: text("sku").notNull().default(""),
+  variant_label: text("variant_label"),
+  quantity: integer("quantity").notNull().default(0),
+  base_price: decimal("base_price", { precision: 10, scale: 2 }).notNull().default("0"),
+  order_date: timestamp("order_date"),
+  customer_name: text("customer_name"),
+  customer_email: text("customer_email"),
+  bigcommerce_customer_id: integer("bigcommerce_customer_id"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertBcOrderLineItemSchema = createInsertSchema(bcOrderLineItems).omit({ id: true, created_at: true });
+export type InsertBcOrderLineItem = z.infer<typeof insertBcOrderLineItemSchema>;
+export type BcOrderLineItem = typeof bcOrderLineItems.$inferSelect;
 
 // ─── Report Export Audit Log ──────────────────────────────────────────────────
 

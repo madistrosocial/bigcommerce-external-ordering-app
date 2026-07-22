@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems } from "@shared/schema";
 import { eq, desc, and, inArray, gt, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
@@ -138,9 +138,20 @@ export interface IStorage {
   createPosStoreCreditUsage(entry: InsertPosStoreCreditUsage): Promise<PosStoreCreditUsage>;
   getPosStoreCreditUsage(opts: { customerId?: number; cashierId?: number; orderSearch?: string; dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ rows: PosStoreCreditUsage[]; total: number }>;
 
-  // Reports
+  // Reports — legacy (orders table)
   getSalesReport(opts: { view: string; dateFrom?: string; dateTo?: string; search?: string; status?: string; page?: number; limit?: number; sortBy?: string; sortDir?: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
   logReportExport(data: InsertReportExportLog): Promise<void>;
+
+  // Reports — BC Order Line Items mirror
+  getSyncedBcOrderIds(dateFrom?: string, dateTo?: string): Promise<Set<number>>;
+  insertBcOrderLineItems(items: InsertBcOrderLineItem[]): Promise<void>;
+  searchProductsForReport(query: string, limit?: number): Promise<Product[]>;
+  getProductsByBrandId(brandId: number): Promise<Product[]>;
+  getProductsByCategoryId(categoryId: number): Promise<Product[]>;
+  getSalesReportSummary(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; page: number; limit: number; sortBy: string; sortDir: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
+  getSalesReportDetails(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; page: number; limit: number; sortBy: string; sortDir: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
+  getSalesReportStats(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[] }): Promise<{ totalProducts: number; totalVariants: number; totalQtySold: number; totalCurrentStock: number }>;
+  getRecentExportLogs(limit?: number): Promise<Record<string, unknown>[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1475,6 +1486,269 @@ export class DatabaseStorage implements IStorage {
 
   async logReportExport(data: InsertReportExportLog): Promise<void> {
     await db.insert(reportExportLogs).values(data);
+  }
+
+  // ─── BC Order Line Items mirror ───────────────────────────────────────────
+
+  async getSyncedBcOrderIds(dateFrom?: string, dateTo?: string): Promise<Set<number>> {
+    let q = `SELECT DISTINCT bigcommerce_order_id FROM bc_order_line_items`;
+    const conditions: string[] = [];
+    if (dateFrom) conditions.push(`order_date >= '${dateFrom}'::date`);
+    if (dateTo) conditions.push(`order_date < '${dateTo}'::date + interval '1 day'`);
+    if (conditions.length) q += ` WHERE ${conditions.join(" AND ")}`;
+    const result = await db.execute(sql.raw(q));
+    const ids = new Set<number>();
+    for (const row of result.rows as any[]) ids.add(Number(row.bigcommerce_order_id));
+    return ids;
+  }
+
+  async insertBcOrderLineItems(items: InsertBcOrderLineItem[]): Promise<void> {
+    if (!items.length) return;
+    const CHUNK = 200;
+    for (let i = 0; i < items.length; i += CHUNK) {
+      await db.insert(bcOrderLineItems).values(items.slice(i, i + CHUNK));
+    }
+  }
+
+  async searchProductsForReport(query: string, limit = 20): Promise<Product[]> {
+    const q = `%${query.toLowerCase()}%`;
+    return db
+      .select()
+      .from(products)
+      .where(
+        or(
+          ilike(products.name, `%${query}%`),
+          ilike(products.sku, `%${query}%`)
+        )
+      )
+      .limit(limit);
+  }
+
+  async getProductsByBrandId(brandId: number): Promise<Product[]> {
+    return db.select().from(products).where(eq(products.brand_id, brandId));
+  }
+
+  async getProductsByCategoryId(categoryId: number): Promise<Product[]> {
+    const result = await db.execute(
+      sql.raw(`SELECT * FROM products WHERE categories @> '${categoryId}'::jsonb`)
+    );
+    return result.rows as Product[];
+  }
+
+  async getSalesReportSummary(opts: {
+    dateFrom?: string;
+    dateTo?: string;
+    bcProductIds?: number[];
+    page: number;
+    limit: number;
+    sortBy: string;
+    sortDir: string;
+  }): Promise<{ rows: Record<string, unknown>[]; total: number }> {
+    const { dateFrom, dateTo, bcProductIds, page, limit, sortBy, sortDir } = opts;
+    const offset = page * limit;
+
+    const dateFromCond = dateFrom
+      ? `AND li.order_date >= '${dateFrom}'::date`
+      : "";
+    const dateToCond = dateTo
+      ? `AND li.order_date < '${dateTo}'::date + interval '1 day'`
+      : "";
+    const productCond =
+      bcProductIds && bcProductIds.length > 0
+        ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
+        : "";
+
+    const sortColMap: Record<string, string> = {
+      qty_sold: "qty_sold",
+      current_stock: "current_stock",
+      sku: "li.sku",
+      product_name: "product_name",
+      variant_label: "li.variant_label",
+    };
+    const sortCol = sortColMap[sortBy] ?? "qty_sold";
+    const dir = sortDir === "asc" ? "ASC" : "DESC";
+
+    const baseFrom = `
+      FROM bc_order_line_items li
+      LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+      WHERE 1=1
+      ${dateFromCond}
+      ${dateToCond}
+      ${productCond}
+    `;
+
+    const [countRes, dataRes] = await Promise.all([
+      db.execute(sql.raw(`
+        SELECT COUNT(*)::int AS total
+        FROM (
+          SELECT li.bigcommerce_product_id, li.variant_id, li.sku
+          ${baseFrom}
+          GROUP BY li.bigcommerce_product_id, li.variant_id, li.sku, li.variant_label
+        ) sub
+      `)),
+      db.execute(sql.raw(`
+        SELECT
+          li.bigcommerce_product_id AS bc_product_id,
+          COALESCE(p.name, li.product_name) AS product_name,
+          COALESCE(p.brand_name, '') AS brand_name,
+          li.variant_id,
+          li.variant_label,
+          li.sku,
+          SUM(li.quantity)::int AS qty_sold,
+          COALESCE(
+            (
+              SELECT CAST(v->>'inventory_level' AS int)
+              FROM jsonb_array_elements(p.variants) AS v
+              WHERE v->>'id' IS NOT NULL
+                AND CAST(v->>'id' AS int) = li.variant_id
+              LIMIT 1
+            ),
+            p.stock_level,
+            0
+          ) AS current_stock
+        ${baseFrom}
+        GROUP BY li.bigcommerce_product_id, product_name, brand_name, li.variant_id, li.variant_label, li.sku, p.stock_level, p.variants
+        ORDER BY ${sortCol} ${dir}
+        LIMIT ${limit} OFFSET ${offset}
+      `)),
+    ]);
+
+    return {
+      rows: dataRes.rows as Record<string, unknown>[],
+      total: (countRes.rows[0] as any)?.total ?? 0,
+    };
+  }
+
+  async getSalesReportDetails(opts: {
+    dateFrom?: string;
+    dateTo?: string;
+    bcProductIds?: number[];
+    page: number;
+    limit: number;
+    sortBy: string;
+    sortDir: string;
+  }): Promise<{ rows: Record<string, unknown>[]; total: number }> {
+    const { dateFrom, dateTo, bcProductIds, page, limit, sortBy, sortDir } = opts;
+    const offset = page * limit;
+
+    const dateFromCond = dateFrom
+      ? `AND li.order_date >= '${dateFrom}'::date`
+      : "";
+    const dateToCond = dateTo
+      ? `AND li.order_date < '${dateTo}'::date + interval '1 day'`
+      : "";
+    const productCond =
+      bcProductIds && bcProductIds.length > 0
+        ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
+        : "";
+
+    const sortColMap: Record<string, string> = {
+      order_date: "li.order_date",
+      qty: "li.quantity",
+      product_name: "product_name",
+      customer_name: "li.customer_name",
+      order_number: "li.bigcommerce_order_id",
+    };
+    const sortCol = sortColMap[sortBy] ?? "li.order_date";
+    const dir = sortDir === "asc" ? "ASC" : "DESC";
+
+    const baseFrom = `
+      FROM bc_order_line_items li
+      LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+      WHERE 1=1
+      ${dateFromCond}
+      ${dateToCond}
+      ${productCond}
+    `;
+
+    const [countRes, dataRes] = await Promise.all([
+      db.execute(sql.raw(`SELECT COUNT(*)::int AS total ${baseFrom}`)),
+      db.execute(sql.raw(`
+        SELECT
+          li.bigcommerce_product_id AS bc_product_id,
+          COALESCE(p.name, li.product_name) AS product_name,
+          COALESCE(p.brand_name, '') AS brand_name,
+          li.variant_label,
+          li.sku,
+          li.bigcommerce_order_id AS order_number,
+          COALESCE(
+            com.order_number::text,
+            li.bigcommerce_order_id::text
+          ) AS display_order_number,
+          li.customer_name,
+          li.customer_email,
+          li.quantity,
+          li.base_price AS unit_price,
+          li.order_date
+        ${baseFrom}
+        LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
+        ORDER BY ${sortCol} ${dir}
+        LIMIT ${limit} OFFSET ${offset}
+      `)),
+    ]);
+
+    return {
+      rows: dataRes.rows as Record<string, unknown>[],
+      total: (countRes.rows[0] as any)?.total ?? 0,
+    };
+  }
+
+  async getSalesReportStats(opts: {
+    dateFrom?: string;
+    dateTo?: string;
+    bcProductIds?: number[];
+  }): Promise<{ totalProducts: number; totalVariants: number; totalQtySold: number; totalCurrentStock: number }> {
+    const { dateFrom, dateTo, bcProductIds } = opts;
+
+    const dateFromCond = dateFrom ? `AND li.order_date >= '${dateFrom}'::date` : "";
+    const dateToCond = dateTo ? `AND li.order_date < '${dateTo}'::date + interval '1 day'` : "";
+    const productCond =
+      bcProductIds && bcProductIds.length > 0
+        ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
+        : "";
+
+    const res = await db.execute(sql.raw(`
+      SELECT
+        COUNT(DISTINCT li.bigcommerce_product_id)::int AS total_products,
+        COUNT(DISTINCT (li.bigcommerce_product_id, li.variant_id, li.sku))::int AS total_variants,
+        SUM(li.quantity)::int AS total_qty_sold,
+        COALESCE(SUM(
+          COALESCE(
+            (
+              SELECT CAST(v->>'inventory_level' AS int)
+              FROM jsonb_array_elements(p.variants) AS v
+              WHERE v->>'id' IS NOT NULL
+                AND CAST(v->>'id' AS int) = li.variant_id
+              LIMIT 1
+            ),
+            p.stock_level,
+            0
+          )
+        ), 0)::int AS total_current_stock
+      FROM bc_order_line_items li
+      LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+      WHERE 1=1
+      ${dateFromCond}
+      ${dateToCond}
+      ${productCond}
+    `));
+
+    const row = res.rows[0] as any;
+    return {
+      totalProducts: row?.total_products ?? 0,
+      totalVariants: row?.total_variants ?? 0,
+      totalQtySold: row?.total_qty_sold ?? 0,
+      totalCurrentStock: row?.total_current_stock ?? 0,
+    };
+  }
+
+  async getRecentExportLogs(limit = 5): Promise<Record<string, unknown>[]> {
+    const res = await db
+      .select()
+      .from(reportExportLogs)
+      .orderBy(desc(reportExportLogs.created_at))
+      .limit(limit);
+    return res as unknown as Record<string, unknown>[];
   }
 }
 

@@ -1,0 +1,213 @@
+Data Source (Critical)
+
+Do NOT use the orders table.
+
+The Sales Report must use the BigCommerce Order Mirror (customers_order_mirror) as the primary data source.
+
+The report is intended to analyze all BigCommerce sales, not just SalesCore-created transactions.
+
+The report must include:
+
+Storefront Orders
+POS Orders
+Manual BigCommerce Orders
+API-created Orders
+Any future mirrored BigCommerce orders
+
+Product information and current inventory should come from the Product Mirror.
+
+SalesCore orders should never be treated as the source of truth for this report.
+
+Report Purpose
+
+This is NOT an order report.
+
+This is a Product Sales Report.
+
+The report should answer questions like:
+
+How many units of each product sold?
+Which variants sold the most?
+What is current inventory?
+Which customers purchased a product? (Order Details View)
+
+Everything should revolve around the product, not the order.
+
+Product Selection
+
+Instead of only having a search box, provide a dedicated Product Selection workflow.
+
+Product Selection Panel
+
+Users should be able to generate reports using one or more of the following:
+
+Option 1 (Recommended)
+
+Select entire Brands.
+
+Example
+
+Geek Bar
+Lost Mary
+Raz
+Flum
+
+Selecting a brand automatically includes every product under that brand.
+
+Option 2
+
+Select Categories.
+
+Example
+
+Disposable
+Pods
+Batteries
+E-Liquid
+
+Selecting a category includes every product within that category.
+
+Option 3
+
+Search and select individual products.
+
+Autocomplete should search:
+
+Product Name
+SKU
+
+Each selected product becomes a removable chip.
+
+Example
+
+Geek Bar Pulse ✕
+Geek Bar Digiflavor ✕
+Raz TN9000 ✕
+Option 4
+
+Select All Products
+
+A quick action that includes every active BigCommerce product.
+
+Product Selection Rules
+
+Users may combine filters.
+
+Example
+
+Brand:
+Geek Bar
+
++
+
+Manually Selected Product:
+Raz TN9000
+
++
+
+Category:
+Pod Systems
+
+The final report should contain the union of all selected products.
+
+Product Filter Flow
+
+The report generation should follow this sequence:
+
+Choose Date Range
+
+↓
+
+Choose Products
+
+↓
+
+Generate Report
+
+The report should not continuously refresh while filters are changing.
+
+Instead:
+
+user selects filters
+user selects products
+clicks Generate Report
+report loads
+
+This prevents unnecessary SQL queries and greatly improves performance on large datasets.
+
+Summary View
+
+The Summary View should always group data by Product.
+
+Example
+
+Geek Bar Pulse
+
+    Blue Razz Ice
+    Miami Mint
+    Strawberry Banana
+
+Lost Mary MT15000
+
+    Watermelon Ice
+    Mexico Mango
+    Sour Apple
+
+The product row serves only as a visual grouping header.
+
+Each variant beneath it displays:
+
+SKU
+Quantity Sold
+Current Stock
+
+No expandable rows.
+
+Everything is already visible.
+
+Order Details View
+
+This view uses the same selected products.
+
+Instead of grouping, it displays every mirrored order line.
+
+Example
+
+Geek Bar Pulse
+
+Blue Razz Ice
+
+Order #10455
+
+ABC Smoke Shop
+
+12 Qty
+
+July 18
+UI Changes
+
+Replace the current Product Search field with a richer selector:
+
+Date Range
+
+Brand
+
+Category
+
+Selected Products
+
+[ + Add Products ]
+
+----------------------------------
+
+Selected:
+
+✓ Geek Bar Pulse
+
+✓ Raz TN9000
+
+✓ Lost Mary MT15000
+
+----------------------------------
+
+[ Generate Report ]

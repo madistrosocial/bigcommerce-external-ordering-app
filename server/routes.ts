@@ -5764,16 +5764,248 @@ export async function registerRoutes(
 
   // ─── Reports ───────────────────────────────────────────────────────────────
 
-  // GET /api/reports/sales — Sales Report (summary + order details views)
+  // Helper: sync BC order line items for orders not yet mirrored
+  async function syncBcOrderLineItemsForRange(
+    storeHash: string,
+    headers: Record<string, string>,
+    dateFrom?: string,
+    dateTo?: string,
+    bcProductIds?: number[],
+    maxNewOrders = 300,
+  ): Promise<number> {
+    const alreadySynced = await storage.getSyncedBcOrderIds(dateFrom, dateTo);
+
+    // Build BC API URL with date filters
+    let url = `https://api.bigcommerce.com/stores/${storeHash}/v2/orders?limit=250&sort=date_created:desc`;
+    if (dateFrom) url += `&min_date_created=${encodeURIComponent(new Date(dateFrom + "T00:00:00Z").toUTCString())}`;
+    if (dateTo) url += `&max_date_created=${encodeURIComponent(new Date(dateTo + "T23:59:59Z").toUTCString())}`;
+
+    let page = 1;
+    let totalSynced = 0;
+    let morePages = true;
+
+    while (morePages && totalSynced < maxNewOrders) {
+      let bcOrders: any[];
+      try {
+        const fetchRes = await fetch(`${url}&page=${page}`, { headers });
+        if (fetchRes.status === 204) break;
+        if (!fetchRes.ok) break;
+        bcOrders = await fetchRes.json();
+      } catch { break; }
+      if (!Array.isArray(bcOrders!) || bcOrders!.length === 0) break;
+      if (bcOrders!.length < 250) morePages = false;
+
+      for (const bcOrder of bcOrders!) {
+        if (alreadySynced.has(bcOrder.id)) continue;
+        if (totalSynced >= maxNewOrders) { morePages = false; break; }
+
+        let bcItems: any[];
+        try {
+          const itemsFetchRes = await fetch(
+            `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrder.id}/products?limit=250`,
+            { headers },
+          );
+          if (!itemsFetchRes.ok) continue;
+          bcItems = await itemsFetchRes.json();
+        } catch { continue; }
+        if (!Array.isArray(bcItems!) || bcItems!.length === 0) continue;
+
+        const billingAddr = bcOrder.billing_address ?? {};
+        const customerName = `${billingAddr.first_name ?? ""} ${billingAddr.last_name ?? ""}`.trim() ||
+          bcOrder.customer_name || null;
+        const orderDate = bcOrder.date_created ? new Date(bcOrder.date_created) : null;
+
+        const newItems = bcItems
+          .filter(item => !bcProductIds || bcProductIds.includes(item.product_id))
+          .map((item: any) => {
+            const options = Array.isArray(item.product_options)
+              ? item.product_options.map((o: any) => o.display_value ?? o.value ?? "").filter(Boolean).join(" / ")
+              : null;
+            return {
+              bigcommerce_order_id: bcOrder.id,
+              bigcommerce_product_id: item.product_id,
+              variant_id: item.variant_id || null,
+              product_name: item.name ?? "",
+              sku: item.sku ?? "",
+              variant_label: options || null,
+              quantity: Number(item.quantity) || 0,
+              base_price: String(item.base_price ?? item.price_ex_tax ?? "0"),
+              order_date: orderDate,
+              customer_name: customerName,
+              customer_email: billingAddr.email ?? null,
+              bigcommerce_customer_id: bcOrder.customer_id ? Number(bcOrder.customer_id) : null,
+            };
+          });
+
+        if (newItems.length > 0) {
+          await storage.insertBcOrderLineItems(newItems);
+          alreadySynced.add(bcOrder.id);
+          totalSynced++;
+        }
+      }
+      page++;
+    }
+    return totalSynced;
+  }
+
+  // GET /api/reports/bc-brands — fetch brands from BigCommerce (cached 1 hour)
+  app.get("/api/reports/bc-brands", requirePermission("reporting_sales"), async (req, res) => {
+    try {
+      const cacheKey = "report_bc_brands_cache";
+      const cached = await storage.getSetting(cacheKey);
+      if (cached?.value) {
+        const { data, ts } = cached.value as any;
+        if (Date.now() - ts < 3600_000) return res.json(data);
+      }
+      const { storeHash, headers } = await getBcCreds();
+      let brands: any[] = [];
+      let pg = 1;
+      while (true) {
+        const r = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/brands?limit=250&page=${pg}`,
+          { headers },
+        );
+        if (!r.ok) break;
+        const json = await r.json();
+        const items = json.data ?? [];
+        brands.push(...items.map((b: any) => ({ id: b.id, name: b.name })));
+        if (items.length < 250) break;
+        pg++;
+      }
+      brands.sort((a, b) => a.name.localeCompare(b.name));
+      await storage.setSetting(cacheKey, { data: brands, ts: Date.now() });
+      res.json(brands);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/reports/bc-categories — fetch categories from BigCommerce (cached 1 hour)
+  app.get("/api/reports/bc-categories", requirePermission("reporting_sales"), async (req, res) => {
+    try {
+      const cacheKey = "report_bc_categories_cache";
+      const cached = await storage.getSetting(cacheKey);
+      if (cached?.value) {
+        const { data, ts } = cached.value as any;
+        if (Date.now() - ts < 3600_000) return res.json(data);
+      }
+      const { storeHash, headers } = await getBcCreds();
+      let cats: any[] = [];
+      let pg = 1;
+      while (true) {
+        const r = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/categories?limit=250&page=${pg}`,
+          { headers },
+        );
+        if (!r.ok) break;
+        const json = await r.json();
+        const items = json.data ?? [];
+        cats.push(...items.map((c: any) => ({ id: c.id, name: c.name, parent_id: c.parent_id })));
+        if (items.length < 250) break;
+        pg++;
+      }
+      cats.sort((a, b) => a.name.localeCompare(b.name));
+      await storage.setSetting(cacheKey, { data: cats, ts: Date.now() });
+      res.json(cats);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/reports/product-search — search local product catalog
+  app.get("/api/reports/product-search", requirePermission("reporting_sales"), async (req, res) => {
+    try {
+      const q = String(req.query.q ?? "").trim();
+      if (!q || q.length < 1) return res.json([]);
+      const results = await storage.searchProductsForReport(q, 20);
+      res.json(results.map(p => ({
+        id: p.id,
+        bigcommerce_id: p.bigcommerce_id,
+        name: p.name,
+        sku: p.sku,
+        brand_name: p.brand_name ?? "",
+      })));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/reports/sales — BC-mirror-based Sales Report
   app.get("/api/reports/sales", requirePermission("reporting_sales"), async (req, res) => {
     try {
-      const { view = "summary", dateFrom, dateTo, search, status, sortBy, sortDir } = req.query as Record<string, string>;
+      const {
+        view = "summary",
+        dateFrom,
+        dateTo,
+        brandId,
+        categoryId,
+        bcProductIds: bcProductIdsRaw,
+        selectAll,
+        sortBy = "qty_sold",
+        sortDir = "desc",
+      } = req.query as Record<string, string>;
       const page = Math.max(0, parseInt(String(req.query.page ?? "0")));
-      const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 100000);
-      const result = await storage.getSalesReport({
-        view, dateFrom, dateTo, search, status, page, limit, sortBy, sortDir,
-      });
+      const limit = Math.min(parseInt(String(req.query.limit ?? "20")), 200);
+
+      // Resolve product IDs from brand/category/individual selection
+      let resolvedIds: number[] | undefined = undefined;
+
+      if (selectAll !== "true") {
+        const ids = new Set<number>();
+
+        if (brandId && brandId !== "") {
+          const prods = await storage.getProductsByBrandId(parseInt(brandId));
+          prods.forEach(p => ids.add(p.bigcommerce_id));
+        }
+
+        if (categoryId && categoryId !== "") {
+          const prods = await storage.getProductsByCategoryId(parseInt(categoryId));
+          prods.forEach(p => ids.add(p.bigcommerce_id));
+        }
+
+        if (bcProductIdsRaw) {
+          bcProductIdsRaw.split(",").map(Number).filter(Boolean).forEach(id => ids.add(id));
+        }
+
+        if (brandId || categoryId || bcProductIdsRaw) {
+          resolvedIds = [...ids];
+        }
+      }
+
+      // Sync missing orders from BC API (silently — skip if BC not configured)
+      try {
+        const { storeHash, headers } = await getBcCreds();
+        await syncBcOrderLineItemsForRange(storeHash, headers, dateFrom, dateTo, resolvedIds, 300);
+      } catch { /* BC not configured or error — query whatever is locally cached */ }
+
+      const opts = { dateFrom, dateTo, bcProductIds: resolvedIds, page, limit, sortBy, sortDir };
+      const result = view === "summary"
+        ? await storage.getSalesReportSummary(opts)
+        : await storage.getSalesReportDetails(opts);
+
       res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/reports/sales/stats — aggregate stats for the report sidebar
+  app.get("/api/reports/sales/stats", requirePermission("reporting_sales"), async (req, res) => {
+    try {
+      const { dateFrom, dateTo, brandId, categoryId, bcProductIds: raw, selectAll } = req.query as Record<string, string>;
+
+      let resolvedIds: number[] | undefined = undefined;
+      if (selectAll !== "true") {
+        const ids = new Set<number>();
+        if (brandId) (await storage.getProductsByBrandId(parseInt(brandId))).forEach(p => ids.add(p.bigcommerce_id));
+        if (categoryId) (await storage.getProductsByCategoryId(parseInt(categoryId))).forEach(p => ids.add(p.bigcommerce_id));
+        if (raw) raw.split(",").map(Number).filter(Boolean).forEach(id => ids.add(id));
+        if (brandId || categoryId || raw) resolvedIds = [...ids];
+      }
+
+      const stats = await storage.getSalesReportStats({ dateFrom, dateTo, bcProductIds: resolvedIds });
+      res.json({ ...stats, dateFrom, dateTo });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/reports/recent-exports — last N report export log entries
+  app.get("/api/reports/recent-exports", requireAuth, async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(String(req.query.limit ?? "5")), 20);
+      const rows = await storage.getRecentExportLogs(limit);
+      res.json(rows);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
