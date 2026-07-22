@@ -4766,36 +4766,71 @@ export async function registerRoutes(
     return "ok";
   }
 
-  // POST /api/crm/sync/line-items — full sync:
+  // In-memory state for the long-running full line-items sync (background job)
+  const liSyncState = {
+    running: false,
+    synced: 0,
+    failed: 0,
+    total: 0,
+    error: null as string | null,
+    finishedAt: null as string | null,
+  };
+
+  // GET /api/crm/sync/line-items/status — poll progress of background full sync
+  app.get("/api/crm/sync/line-items/status", requireAuth, (_req, res) => {
+    res.json({ ...liSyncState });
+  });
+
+  // POST /api/crm/sync/line-items — starts full sync as a background job and returns immediately.
   // Truncates the local table, then re-syncs all orders from customer_orders_mirror.
-  // (Truncate+re-sync ensures stale/missed records are corrected on every full sync.)
   app.post("/api/crm/sync/line-items", requireAuth, async (_req, res) => {
+    if (liSyncState.running) {
+      return res.json({ started: false, already_running: true, ...liSyncState });
+    }
+
+    let storeHash: string, token: string;
     try {
-      const { storeHash, token } = await getBcConfig();
-      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce not configured" });
-      const headers = { "X-Auth-Token": String(token), "Accept": "application/json" };
+      const cfg = await getBcConfig();
+      if (!cfg.storeHash || !cfg.token) return res.status(400).json({ error: "BigCommerce not configured" });
+      storeHash = String(cfg.storeHash);
+      token = String(cfg.token);
+    } catch (e: any) { return res.status(500).json({ error: e.message }); }
 
-      // Truncate first so full sync is always a clean slate
-      await storage.truncateBcOrderLineItems();
+    // Reset state and acknowledge immediately
+    liSyncState.running = true;
+    liSyncState.synced = 0;
+    liSyncState.failed = 0;
+    liSyncState.total = 0;
+    liSyncState.error = null;
+    liSyncState.finishedAt = null;
+    res.json({ started: true, message: "Full sync started — poll /api/crm/sync/line-items/status for progress." });
 
-      const orders = await storage.getCrmOrdersForLineItemSync();
-      let synced = 0;
-      let failed = 0;
-      for (const order of orders) {
-        const result = await fetchAndStoreLineItems(
-          order.bigcommerce_order_id, order.order_date, order.customer_name,
-          order.customer_email, order.bigcommerce_customer_id, storeHash, headers,
-        );
-        if (result === "ok") synced++;
-        else if (result === "error") failed++;
-        // Pace calls to stay within BC's 150 req/30s rate limit
-        await new Promise(r => setTimeout(r, 220));
+    // Run the actual work in background (not awaited)
+    ;(async () => {
+      try {
+        const headers = { "X-Auth-Token": token, "Accept": "application/json" };
+        await storage.truncateBcOrderLineItems();
+        const orders = await storage.getCrmOrdersForLineItemSync();
+        liSyncState.total = orders.length;
+        for (const order of orders) {
+          const result = await fetchAndStoreLineItems(
+            order.bigcommerce_order_id, order.order_date, order.customer_name,
+            order.customer_email, order.bigcommerce_customer_id, storeHash, headers,
+          );
+          if (result === "ok") liSyncState.synced++;
+          else if (result === "error") liSyncState.failed++;
+          await new Promise(r => setTimeout(r, 220));
+        }
+        const now = new Date().toISOString();
+        await storage.setSetting("crm_last_line_items_sync", now);
+        await storage.setSetting("crm_last_line_items_incremental_sync", now);
+        liSyncState.finishedAt = now;
+      } catch (e: any) {
+        liSyncState.error = e.message;
+      } finally {
+        liSyncState.running = false;
       }
-      const now = new Date().toISOString();
-      await storage.setSetting("crm_last_line_items_sync", now);
-      await storage.setSetting("crm_last_line_items_incremental_sync", now);
-      res.json({ success: true, synced, failed });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    })();
   });
 
   // POST /api/crm/sync/line-items/incremental — only orders since last sync

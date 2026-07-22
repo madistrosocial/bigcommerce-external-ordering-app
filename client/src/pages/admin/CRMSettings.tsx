@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getAuthHeaders } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -35,6 +35,9 @@ function SyncLog({ log }: { log: string | null }) {
 export default function CRMSettings() {
   const { toast } = useToast();
   const qc = useQueryClient();
+
+  // Line items full-sync polling interval ref
+  const liPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Sync states
   const [syncingCustomers, setSyncingCustomers] = useState(false);
@@ -125,7 +128,56 @@ export default function CRMSettings() {
 
   const syncCustomers    = () => runSync("/api/crm/sync/customers", "POST", setSyncingCustomers, setCustomerLog, "Full Customer Sync");
   const syncOrders       = () => runSync("/api/crm/sync/orders", "POST", setSyncingOrders, setOrderLog, "Full Order Sync");
-  const syncLineItems    = () => runSync("/api/crm/sync/line-items", "POST", setSyncingLineItems, setLineItemLog, "Full Line Items Sync");
+
+  // Full line-items sync runs as a background job — start it, then poll for progress.
+  const syncLineItems = async () => {
+    if (syncingLineItems) return;
+    setSyncingLineItems(true);
+    setLineItemLog(null);
+    if (liPollRef.current) { clearInterval(liPollRef.current); liPollRef.current = null; }
+    try {
+      const startRes = await fetch("/api/crm/sync/line-items", {
+        method: "POST", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      });
+      const startData = await startRes.json();
+      if (!startRes.ok) throw new Error(startData.error || "Failed to start sync");
+      if (startData.already_running) {
+        setLineItemLog("⟳ Sync already in progress…");
+      }
+    } catch (e: any) {
+      setLineItemLog(`✗ ${e.message}`);
+      toast({ title: "Full Line Items Sync Failed", description: e.message, variant: "destructive" });
+      setSyncingLineItems(false);
+      return;
+    }
+
+    // Poll status every 2 seconds
+    liPollRef.current = setInterval(async () => {
+      try {
+        const r = await fetch("/api/crm/sync/line-items/status", { headers: getAuthHeaders() });
+        if (!r.ok) return;
+        const s = await r.json() as { running: boolean; synced: number; failed: number; total: number; error: string | null; finishedAt: string | null };
+        const pct = s.total > 0 ? Math.round((s.synced + s.failed) / s.total * 100) : 0;
+        if (s.running) {
+          setLineItemLog(`⟳ Syncing… ${s.synced.toLocaleString()} / ${s.total.toLocaleString()} orders (${pct}%)${s.failed > 0 ? ` · ${s.failed} failed` : ""}`);
+        } else {
+          // Done
+          clearInterval(liPollRef.current!);
+          liPollRef.current = null;
+          setSyncingLineItems(false);
+          if (s.error) {
+            setLineItemLog(`✗ ${s.error}`);
+            toast({ title: "Line Items Sync Failed", description: s.error, variant: "destructive" });
+          } else {
+            const msg = `✓ Synced ${s.synced.toLocaleString()} orders${s.failed > 0 ? ` (${s.failed} failed)` : ""}`;
+            setLineItemLog(msg);
+            toast({ title: "Full Line Items Sync", description: msg.replace("✓ ", "") });
+          }
+          qc.invalidateQueries({ queryKey: ["crm"] });
+        }
+      } catch { /* ignore transient poll errors */ }
+    }, 2000);
+  };
   const incSyncCustomers = () => runSync("/api/crm/sync/customers/incremental", "POST", setIncSyncingCustomers, setCustomerLog, "Incremental Customer Sync");
   const incSyncOrders    = () => runSync("/api/crm/sync/orders/incremental", "POST", setIncSyncingOrders, setOrderLog, "Incremental Order Sync");
   const incSyncLineItems = () => runSync("/api/crm/sync/line-items/incremental", "POST", setIncSyncingLineItems, setLineItemLog, "Incremental Line Items Sync");
