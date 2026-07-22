@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs } from "@shared/schema";
 import { eq, desc, and, inArray, gt, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
@@ -137,6 +137,10 @@ export interface IStorage {
   // POS Enhancements — Store Credit Usage
   createPosStoreCreditUsage(entry: InsertPosStoreCreditUsage): Promise<PosStoreCreditUsage>;
   getPosStoreCreditUsage(opts: { customerId?: number; cashierId?: number; orderSearch?: string; dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ rows: PosStoreCreditUsage[]; total: number }>;
+
+  // Reports
+  getSalesReport(opts: { view: string; dateFrom?: string; dateTo?: string; search?: string; status?: string; page?: number; limit?: number; sortBy?: string; sortDir?: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
+  logReportExport(data: InsertReportExportLog): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1328,6 +1332,149 @@ export class DatabaseStorage implements IStorage {
     ]);
 
     return { rows, total: countRows[0]?.count ?? 0 };
+  }
+  // ─── Reports ──────────────────────────────────────────────────────────────────
+
+  async getSalesReport(opts: {
+    view: string;
+    dateFrom?: string;
+    dateTo?: string;
+    search?: string;
+    status?: string;
+    page?: number;
+    limit?: number;
+    sortBy?: string;
+    sortDir?: string;
+  }): Promise<{ rows: Record<string, unknown>[]; total: number }> {
+    const { view, dateFrom, dateTo, search, page = 0, limit = 50, sortBy, sortDir = "desc" } = opts;
+    const offset = page * limit;
+
+    // Default status filter: synced + pending_sync (unless 'all' is requested)
+    const statuses = opts.status === "all"
+      ? ["synced", "pending_sync", "draft", "failed"]
+      : opts.status === "pending_sync"
+      ? ["pending_sync"]
+      : opts.status === "synced"
+      ? ["synced"]
+      : ["synced", "pending_sync"];
+
+    const statusList = statuses.map((s) => `'${s}'`).join(", ");
+
+    const dateFromCond = dateFrom
+      ? `AND o.date >= '${dateFrom.replace(/'/g, "''")}'::date`
+      : "";
+    const dateToCond = dateTo
+      ? `AND o.date < ('${dateTo.replace(/'/g, "''")}'::date + INTERVAL '1 day')`
+      : "";
+    const searchCond = search
+      ? `AND (
+          item->'product'->>'name' ILIKE '%${search.replace(/'/g, "''")}%'
+          OR COALESCE(item->'variant'->>'sku', item->'product'->>'sku', '') ILIKE '%${search.replace(/'/g, "''")}%'
+        )`
+      : "";
+
+    if (view === "summary") {
+      const sortColMap: Record<string, string> = {
+        product_name: "product_name",
+        variant_label: "variant_label",
+        sku: "sku",
+        qty_sold: "qty_sold",
+        revenue: "revenue",
+      };
+      const orderCol = sortColMap[sortBy ?? "qty_sold"] ?? "qty_sold";
+      const orderDir = sortDir === "asc" ? "ASC" : "DESC";
+
+      const baseWhere = `
+        FROM orders o, jsonb_array_elements(o.items) AS item
+        WHERE o.status IN (${statusList})
+        ${dateFromCond}
+        ${dateToCond}
+        ${searchCond}
+      `;
+
+      const [countResult, dataResult] = await Promise.all([
+        db.execute(sql.raw(`
+          SELECT COUNT(*)::int AS total
+          FROM (
+            SELECT 1
+            ${baseWhere}
+            GROUP BY
+              item->'product'->>'name',
+              COALESCE(item->'variant'->>'label', ''),
+              COALESCE(NULLIF(item->'variant'->>'sku', ''), item->'product'->>'sku', '')
+          ) t
+        `)),
+        db.execute(sql.raw(`
+          SELECT
+            item->'product'->>'name' AS product_name,
+            COALESCE(item->'variant'->>'label', '') AS variant_label,
+            COALESCE(NULLIF(item->'variant'->>'sku', ''), item->'product'->>'sku', '') AS sku,
+            SUM((item->>'quantity')::numeric) AS qty_sold,
+            SUM((item->>'quantity')::numeric * (item->>'price_at_sale')::numeric) AS revenue
+          ${baseWhere}
+          GROUP BY
+            item->'product'->>'name',
+            COALESCE(item->'variant'->>'label', ''),
+            COALESCE(NULLIF(item->'variant'->>'sku', ''), item->'product'->>'sku', '')
+          ORDER BY ${orderCol} ${orderDir}
+          LIMIT ${limit} OFFSET ${offset}
+        `)),
+      ]);
+
+      return {
+        rows: dataResult.rows as Record<string, unknown>[],
+        total: (countResult.rows[0] as any)?.total ?? 0,
+      };
+    }
+
+    // ── Order Details view ──────────────────────────────────────────────────────
+    const sortColMap: Record<string, string> = {
+      product_name: "item->'product'->>'name'",
+      variant_label: "COALESCE(item->'variant'->>'label', '')",
+      sku: "COALESCE(NULLIF(item->'variant'->>'sku', ''), item->'product'->>'sku', '')",
+      order_number: "o.bigcommerce_order_id",
+      customer_name: "o.customer_name",
+      quantity: "(item->>'quantity')::numeric",
+      unit_price: "(item->>'price_at_sale')::numeric",
+      order_date: "o.date",
+    };
+    const orderExpr = sortColMap[sortBy ?? "order_date"] ?? "o.date";
+    const orderDir = sortDir === "asc" ? "ASC" : "DESC";
+
+    const baseWhere = `
+      FROM orders o, jsonb_array_elements(o.items) AS item
+      WHERE o.status IN (${statusList})
+      ${dateFromCond}
+      ${dateToCond}
+      ${searchCond}
+    `;
+
+    const [countResult, dataResult] = await Promise.all([
+      db.execute(sql.raw(`SELECT COUNT(*)::int AS total ${baseWhere}`)),
+      db.execute(sql.raw(`
+        SELECT
+          item->'product'->>'name' AS product_name,
+          COALESCE(item->'variant'->>'label', '') AS variant_label,
+          COALESCE(NULLIF(item->'variant'->>'sku', ''), item->'product'->>'sku', '') AS sku,
+          o.bigcommerce_order_id AS order_number,
+          o.customer_name,
+          (item->>'quantity')::numeric AS quantity,
+          (item->>'price_at_sale')::numeric AS unit_price,
+          o.date AS order_date
+        ${baseWhere}
+        ORDER BY ${orderExpr} ${orderDir}
+        LIMIT ${limit} OFFSET ${offset}
+      `)),
+    ]);
+
+    return {
+      rows: dataResult.rows as Record<string, unknown>[],
+      total: (countResult.rows[0] as any)?.total ?? 0,
+    };
+  }
+
+  async logReportExport(data: InsertReportExportLog): Promise<void> {
+    await db.insert(reportExportLogs).values(data);
   }
 }
 

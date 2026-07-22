@@ -150,6 +150,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
 
   // Reporting children
   const reportingChildren: NavLeaf[] = [
+    ...(hasPermission("reporting_sales") ? [{ label: "Sales Report", path: "/reports/sales" }] : []),
     ...(hasPermission("reporting_price_override_audit") ? [{ label: "Price Override Audit", path: "/reports/price-override-audit" }] : []),
     ...(hasPermission("reporting_store_credit_usage") ? [{ label: "Store Credit Usage", path: "/reports/store-credit-usage" }] : []),
   ];

@@ -327,6 +327,24 @@ export type CrmNote = typeof crmCustomerNotes.$inferSelect;
 export type InsertCrmAuditLog = z.infer<typeof insertCrmAuditLogSchema>;
 export type CrmAuditLogEntry = typeof crmAuditLog.$inferSelect;
 
+// ─── Report Export Audit Log ──────────────────────────────────────────────────
+
+export const reportExportLogs = pgTable("report_export_logs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id"),
+  user_name: text("user_name").notNull().default(""),
+  report_name: text("report_name").notNull(),
+  view_name: text("view_name").notNull().default(""),
+  filters: jsonb("filters").notNull().default({}),
+  export_type: text("export_type").notNull(), // 'csv' | 'excel'
+  row_count: integer("row_count").notNull().default(0),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertReportExportLogSchema = createInsertSchema(reportExportLogs).omit({ id: true, created_at: true });
+export type InsertReportExportLog = z.infer<typeof insertReportExportLogSchema>;
+export type ReportExportLog = typeof reportExportLogs.$inferSelect;
+
 // RBAC types
 export type InsertRole = z.infer<typeof insertRoleSchema>;
 export type Role = typeof roles.$inferSelect;

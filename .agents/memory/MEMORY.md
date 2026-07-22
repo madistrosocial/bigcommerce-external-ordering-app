@@ -4,3 +4,4 @@
 - [CRM auth pattern](crm-auth-pattern.md) — `requireAuth` sets `authUser`, NOT `userId`; using `(req as any).userId` silently breaks all CRM endpoints (returns 401 → shows 0 customers).
 - [CRM Visibility RBAC](crm-visibility-rbac.md) — crm:view_all is the canonical "see all customers" perm; CRM_ACTION_PERMS in AdminUsers.tsx; health cards and reactivation both now pass visibility scope.
 - [Native BC store credit checkout](bc-native-store-credit.md) — full OAuth flow for native store_credit_amount on POS orders; requires clientId+clientSecret in bigcommerce_config setting.
+- [Reports Module architecture](reports-module.md) — shared engine pattern; individual reports supply config only; use getAllPermissions() not getPermissions() in seeds.

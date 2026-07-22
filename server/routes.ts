@@ -4824,6 +4824,24 @@ export async function registerRoutes(
     } catch (_) { /* non-fatal — permissions may already exist */ }
   })();
 
+  // ── Reports permission auto-seed ──────────────────────────────────────────────
+  await (async () => {
+    const REPORT_PERMS: Array<{ module: string; action: string; description: string }> = [
+      { module: "reporting_sales",                action: "view", description: "Reporting: Sales Report (summary + order details)" },
+      { module: "reporting_price_override_audit", action: "view", description: "Reporting: Price Override Audit log" },
+      { module: "reporting_store_credit_usage",   action: "view", description: "Reporting: Store Credit Usage log" },
+    ];
+    try {
+      const existing = await storage.getAllPermissions();
+      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+      for (const p of REPORT_PERMS) {
+        if (!existingSet.has(`${p.module}:${p.action}`)) {
+          await storage.createPermission({ module: p.module, action: p.action, description: p.description });
+        }
+      }
+    } catch (_) { /* non-fatal */ }
+  })();
+
   // ── CRM visibility scope helper ───────────────────────────────────────────────
   // Non-admin users without an explicit visibility permission default to ASSIGNED_ONLY
   // (least-privilege). Admins always get ALL_CUSTOMERS.
@@ -5741,6 +5759,38 @@ export async function registerRoutes(
         orderSearch, dateFrom, dateTo, sortBy, sortDir, limit, offset,
       });
       res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ─── Reports ───────────────────────────────────────────────────────────────
+
+  // GET /api/reports/sales — Sales Report (summary + order details views)
+  app.get("/api/reports/sales", requirePermission("reporting_sales"), async (req, res) => {
+    try {
+      const { view = "summary", dateFrom, dateTo, search, status, sortBy, sortDir } = req.query as Record<string, string>;
+      const page = Math.max(0, parseInt(String(req.query.page ?? "0")));
+      const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 100000);
+      const result = await storage.getSalesReport({
+        view, dateFrom, dateTo, search, status, page, limit, sortBy, sortDir,
+      });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/reports/export-log — Audit log for every CSV/Excel export
+  app.post("/api/reports/export-log", requireAuth, async (req, res) => {
+    try {
+      const { user_id, user_name, report_name, view_name, filters, export_type, row_count } = req.body;
+      await storage.logReportExport({
+        user_id: user_id ?? null,
+        user_name: String(user_name ?? ""),
+        report_name: String(report_name ?? ""),
+        view_name: String(view_name ?? ""),
+        filters: filters ?? {},
+        export_type: String(export_type ?? "csv"),
+        row_count: Number(row_count ?? 0),
+      });
+      res.status(201).json({ ok: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
