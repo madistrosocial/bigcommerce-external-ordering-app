@@ -112,13 +112,22 @@ function SortIcon({ col, sortBy, sortDir }: { col: string; sortBy: string; sortD
     : <ChevronDown className="h-3.5 w-3.5 text-blue-500 inline ml-1" />;
 }
 
-function EmptyState({ hasParams }: { hasParams: boolean }) {
+function EmptyState({ hasParams, noData }: { hasParams: boolean; noData?: boolean }) {
   if (!hasParams) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center px-4">
         <BarChart3 className="h-12 w-12 text-slate-300 mb-4" />
         <p className="text-slate-500 font-medium">Configure your report filters above</p>
         <p className="text-slate-400 text-sm mt-1">Select a date range and products, then click Generate Report</p>
+      </div>
+    );
+  }
+  if (noData) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center px-4">
+        <RefreshCw className="h-12 w-12 text-slate-300 mb-4" />
+        <p className="text-slate-500 font-medium">No line items data — run Sync Order Line Items from CRM Settings first.</p>
+        <p className="text-slate-400 text-sm mt-1">Go to Admin → CRM Settings → Sync Order Line Items and click Full Sync.</p>
       </div>
     );
   }
@@ -212,7 +221,7 @@ export default function SalesReport() {
     return new URLSearchParams(p).toString();
   };
 
-  const { data: reportData, isLoading: loadingReport, isFetching, error: reportError } = useQuery<{ rows: any[]; total: number }>({
+  const { data: reportData, isLoading: loadingReport, isFetching, error: reportError } = useQuery<{ rows: any[]; total: number; noData?: boolean }>({
     queryKey: ["sales-report", reportParams, activeView, page, limit, sortBy, sortDir, generatingKey],
     queryFn: async () => {
       const qs = buildQs({ view: activeView, page: String(page), limit: String(limit), sortBy, sortDir });
@@ -505,7 +514,7 @@ export default function SalesReport() {
                 <span className="text-sm">Error loading report. Please try again.</span>
               </div>
             ) : activeView === "summary" ? (
-              summaryGroups.length === 0 ? <EmptyState hasParams={!!reportParams} /> : (
+              summaryGroups.length === 0 ? <EmptyState hasParams={!!reportParams} noData={reportData?.noData} /> : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -554,7 +563,7 @@ export default function SalesReport() {
                 </div>
               )
             ) : (
-              detailRows.length === 0 ? <EmptyState hasParams={!!reportParams} /> : (
+              detailRows.length === 0 ? <EmptyState hasParams={!!reportParams} noData={reportData?.noData} /> : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>

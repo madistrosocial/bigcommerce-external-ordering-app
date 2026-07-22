@@ -6028,11 +6028,15 @@ export async function registerRoutes(
       }
 
       const opts = { dateFrom, dateTo, bcProductIds: resolvedIds, page, limit, sortBy, sortDir };
-      const result = view === "summary"
-        ? await storage.getSalesReportSummary(opts)
-        : await storage.getSalesReportDetails(opts);
+      const [result, totalLineItems] = await Promise.all([
+        view === "summary"
+          ? storage.getSalesReportSummary(opts)
+          : storage.getSalesReportDetails(opts),
+        storage.getBcOrderLineItemsCount(),
+      ]);
 
-      res.json(result);
+      const noData = totalLineItems === 0;
+      res.json({ ...result, noData });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
