@@ -304,12 +304,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async setSetting(key: string, value: any): Promise<void> {
-    const existing = await this.getSetting(key);
-    if (existing) {
-      await db.update(settings).set({ value }).where(eq(settings.key, key));
-    } else {
-      await db.insert(settings).values({ key, value });
-    }
+    await db.insert(settings).values({ key, value })
+      .onConflictDoUpdate({ target: settings.key, set: { value } });
   }
 
   async getCachedPriceHistory(customerId: number, bcProductId: number): Promise<PriceHistoryCacheEntry[]> {
@@ -1682,9 +1678,7 @@ export class DatabaseStorage implements IStorage {
     const sortCol = sortColMap[sortBy] ?? "li.order_date";
     const dir = sortDir === "asc" ? "ASC" : "DESC";
 
-    const baseFrom = `
-      FROM bc_order_line_items li
-      LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+    const whereCond = `
       WHERE 1=1
       ${dateFromCond}
       ${dateToCond}
@@ -1692,7 +1686,12 @@ export class DatabaseStorage implements IStorage {
     `;
 
     const [countRes, dataRes] = await Promise.all([
-      db.execute(sql.raw(`SELECT COUNT(*)::int AS total ${baseFrom}`)),
+      db.execute(sql.raw(`
+        SELECT COUNT(*)::int AS total
+        FROM bc_order_line_items li
+        LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+        ${whereCond}
+      `)),
       db.execute(sql.raw(`
         SELECT
           li.bigcommerce_product_id AS bc_product_id,
@@ -1710,8 +1709,10 @@ export class DatabaseStorage implements IStorage {
           li.quantity,
           li.base_price AS unit_price,
           li.order_date
-        ${baseFrom}
+        FROM bc_order_line_items li
+        LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
+        ${whereCond}
         ORDER BY ${sortCol} ${dir}
         LIMIT ${limit} OFFSET ${offset}
       `)),
