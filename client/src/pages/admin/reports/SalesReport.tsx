@@ -15,6 +15,134 @@ import { getAuthHeaders } from "@/lib/api";
 interface Brand { id: number; name: string; }
 interface Category { id: number; name: string; parent_id?: number; }
 interface ProductOption { id: number; bigcommerce_id: number; name: string; sku: string; brand_name?: string; }
+interface TreeNode extends Category { children: TreeNode[]; }
+
+// ─── Category tree helpers ─────────────────────────────────────────────────
+
+function buildCategoryTree(cats: Category[]): TreeNode[] {
+  const map = new Map<number, TreeNode>();
+  cats.forEach(c => map.set(c.id, { ...c, children: [] }));
+  const roots: TreeNode[] = [];
+  cats.forEach(c => {
+    const node = map.get(c.id)!;
+    if (c.parent_id && c.parent_id !== 0 && map.has(c.parent_id)) {
+      map.get(c.parent_id)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  });
+  const sort = (ns: TreeNode[]) => { ns.sort((a, b) => a.name.localeCompare(b.name)); ns.forEach(n => sort(n.children)); };
+  sort(roots);
+  return roots;
+}
+
+function getAllDescendantIds(node: TreeNode): number[] {
+  return [node.id, ...node.children.flatMap(getAllDescendantIds)];
+}
+
+// ─── CategoryTreePicker ────────────────────────────────────────────────────
+
+function CategoryTreePicker({ categories, selectedIds, onChange }: {
+  categories: Category[];
+  selectedIds: number[];
+  onChange: (ids: number[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const ref = useRef<HTMLDivElement>(null);
+  const tree = useMemo(() => buildCategoryTree(categories), [categories]);
+  const sel = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  const isAll = (node: TreeNode) => getAllDescendantIds(node).every(id => sel.has(id));
+  const isSome = (node: TreeNode) => {
+    if (!node.children.length) return false;
+    const ids = getAllDescendantIds(node);
+    return ids.some(id => sel.has(id)) && !ids.every(id => sel.has(id));
+  };
+
+  const toggle = (node: TreeNode) => {
+    const ids = getAllDescendantIds(node);
+    if (isAll(node)) onChange(selectedIds.filter(id => !ids.includes(id)));
+    else onChange([...new Set([...selectedIds, ...ids])]);
+  };
+
+  const toggleExp = (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
+
+  const label = selectedIds.length === 0
+    ? "All Categories"
+    : selectedIds.length === 1
+      ? (categories.find(c => c.id === selectedIds[0])?.name ?? "1 selected")
+      : `${selectedIds.length} categories`;
+
+  const CheckBox = ({ checked, partial }: { checked: boolean; partial?: boolean }) => (
+    <div className={`shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${checked ? "bg-blue-600 border-blue-600" : partial ? "bg-blue-50 border-blue-400" : "border-slate-300 bg-white"}`}>
+      {checked && <svg className="h-2.5 w-2.5 text-white" fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+      {!checked && partial && <div className="w-2 h-0.5 bg-blue-500 rounded" />}
+    </div>
+  );
+
+  const renderNode = (node: TreeNode, depth = 0): React.ReactNode => {
+    const allSel = isAll(node);
+    const someSel = isSome(node);
+    const isOpen = expanded.has(node.id);
+    const hasKids = node.children.length > 0;
+    return (
+      <div key={node.id}>
+        <div
+          className="flex items-center gap-1.5 py-1.5 pr-2 hover:bg-slate-50 cursor-pointer rounded-sm select-none"
+          style={{ paddingLeft: `${8 + depth * 16}px` }}
+          onClick={() => toggle(node)}
+        >
+          <button
+            className={`shrink-0 text-slate-400 hover:text-slate-700 transition-colors w-4 h-4 flex items-center justify-center ${!hasKids ? "invisible" : ""}`}
+            onClick={e => toggleExp(node.id, e)}
+          >
+            {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </button>
+          <CheckBox checked={allSel} partial={someSel} />
+          <span className="text-sm text-slate-700 truncate flex-1">{node.name}</span>
+          {hasKids && <span className="text-xs text-slate-400 shrink-0 ml-1">({node.children.length})</span>}
+        </div>
+        {isOpen && hasKids && node.children.map(child => renderNode(child, depth + 1))}
+      </div>
+    );
+  };
+
+  return (
+    <div ref={ref} className="relative" onMouseDown={e => e.stopPropagation()}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={`flex items-center gap-2 border rounded-md px-3 py-1.5 text-sm bg-white hover:border-slate-300 transition-colors min-w-[160px] max-w-[200px] focus:outline-none ${selectedIds.length > 0 ? "border-blue-400 text-blue-700" : "border-slate-200 text-slate-700"}`}
+        data-testid="button-category-picker"
+      >
+        <span className="flex-1 text-left truncate">{label}</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-xl z-50 max-h-80 overflow-y-auto py-1">
+          <div
+            className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-slate-50 cursor-pointer select-none border-b border-slate-100 mb-1"
+            onClick={() => onChange([])}
+          >
+            <div className="w-4 h-4 shrink-0" />
+            <CheckBox checked={selectedIds.length === 0} />
+            <span className="text-sm text-slate-700 font-medium">All Categories</span>
+          </div>
+          {tree.map(node => renderNode(node))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface VariantRow {
   bc_product_id: number;
@@ -54,7 +182,7 @@ interface ReportParams {
   dateFrom: string;
   dateTo: string;
   brandId: string;
-  categoryId: string;
+  categoryIds: number[];
   bcProductIds: number[];
   selectAll: boolean;
 }
@@ -155,7 +283,7 @@ export default function SalesReport() {
     return d.toISOString().slice(0, 10);
   });
   const [selectedBrandId, setSelectedBrandId] = useState("");
-  const [selectedCategoryId, setSelectedCategoryId] = useState("");
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [productSearch, setProductSearch] = useState("");
   const [selectedProducts, setSelectedProducts] = useState<ProductOption[]>([]);
   const [selectAll, setSelectAll] = useState(false);
@@ -215,7 +343,7 @@ export default function SalesReport() {
     if (!reportParams) return "";
     const p: Record<string, string> = { dateFrom: reportParams.dateFrom, dateTo: reportParams.dateTo, ...extra };
     if (reportParams.brandId) p.brandId = reportParams.brandId;
-    if (reportParams.categoryId) p.categoryId = reportParams.categoryId;
+    if (reportParams.categoryIds.length > 0) p.categoryIds = reportParams.categoryIds.join(",");
     if (reportParams.bcProductIds.length > 0) p.bcProductIds = reportParams.bcProductIds.join(",");
     if (reportParams.selectAll) p.selectAll = "true";
     return new URLSearchParams(p).toString();
@@ -254,7 +382,7 @@ export default function SalesReport() {
   // ─── Handlers ────────────────────────────────────────────────────────────
 
   const handleGenerate = () => {
-    setReportParams({ dateFrom, dateTo, brandId: selectedBrandId, categoryId: selectedCategoryId, bcProductIds: selectedProducts.map(p => p.bigcommerce_id), selectAll });
+    setReportParams({ dateFrom, dateTo, brandId: selectedBrandId, categoryIds: selectedCategoryIds, bcProductIds: selectedProducts.map(p => p.bigcommerce_id), selectAll });
     setPage(0);
     setExpandedProducts(new Set());
     setGeneratingKey(k => k + 1);
@@ -393,13 +521,11 @@ export default function SalesReport() {
               {/* Category */}
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-slate-500">Category</label>
-                <div className="relative">
-                  <select value={selectedCategoryId} onChange={e => setSelectedCategoryId(e.target.value)} className="appearance-none border border-slate-200 rounded-md px-3 py-1.5 pr-8 text-sm text-slate-700 bg-white hover:border-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer min-w-[140px]" data-testid="select-category">
-                    <option value="">All Categories</option>
-                    {categories.map(c => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                </div>
+                <CategoryTreePicker
+                  categories={categories}
+                  selectedIds={selectedCategoryIds}
+                  onChange={setSelectedCategoryIds}
+                />
               </div>
 
               {/* Product Search */}

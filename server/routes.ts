@@ -6053,7 +6053,7 @@ export async function registerRoutes(
         dateFrom,
         dateTo,
         brandId,
-        categoryId,
+        categoryIds: categoryIdsRaw,
         bcProductIds: bcProductIdsRaw,
         selectAll,
         sortBy = "qty_sold",
@@ -6062,29 +6062,30 @@ export async function registerRoutes(
       const page = Math.max(0, parseInt(String(req.query.page ?? "0")));
       const limit = Math.min(parseInt(String(req.query.limit ?? "20")), 200);
 
-      // Resolve product IDs from brand/category/individual selection
+      // Resolve product IDs:
+      // - Brand/category filters always applied (even with selectAll)
+      // - Specific bcProductIds only applied when selectAll is NOT set
+      const ids = new Set<number>();
+
+      if (brandId && brandId !== "") {
+        const prods = await storage.getProductsByBrandId(parseInt(brandId));
+        prods.forEach(p => ids.add(p.bigcommerce_id));
+      }
+
+      const catIds = (categoryIdsRaw ?? "").split(",").map(Number).filter(Boolean);
+      for (const cid of catIds) {
+        const prods = await storage.getProductsByCategoryId(cid);
+        prods.forEach(p => ids.add(p.bigcommerce_id));
+      }
+
+      if (selectAll !== "true" && bcProductIdsRaw) {
+        bcProductIdsRaw.split(",").map(Number).filter(Boolean).forEach(id => ids.add(id));
+      }
+
       let resolvedIds: number[] | undefined = undefined;
-
-      if (selectAll !== "true") {
-        const ids = new Set<number>();
-
-        if (brandId && brandId !== "") {
-          const prods = await storage.getProductsByBrandId(parseInt(brandId));
-          prods.forEach(p => ids.add(p.bigcommerce_id));
-        }
-
-        if (categoryId && categoryId !== "") {
-          const prods = await storage.getProductsByCategoryId(parseInt(categoryId));
-          prods.forEach(p => ids.add(p.bigcommerce_id));
-        }
-
-        if (bcProductIdsRaw) {
-          bcProductIdsRaw.split(",").map(Number).filter(Boolean).forEach(id => ids.add(id));
-        }
-
-        if (brandId || categoryId || bcProductIdsRaw) {
-          resolvedIds = [...ids];
-        }
+      const hasFilter = !!(brandId || catIds.length > 0 || (selectAll !== "true" && bcProductIdsRaw));
+      if (hasFilter) {
+        resolvedIds = ids.size > 0 ? [...ids] : [];
       }
 
       const opts = { dateFrom, dateTo, bcProductIds: resolvedIds, page, limit, sortBy, sortDir };
@@ -6106,16 +6107,19 @@ export async function registerRoutes(
   // GET /api/reports/sales/stats — aggregate stats for the report sidebar
   app.get("/api/reports/sales/stats", requirePermission("reporting_sales"), async (req, res) => {
     try {
-      const { dateFrom, dateTo, brandId, categoryId, bcProductIds: raw, selectAll } = req.query as Record<string, string>;
+      const { dateFrom, dateTo, brandId, categoryIds: categoryIdsRaw2, bcProductIds: raw, selectAll } = req.query as Record<string, string>;
+
+      const sids = new Set<number>();
+      if (brandId) (await storage.getProductsByBrandId(parseInt(brandId))).forEach(p => sids.add(p.bigcommerce_id));
+      const catIds2 = (categoryIdsRaw2 ?? "").split(",").map(Number).filter(Boolean);
+      for (const cid of catIds2) {
+        (await storage.getProductsByCategoryId(cid)).forEach(p => sids.add(p.bigcommerce_id));
+      }
+      if (selectAll !== "true" && raw) raw.split(",").map(Number).filter(Boolean).forEach(id => sids.add(id));
 
       let resolvedIds: number[] | undefined = undefined;
-      if (selectAll !== "true") {
-        const ids = new Set<number>();
-        if (brandId) (await storage.getProductsByBrandId(parseInt(brandId))).forEach(p => ids.add(p.bigcommerce_id));
-        if (categoryId) (await storage.getProductsByCategoryId(parseInt(categoryId))).forEach(p => ids.add(p.bigcommerce_id));
-        if (raw) raw.split(",").map(Number).filter(Boolean).forEach(id => ids.add(id));
-        if (brandId || categoryId || raw) resolvedIds = [...ids];
-      }
+      const hasFilter2 = !!(brandId || catIds2.length > 0 || (selectAll !== "true" && raw));
+      if (hasFilter2) resolvedIds = sids.size > 0 ? [...sids] : [];
 
       const stats = await storage.getSalesReportStats({ dateFrom, dateTo, bcProductIds: resolvedIds });
       res.json({ ...stats, dateFrom, dateTo });
