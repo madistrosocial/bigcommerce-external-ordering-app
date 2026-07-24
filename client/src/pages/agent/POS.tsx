@@ -777,7 +777,7 @@ function VariantPopupDialog({
                   ? "The following variants are priced below their cost:"
                   : "This variant is priced below its cost:"}
               </p>
-              <div className="space-y-2">
+              <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
                 {belowCostReview?.map((f) => (
                   <div
                     key={f.k}
