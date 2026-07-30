@@ -1595,7 +1595,9 @@ export class DatabaseStorage implements IStorage {
     const baseFrom = `
       FROM bc_order_line_items li
       LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+      LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
       WHERE 1=1
+      AND COALESCE(com.status, '') NOT IN ('Cancelled', 'Declined', 'Refunded', 'Partially Refunded')
       ${dateFromCond}
       ${dateToCond}
       ${productCond}
@@ -1690,7 +1692,9 @@ export class DatabaseStorage implements IStorage {
         SELECT COUNT(*)::int AS total
         FROM bc_order_line_items li
         LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+        LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
         ${whereCond}
+        AND COALESCE(com.status, '') NOT IN ('Cancelled', 'Declined', 'Refunded', 'Partially Refunded')
       `)),
       db.execute(sql.raw(`
         SELECT
@@ -1713,6 +1717,7 @@ export class DatabaseStorage implements IStorage {
         LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
         ${whereCond}
+        AND COALESCE(com.status, '') NOT IN ('Cancelled', 'Declined', 'Refunded', 'Partially Refunded')
         ORDER BY ${sortCol} ${dir}
         LIMIT ${limit} OFFSET ${offset}
       `)),
@@ -1760,7 +1765,9 @@ export class DatabaseStorage implements IStorage {
         ), 0)::int AS total_current_stock
       FROM bc_order_line_items li
       LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+      LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
       WHERE 1=1
+      AND COALESCE(com.status, '') NOT IN ('Cancelled', 'Declined', 'Refunded', 'Partially Refunded')
       ${dateFromCond}
       ${dateToCond}
       ${productCond}
