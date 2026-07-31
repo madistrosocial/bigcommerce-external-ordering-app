@@ -1,0 +1,320 @@
+SalesCore ERP Architecture Discovery & Planning
+
+Do not write any code yet.
+
+This task is an architecture and planning exercise only.
+
+The SalesCore application has grown beyond its original scope. It started as a POS/CRM integration with BigCommerce, but the long-term goal is to become the primary ERP system for our wholesale distribution business.
+
+The current database evolved feature by feature and was not originally designed around a complete ERP architecture. Before implementing additional major modules, I want to evaluate the existing system and design a long-term architecture that minimizes redundancy, scales well, and provides a cohesive foundation.
+
+Your task
+
+Perform a complete architectural review of the existing codebase and database.
+
+Do not modify anything.
+
+Instead, produce a comprehensive implementation plan covering:
+
+1. Current System Assessment
+
+Analyze the existing application architecture.
+
+Document:
+
+Current database structure
+Existing modules
+Relationships between modules
+Current data flow
+Source of truth for each major business entity
+Existing duplicated data
+Existing technical debt
+Areas that should remain unchanged
+
+Do not recommend changes unless there is a clear long-term architectural benefit.
+
+2. Future ERP Vision
+
+Design the system around these major domains.
+
+Customer 360
+
+Product 360
+
+Vendor 360
+
+Inventory
+
+Sales Orders
+
+Purchase Orders
+
+CRM
+
+Pricing
+
+Reporting Engine
+
+Audit Engine
+
+User & RBAC
+
+Notifications & To Do
+
+Settings
+
+Each domain should clearly define:
+
+Primary entity
+Related entities
+Ownership
+Source of truth
+Relationships
+History tables
+Audit requirements
+Reporting requirements
+3. Database Architecture
+
+Review every existing table.
+
+For every table identify:
+
+Purpose
+
+Keep as-is
+
+Modify
+
+Split
+
+Merge
+
+Replace
+
+Deprecate
+
+If recommending a change, explain why.
+
+The objective is to reduce redundancy while preserving historical business data.
+
+Avoid unnecessary normalization that would negatively impact reporting performance.
+
+4. Data History Strategy
+
+Recommend a consistent strategy for history tracking.
+
+Examples:
+
+Customer History
+
+Product History
+
+Price History
+
+Inventory History
+
+CRM Actions
+
+Audit Logs
+
+Explain how history differs from current master data.
+
+5. Reporting Strategy
+
+The Reporting Engine should support multiple report modules.
+
+Recommend the optimal architecture.
+
+Examples:
+
+Sales Report
+
+Inventory Report
+
+Sales Rep Report
+
+Customer Report
+
+Profit Report
+
+Purchase Report
+
+Explain whether reporting should use:
+
+transaction tables
+
+summary tables
+
+cached reporting tables
+
+materialized views
+
+or another approach.
+
+Also estimate long-term storage growth.
+
+6. Synchronization Strategy
+
+Review current integrations.
+
+BigCommerce
+
+SkuVault
+
+POS
+
+Determine which system should be the Source of Truth for each business domain.
+
+Recommend how synchronization should work.
+
+Avoid unnecessary mirrored data where possible.
+
+7. Product 360
+
+Design the complete Product 360 architecture.
+
+Include:
+
+Current Product
+
+Timeline
+
+Price History
+
+Cost History
+
+Promotion History
+
+Inventory History
+
+Brand History
+
+Category History
+
+Images
+
+Audit
+
+Sales History
+
+Purchasing History
+
+Do not implement.
+
+Only design.
+
+8. Customer 360
+
+Review the existing CRM enhancement plan.
+
+The CRM will include:
+
+Customer / Vendor / Internal Account classification
+
+Active / Inactive accounts
+
+Inactive reason
+
+Unified Actions
+
+To Do
+
+Follow Up
+
+Timeline
+
+Next Follow Up
+
+Notifications
+
+Sales Rep metrics
+
+Determine whether this architecture should extend the current CRM or be redesigned.
+
+Prefer extending existing code where practical.
+
+9. Inventory Strategy
+
+Evaluate future inventory requirements.
+
+Temporary Reservations
+
+Warehouse Inventory
+
+SkuVault
+
+BigCommerce
+
+POS
+
+Inventory History
+
+Inventory Adjustments
+
+Recommend an architecture suitable for wholesale distribution.
+
+10. Performance
+
+Identify:
+
+Potential bottlenecks
+
+Large tables
+
+Slow queries
+
+Future scalability concerns
+
+Suggest indexing strategy.
+
+Suggest archival strategy if necessary.
+
+11. Implementation Roadmap
+
+Produce an implementation roadmap.
+
+Group related work together.
+
+Minimize database migrations.
+
+Minimize code rewrites.
+
+Prefer extending existing functionality.
+
+12. Development Effort
+
+Estimate:
+
+Database redesign effort
+
+Backend effort
+
+Frontend effort
+
+Migration complexity
+
+Risk
+
+Testing effort
+
+Overall implementation difficulty
+
+Identify which modules are high-risk.
+
+Important Requirements
+
+Do not begin implementing.
+
+Do not generate SQL.
+
+Do not generate migrations.
+
+Do not generate code.
+
+Do not redesign simply because something could be cleaner.
+
+Preserve working systems wherever possible.
+
+The goal is to evolve the current application into a full ERP platform while minimizing technical debt, redundant data, and future rewrites.
+
+The final deliverable should be a detailed ERP Architecture Proposal and Implementation Roadmap that can be reviewed before any development begins.
