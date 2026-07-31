@@ -404,6 +404,7 @@ function VariantPopupDialog({
   };
 
   const selectedCount = rows.reduce((n, v) => n + (getQty(v) > 0 ? 1 : 0), 0);
+  const selectedQty = rows.reduce((n, v) => n + getQty(v), 0);
   const selectedTotal = rows.reduce((sum, v) => {
     const qty = getQty(v);
     if (qty <= 0) return sum;
@@ -732,7 +733,19 @@ function VariantPopupDialog({
         </div>
 
         {/* Footer: Add Selected + Done */}
-        <div className="px-5 py-3 border-t shrink-0 flex items-center justify-center gap-3">
+        <div className="px-5 py-3 border-t shrink-0 flex items-center justify-between gap-3">
+          {/* Bottom-left summary */}
+          <div className="text-sm text-slate-500 min-w-0">
+            {selectedCount > 0 ? (
+              <span>
+                <span className="font-semibold text-slate-700">{selectedCount}</span> variant{selectedCount !== 1 ? "s" : ""}{" · "}
+                <span className="font-semibold text-slate-700">{selectedQty}</span> unit{selectedQty !== 1 ? "s" : ""}
+              </span>
+            ) : (
+              <span className="text-slate-400">No variants selected</span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
           <Button
             className="font-semibold px-6"
             onClick={handleBulkAdd}
@@ -751,6 +764,7 @@ function VariantPopupDialog({
           >
             Done
           </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
