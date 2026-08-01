@@ -7,6 +7,18 @@
 
 ---
 
+### Status Legend
+
+| Badge | Meaning |
+|---|---|
+| 🟢 **Implemented** | Live in production today |
+| 🟡 **Planned** | Approved architecture; not yet built |
+| 🔵 **Future Vision** | Long-term concept; intentionally deferred |
+
+Status tags appear on every major section and domain throughout this document.  
+
+---
+
 ## Table of Contents
 
 1. [Phase 1 — Business Architecture Review](#phase-1--business-architecture-review)
@@ -42,15 +54,16 @@
 
 SalesCore currently operates across seven functional areas:
 
-| Module | Primary Users | Core Responsibility |
-|---|---|---|
-| **POS / Order Entry** | Sales agents | Create sales orders, apply pricing, manage cart, sync to BigCommerce |
-| **Product Catalog** | Agents, Admins | Browse, search, and pin products synced from BigCommerce |
-| **CRM** | Admins, Agents | Track customers, assign reps, manage notes, view order history |
-| **Inventory** | Admins | Push manual stock adjustments to BigCommerce |
-| **Reporting** | Admins | Sales reports filtered by brand, category, date, and product |
-| **Tools** | Admins | BC product linking, promo SKU tracking, ShipStation export |
-| **Admin / RBAC** | Admins | User management, role/permission management, system settings |
+| Module | Primary Users | Core Responsibility | Status |
+|---|---|---|---|
+| **POS / Order Entry** | Sales agents | Create sales orders, apply pricing, manage cart, sync to BigCommerce | 🟢 Implemented |
+| **Product Catalog** | Agents, Admins | Browse, search, and pin products synced from BigCommerce | 🟢 Implemented (basic) · 🟡 Product 360 planned |
+| **CRM** | Admins, Agents | Track customers, assign reps, manage notes, view order history | 🟢 Implemented (core) · 🟡 Extensions planned |
+| **Inventory** | Admins | Push manual stock adjustments to BigCommerce | 🟢 Implemented (manual push) · 🟡 Ledger + SkuVault planned |
+| **Reporting** | Admins | Sales reports filtered by brand, category, date, and product | 🟢 Implemented (Sales, Price Override, Store Credit) · 🟡 Full engine planned |
+| **Tools** | Admins | BC product linking, promo SKU tracking, ShipStation export | 🟢 Implemented |
+| **Admin / RBAC** | Admins | User management, role/permission management, system settings | 🟢 Implemented |
+| **Fulfillment** | Warehouse, Admins | Pick queue, tablet picking, shortage handling, auto store credit, notifications | 🟡 Planned |
 
 ### Module Responsibilities
 
@@ -301,6 +314,7 @@ The architecture must remain modular enough that, if the business eventually dec
 ## Phase 3 — ERP Domain Design
 
 ### Domain 1: Customer 360
+> 🟢 **Implemented** (core: mirror, rep assignment, health scoring, notes, audit) · 🟡 **Planned** (to-dos, follow-ups, full 360 UI, notifications, status history)
 
 | Attribute | Definition |
 |---|---|
@@ -314,6 +328,7 @@ The architecture must remain modular enough that, if the business eventually dec
 | **Reporting Requirements** | Lifetime revenue, order frequency, avg order value, last activity, rep performance, reactivation eligibility |
 
 ### Domain 2: Product 360
+> 🟡 **Planned** — BC sync fix and variant normalization are prerequisites; no Product 360 UI exists yet
 
 | Attribute | Definition |
 |---|---|
@@ -327,6 +342,7 @@ The architecture must remain modular enough that, if the business eventually dec
 | **Reporting Requirements** | Units sold by period, revenue, margin, sell-through rate, stock turns |
 
 ### Domain 3: Vendor 360
+> 🔵 **Future Vision** — no vendor data exists in the system today; depends on Warehouse Integration (SkuVault PO mirrors) and Purchase Orders
 
 | Attribute | Definition |
 |---|---|
@@ -340,6 +356,7 @@ The architecture must remain modular enough that, if the business eventually dec
 | **Reporting Requirements** | Spend by vendor, lead times, fill rate, open PO value |
 
 ### Domain 4a: Inventory Intelligence
+> 🟡 **Planned** — schema design approved; no ledger, positions, or reservations table exists yet; `inventory_push_logs` is the only current inventory record
 
 | Attribute | Definition |
 |---|---|
@@ -355,6 +372,7 @@ The architecture must remain modular enough that, if the business eventually dec
 > SalesCore owns all business logic *surrounding* inventory. It does not own the warehouse execution layer.
 
 ### Domain 4b: Warehouse Integration
+> 🟡 **Planned** (adapter abstraction + sync log) · 🔵 **Future Vision** (BI mirrors: PO status, receiving history, inventory snapshots from SkuVault)
 
 | Attribute | Definition |
 |---|---|
@@ -382,6 +400,7 @@ The architecture must remain modular enough that, if the business eventually dec
 - Expected Deliveries & Partial Receipts
 
 ### Domain 4c: Fulfillment
+> 🟡 **Planned** (queue, pick lines, missing items, auto store credit, CRM/Product 360 wiring, email automation) · 🔵 **Future Vision** (tablet barcode scanning, offline capability, Picker Performance analytics)
 
 | Attribute | Definition |
 |---|---|
@@ -434,6 +453,7 @@ Every fulfillment event feeds into Customer 360 Timeline: Order Created → Pick
 Every fulfillment event contributes product-level metrics: Times Picked, Times Missing, Fill Rate, Warehouse Accuracy, Revenue Lost, Store Credit Issued, Damage Frequency.
 
 ### Domain 5: Sales Orders
+> 🟢 **Implemented** (POS core: create, draft, sync lifecycle, below-cost audit, store credit) · 🟡 **Planned** (JSONB → `sales_order_lines` normalization, status history table)
 
 | Attribute | Definition |
 |---|---|
@@ -447,6 +467,7 @@ Every fulfillment event contributes product-level metrics: Times Picked, Times M
 | **Reporting Requirements** | Revenue by period, by rep, by customer, by product; margin analysis |
 
 ### Domain 6: Purchase Orders
+> 🔵 **Future Vision** — no purchase order infrastructure exists; depends on Vendor 360 and Warehouse Integration (SkuVault PO mirrors)
 
 | Attribute | Definition |
 |---|---|
@@ -460,6 +481,7 @@ Every fulfillment event contributes product-level metrics: Times Picked, Times M
 | **Reporting Requirements** | Open PO value, COGS, vendor spend, lead time analysis |
 
 ### Domain 7: CRM
+> 🟢 **Implemented** (notes, rep assignment, audit log, health scoring, reactivation) · 🟡 **Planned** (to-dos, follow-ups, unified activity stream, notifications)
 
 | Attribute | Definition |
 |---|---|
@@ -473,6 +495,7 @@ Every fulfillment event contributes product-level metrics: Times Picked, Times M
 | **Reporting Requirements** | Activities per rep, follow-up completion rate, next-action pipeline |
 
 ### Domain 8: Pricing
+> 🟡 **Planned** — `price_history_cache` exists for POS orders only; no rules engine, no price lists, no BC web order coverage yet
 
 | Attribute | Definition |
 |---|---|
@@ -486,6 +509,7 @@ Every fulfillment event contributes product-level metrics: Times Picked, Times M
 | **Reporting Requirements** | Average selling price by product, discount frequency, below-cost frequency |
 
 ### Domain 9: Reporting Engine
+> 🟢 **Implemented** (Sales Report, Price Override Audit, Store Credit Usage, export audit log) · 🟡 **Planned** (Inventory, Rep, Customer, Profit, Fulfillment reports; parameterized query layer; cache layer)
 
 | Attribute | Definition |
 |---|---|
@@ -499,6 +523,7 @@ Every fulfillment event contributes product-level metrics: Times Picked, Times M
 | **Reporting Requirements** | Meta: report usage frequency |
 
 ### Domain 10: Audit Engine
+> 🟢 **Implemented** (individual audit tables: `crm_audit_log`, `pos_price_override_audit`, `inventory_push_logs`, `report_export_logs`, `pos_store_credit_usage`) · 🟡 **Planned** (unified `audit_events` table for new entity types: products, orders, vendors)
 
 | Attribute | Definition |
 |---|---|
@@ -512,6 +537,7 @@ Every fulfillment event contributes product-level metrics: Times Picked, Times M
 | **Reporting Requirements** | Activity by user, entity change frequency |
 
 ### Domain 11: User & RBAC
+> 🟢 **Implemented** — full module:action permission system, role inheritance, per-user overrides; production-proven
 
 | Attribute | Definition |
 |---|---|
@@ -525,6 +551,7 @@ Every fulfillment event contributes product-level metrics: Times Picked, Times M
 | **Reporting Requirements** | User activity, login frequency, permission usage |
 
 ### Domain 12: Notifications & To-Do
+> 🟡 **Planned** — no notifications or to-do infrastructure exists today; will be built as part of Customer 360 and Fulfillment phases
 
 | Attribute | Definition |
 |---|---|
@@ -538,6 +565,7 @@ Every fulfillment event contributes product-level metrics: Times Picked, Times M
 | **Reporting Requirements** | Open to-dos by rep, overdue follow-ups |
 
 ### Domain 13: Settings
+> 🟢 **Implemented** (key-value `settings` table; catch-all) · 🟡 **Planned** (split into `app_config` for typed credentials and `cache_store` with TTL; reduce catch-all overuse)
 
 | Attribute | Definition |
 |---|---|
@@ -1205,6 +1233,7 @@ customers (renamed from customers_mirror)
 SalesCore does not replicate or replace SkuVault's warehouse execution. It consumes warehouse data through the integration layer to drive business intelligence.
 
 ### Current State
+> 🟢 **Implemented**
 
 - `products.stock_level` — a snapshot synced from BigCommerce
 - `inventory_push_logs` — log of manual adjustments pushed to BC
@@ -1364,6 +1393,7 @@ Manual Adjustment
 ---
 
 ### Phase A — Foundation (Priority: Immediate)
+> 🟡 **Planned** — Tasks #14 (indexes) and #15 (product sync) are proposed; not yet started
 
 **Goal:** Fix the most impactful gaps without adding new features.
 
@@ -1376,6 +1406,7 @@ Manual Adjustment
 ---
 
 ### Phase B — Customer 360 (Priority: High)
+> 🟡 **Planned** — core CRM is 🟢 live; extensions (to-dos, follow-ups, status history, notifications, 360 UI) not yet built
 
 **Goal:** Evolve the CRM into a complete Customer 360 platform.
 
@@ -1390,6 +1421,7 @@ Manual Adjustment
 ---
 
 ### Phase C — Product 360 (Priority: High)
+> 🟡 **Planned** — depends on Phase A product sync fix; no Product 360 UI, variant table, or price/cost history tables exist yet
 
 **Goal:** Normalize products and establish complete product history.
 
@@ -1404,6 +1436,7 @@ Manual Adjustment
 ---
 
 ### Phase D — Sales Order Normalization (Priority: Medium)
+> 🟡 **Planned** — `orders.items` is JSONB today; `sales_order_lines` table does not exist yet; highest-risk migration
 
 **Goal:** Replace JSONB order items with a queryable line-item table.
 
@@ -1416,6 +1449,7 @@ Manual Adjustment
 ---
 
 ### Phase E — Reporting Engine (Priority: Medium)
+> 🟡 **Planned** — Sales Report is 🟢 live; Inventory, Rep, Customer, Profit, and Fulfillment reports not yet built; parameterized query layer and cache layer not yet implemented
 
 **Goal:** Build the full reporting module with all planned reports.
 
@@ -1428,9 +1462,10 @@ Manual Adjustment
 
 ---
 
-### Phase F — Inventory Ledger (Priority: Medium)
+### Phase F — Inventory & Warehouse Integration (Priority: Medium)
+> 🟡 **Planned** (ledger, positions, reservations, SkuVault adapter abstraction) · 🔵 **Future Vision** (BI mirrors: PO status, receiving history from SkuVault)
 
-**Goal:** Replace stock-level snapshot with a proper inventory ledger.
+**Goal:** Replace stock-level snapshot with a proper inventory ledger and introduce the Warehouse Integration Layer.
 
 1. Create `inventory_positions`, `inventory_locations`, `inventory_transactions` tables
 2. Migrate `inventory_push_logs` writes to also write to `inventory_transactions`
@@ -1441,6 +1476,7 @@ Manual Adjustment
 ---
 
 ### Phase G — Vendor & Purchase Orders (Priority: Lower)
+> 🔵 **Future Vision** — no vendor or ERP purchase order infrastructure exists; depends on Phase F (Warehouse Integration) for SkuVault PO mirrors
 
 **Goal:** Complete the supply-side of the ERP.
 
@@ -1454,6 +1490,7 @@ Manual Adjustment
 ---
 
 ### Phase H — Audit Engine (Priority: Lower)
+> 🔵 **Future Vision** — individual audit tables are 🟢 live and working; unified `audit_events` table is intentionally deferred until new entity types (products, orders, vendors) require it
 
 **Goal:** Unified audit trail across all entities.
 
@@ -1465,6 +1502,7 @@ Manual Adjustment
 ---
 
 ### Phase I — Fulfillment (Priority: High — after Phase D)
+> 🟡 **Planned** (queue, pick lines, missing items, auto store credit, email automation, CRM/Product 360 wiring, reports) · 🔵 **Future Vision** (tablet barcode scanning, offline capability, Picker Performance analytics)
 
 > **Added August 2026.** Fulfillment is a first-class ERP domain that orchestrates everything between Order Created and Shipment Completed. It eliminates paper pick lists, automates store credit issuance, and feeds every event back into CRM and Product 360.
 
