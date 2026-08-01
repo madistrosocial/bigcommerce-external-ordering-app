@@ -1,0 +1,532 @@
+Task: Customer 360 Foundation (Phase 1)
+Objective
+
+Implement the foundational Customer 360 enhancements described in the ERP Architecture Proposal while preserving all existing CRM functionality.
+
+This is an extension of the current CRM, not a redesign.
+
+All changes must be additive and backward compatible.
+
+Guiding Principles
+Follow the ERP Architecture Proposal.
+Follow the "Extend Rather Than Replace" philosophy.
+No existing CRM functionality should be removed.
+Existing customer synchronization from BigCommerce must continue working.
+Existing notes must remain functional.
+Database changes must be additive.
+Existing APIs should continue functioning unless intentionally extended.
+UI should maintain the current SalesCore look and feel.
+Scope
+
+This implementation only covers the Customer 360 foundation.
+
+Do NOT implement:
+
+Product 360
+Inventory Intelligence
+Warehouse Integration
+Fulfillment
+Purchase Orders
+Vendor 360
+Reporting changes
+
+Those will be separate implementations.
+
+Part 1 – Customer Account Classification
+
+Extend the customer record to support proper account classification.
+
+Every customer record must belong to exactly one account type.
+
+Account Types
+
+Customer
+
+Default.
+
+Actual purchasing customers.
+
+Counted in CRM KPIs.
+
+Displayed by default.
+
+Vendor
+
+Companies supplying products.
+
+Not counted as customers.
+
+Excluded from customer KPIs.
+
+Future Vendor 360 foundation.
+
+Internal
+
+Employees
+
+Sales Representatives
+
+Internal users
+
+Company accounts
+
+Not counted as customers.
+
+Excluded from customer KPIs.
+
+Requirements
+
+Existing customers default to Customer.
+Existing functionality continues working.
+BigCommerce sync must preserve account type.
+Account type is managed only inside SalesCore.
+Never overwrite from BigCommerce.
+Part 2 – Active / Inactive Status
+
+Add account lifecycle management.
+
+Status
+
+Active
+
+Inactive
+
+Inactive accounts represent businesses that are no longer realistically recoverable.
+
+Examples
+
+Closed Business
+
+No Longer Interested
+
+Duplicate Account
+
+Fraud
+
+Bankrupt
+
+Merged
+
+Other
+
+Requirements
+
+Inactive accounts
+
+excluded from CRM KPIs
+excluded from default customer list
+remain searchable
+retain full history
+never deleted
+
+Inactive Reason
+
+Store
+
+Reason
+
+Notes
+
+Date marked inactive
+
+User who performed action
+
+Part 3 – Customer List Filters
+
+Expand filters.
+
+Current
+
+Customer search
+
+Sales rep
+
+etc.
+
+Add
+
+Account Type
+
+Customer
+
+Vendor
+
+Internal
+
+All
+
+Account Status
+
+Active
+
+Inactive
+
+Both
+
+Requirements
+
+Default
+
+Customer
+
+Active
+
+KPI cards
+
+Must automatically update based on current filters.
+
+Example
+
+Viewing Vendors
+
+Cards show Vendor totals.
+
+Viewing Inactive
+
+Cards show only inactive accounts.
+
+Viewing Customers
+
+Cards show only customers.
+
+Part 4 – Customer List UI
+
+Keep current layout.
+
+Do NOT redesign.
+
+Add new columns.
+
+Recommended columns
+
+Account Type
+
+Status
+
+Inactive Reason
+
+Use badges.
+
+Example
+
+Customer
+
+Vendor
+
+Internal
+
+Active
+
+Inactive
+
+Part 5 – CRM Notes Evolution
+
+Current
+
+Notes
+
+↓
+
+Future
+
+Actions
+
+Rename Notes section to
+
+Actions
+
+Existing notes remain unchanged.
+
+Current note types remain.
+
+Add
+
+To Do
+
+This becomes the first new CRM activity.
+
+Requirements
+
+No new timeline yet.
+
+No redesign.
+
+Simply allow
+
+Action Type
+
+Note
+
+To Do
+
+Future
+
+Call
+
+Email
+
+Visit
+
+Meeting
+
+Quote
+
+Task
+
+Part 6 – To Do System
+
+To Do is now a CRM Action.
+
+Fields
+
+Title
+
+Description
+
+Customer
+
+Assigned User
+
+Created By
+
+Priority
+
+Due Date
+
+Completed
+
+Completed Date
+
+Reminder
+
+Status
+
+Status
+
+Pending
+
+Completed
+
+Cancelled
+
+Overdue
+
+Part 7 – CRM To Do Module
+
+Create new CRM submenu
+
+CRM
+
+↓
+
+To Do
+
+Default
+
+Show only
+
+My To Dos
+
+RBAC
+
+Add permission
+
+View All To Dos
+
+If granted
+
+User may switch
+
+My To Dos
+
+↓
+
+All Users
+
+Sorting
+
+Default
+
+Overdue
+
+Today
+
+Upcoming
+
+Completed
+
+Filters
+
+Assigned User
+
+Customer
+
+Priority
+
+Status
+
+Due Date
+
+Part 8 – Customer Page
+
+Top Right
+
+Display
+
+Next Follow Up
+
+Derived from nearest incomplete To Do.
+
+Actions tab
+
+Display
+
+Notes
+
+To Dos
+
+Sorted by
+
+Newest
+
+or
+
+Filter
+
+Part 9 – Notifications
+
+Do not implement notifications yet.
+
+Prepare architecture.
+
+Database
+
+Ready.
+
+No UI.
+
+Part 10 – Dashboard Changes
+
+CRM Dashboard
+
+Update KPIs
+
+Customers
+
+Only Customer accounts.
+
+Inactive
+
+Separate KPI.
+
+Vendors
+
+Separate KPI.
+
+Internal
+
+Separate KPI.
+
+Upcoming To Dos
+
+My overdue
+
+Today
+
+Upcoming
+
+Completed today
+
+Part 11 – Database
+
+Only add required columns.
+
+Do not redesign.
+
+Do not rename tables.
+
+Do not migrate existing tables.
+
+Do not normalize.
+
+Keep current schema.
+
+Part 12 – API
+
+Extend existing endpoints.
+
+Avoid creating duplicate endpoints.
+
+Current CRM should continue working.
+
+Part 13 – RBAC
+
+Add permissions
+
+CRM
+
+View All To Dos
+
+Manage To Dos
+
+Manage Account Classification
+
+Manage Inactive Accounts
+
+Part 14 – Migration
+
+Existing customers
+
+↓
+
+Customer
+
+↓
+
+Active
+
+Automatically.
+
+No manual migration.
+
+Part 15 – UI Philosophy
+
+Do NOT redesign CRM.
+
+Do NOT rebuild Customer List.
+
+Do NOT rebuild Customer Profile.
+
+Only extend.
+
+Users should immediately recognize the interface.
+
+Part 16 – Future Compatibility
+
+This implementation becomes the foundation for
+
+Customer 360
+CRM Activity Engine
+Notifications
+Follow Ups
+AI Suggestions
+Customer Timeline
+Sales Rep Performance
+Route Planning
+Vendor 360
+Fulfillment Integration
+
+Do not implement these now.
+
+Only ensure this implementation is compatible with them.
+
+Success Criteria
+Existing CRM functionality remains fully operational.
+Customer accounts can be classified as Customer, Vendor, or Internal.
+Active and inactive account management is implemented.
+KPIs dynamically reflect current filters.
+Notes evolve into Actions without breaking existing data.
+To Dos function as CRM actions and are available in a dedicated module.
+RBAC controls access to new functionality.
+All changes are additive, backward compatible, and aligned with the ERP Architecture Proposal.
+The implementation establishes the Customer 360 foundation while leaving future ERP modules (Product 360, Fulfillment, Inventory Intelligence, Notifications, and Vendor 360) free to build on top of it without requiring major refactoring.
