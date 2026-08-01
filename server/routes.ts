@@ -5234,7 +5234,7 @@ export async function registerRoutes(
       const user = (req as any).authUser;
       const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
-      const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "", health = "", assignedRep = "", customerType = "", addressType = "", primaryRep = "", secondaryRep = "" } = req.query as any;
+      const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "", health = "", assignedRep = "", customerType = "", addressType = "", primaryRep = "", secondaryRep = "", accountType = "", status = "active" } = req.query as any;
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
       const offset = parseInt(String(req.query.offset ?? "0"));
       const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
@@ -5242,7 +5242,7 @@ export async function registerRoutes(
       const repFilter = assignedRep === "unassigned" ? "unassigned" : (assignedRep ? parseInt(String(assignedRep)) : undefined) as number | "unassigned" | undefined;
       const primaryRepFilter = primaryRep === "unassigned" ? "unassigned" : (primaryRep ? parseInt(String(primaryRep)) : undefined) as number | "unassigned" | undefined;
       const secondaryRepFilter = secondaryRep === "unassigned" ? "unassigned" : (secondaryRep ? parseInt(String(secondaryRep)) : undefined) as number | "unassigned" | undefined;
-      const result = await storage.getCrmCustomers({ search, group: group || undefined, state: state || undefined, health: health || undefined, customerType: customerType || undefined, addressType: addressType || undefined, primaryRep: primaryRepFilter, secondaryRep: secondaryRepFilter, sortBy, sortDir, limit, offset, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
+      const result = await storage.getCrmCustomers({ search, group: group || undefined, state: state || undefined, health: health || undefined, customerType: customerType || undefined, addressType: addressType || undefined, primaryRep: primaryRepFilter, secondaryRep: secondaryRepFilter, sortBy, sortDir, limit, offset, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId, accountType: accountType || undefined, status: status || "active" });
       res.json(result);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -5323,7 +5323,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // PATCH /api/crm/customers/:id — update master fields (primary_rep, secondary_rep, customer_type, address_type)
+  // PATCH /api/crm/customers/:id — update master fields (primary_rep, secondary_rep, customer_type, account_type, inactive fields)
   app.patch("/api/crm/customers/:id", requireAuth, async (req, res) => {
     try {
       const user = (req as any).authUser;
@@ -5331,19 +5331,47 @@ export async function registerRoutes(
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const id = parseInt(req.params.id);
       if (!await assertCrmCustomerAccess(storage, id, userId, user.role, res)) return;
-      const { primary_rep_id, secondary_rep_id, customer_type } = req.body;
+      const { primary_rep_id, secondary_rep_id, customer_type, account_type, inactive_reason, inactive_notes, mark_inactive, restore_active } = req.body;
       if (customer_type !== undefined && !["Store", "Distributor"].includes(customer_type)) {
         return res.status(400).json({ error: "Invalid customer_type" });
+      }
+      const ACCOUNT_TYPES = ["customer", "vendor", "internal"];
+      if (account_type !== undefined && !ACCOUNT_TYPES.includes(account_type)) {
+        return res.status(400).json({ error: "Invalid account_type" });
+      }
+
+      // Check permissions for ERP-only fields
+      const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
+      if (account_type !== undefined && user.role !== "admin" && !perms.includes("crm:manage_account_classification")) {
+        return res.status(403).json({ error: "Forbidden: crm:manage_account_classification required" });
+      }
+      if ((mark_inactive || restore_active) && user.role !== "admin" && !perms.includes("crm:manage_inactive_accounts")) {
+        return res.status(403).json({ error: "Forbidden: crm:manage_inactive_accounts required" });
       }
 
       // Load current state before update for timeline logging
       const before = await storage.getCrmCustomerById(id);
       if (!before) return res.status(404).json({ error: "Customer not found" });
 
-      const data: { primary_rep_id?: number | null; secondary_rep_id?: number | null; customer_type?: string } = {};
+      const data: Record<string, any> = {};
       if ('primary_rep_id' in req.body) data.primary_rep_id = primary_rep_id != null ? Number(primary_rep_id) : null;
       if ('secondary_rep_id' in req.body) data.secondary_rep_id = secondary_rep_id != null ? Number(secondary_rep_id) : null;
       if (customer_type !== undefined) data.customer_type = customer_type;
+      if (account_type !== undefined) data.account_type = account_type;
+      if (mark_inactive) {
+        data.inactive_at = new Date();
+        data.inactive_reason = inactive_reason ?? null;
+        data.inactive_notes = inactive_notes ?? null;
+        data.inactivated_by_user_id = userId;
+        data.is_active = false;
+      }
+      if (restore_active) {
+        data.inactive_at = null;
+        data.inactive_reason = null;
+        data.inactive_notes = null;
+        data.inactivated_by_user_id = null;
+        data.is_active = true;
+      }
 
       // Resolve old rep names before update
       const [oldPrimaryUser, oldSecondaryUser] = await Promise.all([
@@ -5407,6 +5435,33 @@ export async function registerRoutes(
           action: "customer_type_changed",
           customer_id: id,
           detail: { old_value: (before as any).customer_type ?? "Store", new_value: data.customer_type },
+        }));
+      }
+
+      if ('account_type' in data && (before as any).account_type !== data.account_type) {
+        auditEntries.push(storage.createCrmAuditLog({
+          user_id: userId,
+          action: "account_type_changed",
+          customer_id: id,
+          detail: { old_value: (before as any).account_type ?? "customer", new_value: data.account_type },
+        }));
+      }
+
+      if (mark_inactive) {
+        auditEntries.push(storage.createCrmAuditLog({
+          user_id: userId,
+          action: "customer_marked_inactive",
+          customer_id: id,
+          detail: { reason: inactive_reason ?? null, notes: inactive_notes ?? null },
+        }));
+      }
+
+      if (restore_active) {
+        auditEntries.push(storage.createCrmAuditLog({
+          user_id: userId,
+          action: "customer_restored_active",
+          customer_id: id,
+          detail: {},
         }));
       }
 
@@ -5773,14 +5828,97 @@ export async function registerRoutes(
       const user = (req as any).authUser;
       const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
-      const { search = "", group = "", state = "", assignedRep = "", primaryRep = "", secondaryRep = "", customerType = "", addressType = "" } = req.query as Record<string, string>;
+      const { search = "", group = "", state = "", assignedRep = "", primaryRep = "", secondaryRep = "", customerType = "", addressType = "", accountType = "", status = "both" } = req.query as Record<string, string>;
       const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
       const visScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
       const repFilter = assignedRep === "unassigned" ? "unassigned" : (assignedRep ? parseInt(String(assignedRep)) : undefined) as number | "unassigned" | undefined;
       const primaryRepFilter = primaryRep === "unassigned" ? "unassigned" : (primaryRep ? parseInt(String(primaryRep)) : undefined) as number | "unassigned" | undefined;
       const secondaryRepFilter = secondaryRep === "unassigned" ? "unassigned" : (secondaryRep ? parseInt(String(secondaryRep)) : undefined) as number | "unassigned" | undefined;
-      const metrics = await storage.getCrmMetrics({ search, group, state, primaryRep: primaryRepFilter, secondaryRep: secondaryRepFilter, customerType: customerType || undefined, addressType: addressType || undefined, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
+      const metrics = await storage.getCrmMetrics({ search, group, state, primaryRep: primaryRepFilter, secondaryRep: secondaryRepFilter, customerType: customerType || undefined, addressType: addressType || undefined, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId, accountType: accountType || undefined, status: status || "both" });
       res.json(metrics);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── CRM Todos ──────────────────────────────────────────────────────────────────
+
+  // GET /api/crm/todos
+  app.get("/api/crm/todos", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
+      const canViewAll = user.role === "admin" || perms.includes("crm:view_all_todos");
+      const allUsers = req.query.allUsers === "true" && canViewAll;
+      const { status = "", customerId = "" } = req.query as Record<string, string>;
+      const todos = await storage.getCrmTodos({
+        userId,
+        allUsers,
+        status: status || undefined,
+        customerId: customerId ? parseInt(customerId) : undefined,
+      });
+      res.json(todos);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/crm/todos
+  app.post("/api/crm/todos", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
+      if (user.role !== "admin" && !perms.includes("crm:manage_todos") && !perms.includes("crm:add_note")) {
+        return res.status(403).json({ error: "Forbidden: crm:manage_todos permission required" });
+      }
+      const { customer_id, title, note, priority, due_date, assigned_to_user_id, reminder_at } = req.body;
+      if (!title?.trim()) return res.status(400).json({ error: "title is required" });
+      const todo = await storage.createCrmTodo({
+        customer_id: customer_id ? parseInt(customer_id) : null,
+        title: String(title).trim(),
+        note: String(note ?? ""),
+        priority: priority ?? "medium",
+        due_date: due_date ? new Date(due_date) : null,
+        assigned_to_user_id: assigned_to_user_id ? parseInt(assigned_to_user_id) : userId,
+        reminder_at: reminder_at ? new Date(reminder_at) : null,
+        created_by: userId,
+      });
+      res.status(201).json(todo);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/crm/todos/:id
+  app.put("/api/crm/todos/:id", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const id = parseInt(req.params.id);
+      const { title, note, priority, due_date, assigned_to_user_id, reminder_at, completed } = req.body;
+      const updates: Record<string, any> = {};
+      if (title !== undefined) updates.title = String(title).trim();
+      if (note !== undefined) updates.note = String(note);
+      if (priority !== undefined) updates.priority = priority;
+      if ('due_date' in req.body) updates.due_date = due_date ? new Date(due_date) : null;
+      if ('assigned_to_user_id' in req.body) updates.assigned_to_user_id = assigned_to_user_id ? parseInt(assigned_to_user_id) : null;
+      if ('reminder_at' in req.body) updates.reminder_at = reminder_at ? new Date(reminder_at) : null;
+      if (completed !== undefined) {
+        updates.completed_at = completed ? new Date() : null;
+        updates.todo_status = completed ? 'completed' : 'pending';
+      }
+      const todo = await storage.updateCrmTodo(id, updates);
+      res.json(todo);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/crm/todos/:id
+  app.delete("/api/crm/todos/:id", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const id = parseInt(req.params.id);
+      await storage.deleteCrmTodo(id);
+      res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

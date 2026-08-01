@@ -10,11 +10,15 @@ import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import {
   Search, FileText, FileSpreadsheet, ArrowUp, ArrowDown, ArrowUpDown,
   ChevronLeft, ChevronRight, User, Settings2, X, Users, AlertTriangle,
-  TrendingUp, HeartPulse, Activity, Phone, Mail, Filter,
+  TrendingUp, HeartPulse, Activity, Phone, Mail, Filter, UserX, UserCheck,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
 
@@ -230,6 +234,13 @@ export default function CRMCustomers() {
   const [page, setPage] = useState<number>(() => savedFilters.page ?? 1);
   const [exporting, setExporting] = useState<"csv" | "xlsx" | null>(null);
   const [showColMenu, setShowColMenu] = useState(false);
+  const [accountTypeFilter, setAccountTypeFilter] = useState<string>(() => savedFilters.accountType ?? "customer");
+  const [statusFilter, setStatusFilter] = useState<string>(() => savedFilters.status ?? "active");
+  // Mark Inactive modal
+  const [markInactiveCustomer, setMarkInactiveCustomer] = useState<any | null>(null);
+  const [inactiveReason, setInactiveReason] = useState<string>("");
+  const [inactiveNotes, setInactiveNotes] = useState<string>("");
+  const [savingInactive, setSavingInactive] = useState(false);
 
   // Persist filter state to localStorage whenever anything changes
   useEffect(() => {
@@ -239,10 +250,12 @@ export default function CRMCustomers() {
         primaryRep: primaryRepFilter, secondaryRep: secondaryRepFilter,
         customerType: customerTypeFilter, addressType: addressTypeFilter,
         healthFilter, sortBy, sortDir, page,
+        accountType: accountTypeFilter, status: statusFilter,
       }));
     } catch {}
   }, [showFilters, search, group, stateFilter, primaryRepFilter, secondaryRepFilter,
-      customerTypeFilter, addressTypeFilter, healthFilter, sortBy, sortDir, page, filterKey]);
+      customerTypeFilter, addressTypeFilter, healthFilter, sortBy, sortDir, page, filterKey,
+      accountTypeFilter, statusFilter]);
 
   const debounce = useCallback((val: string) => {
     setSearch(val);
@@ -265,6 +278,8 @@ export default function CRMCustomers() {
   const setSecondaryRepFilterVal = (v: string) => { setSecondaryRepFilter(v); setPage(1); };
   const setCustomerTypeFilterVal = (v: string) => { setCustomerTypeFilter(v); setPage(1); };
   const setAddressTypeFilterVal  = (v: string) => { setAddressTypeFilter(v); setPage(1); };
+  const setAccountTypeFilterVal  = (v: string) => { setAccountTypeFilter(v); setPage(1); };
+  const setStatusFilterVal       = (v: string) => { setStatusFilter(v); setPage(1); };
   const toggleHealthFilter = (h: HealthFilter) => {
     setHealthFilter(prev => prev === h ? "" : h);
     setPage(1);
@@ -292,24 +307,68 @@ export default function CRMCustomers() {
   });
 
   const { data: metrics } = useQuery({
-    queryKey: ["crm", "metrics", debouncedSearch, group, stateFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter],
+    queryKey: ["crm", "metrics", debouncedSearch, group, stateFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter, accountTypeFilter],
     queryFn: async () => {
-      const params = new URLSearchParams({ search: debouncedSearch });
+      const params = new URLSearchParams({ search: debouncedSearch, status: "both" });
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
       if (primaryRepFilter) params.set("primaryRep", primaryRepFilter);
       if (secondaryRepFilter) params.set("secondaryRep", secondaryRepFilter);
       if (customerTypeFilter) params.set("customerType", customerTypeFilter);
       if (addressTypeFilter) params.set("addressType", addressTypeFilter);
+      if (accountTypeFilter) params.set("accountType", accountTypeFilter);
       const r = await fetch(`/api/crm/metrics?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load metrics");
-      return r.json() as Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }>;
+      return r.json() as Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number; inactive: number; by_account_type: Record<string, number> }>;
     },
     staleTime: 30_000,
   });
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["crm", "customers", debouncedSearch, group, stateFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter, healthFilter, sortBy, sortDir, page],
+  const canManageInactive = hasPermission("crm", "manage_inactive_accounts");
+  const queryClient = useQueryClient();
+
+  const invalidateCustomerData = () => {
+    queryClient.invalidateQueries({ queryKey: ["crm", "customers"] });
+    queryClient.invalidateQueries({ queryKey: ["crm", "metrics"] });
+  };
+
+  const handleMarkInactive = async () => {
+    if (!markInactiveCustomer) return;
+    setSavingInactive(true);
+    try {
+      const r = await fetch(`/api/crm/customers/${markInactiveCustomer.id}`, {
+        method: "PATCH",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ mark_inactive: true, inactive_reason: inactiveReason, inactive_notes: inactiveNotes }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to mark inactive");
+      toast({ title: "Customer marked inactive" });
+      setMarkInactiveCustomer(null);
+      setInactiveReason("");
+      setInactiveNotes("");
+      invalidateCustomerData();
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setSavingInactive(false); }
+  };
+
+  const handleRestore = async (customer: any) => {
+    try {
+      const r = await fetch(`/api/crm/customers/${customer.id}`, {
+        method: "PATCH",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ restore_active: true }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to restore");
+      toast({ title: "Customer restored to active" });
+      invalidateCustomerData();
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const { data, isLoading, refetch: refetchCustomers } = useQuery({
+    queryKey: ["crm", "customers", debouncedSearch, group, stateFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter, healthFilter, sortBy, sortDir, page, accountTypeFilter, statusFilter],
     queryFn: async () => {
       const params = new URLSearchParams({
         search: debouncedSearch,
@@ -317,6 +376,7 @@ export default function CRMCustomers() {
         sortDir,
         limit: String(PAGE_SIZE),
         offset: String((page - 1) * PAGE_SIZE),
+        status: statusFilter || "active",
       });
       if (group) params.set("group", group);
       if (stateFilter) params.set("state", stateFilter);
@@ -325,6 +385,7 @@ export default function CRMCustomers() {
       if (customerTypeFilter) params.set("customerType", customerTypeFilter);
       if (addressTypeFilter) params.set("addressType", addressTypeFilter);
       if (healthFilter) params.set("health", healthFilter);
+      if (accountTypeFilter) params.set("accountType", accountTypeFilter);
       const r = await fetch(`/api/crm/customers?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load customers");
       return r.json() as Promise<{ customers: any[]; total: number }>;
@@ -363,7 +424,7 @@ export default function CRMCustomers() {
   };
 
   const activeFilterCount = [group, stateFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter].filter(Boolean).length;
-  const hasAnyFilter = activeFilterCount > 0 || !!healthFilter || !!debouncedSearch;
+  const hasAnyFilter = activeFilterCount > 0 || !!healthFilter || !!debouncedSearch || accountTypeFilter !== "customer" || statusFilter !== "active";
 
   const clearAllFilters = () => {
     setSearch("");
@@ -376,6 +437,8 @@ export default function CRMCustomers() {
     setSecondaryRepFilter("");
     setCustomerTypeFilter("");
     setAddressTypeFilter("");
+    setAccountTypeFilter("customer");
+    setStatusFilter("active");
     setPage(1);
   };
 
@@ -648,6 +711,29 @@ export default function CRMCustomers() {
                   <SelectItem value="Unknown">Unknown</SelectItem>
                 </SelectContent>
               </Select>
+
+              <Select value={accountTypeFilter || "__all__"} onValueChange={v => setAccountTypeFilterVal(v === "__all__" ? "" : v)}>
+                <SelectTrigger className="h-8 text-xs w-36" data-testid="select-account-type-filter">
+                  <SelectValue placeholder="Account Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All Account Types</SelectItem>
+                  <SelectItem value="customer">Customer</SelectItem>
+                  <SelectItem value="vendor">Vendor</SelectItem>
+                  <SelectItem value="internal">Internal</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={statusFilter || "active"} onValueChange={v => setStatusFilterVal(v)}>
+                <SelectTrigger className="h-8 text-xs w-32" data-testid="select-status-filter">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active Only</SelectItem>
+                  <SelectItem value="inactive">Inactive Only</SelectItem>
+                  <SelectItem value="both">All (incl. Inactive)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {hasAnyFilter && (
@@ -750,7 +836,36 @@ export default function CRMCustomers() {
                         className="px-3 py-2.5 sticky left-0 z-10 bg-white group-hover:bg-blue-50 transition-colors border-r border-slate-100"
                         style={{ maxWidth: colWidths.company }}
                       >
-                        <span className="font-bold text-slate-800 block truncate">{c.company || "—"}</span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-bold text-slate-800 truncate">{c.company || "—"}</span>
+                          {c.inactive_at && <span className="inline-flex items-center shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 text-slate-500">Inactive</span>}
+                          {c.account_type && c.account_type !== "customer" && (
+                            <span className={`inline-flex items-center shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium capitalize ${c.account_type === "vendor" ? "bg-purple-100 text-purple-700" : "bg-cyan-100 text-cyan-700"}`}>
+                              {c.account_type}
+                            </span>
+                          )}
+                        </div>
+                        {canManageInactive && (
+                          <div className="flex items-center gap-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {c.inactive_at ? (
+                              <button
+                                className="text-[10px] text-green-600 hover:text-green-800 flex items-center gap-0.5"
+                                onClick={e => { e.stopPropagation(); handleRestore(c); }}
+                                title="Restore to active"
+                              >
+                                <UserCheck className="h-2.5 w-2.5" /> Restore
+                              </button>
+                            ) : (
+                              <button
+                                className="text-[10px] text-slate-400 hover:text-red-600 flex items-center gap-0.5"
+                                onClick={e => { e.stopPropagation(); setMarkInactiveCustomer(c); }}
+                                title="Mark inactive"
+                              >
+                                <UserX className="h-2.5 w-2.5" /> Deactivate
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
                     )}
                     {vis("customer_name")  && <td className="px-3 py-2.5 text-slate-700 truncate" style={{ maxWidth: colWidths.customer_name }}>{[c.first_name, c.last_name].filter(Boolean).join(" ") || "—"}</td>}
@@ -858,6 +973,42 @@ export default function CRMCustomers() {
           </div>
         </div>
       )}
+
+      {/* ── Mark Inactive Modal ───────────────────────────────────────────────── */}
+      <Dialog open={!!markInactiveCustomer} onOpenChange={v => { if (!v) { setMarkInactiveCustomer(null); setInactiveReason(""); setInactiveNotes(""); } }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Mark Customer Inactive</DialogTitle></DialogHeader>
+          <p className="text-sm text-slate-600">
+            <span className="font-medium">{markInactiveCustomer?.company || `${markInactiveCustomer?.first_name ?? ""} ${markInactiveCustomer?.last_name ?? ""}`.trim()}</span> will be hidden from active customer lists.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs mb-1.5 block">Reason</Label>
+              <Select value={inactiveReason || "__none__"} onValueChange={v => setInactiveReason(v === "__none__" ? "" : v)}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select reason…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No reason specified</SelectItem>
+                  <SelectItem value="no_longer_ordering">No Longer Ordering</SelectItem>
+                  <SelectItem value="closed">Business Closed</SelectItem>
+                  <SelectItem value="duplicate">Duplicate Account</SelectItem>
+                  <SelectItem value="test_account">Test Account</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs mb-1.5 block">Notes (optional)</Label>
+              <Textarea value={inactiveNotes} onChange={e => setInactiveNotes(e.target.value)} placeholder="Additional context…" rows={2} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setMarkInactiveCustomer(null); setInactiveReason(""); setInactiveNotes(""); }}>Cancel</Button>
+            <Button variant="destructive" onClick={handleMarkInactive} disabled={savingInactive} data-testid="btn-confirm-mark-inactive">
+              {savingInactive ? "Saving…" : "Mark Inactive"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

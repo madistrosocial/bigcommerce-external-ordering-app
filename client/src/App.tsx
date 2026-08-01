@@ -39,6 +39,7 @@ import CRMCustomers from "@/pages/crm/Customers";
 import CustomerProfile from "@/pages/crm/CustomerProfile";
 import CRMReactivation from "@/pages/crm/Reactivation";
 import CRMNotes from "@/pages/crm/CRMNotes";
+import CRMToDo from "@/pages/crm/ToDo";
 import PriceOverrideAuditPage from "@/pages/admin/reports/PriceOverrideAudit";
 import StoreCreditUsageReportPage from "@/pages/admin/reports/StoreCreditUsageReport";
 import SalesReportPage from "@/pages/admin/reports/SalesReport";
@@ -191,6 +192,9 @@ function Router() {
       </Route>
       <Route path="/crm/notes">
         {() => <ProtectedRoute component={CRMNotes} />}
+      </Route>
+      <Route path="/crm/todos">
+        {() => <ProtectedRoute component={CRMToDo} />}
       </Route>
       <Route path="/admin/crm">
         {() => <ProtectedRoute component={CRMSettings} role="admin" />}

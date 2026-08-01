@@ -16,8 +16,9 @@ import {
   ArrowLeft, Building2, User, Mail, Phone, Hash, TrendingUp, ShoppingBag,
   Calendar, DollarSign, Users, Plus, Pencil, Trash2, MessageSquare,
   UserCheck, UserMinus, AlertTriangle, Clock, ChevronLeft, ChevronRight,
-  FileText, CreditCard, Edit3, RefreshCw, BookOpen, Save,
+  FileText, CreditCard, Edit3, RefreshCw, BookOpen, Save, CheckSquare,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { useTimeService } from "@/hooks/useTimeService";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -415,9 +416,20 @@ export default function CustomerProfile() {
   const canDeleteNote    = hasPermission("crm", "notes_delete");
   const canAssignRep     = hasPermission("crm", "assign_rep");
   const canEditBcNotes   = hasPermission("crm", "edit_customer_notes");
+  const canManageTodos   = isAdmin || hasPermission("crm", "manage_todos") || hasPermission("crm", "add_note");
+  const canManageAccountType = isAdmin || hasPermission("crm", "manage_account_classification");
+  const canManageInactive    = isAdmin || hasPermission("crm", "manage_inactive_accounts");
 
   const [activeTab, setActiveTab]           = useState<Tab>("overview");
   const [showAddNote, setShowAddNote]       = useState(false);
+  const [showAddTodo, setShowAddTodo]       = useState(false);
+  const [editingTodo, setEditingTodo]       = useState<any | null>(null);
+  const [deletingTodoId, setDeletingTodoId] = useState<number | null>(null);
+  const [todoTitle, setTodoTitle]           = useState("");
+  const [todoNote, setTodoNote]             = useState("");
+  const [todoPriority, setTodoPriority]     = useState("medium");
+  const [todoDueDate, setTodoDueDate]       = useState("");
+  const [todoAssignedTo, setTodoAssignedTo] = useState("");
   const [editingNote, setEditingNote]       = useState<any | null>(null);
   const [deletingNoteId, setDeletingNoteId] = useState<number | null>(null);
   const [showAssignRep, setShowAssignRep]   = useState(false);
@@ -487,6 +499,16 @@ export default function CustomerProfile() {
     enabled: !!id,
   });
 
+  const { data: todos = [], isLoading: loadingTodos } = useQuery<any[]>({
+    queryKey: ["crm", "customer", id, "todos"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/todos?customerId=${id}&status=all&allUsers=true`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load todos");
+      return r.json();
+    },
+    enabled: !!id,
+  });
+
   const { data: bcNotesData, isLoading: loadingBcNotes, refetch: refetchBcNotes } = useQuery({
     queryKey: ["crm", "customer", id, "bc-notes"],
     queryFn: async () => {
@@ -514,6 +536,51 @@ export default function CustomerProfile() {
     queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "notes"] });
     queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
   };
+
+  const invalidateTodos = () => {
+    queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "todos"] });
+    queryClient.invalidateQueries({ queryKey: ["crm", "todos"] });
+  };
+
+  const createTodoMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const r = await fetch("/api/crm/todos", {
+        method: "POST", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ ...data, customer_id: id }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to create to do");
+      return r.json();
+    },
+    onSuccess: () => {
+      invalidateTodos();
+      setShowAddTodo(false);
+      setTodoTitle(""); setTodoNote(""); setTodoPriority("medium"); setTodoDueDate(""); setTodoAssignedTo("");
+      toast({ title: "To Do created" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const updateTodoMutation = useMutation({
+    mutationFn: async ({ todoId, data }: { todoId: number; data: any }) => {
+      const r = await fetch(`/api/crm/todos/${todoId}`, {
+        method: "PUT", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to update to do");
+      return r.json();
+    },
+    onSuccess: () => { invalidateTodos(); setEditingTodo(null); toast({ title: "To Do updated" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteTodoMutation = useMutation({
+    mutationFn: async (todoId: number) => {
+      const r = await fetch(`/api/crm/todos/${todoId}`, { method: "DELETE", headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to delete to do");
+    },
+    onSuccess: () => { invalidateTodos(); setDeletingTodoId(null); toast({ title: "To Do deleted" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
 
   const createNoteMutation = useMutation({
     mutationFn: async (data: { note: string; note_type: string; order_id?: number | null; bc_target?: string }) => {
@@ -671,10 +738,18 @@ export default function CustomerProfile() {
     } finally { setSavingBcNotes(false); }
   };
 
+  // Next follow-up: nearest pending todo with a due_date
+  const nextFollowUp = (todos as any[])
+    .filter((t: any) => !t.completed_at && t.due_date)
+    .sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())[0] ?? null;
+
+  const pendingTodos  = (todos as any[]).filter((t: any) => !t.completed_at);
+  const totalActions  = (notes as any[]).length + (todos as any[]).length;
+
   const TABS: { id: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
     { id: "overview",  label: "Overview",  icon: <User className="h-3.5 w-3.5" /> },
     { id: "orders",    label: "Orders",    icon: <ShoppingBag className="h-3.5 w-3.5" />, count: allOrders.length || undefined },
-    { id: "notes",     label: "Notes",     icon: <MessageSquare className="h-3.5 w-3.5" />, count: (notes as any[]).length || undefined },
+    { id: "notes",     label: "Actions",   icon: <MessageSquare className="h-3.5 w-3.5" />, count: totalActions || undefined },
     { id: "timeline",  label: "Timeline",  icon: <Clock className="h-3.5 w-3.5" /> },
   ];
 
@@ -805,8 +880,81 @@ export default function CustomerProfile() {
                   )}
                 </div>
 
+                {/* Next Follow Up */}
+                {nextFollowUp && (
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <span className="text-xs text-slate-500 font-medium shrink-0">Next Follow Up:</span>
+                    <span className={`text-xs font-medium flex items-center gap-1 ${nextFollowUp.is_overdue ? "text-red-600" : "text-blue-600"}`}>
+                      <Calendar className="h-3 w-3" />
+                      {fmt.date(nextFollowUp.due_date)} — {nextFollowUp.title}
+                      {nextFollowUp.is_overdue && <span className="text-[10px] font-normal text-red-400">(overdue)</span>}
+                    </span>
+                  </div>
+                )}
+
                 {/* Customer Type / Address Type */}
                 <div className="flex items-center flex-wrap gap-x-5 gap-y-1 mt-1.5">
+                  {/* Account Type (SalesCore ERP field) */}
+                  {canManageAccountType ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-slate-500 font-medium">Account:</span>
+                      <Select value={customer.account_type ?? "customer"} onValueChange={v => handleMasterFieldChange("account_type", v)}>
+                        <SelectTrigger className="h-6 text-xs w-auto border border-slate-200 rounded-md px-2 gap-1 focus:ring-1 focus:ring-blue-400">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="customer">Customer</SelectItem>
+                          <SelectItem value="vendor">Vendor</SelectItem>
+                          <SelectItem value="internal">Internal</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : customer.account_type && customer.account_type !== "customer" ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-slate-500 font-medium">Account:</span>
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700 capitalize">{customer.account_type}</span>
+                    </div>
+                  ) : null}
+                  {/* Inactive state */}
+                  {customer.inactive_at ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-200 text-slate-600">Inactive</span>
+                      {customer.inactive_reason && <span className="text-xs text-slate-400 capitalize">{customer.inactive_reason.replace(/_/g, " ")}</span>}
+                      {canManageInactive && (
+                        <Button size="sm" variant="outline" className="h-5 text-[10px] px-2 text-green-700 border-green-300 hover:bg-green-50"
+                          onClick={async () => {
+                            try {
+                              await fetch(`/api/crm/customers/${id}`, {
+                                method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+                                body: JSON.stringify({ restore_active: true }),
+                              });
+                              queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
+                              toast({ title: "Customer restored to active" });
+                            } catch (e: any) { toast({ title: "Error", description: e.message, variant: "destructive" }); }
+                          }}>
+                          Restore
+                        </Button>
+                      )}
+                    </div>
+                  ) : canManageInactive ? (
+                    <div className="flex items-center gap-1.5">
+                      <Button size="sm" variant="ghost" className="h-5 text-[10px] px-2 text-slate-400 hover:text-red-600"
+                        onClick={async () => {
+                          const reason = window.prompt("Mark inactive? Enter reason (optional):", "") ?? null;
+                          if (reason === null) return; // cancelled
+                          try {
+                            await fetch(`/api/crm/customers/${id}`, {
+                              method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+                              body: JSON.stringify({ mark_inactive: true, inactive_reason: reason || null }),
+                            });
+                            queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
+                            toast({ title: "Customer marked inactive" });
+                          } catch (e: any) { toast({ title: "Error", description: e.message, variant: "destructive" }); }
+                        }}>
+                        Mark Inactive
+                      </Button>
+                    </div>
+                  ) : null}
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs text-slate-500 font-medium">Type:</span>
                     <Select value={customer.customer_type ?? "Store"} onValueChange={v => handleMasterFieldChange("customer_type", v)}>
@@ -1185,6 +1333,71 @@ export default function CustomerProfile() {
                   </table>
                 </div>
               )}
+
+              {/* ── SECTION 3: To Dos ──────────────────────────────────────────── */}
+              <div className="px-4 py-3 border-t border-b bg-slate-50 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                  <CheckSquare className="h-4 w-4 text-slate-400" />
+                  To Dos {pendingTodos.length > 0 && <span className="text-xs font-normal text-slate-400">({pendingTodos.length} pending)</span>}
+                </h2>
+                {canManageTodos && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowAddTodo(true)}>
+                    <Plus className="h-3.5 w-3.5" />New To Do
+                  </Button>
+                )}
+              </div>
+              {loadingTodos ? (
+                <div className="flex items-center justify-center h-20 text-slate-400 text-sm">Loading…</div>
+              ) : (todos as any[]).length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-20 text-slate-400">
+                  <p className="text-sm">No to dos</p>
+                  {canManageTodos && <Button size="sm" variant="outline" className="mt-1.5 text-xs" onClick={() => setShowAddTodo(true)}>Create first to do</Button>}
+                </div>
+              ) : (
+                <div className="p-4 space-y-2">
+                  {(todos as any[])
+                    .sort((a, b) => {
+                      if (!!a.completed_at !== !!b.completed_at) return a.completed_at ? 1 : -1;
+                      if (a.due_date && b.due_date) return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+                      if (a.due_date) return -1;
+                      if (b.due_date) return 1;
+                      return 0;
+                    })
+                    .map((todo: any) => {
+                      const isDone = !!todo.completed_at;
+                      const isOverdue = todo.is_overdue && !isDone;
+                      const PRIORITY_COLORS: Record<string, string> = { high: "bg-red-100 text-red-700 border-red-200", medium: "bg-amber-100 text-amber-700 border-amber-200", low: "bg-slate-100 text-slate-500 border-slate-200" };
+                      return (
+                        <div key={todo.id} className={`flex items-start gap-3 p-3 rounded-lg border ${isDone ? "bg-slate-50 opacity-60" : "bg-white"}`}>
+                          <button
+                            onClick={() => updateTodoMutation.mutate({ todoId: todo.id, data: { completed: !isDone } })}
+                            className={`mt-0.5 h-4 w-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${isDone ? "bg-green-500 border-green-500 text-white" : "border-slate-300 hover:border-blue-500"}`}
+                          >
+                            {isDone && <span className="text-white text-[10px] font-bold">✓</span>}
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`text-sm font-medium ${isDone ? "line-through text-slate-400" : "text-slate-800"}`}>{todo.title}</span>
+                              {todo.priority && <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border capitalize ${PRIORITY_COLORS[todo.priority] ?? PRIORITY_COLORS.medium}`}>{todo.priority}</span>}
+                            </div>
+                            {todo.note && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{todo.note}</p>}
+                            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[11px] text-slate-400">
+                              {todo.due_date && <span className={`flex items-center gap-1 ${isOverdue ? "text-red-500 font-medium" : ""}`}><Calendar className="h-3 w-3" />Due {fmt.date(todo.due_date)}{isOverdue && " (overdue)"}</span>}
+                              {todo.assigned_to_name && <span className="flex items-center gap-1"><User className="h-3 w-3" />{todo.assigned_to_name}</span>}
+                              {todo.completed_at && <span><Clock className="h-3 w-3 inline mr-0.5" />Done {fmt.relative(todo.completed_at)}</span>}
+                            </div>
+                          </div>
+                          {canManageTodos && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button onClick={() => setEditingTodo(todo)} className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-blue-600"><Pencil className="h-3.5 w-3.5" /></button>
+                              <button onClick={() => setDeletingTodoId(todo.id)} className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1311,6 +1524,113 @@ export default function CustomerProfile() {
           }}
         />
       )}
+
+      {/* ── Add To Do Modal ──────────────────────────────────────────────────── */}
+      <Dialog open={showAddTodo} onOpenChange={v => { if (!v) { setShowAddTodo(false); setTodoTitle(""); setTodoNote(""); setTodoPriority("medium"); setTodoDueDate(""); setTodoAssignedTo(""); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>New To Do</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs mb-1.5 block">Title *</Label>
+              <Input value={todoTitle} onChange={e => setTodoTitle(e.target.value)} placeholder="What needs to be done?" />
+            </div>
+            <div>
+              <Label className="text-xs mb-1.5 block">Description</Label>
+              <Textarea value={todoNote} onChange={e => setTodoNote(e.target.value)} placeholder="Optional details…" rows={2} />
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <Label className="text-xs mb-1.5 block">Priority</Label>
+                <Select value={todoPriority} onValueChange={setTodoPriority}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex-1">
+                <Label className="text-xs mb-1.5 block">Due Date</Label>
+                <Input type="date" value={todoDueDate} onChange={e => setTodoDueDate(e.target.value)} className="h-8 text-xs" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowAddTodo(false); setTodoTitle(""); setTodoNote(""); setTodoPriority("medium"); setTodoDueDate(""); }}>Cancel</Button>
+            <Button
+              onClick={() => createTodoMutation.mutate({ title: todoTitle, note: todoNote, priority: todoPriority, due_date: todoDueDate || null })}
+              disabled={!todoTitle.trim() || createTodoMutation.isPending}
+            >
+              {createTodoMutation.isPending ? "Saving…" : "Create To Do"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit To Do Modal ─────────────────────────────────────────────────── */}
+      {editingTodo && (
+        <Dialog open={!!editingTodo} onOpenChange={v => { if (!v) setEditingTodo(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader><DialogTitle>Edit To Do</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs mb-1.5 block">Title *</Label>
+                <Input value={editingTodo.title ?? ""} onChange={e => setEditingTodo((t: any) => ({ ...t, title: e.target.value }))} />
+              </div>
+              <div>
+                <Label className="text-xs mb-1.5 block">Description</Label>
+                <Textarea value={editingTodo.note ?? ""} onChange={e => setEditingTodo((t: any) => ({ ...t, note: e.target.value }))} rows={2} />
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <Label className="text-xs mb-1.5 block">Priority</Label>
+                  <Select value={editingTodo.priority ?? "medium"} onValueChange={v => setEditingTodo((t: any) => ({ ...t, priority: v }))}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex-1">
+                  <Label className="text-xs mb-1.5 block">Due Date</Label>
+                  <Input
+                    type="date"
+                    value={editingTodo.due_date ? new Date(editingTodo.due_date).toISOString().split("T")[0] : ""}
+                    onChange={e => setEditingTodo((t: any) => ({ ...t, due_date: e.target.value || null }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditingTodo(null)}>Cancel</Button>
+              <Button
+                onClick={() => updateTodoMutation.mutate({ todoId: editingTodo.id, data: { title: editingTodo.title, note: editingTodo.note, priority: editingTodo.priority, due_date: editingTodo.due_date || null } })}
+                disabled={!editingTodo.title?.trim() || updateTodoMutation.isPending}
+              >
+                {updateTodoMutation.isPending ? "Saving…" : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Delete To Do Confirm ─────────────────────────────────────────────── */}
+      <Dialog open={deletingTodoId !== null} onOpenChange={v => { if (!v) setDeletingTodoId(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Delete To Do</DialogTitle></DialogHeader>
+          <p className="text-sm text-slate-600">This to do will be permanently deleted.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingTodoId(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => deletingTodoId && deleteTodoMutation.mutate(deletingTodoId)} disabled={deleteTodoMutation.isPending}>
+              {deleteTodoMutation.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

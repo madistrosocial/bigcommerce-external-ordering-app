@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications } from "@shared/schema";
 import { eq, desc, and, inArray, gt, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
@@ -88,15 +88,15 @@ export interface IStorage {
   deletePromoSku(id: number): Promise<void>;
 
   // CRM operations
-  getCrmCustomers(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; limit?: number; offset?: number; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null; last_action_date?: string | null; last_action_type?: string | null })[]; total: number }>;
+  getCrmCustomers(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; limit?: number; offset?: number; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null; last_action_date?: string | null; last_action_type?: string | null })[]; total: number }>;
   getHealthThresholds(): Promise<{ healthy_days: number; watch_days: number; at_risk_days: number }>;
   setHealthThresholds(t: { healthy_days: number; watch_days: number; at_risk_days: number }): Promise<void>;
   getCrmCustomerById(id: number): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null }) | undefined>;
   getCrmCustomerByBcId(bcId: number): Promise<CrmCustomer | undefined>;
   upsertCrmCustomer(data: InsertCrmCustomer): Promise<CrmCustomer>;
   getCrmCustomerCount(): Promise<number>;
-  getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null; last_action_date?: string | null; last_action_type?: string | null })[]>;
-  updateCrmCustomerMasterFields(id: number, data: { primary_rep_id?: number | null; secondary_rep_id?: number | null; customer_type?: string }): Promise<void>;
+  getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null; last_action_date?: string | null; last_action_type?: string | null })[]>;
+  updateCrmCustomerMasterFields(id: number, data: { primary_rep_id?: number | null; secondary_rep_id?: number | null; customer_type?: string; account_type?: string; inactive_reason?: string | null; inactive_at?: Date | null; inactive_notes?: string | null; inactivated_by_user_id?: number | null; is_active?: boolean }): Promise<void>;
   getCrmFilterOptions(): Promise<{ groups: string[]; states: string[]; reps: { id: number; name: string }[] }>;
   getCrmOrdersByBcCustomerId(bcCustomerId: number, limit?: number): Promise<CrmOrder[]>;
   upsertCrmOrder(data: InsertCrmOrder): Promise<CrmOrder>;
@@ -119,7 +119,12 @@ export interface IStorage {
   // CRM Reactivation
   getReactivationCustomers(opts: { search?: string; group?: string; state?: string; health?: string; rep?: number; sortBy?: string; sortDir?: string; limit?: number; offset?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null })[]; total: number }>;
   // CRM Metrics
-  getCrmMetrics(opts: { search?: string; group?: string; state?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; customerType?: string; addressType?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }>;
+  getCrmMetrics(opts: { search?: string; group?: string; state?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; customerType?: string; addressType?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number; inactive: number; by_account_type: Record<string, number> }>;
+  // CRM Todos (rows in crm_customer_notes with activity_type='todo')
+  getCrmTodos(opts: { userId?: number; allUsers?: boolean; status?: string; customerId?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<any[]>;
+  createCrmTodo(data: { customer_id?: number | null; title: string; note: string; priority?: string; due_date?: Date | null; assigned_to_user_id?: number | null; reminder_at?: Date | null; created_by: number }): Promise<any>;
+  updateCrmTodo(id: number, data: { title?: string; note?: string; priority?: string; due_date?: Date | null; assigned_to_user_id?: number | null; reminder_at?: Date | null; todo_status?: string; completed_at?: Date | null }): Promise<any>;
+  deleteCrmTodo(id: number): Promise<void>;
   // CRM Users list
   getCrmUsers(): Promise<{ id: number; name: string }[]>;
   // CRM Order Notes (mirror update)
@@ -514,6 +519,8 @@ export class DatabaseStorage implements IStorage {
     addressType?: string,
     primaryRep?: number | "unassigned",
     secondaryRep?: number | "unassigned",
+    accountType?: string,
+    status?: string, // 'active' | 'inactive' | 'both'; default 'active'
   ) {
     const conditions: any[] = [];
     if (search?.trim()) {
@@ -548,6 +555,15 @@ export class DatabaseStorage implements IStorage {
     } else if (secondaryRep !== undefined) {
       conditions.push(eq(customersMirror.secondary_rep_id, Number(secondaryRep)));
     }
+    // ERP account_type filter (customer / vendor / internal)
+    if (accountType) conditions.push(eq(customersMirror.account_type, accountType));
+    // Active/inactive filter — default to active-only for backward compat
+    if (!status || status === 'active') {
+      conditions.push(isNull(customersMirror.inactive_at));
+    } else if (status === 'inactive') {
+      conditions.push(isNotNull(customersMirror.inactive_at));
+    }
+    // status === 'both' → no filter
     if (conditions.length === 0) return undefined;
     if (conditions.length === 1) return conditions[0];
     return and(...conditions);
@@ -637,13 +653,13 @@ export class DatabaseStorage implements IStorage {
     return conds;
   }
 
-  async getCrmCustomers(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; limit?: number; offset?: number; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null })[]; total: number }> {
+  async getCrmCustomers(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; limit?: number; offset?: number; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null })[]; total: number }> {
     const { search, group, state, health, customerType, addressType, primaryRep, secondaryRep,
             sortBy = "last_order_date", sortDir = "desc", limit = 50, offset = 0,
-            assignedRep, visibilityScope, visibilityUserId } = opts;
+            assignedRep, visibilityScope, visibilityUserId, accountType, status } = opts;
     const primaryRepUser = alias(users, "primary_rep_user");
     const secondaryRepUser = alias(users, "secondary_rep_user");
-    const baseWhere = this.buildCrmWhereClause(search, group, state, health, customerType, addressType, primaryRep, secondaryRep);
+    const baseWhere = this.buildCrmWhereClause(search, group, state, health, customerType, addressType, primaryRep, secondaryRep, accountType, status);
     const repConds = this.buildCrmRepConditions(assignedRep, visibilityScope, visibilityUserId);
     const needsRepJoin = repConds.length > 0;
     const allConds = [...(baseWhere ? [baseWhere] : []), ...repConds];
@@ -716,6 +732,8 @@ export class DatabaseStorage implements IStorage {
     const result = await db.insert(customersMirror).values(data)
       .onConflictDoUpdate({
         target: customersMirror.bigcommerce_customer_id,
+        // NOTE: SalesCore-only ERP columns (account_type, inactive_*, inactivated_by_user_id)
+        // are intentionally excluded here — BC sync must never overwrite them.
         set: {
           company: data.company,
           first_name: data.first_name,
@@ -727,7 +745,6 @@ export class DatabaseStorage implements IStorage {
           billing_address: data.billing_address,
           shipping_address: data.shipping_address,
           created_date: data.created_date,
-          is_active: data.is_active,
           store_credit_balance: data.store_credit_balance,
           address_type: data.address_type,
           updated_at: new Date(),
@@ -741,13 +758,13 @@ export class DatabaseStorage implements IStorage {
     return result[0]?.count ?? 0;
   }
 
-  async getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null })[]> {
+  async getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null })[]> {
     const { search, group, state, health, customerType, addressType, primaryRep, secondaryRep,
             sortBy = "last_order_date", sortDir = "desc",
-            assignedRep, visibilityScope, visibilityUserId } = opts;
+            assignedRep, visibilityScope, visibilityUserId, accountType, status } = opts;
     const primaryRepUser = alias(users, "primary_rep_user");
     const secondaryRepUser = alias(users, "secondary_rep_user");
-    const baseWhere = this.buildCrmWhereClause(search, group, state, health, customerType, addressType, primaryRep, secondaryRep);
+    const baseWhere = this.buildCrmWhereClause(search, group, state, health, customerType, addressType, primaryRep, secondaryRep, accountType, status);
     const repConds = this.buildCrmRepConditions(assignedRep, visibilityScope, visibilityUserId);
     const allConds = [...(baseWhere ? [baseWhere] : []), ...repConds];
     const where = allConds.length === 0 ? undefined : allConds.length === 1 ? allConds[0] : and(...allConds);
@@ -781,11 +798,23 @@ export class DatabaseStorage implements IStorage {
     primary_rep_id?: number | null;
     secondary_rep_id?: number | null;
     customer_type?: string;
+    account_type?: string;
+    inactive_reason?: string | null;
+    inactive_at?: Date | null;
+    inactive_notes?: string | null;
+    inactivated_by_user_id?: number | null;
+    is_active?: boolean;
   }): Promise<void> {
     const updates: Record<string, any> = { updated_at: new Date() };
     if ('primary_rep_id' in data) updates.primary_rep_id = data.primary_rep_id ?? null;
     if ('secondary_rep_id' in data) updates.secondary_rep_id = data.secondary_rep_id ?? null;
     if (data.customer_type !== undefined) updates.customer_type = data.customer_type;
+    if (data.account_type !== undefined) updates.account_type = data.account_type;
+    if ('inactive_reason' in data) updates.inactive_reason = data.inactive_reason ?? null;
+    if ('inactive_at' in data) updates.inactive_at = data.inactive_at ?? null;
+    if ('inactive_notes' in data) updates.inactive_notes = data.inactive_notes ?? null;
+    if ('inactivated_by_user_id' in data) updates.inactivated_by_user_id = data.inactivated_by_user_id ?? null;
+    if ('is_active' in data) updates.is_active = data.is_active;
     await db.update(customersMirror).set(updates).where(eq(customersMirror.id, id));
   }
 
@@ -936,7 +965,7 @@ export class DatabaseStorage implements IStorage {
     const rows = await db.select({ n: crmCustomerNotes, u: users })
       .from(crmCustomerNotes)
       .leftJoin(users, eq(users.id, crmCustomerNotes.created_by))
-      .where(eq(crmCustomerNotes.customer_id, customerId))
+      .where(and(eq(crmCustomerNotes.customer_id, customerId), eq(crmCustomerNotes.activity_type, 'note')))
       .orderBy(desc(crmCustomerNotes.created_at));
     return rows.map(r => ({ ...r.n, created_by_name: r.u?.name ?? null }));
   }
@@ -1208,34 +1237,141 @@ export class DatabaseStorage implements IStorage {
 
   // ─── CRM Metrics ──────────────────────────────────────────────────────────────
 
-  async getCrmMetrics(opts: { search?: string; group?: string; state?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; customerType?: string; addressType?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number }> {
-    const { search, group, state, primaryRep, secondaryRep, customerType, addressType, assignedRep, visibilityScope, visibilityUserId } = opts;
-    const baseWhere = this.buildCrmWhereClause(search, group, state, undefined, customerType, addressType, primaryRep, secondaryRep);
+  async getCrmMetrics(opts: { search?: string; group?: string; state?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; customerType?: string; addressType?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number; inactive: number; by_account_type: Record<string, number> }> {
+    const { search, group, state, primaryRep, secondaryRep, customerType, addressType, assignedRep, visibilityScope, visibilityUserId, accountType, status } = opts;
+    // Base where using 'both' status so we can separately count inactive
+    const baseWhere = this.buildCrmWhereClause(search, group, state, undefined, customerType, addressType, primaryRep, secondaryRep, accountType, status ?? 'both');
     const repConds = this.buildCrmRepConditions(assignedRep, visibilityScope, visibilityUserId);
     const needsRepJoin = repConds.length > 0;
     const allConds = [...(baseWhere ? [baseWhere] : []), ...repConds];
     const where = allConds.length === 0 ? undefined : allConds.length === 1 ? allConds[0] : and(...allConds);
 
-    const rows = needsRepJoin
-      ? await db.select({ account_health: customersMirror.account_health, count: sql<number>`count(*)::int` })
-          .from(customersMirror)
-          .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
-          .where(where)
-          .groupBy(customersMirror.account_health)
-      : await db.select({ account_health: customersMirror.account_health, count: sql<number>`count(*)::int` })
-          .from(customersMirror)
-          .where(where)
-          .groupBy(customersMirror.account_health);
+    const [healthRows, accountTypeRows, inactiveRows] = await Promise.all([
+      needsRepJoin
+        ? db.select({ account_health: customersMirror.account_health, count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+            .where(where ? and(where, isNull(customersMirror.inactive_at)) : isNull(customersMirror.inactive_at))
+            .groupBy(customersMirror.account_health)
+        : db.select({ account_health: customersMirror.account_health, count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .where(where ? and(where, isNull(customersMirror.inactive_at)) : isNull(customersMirror.inactive_at))
+            .groupBy(customersMirror.account_health),
+      needsRepJoin
+        ? db.select({ account_type: customersMirror.account_type, count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+            .where(where)
+            .groupBy(customersMirror.account_type)
+        : db.select({ account_type: customersMirror.account_type, count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .where(where)
+            .groupBy(customersMirror.account_type),
+      needsRepJoin
+        ? db.select({ count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+            .where(where ? and(where, isNotNull(customersMirror.inactive_at)) : isNotNull(customersMirror.inactive_at))
+        : db.select({ count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .where(where ? and(where, isNotNull(customersMirror.inactive_at)) : isNotNull(customersMirror.inactive_at)),
+    ]);
 
     const counts: Record<string, number> = {};
-    for (const r of rows) counts[r.account_health ?? '__null__'] = r.count;
+    for (const r of healthRows) counts[r.account_health ?? '__null__'] = r.count;
 
     const healthy = counts['Healthy'] ?? 0;
     const watch = counts['Watch'] ?? 0;
     const at_risk = counts['At Risk'] ?? 0;
     const lost = (counts['Lost'] ?? 0) + (counts['__null__'] ?? 0);
     const total = healthy + watch + at_risk + lost;
-    return { total, healthy, watch, at_risk, lost, needs_follow_up: at_risk + lost };
+    const inactive = inactiveRows[0]?.count ?? 0;
+
+    const by_account_type: Record<string, number> = {};
+    for (const r of accountTypeRows) by_account_type[r.account_type ?? 'customer'] = r.count;
+
+    return { total, healthy, watch, at_risk, lost, needs_follow_up: at_risk + lost, inactive, by_account_type };
+  }
+
+  // ─── CRM Todos (rows in crm_customer_notes with activity_type='todo') ─────────
+
+  async getCrmTodos(opts: { userId?: number; allUsers?: boolean; status?: string; customerId?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<any[]> {
+    const { userId, allUsers, status, customerId, visibilityScope, visibilityUserId } = opts;
+    const assignedUser = alias(users, "assigned_user");
+    const createdUser = alias(users, "created_user");
+    const conditions: any[] = [eq(crmCustomerNotes.activity_type, 'todo')];
+    if (customerId) conditions.push(eq(crmCustomerNotes.customer_id, customerId));
+    if (!allUsers && userId) conditions.push(eq(crmCustomerNotes.assigned_to_user_id, userId));
+    if (status === 'pending') conditions.push(isNull(crmCustomerNotes.completed_at));
+    if (status === 'completed') conditions.push(isNotNull(crmCustomerNotes.completed_at));
+    const where = conditions.length === 1 ? conditions[0] : and(...conditions);
+
+    const rows = await db.select({
+      n: crmCustomerNotes,
+      customer_company: customersMirror.company,
+      customer_first_name: customersMirror.first_name,
+      customer_last_name: customersMirror.last_name,
+      customer_bc_id: customersMirror.bigcommerce_customer_id,
+      assigned_to_name: assignedUser.name,
+      created_by_name: createdUser.name,
+    })
+      .from(crmCustomerNotes)
+      .leftJoin(customersMirror, eq(customersMirror.id, crmCustomerNotes.customer_id))
+      .leftJoin(assignedUser, eq(assignedUser.id, crmCustomerNotes.assigned_to_user_id))
+      .leftJoin(createdUser, eq(createdUser.id, crmCustomerNotes.created_by))
+      .where(where)
+      .orderBy(sql`${crmCustomerNotes.due_date} ASC NULLS LAST`, desc(crmCustomerNotes.created_at));
+
+    const now = new Date();
+    return rows.map(r => {
+      const isOverdue = r.n.due_date && !r.n.completed_at && new Date(r.n.due_date) < now;
+      return {
+        ...r.n,
+        customer_company: r.customer_company ?? null,
+        customer_first_name: r.customer_first_name ?? null,
+        customer_last_name: r.customer_last_name ?? null,
+        customer_bc_id: r.customer_bc_id ?? null,
+        assigned_to_name: r.assigned_to_name ?? null,
+        created_by_name: r.created_by_name ?? null,
+        is_overdue: !!isOverdue,
+        todo_status: r.n.completed_at ? 'completed' : 'pending',
+      };
+    });
+  }
+
+  async createCrmTodo(data: { customer_id?: number | null; title: string; note: string; priority?: string; due_date?: Date | null; assigned_to_user_id?: number | null; reminder_at?: Date | null; created_by: number }): Promise<any> {
+    const result = await db.insert(crmCustomerNotes).values({
+      customer_id: data.customer_id as any,
+      activity_type: 'todo',
+      title: data.title,
+      note: data.note,
+      priority: data.priority ?? 'medium',
+      due_date: data.due_date ?? null,
+      assigned_to_user_id: data.assigned_to_user_id ?? null,
+      reminder_at: data.reminder_at ?? null,
+      todo_status: 'pending',
+      created_by: data.created_by,
+      note_type: 'To Do',
+    }).returning();
+    return result[0];
+  }
+
+  async updateCrmTodo(id: number, data: { title?: string; note?: string; priority?: string; due_date?: Date | null; assigned_to_user_id?: number | null; reminder_at?: Date | null; todo_status?: string; completed_at?: Date | null }): Promise<any> {
+    const updates: Record<string, any> = { updated_at: new Date() };
+    if (data.title !== undefined) updates.title = data.title;
+    if (data.note !== undefined) updates.note = data.note;
+    if (data.priority !== undefined) updates.priority = data.priority;
+    if ('due_date' in data) updates.due_date = data.due_date ?? null;
+    if ('assigned_to_user_id' in data) updates.assigned_to_user_id = data.assigned_to_user_id ?? null;
+    if ('reminder_at' in data) updates.reminder_at = data.reminder_at ?? null;
+    if ('completed_at' in data) updates.completed_at = data.completed_at ?? null;
+    if (data.todo_status !== undefined) updates.todo_status = data.todo_status;
+    const result = await db.update(crmCustomerNotes).set(updates).where(eq(crmCustomerNotes.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteCrmTodo(id: number): Promise<void> {
+    await db.delete(crmCustomerNotes).where(and(eq(crmCustomerNotes.id, id), eq(crmCustomerNotes.activity_type, 'todo')));
   }
 
   // ─── CRM Users ────────────────────────────────────────────────────────────────

@@ -65,6 +65,10 @@ export const CRM_ACTION_PERMS = [
   { module: "crm", action: "add_note",           label: "Add CRM Notes",             description: "Can create CRM customer notes." },
   { module: "crm", action: "edit_customer_notes", label: "Edit Customer Account Notes", description: "Can edit and save BigCommerce customer account notes." },
   { module: "crm", action: "notes_edit",          label: "Edit Own CRM Notes",          description: "Can edit CRM notes they personally created." },
+  { module: "crm", action: "view_all_todos",      label: "View All To Dos",             description: "Can see To Dos assigned to any user, not just themselves." },
+  { module: "crm", action: "manage_todos",        label: "Manage To Dos",               description: "Can create, edit, and delete To Dos for any customer." },
+  { module: "crm", action: "manage_account_classification", label: "Manage Account Classification", description: "Can set the ERP account type (Customer / Vendor / Internal)." },
+  { module: "crm", action: "manage_inactive_accounts", label: "Manage Inactive Accounts",   description: "Can mark customers as inactive and restore them." },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -178,6 +178,12 @@ export const customersMirror = pgTable("customers_mirror", {
   secondary_rep_id: integer("secondary_rep_id"),
   customer_type: text("customer_type").notNull().default("Store"),
   address_type: text("address_type").notNull().default("Unknown"),
+  // SalesCore-only ERP fields — never overwritten by BC sync
+  account_type: text("account_type").notNull().default("customer"),
+  inactive_reason: text("inactive_reason"),
+  inactive_at: timestamp("inactive_at"),
+  inactive_notes: text("inactive_notes"),
+  inactivated_by_user_id: integer("inactivated_by_user_id"),
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -211,11 +217,31 @@ export const crmCustomerNotes = pgTable("crm_customer_notes", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
   note_type: text("note_type").notNull().default("General"),
-  note: text("note").notNull(),
+  note: text("note").notNull().default(""),
   order_id: integer("order_id"),
   created_by: integer("created_by").references(() => users.id),
+  // To Do / Actions extended fields
+  activity_type: text("activity_type").notNull().default("note"), // 'note' | 'todo'
+  title: text("title"),
+  assigned_to_user_id: integer("assigned_to_user_id").references(() => users.id),
+  priority: text("priority"), // 'low' | 'medium' | 'high'
+  due_date: timestamp("due_date"),
+  completed_at: timestamp("completed_at"),
+  reminder_at: timestamp("reminder_at"),
+  todo_status: text("todo_status"), // 'pending' | 'completed'
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const notifications = pgTable("notifications", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  customer_id: integer("customer_id").references(() => customersMirror.id, { onDelete: "set null" }),
+  message: text("message").notNull(),
+  notification_type: text("notification_type").notNull().default("info"),
+  is_read: boolean("is_read").notNull().default(false),
+  link_url: text("link_url"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
 export const crmAuditLog = pgTable("crm_audit_log", {
