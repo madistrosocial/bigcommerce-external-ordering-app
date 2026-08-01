@@ -1,0 +1,468 @@
+ERP Architecture Proposal Update
+Warehouse Strategy & Fulfillment Domain Revision
+
+This update supersedes any previous assumption that SalesCore's Inventory module is intended to replace SkuVault.
+
+The long-term direction of SalesCore is not to become a Warehouse Management System (WMS). Instead, SalesCore should become the Business Operations ERP that orchestrates warehouse operations while integrating tightly with an external WMS.
+
+Today that WMS is SkuVault, but the architecture should remain warehouse-agnostic so another WMS—or a future native SalesCore warehouse module—can be substituted without affecting the rest of the application.
+
+New Architectural Principle
+Warehouse-Agnostic ERP
+
+SalesCore should never tightly couple its business logic to SkuVault.
+
+Instead, all warehouse functionality should communicate through an internal Warehouse Integration Layer.
+
+SalesCore ERP
+
+↓
+
+Warehouse Service
+
+↓
+
+SkuVault Adapter
+
+↓
+
+SkuVault API
+
+If SalesCore eventually develops its own warehouse module, only the Warehouse Adapter changes.
+
+CRM, Product 360, Reporting, Orders, Customer 360, Pricing, POS, and other ERP modules should never directly communicate with SkuVault.
+
+Update Source of Truth Matrix
+
+The proposal should distinguish between:
+
+Warehouse Operations
+
+Owned by:
+
+SkuVault
+
+Includes:
+
+Purchase Orders
+Receiving
+Warehouse Inventory
+Bin Locations
+Warehouse Transfers
+Physical Counts
+Picking
+Packing
+Warehouse Adjustments
+Business Operations
+
+Owned by:
+
+SalesCore
+
+Includes:
+
+CRM
+Customer 360
+Product 360
+Reporting
+Pricing
+Sales Analytics
+Customer Intelligence
+Inventory Intelligence
+Store Credit
+POS
+Sales Rep Management
+Audit
+Notifications
+Business Automation
+Shared Ownership
+
+Orders
+
+Products
+
+Inventory
+
+should clearly define
+
+Primary Source
+
+Mirror
+
+Synchronization Direction
+
+Conflict Resolution
+
+Inventory Domain Revision
+
+Split the Inventory architecture into two distinct domains.
+
+Inventory Intelligence
+
+Owned by SalesCore
+
+Purpose:
+
+Business intelligence and operational visibility.
+
+Includes:
+
+Inventory Timeline
+Inventory History
+Inventory Analytics
+Reservations
+Inventory Dashboard
+Stock Buffers
+Inventory KPIs
+Inventory Forecasting
+Inventory Audit
+Inventory Reports
+
+SalesCore owns the business logic surrounding inventory.
+
+Warehouse Integration
+
+Owned by SkuVault
+
+Purpose:
+
+Warehouse execution.
+
+Includes:
+
+Warehouse Inventory
+Bin Locations
+Receiving
+Transfers
+Cycle Counts
+Physical Inventory
+Picking
+Packing
+Warehouse APIs
+
+SalesCore consumes these processes rather than replacing them.
+
+New ERP Domain
+Fulfillment
+
+Introduce Fulfillment as a new first-class ERP domain.
+
+Purpose:
+
+Manage everything between
+
+Order Created
+
+↓
+
+Shipment Created
+
+This is separate from both Orders and Inventory.
+
+Fulfillment Responsibilities
+
+The Fulfillment module should become the orchestration layer for warehouse operations.
+
+It should support:
+
+Picking
+Packing
+Short Pick Handling
+Missing Item Recording
+Store Credit Automation
+Customer Notifications
+Warehouse KPIs
+Picker Performance
+Fulfillment Timeline
+Shipment Readiness
+Current Workflow
+
+Current warehouse workflow:
+
+BigCommerce Order
+
+↓
+
+Print Pick List
+
+↓
+
+Manual Picking
+
+↓
+
+Paper Notes
+
+↓
+
+Manual Missing Item List
+
+↓
+
+Manual Store Credit
+
+↓
+
+Manual Customer Email
+
+↓
+
+Shipment
+
+This workflow contains unnecessary manual work.
+
+Future Workflow
+
+Future SalesCore Fulfillment workflow:
+
+BigCommerce Order
+
+↓
+
+SalesCore Fulfillment Queue
+
+↓
+
+Tablet Picking
+
+↓
+
+Picker scans products
+
+↓
+
+Missing Item Detection
+
+↓
+
+Record Missing Item
+
+↓
+
+Complete Pick
+
+↓
+
+SalesCore calculates shortages
+
+↓
+
+Automatically create Store Credit
+
+↓
+
+Automatically update CRM Timeline
+
+↓
+
+Automatically generate Customer Notification
+
+↓
+
+Warehouse packs shipment
+
+↓
+
+Shipment completed
+
+The warehouse no longer needs paper pick lists.
+
+Tablet-Based Picking
+
+The proposal should include a future tablet interface.
+
+Features:
+
+Assigned Pick Queue
+Barcode Scanning
+Quantity Verification
+Missing Item Recording
+Damage Reporting
+Pick Progress
+Resume Picking
+Offline Capability (future)
+Missing Item Workflow
+
+Instead of handwritten notes,
+
+Pickers should select predefined reasons.
+
+Examples:
+
+Out of Stock
+Not Found
+Damaged
+Wrong Location
+Inventory Discrepancy
+Other
+
+Every event should automatically generate:
+
+Fulfillment Event
+Customer Timeline Event
+Product Timeline Event
+Audit Log
+Automatic Store Credit
+
+When picking is completed,
+
+SalesCore should automatically compare:
+
+Ordered Quantity
+
+vs
+
+Picked Quantity
+
+For shortages:
+
+Automatically
+
+Calculate refund/store credit amount
+Create BigCommerce Store Credit
+Record Store Credit Audit
+Add CRM Timeline Event
+Add Order Timeline Event
+Queue Customer Email
+
+No manual calculations should be required.
+
+Customer Communication
+
+Introduce Email Automation into Fulfillment.
+
+Example:
+
+Customer receives an automated email explaining:
+
+Missing products
+
+Issued store credit
+
+Remaining shipment contents
+
+Store credit balance
+
+Order status
+
+The warehouse should never manually compose these emails.
+
+CRM Integration
+
+Fulfillment should integrate directly into Customer 360.
+
+Customer Timeline examples:
+
+Order Created
+
+↓
+
+Picking Started
+
+↓
+
+Missing Item Recorded
+
+↓
+
+Store Credit Issued
+
+↓
+
+Email Sent
+
+↓
+
+Shipment Completed
+
+Everything becomes part of the customer relationship history.
+
+Product 360 Integration
+
+Every fulfillment event should contribute to Product 360.
+
+Examples:
+
+Times Picked
+Times Missing
+Fill Rate
+Warehouse Accuracy
+Revenue Lost
+Store Credit Issued
+Damage Frequency
+
+This provides valuable operational insights.
+
+Reporting Integration
+
+Add future Fulfillment Reports.
+
+Examples:
+
+Missing Items Report
+Short Pick Report
+Warehouse Accuracy Report
+Store Credit Issuance Report
+Revenue Lost Report
+Picker Performance Report
+Fill Rate Report
+Product Availability Report
+
+These reports should all utilize the existing Reporting Engine.
+
+Vendor 360 Integration
+
+Future Vendor 360 should consume Fulfillment data.
+
+Examples:
+
+Vendor Fill Rate
+
+Vendor Product Availability
+
+Missing Item Frequency
+
+Damaged Goods
+
+Revenue Lost
+
+Supplier Performance
+
+Purchase Order Visibility
+
+This is not an immediate implementation priority.
+
+However, the ERP should support mirroring selected SkuVault purchasing data into SalesCore.
+
+Future mirrored entities may include:
+
+Purchase Orders
+Purchase Order Status
+Receiving History
+Expected Deliveries
+Vendor Receipts
+Partial Receipts
+
+Purpose:
+
+Business intelligence.
+
+Reporting.
+
+Product 360.
+
+Vendor 360.
+
+Sales forecasting.
+
+SalesCore should not create Purchase Orders inside SkuVault at this stage.
+
+Instead it should consume warehouse purchasing data for reporting and future ERP modules.
+
+Architectural Principle
+
+The ERP should be designed to augment SkuVault rather than replace it.
+
+SalesCore's competitive advantage lies in business operations, customer intelligence, reporting, automation, CRM, pricing, and fulfillment orchestration—not in rebuilding mature warehouse execution features that SkuVault already provides.
+
+However, the architecture must remain modular enough that, if the business eventually decides to replace SkuVault, the Warehouse Integration Layer can be swapped with a native SalesCore Warehouse Engine without requiring significant changes to CRM, POS, Reporting, Customer 360, Product 360, or other ERP domains.

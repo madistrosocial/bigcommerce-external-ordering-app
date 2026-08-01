@@ -1,7 +1,8 @@
 # SalesCore ERP Architecture Proposal & Implementation Roadmap
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** July 2026  
+**Last Amended:** August 2026 — Warehouse Strategy & Fulfillment Domain Revision  
 **Status:** Planning Only — No implementation, SQL, or migrations included  
 
 ---
@@ -19,10 +20,19 @@
 9. [Phase 9 — Synchronization Strategy](#phase-9--synchronization-strategy)
 10. [Phase 10 — Product 360](#phase-10--product-360)
 11. [Phase 11 — Customer 360](#phase-11--customer-360)
-12. [Phase 12 — Inventory Strategy](#phase-12--inventory-strategy)
+12. [Phase 12 — Inventory & Warehouse Strategy](#phase-12--inventory--warehouse-strategy)
 13. [Phase 13 — Performance Review](#phase-13--performance-review)
 14. [Phase 14 — Implementation Roadmap](#phase-14--implementation-roadmap)
 15. [Phase 15 — Development Estimates](#phase-15--development-estimates)
+
+### Amendment Index
+- **August 2026** — Warehouse Strategy & Fulfillment Domain Revision
+  - Added Warehouse-Agnostic Architectural Principle (see below and Phase 9)
+  - Split Domain 4 into Inventory Intelligence (SalesCore) and Warehouse Integration (SkuVault)
+  - Added Fulfillment as a new first-class ERP domain (Domain 4c)
+  - Revised Phase 12 to reflect the Intelligence / Integration split
+  - Added Phase I — Fulfillment to the Implementation Roadmap
+  - Updated Development Estimates to include Fulfillment phase
 
 ---
 
@@ -155,6 +165,44 @@ POS Orders ─────────────────> orders table (lo
 
 ---
 
+## Architectural Principle — Warehouse-Agnostic ERP
+
+> **Added August 2026. This principle supersedes any previous assumption that SalesCore's Inventory module is intended to replace SkuVault.**
+
+### Core Principle
+
+SalesCore's long-term direction is to become the **Business Operations ERP** that orchestrates warehouse operations — not a Warehouse Management System (WMS).
+
+All warehouse functionality should communicate through an internal **Warehouse Integration Layer**, so that the external WMS can be substituted without affecting any other ERP module.
+
+```
+SalesCore ERP
+  ↓
+Warehouse Service (internal abstraction)
+  ↓
+SkuVault Adapter
+  ↓
+SkuVault API
+```
+
+If SalesCore eventually develops its own warehouse module, only the Warehouse Adapter changes. CRM, Product 360, Reporting, Orders, Customer 360, Pricing, POS, and all other ERP modules must never directly communicate with SkuVault.
+
+### Ownership Boundaries
+
+| Boundary | Owner | Includes |
+|---|---|---|
+| **Warehouse Operations** | SkuVault | Purchase Orders, Receiving, Warehouse Inventory, Bin Locations, Warehouse Transfers, Physical Counts, Picking, Packing, Warehouse Adjustments |
+| **Business Operations** | SalesCore | CRM, Customer 360, Product 360, Reporting, Pricing, Sales Analytics, Customer Intelligence, Inventory Intelligence, Store Credit, POS, Sales Rep Management, Audit, Notifications, Business Automation |
+| **Shared** | Both | Orders (primary: BC / SalesCore; sync to SkuVault for fulfillment), Products (master: BC; cost: SalesCore; physical stock: SkuVault), Inventory (intelligence: SalesCore; execution: SkuVault; published: BC) |
+
+### Competitive Advantage
+
+SalesCore's competitive advantage lies in **business operations, customer intelligence, reporting, automation, CRM, pricing, and fulfillment orchestration** — not in rebuilding mature warehouse execution features that SkuVault already provides.
+
+The architecture must remain modular enough that, if the business eventually decides to replace SkuVault, the Warehouse Integration Layer can be swapped with a native SalesCore Warehouse Engine without requiring significant changes to any other domain.
+
+---
+
 ## Phase 2 — Current System Assessment
 
 ### Database Structure (22 Tables)
@@ -195,21 +243,25 @@ POS Orders ─────────────────> orders table (lo
 
 ### Source of Truth by Domain
 
-| Domain | Current Source of Truth | Notes |
-|---|---|---|
-| Products (master) | **BigCommerce** | Local `products` table is a sparse, stale mirror |
-| Product variants | **BigCommerce** | Stored as JSONB in local products; not independently synced |
-| Product cost | **Local** (`products.cost_price`) | Not in BC; admin-entered |
-| Customers | **BigCommerce** | `customers_mirror` is a sync copy |
-| Orders (BC web) | **BigCommerce** | `customer_orders_mirror` + `bc_order_line_items` are read mirrors |
-| Orders (POS) | **Local** (`orders` table) | Synced to BC on submission; local is authoritative until synced |
-| Inventory | **BigCommerce** (+ SkuVault future) | `products.stock_level` is a snapshot; no live reservation |
-| Pricing (catalog) | **BigCommerce** | Local `products.price` is a synced copy |
-| Pricing (customer-specific) | **Local** (`price_history_cache`) | POS orders only; not BC web orders |
-| Store credit | **BigCommerce** | Fetched live; `pos_store_credit_usage` is an audit trail only |
-| Users / RBAC | **Local** | SalesCore owns this entirely |
-| CRM data (notes, rep) | **Local** | Enrichment data that does not exist in BC |
-| ShipStation exports | **Local** | Export history only; ShipStation itself is downstream |
+| Domain | Owner | Primary Source | Mirror / Sync | Notes |
+|---|---|---|---|---|
+| Products (master) | **BigCommerce** | BC catalog | `products` table (sparse) | Local mirror is stale; full sync needed |
+| Product variants | **BigCommerce** | BC catalog | JSONB in `products` | Not independently synced |
+| Product cost | **SalesCore** | `products.cost_price` | None | Admin-entered; never sent to BC |
+| Customers | **BigCommerce** | BC customers API | `customers_mirror` | SalesCore enriches; BC is identity master |
+| Orders (BC web) | **BigCommerce** | BC orders API | `customer_orders_mirror` + `bc_order_line_items` | Read-only mirrors |
+| Orders (POS) | **SalesCore** | `orders` table | Synced to BC on submit | SalesCore authoritative until synced |
+| Inventory (physical) | **SkuVault** | SkuVault API | Future: `inventory_positions` | SkuVault is the warehouse record; SalesCore mediates |
+| Inventory (published) | **BigCommerce** | BC stock API | `products.stock_level` (snapshot) | BC publishes the e-commerce quantity |
+| Inventory (intelligence) | **SalesCore** | Derived from SkuVault + BC | Ledger + positions | Reservations, analytics, forecasting |
+| Fulfillment | **SalesCore** | SalesCore Fulfillment module | Feeds back to CRM, Product 360 | New domain — orchestrates warehouse execution |
+| Pricing (catalog) | **BigCommerce** | BC pricing API | `products.price` | Synced copy |
+| Pricing (customer-specific) | **SalesCore** | `price_history_cache` | None | POS orders only; BC web orders not yet covered |
+| Store credit | **BigCommerce** | BC API (live fetch) | `pos_store_credit_usage` (audit only) | Balance changes with BC web orders |
+| Users / RBAC | **SalesCore** | `users`, `roles`, `permissions` | None | SalesCore owns entirely |
+| CRM data (notes, rep) | **SalesCore** | `crm_customer_notes`, `customer_sales_rep` | None | Enrichment data not in BC |
+| Warehouse operations | **SkuVault** | SkuVault API | Future: selected mirrors for BI | POs, receiving, bins, picking, packing |
+| ShipStation exports | **SalesCore** | Export history | None | Export log only; ShipStation is downstream |
 
 ### Existing Duplicated Data
 
@@ -287,18 +339,99 @@ POS Orders ─────────────────> orders table (lo
 | **Audit Requirements** | Vendor record edits, PO status changes |
 | **Reporting Requirements** | Spend by vendor, lead times, fill rate, open PO value |
 
-### Domain 4: Inventory
+### Domain 4a: Inventory Intelligence
 
 | Attribute | Definition |
 |---|---|
-| **Primary Entity** | `inventory_positions` (per product/variant/location) |
-| **Related Entities** | Products, Warehouses, Reservations, Adjustments, PO Receipts, SkuVault Sync |
-| **Ownership** | SalesCore (operational); BC (published stock level); SkuVault (warehouse physical) |
-| **Source of Truth** | SkuVault for physical warehouse; SalesCore for reservations; BC for published quantity |
-| **Relationships** | One inventory position → one product/variant/location combination |
-| **History Requirements** | Every quantity change (receipt, adjustment, sale, return) as a ledger row |
+| **Primary Entity** | `inventory_positions` (current qty per variant/location, derived from ledger) |
+| **Related Entities** | Products, Inventory Transactions, Reservations, Inventory Dashboard, KPIs |
+| **Ownership** | **SalesCore** — business intelligence and operational visibility |
+| **Source of Truth** | SkuVault for raw physical counts; SalesCore derives all intelligence from those counts |
+| **Relationships** | One intelligence record → one product/variant; aggregated from warehouse events |
+| **History Requirements** | Inventory Timeline, Inventory History, every stock movement as a ledger row |
 | **Audit Requirements** | All manual adjustments: who, reason, before/after |
-| **Reporting Requirements** | Current stock by location, movement history, slow-movers, reorder alerts |
+| **Reporting Requirements** | Inventory Dashboard, Stock Buffers, KPIs, Forecasting, Inventory Analytics, Inventory Reports |
+
+> SalesCore owns all business logic *surrounding* inventory. It does not own the warehouse execution layer.
+
+### Domain 4b: Warehouse Integration
+
+| Attribute | Definition |
+|---|---|
+| **Primary Entity** | Abstract: `warehouse_service` (internal integration layer) |
+| **Related Entities** | SkuVault Adapter, Warehouse Inventory, Bin Locations, Receipts, Transfers, Counts |
+| **Ownership** | **SkuVault** — warehouse execution |
+| **Source of Truth** | SkuVault for all physical warehouse state |
+| **Relationships** | SalesCore consumes warehouse data; never writes warehouse execution commands directly |
+| **History Requirements** | Future: mirror selected SkuVault data (PO status, receiving history, expected deliveries) for BI |
+| **Audit Requirements** | Log all sync events (what was received, when, from which source) |
+| **Reporting Requirements** | Vendor Fill Rate, Product Availability, Missing Item Frequency, Supplier Performance |
+
+> The Warehouse Integration Layer is the only SalesCore component that communicates with SkuVault. All other modules consume warehouse data through this abstraction. If SkuVault is ever replaced, only this adapter changes.
+
+**Warehouse-owned processes SalesCore consumes (not replaces):**
+- Warehouse Inventory & Bin Locations
+- Receiving & Transfers
+- Cycle Counts & Physical Inventory
+- Picking & Packing
+- Warehouse APIs
+
+**Future mirrored entities (for BI only, not execution):**
+- Purchase Orders & Purchase Order Status
+- Receiving History & Vendor Receipts
+- Expected Deliveries & Partial Receipts
+
+### Domain 4c: Fulfillment
+
+| Attribute | Definition |
+|---|---|
+| **Primary Entity** | `fulfillment_orders` (one per sales order entering the fulfillment queue) |
+| **Related Entities** | Fulfillment Events, Pick Lines, Missing Items, Shipments, Customer 360, Product 360, Store Credit, Notifications |
+| **Ownership** | **SalesCore** — orchestration layer between Order Created and Shipment Created |
+| **Source of Truth** | SalesCore owns the fulfillment workflow; SkuVault executes physical picking |
+| **Relationships** | One fulfillment order → one sales order; many pick lines; many fulfillment events |
+| **History Requirements** | Full Fulfillment Timeline per order (Queued → Picking Started → Picked → Packed → Shipped) |
+| **Audit Requirements** | Every missing item, every store credit issued, every customer notification sent |
+| **Reporting Requirements** | Missing Items Report, Short Pick Report, Warehouse Accuracy, Store Credit Issuance, Picker Performance, Fill Rate, Revenue Lost |
+
+> Fulfillment is the orchestration bridge. SalesCore manages the business logic (shortages, store credit, notifications, CRM updates) while SkuVault handles physical execution (picking, packing, bin locations). The warehouse no longer needs paper pick lists.
+
+**Current workflow (manual, paper-based):**
+```
+BC Order → Print Pick List → Manual Picking → Paper Notes → Manual Missing Item List
+→ Manual Store Credit → Manual Customer Email → Shipment
+```
+
+**Future SalesCore Fulfillment workflow:**
+```
+BC Order
+  → SalesCore Fulfillment Queue
+  → Tablet Picking (picker scans products)
+  → Missing Item Detection → Record Missing Item (predefined reasons)
+  → Complete Pick
+  → SalesCore calculates shortages automatically
+  → Auto-create Store Credit
+  → Auto-update CRM Timeline
+  → Auto-generate Customer Notification (email with missing items, credit issued, remaining shipment, credit balance, order status)
+  → Warehouse packs shipment
+  → Shipment completed
+```
+
+**Tablet Picking Interface (future):**
+- Assigned Pick Queue
+- Barcode Scanning & Quantity Verification
+- Missing Item Recording (Out of Stock / Not Found / Damaged / Wrong Location / Inventory Discrepancy / Other)
+- Damage Reporting & Pick Progress
+- Resume Picking & Offline Capability (future)
+
+**Automatic Store Credit:**  
+When picking is completed, SalesCore automatically compares Ordered Quantity vs. Picked Quantity. For every shortage: calculate refund/store credit amount → create BC Store Credit → record Store Credit Audit → add CRM Timeline Event → add Order Timeline Event → queue Customer Email. No manual calculations required.
+
+**CRM Integration:**  
+Every fulfillment event feeds into Customer 360 Timeline: Order Created → Picking Started → Missing Item Recorded → Store Credit Issued → Email Sent → Shipment Completed. Everything becomes part of the customer relationship history.
+
+**Product 360 Integration:**  
+Every fulfillment event contributes product-level metrics: Times Picked, Times Missing, Fill Rate, Warehouse Accuracy, Revenue Lost, Store Credit Issued, Damage Frequency.
 
 ### Domain 5: Sales Orders
 
@@ -509,14 +642,40 @@ sales_orders                     (evolved from orders; header)
   └── audit_events (order scope)
 ```
 
-### Inventory Domain
+### Inventory Intelligence Domain
 
 ```
-inventory_positions              (current qty per variant + location)
-  ├── inventory_locations        (warehouse zones/bins)
+inventory_positions              (current qty per variant + location; derived from ledger)
+  ├── inventory_locations        (warehouse zones/bins — local mirror for BI)
   ├── inventory_transactions     (append-only ledger: receipt, sale, adjustment, transfer, return)
   ├── inventory_reservations     (temporary holds for pending orders)
   └── inventory_adjustments      (manual corrections with reason and approval)
+```
+
+> SalesCore owns the intelligence layer. Physical execution (bins, picking, packing, cycle counts) is owned by SkuVault and consumed through the Warehouse Integration Layer.
+
+### Warehouse Integration Domain
+
+```
+warehouse_service                (internal abstraction — not a DB table)
+  ├── skuvault_adapter           (SkuVault-specific API adapter; swappable)
+  └── warehouse_sync_log         (log of every inbound sync from SkuVault: what, when, quantity)
+
+Future BI mirrors (read-only, consumed from SkuVault):
+  ├── wh_purchase_orders_mirror  (PO status, vendor, expected delivery)
+  ├── wh_receiving_history       (received quantities, partial receipts, vendor receipts)
+  └── wh_inventory_snapshot      (periodic SkuVault quantity snapshot for reconciliation)
+```
+
+### Fulfillment Domain
+
+```
+fulfillment_orders               (one per sales order entering fulfillment queue)
+  ├── fulfillment_pick_lines     (one per line item: ordered_qty, picked_qty, status)
+  ├── fulfillment_missing_items  (shortage records: product, qty, reason, picker, timestamp)
+  ├── fulfillment_events         (timeline: Queued → Picking Started → Picked → Packed → Shipped)
+  ├── fulfillment_store_credits  (auto-issued credits linked to shortages and BC store credit)
+  └── fulfillment_notifications  (customer emails queued and sent: contents, delivery status)
 ```
 
 ### Reporting Domain
@@ -547,22 +706,26 @@ app_config                       (typed config sections: bc_credentials, skuvaul
 
 ### Source of Truth Matrix (Future)
 
-| Entity | SalesCore Owns | BC Owns | SkuVault Owns |
-|---|---|---|---|
-| Customer identity | ✓ (extended) | ✓ (master) | |
-| Customer CRM data | ✓ | | |
-| Product catalog | | ✓ | |
-| Product cost | ✓ | | |
-| Product promotions | ✓ | | |
-| Inventory (physical) | | | ✓ |
-| Inventory (published) | | ✓ | |
-| Inventory (reserved) | ✓ | | |
-| Sales orders (POS) | ✓ → BC | | |
-| Sales orders (web) | Read mirror | ✓ | |
-| Purchase orders | ✓ | | |
-| Pricing rules | ✓ | BC publishes | |
-| Store credit | | ✓ | |
-| Users / RBAC | ✓ | | |
+| Entity | SalesCore Owns | BC Owns | SkuVault Owns | Sync Direction |
+|---|---|---|---|---|
+| Customer identity | ✓ (extended) | ✓ (master) | | BC → SalesCore |
+| Customer CRM data | ✓ | | | SalesCore only |
+| Product catalog | | ✓ | | BC → SalesCore |
+| Product cost | ✓ | | | SalesCore only |
+| Product promotions | ✓ | | | SalesCore only |
+| Inventory (physical) | | | ✓ | SkuVault → SalesCore (intelligence) → BC (published) |
+| Inventory (published) | | ✓ | | SalesCore pushes; BC publishes |
+| Inventory (reserved) | ✓ | | | SalesCore only |
+| Inventory (intelligence) | ✓ | | | Derived from SkuVault + BC |
+| Fulfillment | ✓ | | | SalesCore orchestrates; SkuVault executes |
+| Sales orders (POS) | ✓ → BC | | | SalesCore → BC on sync |
+| Sales orders (web) | Read mirror | ✓ | | BC → SalesCore |
+| Warehouse ops (bins, picking) | | | ✓ | SkuVault only |
+| PO / Receiving (execution) | | | ✓ | SkuVault → SalesCore (BI mirror, future) |
+| Purchase orders (ERP) | ✓ | | | SalesCore only |
+| Pricing rules | ✓ | BC publishes | | SalesCore → BC |
+| Store credit | | ✓ | | BC only; SalesCore audit trail |
+| Users / RBAC | ✓ | | | SalesCore only |
 
 ---
 
@@ -817,12 +980,35 @@ The current shared engine pattern (report config object → shared query builder
 
 **Avoid:** Syncing data that SalesCore does not need in real-time. Store credit balance, for example, should be fetched live from BC at POS checkout rather than mirrored (balances change with web orders SalesCore may not know about).
 
-### SkuVault Synchronization (Future)
+### SkuVault Synchronization (Warehouse Integration Layer)
 
-- SkuVault is the warehouse system of record for physical inventory
-- Sync direction: SkuVault → SalesCore (inventory positions) → BigCommerce (published stock)
+SalesCore communicates with SkuVault exclusively through the **Warehouse Integration Layer** — an internal abstraction that isolates all SkuVault-specific logic. No ERP module (CRM, POS, Reporting, Product 360, Customer 360) communicates with SkuVault directly.
+
+**Sync Architecture:**
+```
+SkuVault API
+  → SkuVault Adapter (SalesCore internal)
+  → Warehouse Service (SalesCore internal)
+  → inventory_transactions (ledger)
+  → inventory_positions (current state)
+  → BigCommerce (published stock push)
+```
+
+**Sync Principles:**
+- Sync direction: SkuVault → SalesCore (inventory intelligence) → BigCommerce (published quantity)
 - Frequency: Polling or webhook on quantity change
-- Conflict: If BC stock and SkuVault stock diverge, SkuVault wins; SalesCore reconciles and pushes correction to BC
+- Conflict: SkuVault wins for physical quantities; SalesCore reconciles and pushes correction to BC; logs discrepancy
+- If SkuVault is ever replaced, only the SkuVault Adapter changes — no other module is affected
+
+**Warehouse Data SalesCore Consumes (BI Only):**
+
+Future: Mirror selected SkuVault purchasing data into SalesCore for business intelligence, reporting, Product 360, and Vendor 360. SalesCore should not *create* Purchase Orders inside SkuVault at this stage — it should *consume* warehouse purchasing data for reporting.
+
+| Data | Purpose |
+|---|---|
+| Purchase Orders & Status | Product 360, Vendor 360, Sales Forecasting |
+| Receiving History & Vendor Receipts | Vendor Fill Rate, Product Availability |
+| Expected Deliveries & Partial Receipts | Inventory Forecasting, Stockout Alerts |
 
 ### POS Synchronization
 
@@ -986,7 +1172,37 @@ customers (renamed from customers_mirror)
 
 ---
 
-## Phase 12 — Inventory Strategy
+## Phase 12 — Inventory & Warehouse Strategy
+
+> **Revised August 2026.** The inventory domain is now split into two distinct responsibilities: **Inventory Intelligence** (owned by SalesCore) and **Warehouse Integration** (executed by SkuVault). See the Warehouse-Agnostic Architectural Principle.
+
+### Split Architecture
+
+```
+┌─────────────────────────────────────────┐
+│  SALESCORE — Inventory Intelligence     │
+│                                         │
+│  inventory_positions (derived)          │
+│  inventory_transactions (ledger)        │
+│  inventory_reservations (POS holds)     │
+│  inventory_adjustments (manual)         │
+│  Inventory Dashboard, KPIs, Forecasting │
+│  Inventory History, Analytics, Reports  │
+└────────────────────┬────────────────────┘
+                     │  Warehouse Integration Layer
+                     │  (SkuVault Adapter)
+┌────────────────────▼────────────────────┐
+│  SKUVAULT — Warehouse Execution         │
+│                                         │
+│  Warehouse Inventory & Bin Locations    │
+│  Receiving & Transfers                  │
+│  Cycle Counts & Physical Inventory      │
+│  Picking & Packing                      │
+│  Warehouse APIs                         │
+└─────────────────────────────────────────┘
+```
+
+SalesCore does not replicate or replace SkuVault's warehouse execution. It consumes warehouse data through the integration layer to drive business intelligence.
 
 ### Current State
 
@@ -994,22 +1210,22 @@ customers (renamed from customers_mirror)
 - `inventory_push_logs` — log of manual adjustments pushed to BC
 - No reservation system, no warehouse-level tracking, no SkuVault integration
 
-### Target Architecture
+### Inventory Intelligence — Target Schema
 
 ```
-inventory_positions         (current quantity per variant per location)
+inventory_positions         (current quantity per variant per location — SalesCore-maintained)
   variant_id, location_id, quantity_on_hand, quantity_reserved
   quantity_available = quantity_on_hand - quantity_reserved
 
-inventory_locations         (warehouse zones, bins, or virtual locations)
+inventory_locations         (warehouse zones, bins, or virtual locations — local mirror for BI)
   id, name, type (warehouse | virtual | bc_published)
 
 inventory_transactions      (append-only ledger — every movement)
   variant_id, location_id, transaction_type, quantity_change, quantity_after
-  reference_type (sale_order | purchase_receipt | adjustment | transfer | return)
+  reference_type (sale_order | skuvault_sync | adjustment | transfer | return | fulfillment_pick)
   reference_id, user_id, note, created_at
 
-inventory_reservations      (temporary holds for pending orders)
+inventory_reservations      (temporary holds for pending POS orders)
   variant_id, location_id, quantity_reserved
   order_id, expires_at, released_at
 
@@ -1018,13 +1234,25 @@ inventory_adjustments       (deliberate corrections requiring approval)
   reason, approved_by, approved_at, created_by, created_at
 ```
 
-### Stock Level Sources and Flow
+### Warehouse Integration — Future BI Mirrors (Read-Only)
+
+SalesCore does not create or manage these in SkuVault. It mirrors selected data for business intelligence only.
 
 ```
-SkuVault (physical warehouse)
-  └──> inventory_transactions (type = 'skuvault_sync')
-       └──> inventory_positions (quantity_on_hand updated)
-            └──> BigCommerce (published stock = on_hand - reserved)
+wh_purchase_orders_mirror   (PO status, vendor, expected delivery date — from SkuVault)
+wh_receiving_history        (received quantities, partial receipts — from SkuVault)
+wh_inventory_snapshot       (periodic SkuVault quantity snapshot for reconciliation)
+warehouse_sync_log          (every sync event: source, quantity, timestamp, success/failure)
+```
+
+### Stock Level Flow
+
+```
+SkuVault (physical source of truth)
+  └──> SkuVault Adapter (Warehouse Integration Layer)
+       └──> inventory_transactions (type = 'skuvault_sync')
+            └──> inventory_positions (quantity_on_hand updated)
+                 └──> BigCommerce (published stock = on_hand - reserved)
 
 POS Order Created
   └──> inventory_reservations (hold units until sync)
@@ -1033,6 +1261,10 @@ POS Order Created
 POS Order Synced
   └──> inventory_transactions (type = 'pos_sale')
        └──> inventory_positions.quantity_on_hand decremented
+
+Fulfillment Pick Completed
+  └──> inventory_transactions (type = 'fulfillment_pick')
+       └──> Shortage detected → auto store credit → CRM timeline event
 
 Manual Adjustment
   └──> inventory_adjustments (approval if needed)
@@ -1044,19 +1276,20 @@ Manual Adjustment
 ### Wholesale Distribution Considerations
 
 - **Bulk orders:** Sales orders may include 10–50+ line items; reservation system must handle bulk atomically
-- **Partial receipts:** POs may be received partially; `po_receipts` supports partial receipt events
-- **Multi-location:** Even if currently single-warehouse, the schema should support multiple locations from day one
+- **Partial receipts:** POs may be received partially; `wh_receiving_history` (from SkuVault) tracks partial receipt events
+- **Multi-location:** Schema supports multiple locations from day one; SkuVault manages bin-level detail
 - **Negative stock:** Wholesale sometimes ships before stock arrives; the system should flag, not block
-- **SkuVault as warehouse truth:** SkuVault data should be the authoritative physical count; BC is the published e-commerce count; SalesCore mediates
+- **SkuVault as warehouse truth:** SkuVault is the authoritative physical count; BC is the published e-commerce count; SalesCore mediates and derives intelligence from both
 
 ### Conflict Resolution
 
 | Conflict | Resolution |
 |---|---|
-| BC stock ≠ SkuVault stock | SkuVault wins; SalesCore pushes correction to BC; logs discrepancy |
+| BC stock ≠ SkuVault stock | SkuVault wins; SalesCore reconciles and pushes correction to BC; logs discrepancy |
 | Reservation expires before order syncs | Release reservation; alert agent |
-| POS order syncs but stock already zero | Log warning; allow completion (wholesale backorder is acceptable); flag for review |
+| POS order syncs but stock already zero | Log warning; allow completion (wholesale backorder acceptable); flag for review |
 | Manual adjustment conflicts with SkuVault sync | Most recent timestamp wins; alert admin |
+| SkuVault data unavailable (adapter down) | Use last known snapshot; flag staleness on Inventory Dashboard |
 
 ---
 
@@ -1231,6 +1464,51 @@ Manual Adjustment
 
 ---
 
+### Phase I — Fulfillment (Priority: High — after Phase D)
+
+> **Added August 2026.** Fulfillment is a first-class ERP domain that orchestrates everything between Order Created and Shipment Completed. It eliminates paper pick lists, automates store credit issuance, and feeds every event back into CRM and Product 360.
+
+**Goal:** Replace the manual paper-based warehouse workflow with a SalesCore-orchestrated digital fulfillment pipeline.
+
+**Depends on:** Phase D (sales_order_lines), Phase B (CRM Timeline), BC Native Store Credit (already implemented)
+
+1. **Create fulfillment schema:**
+   - `fulfillment_orders` table — one per sales order entering the queue
+   - `fulfillment_pick_lines` table — one per line item (ordered_qty, picked_qty, status)
+   - `fulfillment_missing_items` table — shortage records with predefined reason codes
+   - `fulfillment_events` table — append-only timeline per fulfillment order
+   - `fulfillment_notifications` table — customer email queue and delivery log
+
+2. **Build Fulfillment Queue:** BC orders enter the queue automatically; admin can prioritize or assign pickers
+
+3. **Build Tablet Picking UI:**
+   - Assigned Pick Queue per picker
+   - Barcode scanning and quantity verification
+   - Missing item recording with predefined reasons (Out of Stock / Not Found / Damaged / Wrong Location / Inventory Discrepancy / Other)
+   - Damage reporting and pick progress
+   - Resume Picking support
+
+4. **Automate shortage handling:**
+   - On pick completion: compare ordered_qty vs. picked_qty per line
+   - For each shortage: calculate refund amount → create BC Store Credit → record audit → add CRM Timeline Event → add Order Timeline Event → queue customer email
+
+5. **Automate customer communication:**
+   - Generate email with missing products, issued store credit, remaining shipment contents, store credit balance, and order status
+   - Queue and send automatically; log delivery status in `fulfillment_notifications`
+
+6. **Wire fulfillment events into CRM and Product 360:**
+   - Every event appends to Customer 360 Timeline
+   - Missing item events update Product 360 metrics: Times Missing, Fill Rate, Revenue Lost, Store Credit Issued
+
+7. **Build Fulfillment Reports** (in Reporting Engine):
+   - Missing Items Report, Short Pick Report, Warehouse Accuracy Report
+   - Store Credit Issuance Report, Revenue Lost Report
+   - Picker Performance Report, Fill Rate Report, Product Availability Report
+
+8. **Wire inventory transactions:** Fulfilled picks write to `inventory_transactions` (type = 'fulfillment_pick')
+
+---
+
 ### High-Risk Modules
 
 | Module | Risk | Reason |
@@ -1253,11 +1531,14 @@ Manual Adjustment
 | **C — Product 360** | 3 days | 6 days | 10 days | 2 days | 4 days | Medium | ~25 days |
 | **D — Order Normalization** | 2 days | 5 days | 3 days | 3 days | 5 days | High | ~18 days |
 | **E — Reporting Engine** | 1 day | 6 days | 8 days | 0.5 days | 3 days | Low-Med | ~19 days |
-| **F — Inventory Ledger** | 3 days | 6 days | 5 days | 2 days | 4 days | Medium-High | ~20 days |
+| **F — Inventory & Warehouse** | 3 days | 7 days | 5 days | 2 days | 4 days | Medium-High | ~21 days |
 | **G — Vendor & POs** | 3 days | 8 days | 10 days | 0.5 days | 4 days | Medium | ~26 days |
 | **H — Audit Engine** | 2 days | 4 days | 4 days | 1 day | 3 days | Low | ~14 days |
+| **I — Fulfillment** | 3 days | 10 days | 12 days | 1 day | 5 days | Medium | ~31 days |
 
-**Total estimated effort: ~147 development days** (approximately 7 months at 5 days/week, 1 developer)
+**Total estimated effort: ~179 development days** (approximately 9 months at 5 days/week, 1 developer)
+
+> Phase F estimate revised upward by 1 day (backend) to account for Warehouse Integration Layer abstraction. Phase I (Fulfillment) is new — added August 2026.
 
 ### Effort Breakdown by Layer
 
@@ -1300,7 +1581,29 @@ SalesCore is well-positioned to evolve into a full wholesale distribution ERP. T
 2. **Normalize order line items** — from JSONB array to queryable relational table  
 3. **Normalize product variants** — from JSONB array to queryable relational table
 4. **Add database indexes** — the single highest-ROI change available today
-5. **Introduce an inventory ledger** — replace stock snapshots with an event-driven ledger
-6. **Build the missing domains** — Vendors, Purchase Orders, Notifications, and the unified Audit Engine
+5. **Introduce an inventory intelligence ledger** — replace stock snapshots with an event-driven ledger; keep SkuVault as the warehouse source of truth
+6. **Build the Warehouse Integration Layer** — abstract all SkuVault communication so no ERP module is tightly coupled to any specific WMS
+7. **Build the Fulfillment domain** — eliminate paper pick lists; orchestrate picking, shortage detection, automatic store credit, CRM timeline updates, and customer notifications
+8. **Build the missing domains** — Vendors, Purchase Orders, Notifications, and the unified Audit Engine
 
-The recommended sequence — Foundation → Customer 360 → Product 360 → Order Normalization → Reporting → Inventory → Vendors — delivers business value at each phase while progressively reducing technical debt and building toward the 5–10 year ERP vision.
+### Warehouse-Agnostic Principle (August 2026)
+
+SalesCore's competitive advantage is **business operations, not warehouse execution**. SkuVault handles physical warehouse operations. SalesCore handles everything else: customer intelligence, pricing, CRM, reporting, fulfillment orchestration, and automation.
+
+The architecture remains modular at the warehouse boundary. If SkuVault is ever replaced, only the Warehouse Integration Layer adapter changes — no other domain is affected.
+
+### Recommended Sequence
+
+```
+A — Foundation (indexes + product sync)
+  → B — Customer 360
+  → C — Product 360
+  → D — Order Normalization
+  → E — Reporting Engine
+  → F — Inventory & Warehouse Integration
+  → I — Fulfillment (after D and F)
+  → G — Vendors & Purchase Orders
+  → H — Audit Engine
+```
+
+Each phase delivers business value while progressively reducing technical debt and building toward the 5–10 year ERP vision. Total estimated effort: **~179 development days**.
