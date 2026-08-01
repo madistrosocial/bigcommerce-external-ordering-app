@@ -81,6 +81,8 @@ const NOTE_TYPE_COLORS: Record<string, string> = {
 };
 
 const NOTE_TYPES = ["General","Follow Up","Sales","Issue","Credit","Replacement","Visit","Internal","Order Note"];
+const ACTION_MODE_NOTE = "note";
+const ACTION_MODE_TODO = "todo";
 
 function HealthBadge({ health }: { health: string | null | undefined }) {
   if (!health) return null;
@@ -194,21 +196,33 @@ interface NoteModalProps {
   open: boolean;
   onClose: () => void;
   onSave: (data: { note: string; note_type: string; order_id?: number | null; bc_target: string }) => void;
+  onSaveTodo?: (data: { title: string; note: string; priority: string; due_date: string | null; assigned_to_user_id?: number | null }) => void;
   saving: boolean;
   initial?: { note: string; note_type: string; order_id?: number | null };
   title: string;
   orders?: any[];
+  users?: { id: number; name: string }[];
+  currentUserId?: number | null;
 }
-function NoteModal({ open, onClose, onSave, saving, initial, title, orders = [] }: NoteModalProps) {
+function NoteModal({ open, onClose, onSave, onSaveTodo, saving, initial, title, orders = [], users = [], currentUserId }: NoteModalProps) {
+  const [actionMode, setActionMode] = useState<"note" | "todo">(ACTION_MODE_NOTE);
   const [note, setNote]         = useState(initial?.note ?? "");
   const [noteType, setNoteType] = useState(initial?.note_type ?? "General");
   const [orderId, setOrderId]   = useState<string>(String(initial?.order_id ?? ""));
   const [bcStaff, setBcStaff]   = useState(false);
   const [bcCustomer, setBcCustomer] = useState(false);
+  // Todo fields
+  const [todoTitle, setTodoTitle]       = useState("");
+  const [todoNote, setTodoNote]         = useState("");
+  const [todoPriority, setTodoPriority] = useState("medium");
+  const [todoDueDate, setTodoDueDate]   = useState("");
+  const [todoAssigned, setTodoAssigned] = useState(currentUserId ? String(currentUserId) : "");
 
   const handleClose = () => {
+    setActionMode(ACTION_MODE_NOTE);
     setNote(initial?.note ?? ""); setNoteType(initial?.note_type ?? "General");
     setOrderId(String(initial?.order_id ?? "")); setBcStaff(false); setBcCustomer(false);
+    setTodoTitle(""); setTodoNote(""); setTodoPriority("medium"); setTodoDueDate(""); setTodoAssigned(currentUserId ? String(currentUserId) : "");
     onClose();
   };
 
@@ -221,53 +235,123 @@ function NoteModal({ open, onClose, onSave, saving, initial, title, orders = [] 
       <DialogContent className="sm:max-w-md">
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
         <div className="space-y-3">
+          {/* Top-level: Note or To Do */}
           <div>
-            <Label className="text-xs mb-1.5 block">Type</Label>
-            <Select value={noteType} onValueChange={setNoteType}>
-              <SelectTrigger data-testid="select-note-type"><SelectValue /></SelectTrigger>
-              <SelectContent>{NOTE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          {isOrderNote && orders.length > 0 && (
-            <div>
-              <Label className="text-xs mb-1.5 block">Associated Order</Label>
-              <Select value={orderId} onValueChange={setOrderId}>
-                <SelectTrigger data-testid="select-note-order"><SelectValue placeholder="Select order (optional)…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">No specific order</SelectItem>
-                  {orders.map((o: any) => (
-                    <SelectItem key={o.bigcommerce_order_id} value={String(o.bigcommerce_order_id)}>
-                      #{o.order_number ?? o.bigcommerce_order_id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <Label className="text-xs mb-1.5 block">Action Type</Label>
+            <div className="flex rounded-lg border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setActionMode(ACTION_MODE_NOTE)}
+                className={`flex-1 py-1.5 text-sm font-medium transition-colors ${actionMode === ACTION_MODE_NOTE ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              >
+                Note
+              </button>
+              <button
+                type="button"
+                onClick={() => setActionMode(ACTION_MODE_TODO)}
+                className={`flex-1 py-1.5 text-sm font-medium transition-colors ${actionMode === ACTION_MODE_TODO ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              >
+                To Do
+              </button>
             </div>
-          )}
-          <div>
-            <Label className="text-xs mb-1.5 block">Note</Label>
-            <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Enter note…" rows={4} data-testid="textarea-note" />
           </div>
-          {isOrderNote && !!effectiveOrderId && (
-            <div className="border rounded-lg p-3 space-y-2 bg-slate-50">
-              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">BigCommerce Sync</p>
-              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                <Checkbox checked={bcStaff} onCheckedChange={v => setBcStaff(!!v)} id="bc-staff" data-testid="check-bc-staff" />
-                <span>Staff Note (BigCommerce)</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                <Checkbox checked={bcCustomer} onCheckedChange={v => setBcCustomer(!!v)} id="bc-customer" data-testid="check-bc-customer" />
-                <span>Customer Note (BigCommerce)</span>
-              </label>
-              <p className="text-[11px] text-slate-400">Leave unchecked to store in CRM only.</p>
-            </div>
+
+          {actionMode === ACTION_MODE_NOTE ? (
+            <>
+              <div>
+                <Label className="text-xs mb-1.5 block">Type</Label>
+                <Select value={noteType} onValueChange={setNoteType}>
+                  <SelectTrigger data-testid="select-note-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>{NOTE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              {isOrderNote && orders.length > 0 && (
+                <div>
+                  <Label className="text-xs mb-1.5 block">Associated Order</Label>
+                  <Select value={orderId} onValueChange={setOrderId}>
+                    <SelectTrigger data-testid="select-note-order"><SelectValue placeholder="Select order (optional)…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">No specific order</SelectItem>
+                      {orders.map((o: any) => (
+                        <SelectItem key={o.bigcommerce_order_id} value={String(o.bigcommerce_order_id)}>
+                          #{o.order_number ?? o.bigcommerce_order_id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div>
+                <Label className="text-xs mb-1.5 block">Note</Label>
+                <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Enter note…" rows={4} data-testid="textarea-note" />
+              </div>
+              {isOrderNote && !!effectiveOrderId && (
+                <div className="border rounded-lg p-3 space-y-2 bg-slate-50">
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">BigCommerce Sync</p>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                    <Checkbox checked={bcStaff} onCheckedChange={v => setBcStaff(!!v)} id="bc-staff" data-testid="check-bc-staff" />
+                    <span>Staff Note (BigCommerce)</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                    <Checkbox checked={bcCustomer} onCheckedChange={v => setBcCustomer(!!v)} id="bc-customer" data-testid="check-bc-customer" />
+                    <span>Customer Note (BigCommerce)</span>
+                  </label>
+                  <p className="text-[11px] text-slate-400">Leave unchecked to store in CRM only.</p>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div>
+                <Label className="text-xs mb-1.5 block">Title *</Label>
+                <Input value={todoTitle} onChange={e => setTodoTitle(e.target.value)} placeholder="What needs to be done?" />
+              </div>
+              <div>
+                <Label className="text-xs mb-1.5 block">Description</Label>
+                <Textarea value={todoNote} onChange={e => setTodoNote(e.target.value)} placeholder="Optional details…" rows={2} />
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <Label className="text-xs mb-1.5 block">Priority</Label>
+                  <Select value={todoPriority} onValueChange={setTodoPriority}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex-1">
+                  <Label className="text-xs mb-1.5 block">Due Date</Label>
+                  <Input type="date" value={todoDueDate} onChange={e => setTodoDueDate(e.target.value)} className="h-8 text-xs" />
+                </div>
+              </div>
+              {users.length > 0 && (
+                <div>
+                  <Label className="text-xs mb-1.5 block">Assigned To</Label>
+                  <Select value={todoAssigned} onValueChange={setTodoAssigned}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {users.map(u => <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </>
           )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>Cancel</Button>
-          <Button onClick={() => onSave({ note, note_type: noteType, order_id: effectiveOrderId ? parseInt(effectiveOrderId) : null, bc_target: bcTarget })} disabled={!note.trim() || saving} data-testid="btn-save-note">
-            {saving ? "Saving…" : "Save Note"}
-          </Button>
+          {actionMode === ACTION_MODE_NOTE ? (
+            <Button onClick={() => onSave({ note, note_type: noteType, order_id: effectiveOrderId ? parseInt(effectiveOrderId) : null, bc_target: bcTarget })} disabled={!note.trim() || saving} data-testid="btn-save-note">
+              {saving ? "Saving…" : "Save Note"}
+            </Button>
+          ) : (
+            <Button onClick={() => onSaveTodo?.({ title: todoTitle, note: todoNote, priority: todoPriority, due_date: todoDueDate || null, assigned_to_user_id: todoAssigned ? parseInt(todoAssigned) : null })} disabled={!todoTitle.trim() || saving}>
+              {saving ? "Saving…" : "Create To Do"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1454,11 +1538,14 @@ export default function CustomerProfile() {
       ═══════════════════════════════════════════════════════════════════════ */}
 
       <NoteModal
-        open={showAddNote} title="Add Note"
+        open={showAddNote} title="Add Action"
         onClose={() => setShowAddNote(false)}
         onSave={data => createNoteMutation.mutate(data)}
-        saving={createNoteMutation.isPending}
+        onSaveTodo={data => createTodoMutation.mutate(data)}
+        saving={createNoteMutation.isPending || createTodoMutation.isPending}
         orders={orders as any[]}
+        users={crmUsers as { id: number; name: string }[]}
+        currentUserId={currentUserId}
       />
       {editingNote && (
         <NoteModal

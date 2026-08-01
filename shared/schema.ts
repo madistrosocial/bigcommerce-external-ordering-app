@@ -215,7 +215,7 @@ export const customerSalesRep = pgTable("customer_sales_rep", {
 
 export const crmCustomerNotes = pgTable("crm_customer_notes", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  customer_id: integer("customer_id").references(() => customersMirror.id, { onDelete: "cascade" }),
   note_type: text("note_type").notNull().default("General"),
   note: text("note").notNull().default(""),
   order_id: integer("order_id"),

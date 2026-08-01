@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useTimeService } from "@/hooks/useTimeService";
 import {
   CheckSquare, Plus, Clock, AlertTriangle, Calendar, User,
-  Trash2, Pencil, Building2, ChevronDown, ChevronRight,
+  Trash2, Pencil, Building2, ChevronDown, ChevronRight, X,
 } from "lucide-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -33,6 +33,70 @@ function PriorityBadge({ priority }: { priority?: string | null }) {
     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border capitalize ${PRIORITY_COLORS[priority] ?? PRIORITY_COLORS.medium}`}>
       {priority}
     </span>
+  );
+}
+
+// ─── Customer Search ──────────────────────────────────────────────────────────
+
+function CustomerSearchInput({ value, onChange }: { value: { id: number; label: string } | null; onChange: (v: { id: number; label: string } | null) => void }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const { data } = useQuery({
+    queryKey: ["crm", "customers", "search", q],
+    queryFn: async () => {
+      if (!q.trim()) return { customers: [] };
+      const r = await fetch(`/api/crm/customers?search=${encodeURIComponent(q)}&limit=10&status=both`, { headers: getAuthHeaders() });
+      if (!r.ok) return { customers: [] };
+      return r.json() as Promise<{ customers: any[] }>;
+    },
+    enabled: q.length >= 1,
+    staleTime: 5_000,
+  });
+
+  const results = data?.customers ?? [];
+
+  return (
+    <div className="relative">
+      {value ? (
+        <div className="flex items-center gap-1.5 h-8 px-3 border rounded-md bg-slate-50 text-sm">
+          <Building2 className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+          <span className="flex-1 truncate text-slate-700">{value.label}</span>
+          <button onClick={() => { onChange(null); setQ(""); }} className="text-slate-400 hover:text-red-500 ml-1">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : (
+        <div className="relative">
+          <Input
+            value={q}
+            onChange={e => { setQ(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            placeholder="Search customer (optional)…"
+            className="h-8 text-xs pr-8"
+          />
+          {q && <button onClick={() => setQ("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>}
+          {open && results.length > 0 && (
+            <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg max-h-44 overflow-y-auto">
+              {results.map((c: any) => (
+                <button
+                  key={c.id}
+                  className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b last:border-0"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => {
+                    onChange({ id: c.id, label: c.company || `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || `ID ${c.id}` });
+                    setQ(""); setOpen(false);
+                  }}
+                >
+                  <span className="font-medium text-slate-800">{c.company || `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim()}</span>
+                  {c.email && <span className="text-slate-400 text-xs ml-1.5">{c.email}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -55,6 +119,9 @@ function TodoForm({ open, onClose, onSave, saving, initial, users, currentUserId
   const [priority, setPriority] = useState(initial?.priority ?? "medium");
   const [dueDate, setDueDate] = useState(initial?.due_date ? new Date(initial.due_date).toISOString().split("T")[0] : "");
   const [assignedTo, setAssignedTo] = useState(initial?.assigned_to_user_id ? String(initial.assigned_to_user_id) : String(currentUserId));
+  const [customer, setCustomer] = useState<{ id: number; label: string } | null>(
+    initial?.customer_id ? { id: initial.customer_id, label: initial.customer_company || initial.customer_first_name || `ID ${initial.customer_id}` } : null
+  );
 
   const handleClose = () => {
     setTodoTitle(initial?.title ?? "");
@@ -62,6 +129,7 @@ function TodoForm({ open, onClose, onSave, saving, initial, users, currentUserId
     setPriority(initial?.priority ?? "medium");
     setDueDate(initial?.due_date ? new Date(initial.due_date).toISOString().split("T")[0] : "");
     setAssignedTo(initial?.assigned_to_user_id ? String(initial.assigned_to_user_id) : String(currentUserId));
+    setCustomer(null);
     onClose();
   };
 
@@ -75,8 +143,12 @@ function TodoForm({ open, onClose, onSave, saving, initial, users, currentUserId
             <Input value={todoTitle} onChange={e => setTodoTitle(e.target.value)} placeholder="What needs to be done?" />
           </div>
           <div>
+            <Label className="text-xs mb-1.5 block">Customer (optional)</Label>
+            <CustomerSearchInput value={customer} onChange={setCustomer} />
+          </div>
+          <div>
             <Label className="text-xs mb-1.5 block">Description</Label>
-            <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Optional details…" rows={3} />
+            <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Optional details…" rows={2} />
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
@@ -108,7 +180,7 @@ function TodoForm({ open, onClose, onSave, saving, initial, users, currentUserId
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>Cancel</Button>
           <Button
-            onClick={() => onSave({ title: todoTitle, note, priority, due_date: dueDate || null, assigned_to_user_id: parseInt(assignedTo) || null })}
+            onClick={() => onSave({ title: todoTitle, note, priority, due_date: dueDate || null, assigned_to_user_id: parseInt(assignedTo) || null, customer_id: customer?.id ?? null })}
             disabled={!todoTitle.trim() || saving}
           >
             {saving ? "Saving…" : "Save To Do"}
