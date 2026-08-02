@@ -901,11 +901,11 @@ export default function CustomerProfile() {
                 {customer.created_date && <span className="flex items-center gap-1 sm:hidden"><Calendar className="h-3 w-3 shrink-0" />Joined {fmt.date(customer.created_date)}</span>}
               </div>
 
-              {/* Rep rows */}
-              <div className="flex flex-col gap-1 mb-2">
+              {/* Rep row — both reps on one line, wrapping only if needed */}
+              <div className="flex items-center flex-wrap gap-x-4 gap-y-1 mb-2">
                 {/* Primary Rep */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-xs text-slate-500 font-medium w-[88px] shrink-0">Primary Rep:</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-slate-500 font-medium shrink-0">Primary:</span>
                   {customer.primary_rep_name
                     ? <Badge variant="secondary" className="text-xs gap-1 h-6"><UserCheck className="h-3 w-3" />{customer.primary_rep_name}</Badge>
                     : <span className="text-xs text-slate-400">Unassigned</span>}
@@ -932,9 +932,11 @@ export default function CustomerProfile() {
                     </>
                   )}
                 </div>
+                {/* Divider dot */}
+                <span className="text-slate-300 text-xs select-none">·</span>
                 {/* Secondary Rep */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-xs text-slate-500 font-medium w-[88px] shrink-0">Secondary Rep:</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-slate-500 font-medium shrink-0">Secondary:</span>
                   {customer.secondary_rep_name
                     ? <Badge variant="secondary" className="text-xs gap-1 h-6"><UserCheck className="h-3 w-3" />{customer.secondary_rep_name}</Badge>
                     : <span className="text-xs text-slate-400">Unassigned</span>}
