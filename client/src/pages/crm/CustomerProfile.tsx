@@ -507,6 +507,11 @@ export default function CustomerProfile() {
   const [activeTab, setActiveTab]           = useState<Tab>("overview");
   const [showAddNote, setShowAddNote]       = useState(false);
   const [showAddTodo, setShowAddTodo]       = useState(false);
+  // Mark inactive modal
+  const [showMarkInactiveModal, setShowMarkInactiveModal] = useState(false);
+  const [markInactiveReason, setMarkInactiveReason]       = useState("");
+  const [markInactiveNotes, setMarkInactiveNotes]         = useState("");
+  const [savingMarkInactive, setSavingMarkInactive]       = useState(false);
   const [editingTodo, setEditingTodo]       = useState<any | null>(null);
   const [deletingTodoId, setDeletingTodoId] = useState<number | null>(null);
   const [todoTitle, setTodoTitle]           = useState("");
@@ -850,105 +855,131 @@ export default function CustomerProfile() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          HEADER CARD (full bordered card)
+          HEADER CARD
       ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 md:px-6 pt-4">
-        <div className="bg-white border rounded-xl p-5 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+      <div className="px-3 sm:px-4 md:px-6 pt-3 sm:pt-4">
+        <div className="bg-white border rounded-xl p-4 sm:p-5 shadow-sm">
+          <div className="flex gap-3 sm:gap-4">
 
-            {/* Avatar + info */}
-            <div className="flex gap-4 flex-1 min-w-0">
-              <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                <User className="h-6 w-6 text-blue-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                {customer.company && (
-                  <div className="flex items-center gap-1.5 text-slate-500 text-sm mb-0.5">
-                    <Building2 className="h-3.5 w-3.5 shrink-0" />
-                    <span className="font-semibold text-slate-700 truncate">{customer.company}</span>
-                  </div>
-                )}
-                <div className="flex items-center flex-wrap gap-2 mb-2">
-                  <h1 className="text-xl font-bold text-slate-900">
-                    {[customer.first_name, customer.last_name].filter(Boolean).join(" ") || "—"}
-                  </h1>
-                  <HealthBadge health={customer.account_health} />
+            {/* Avatar */}
+            <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-0.5">
+              <User className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
+            </div>
+
+            {/* Main info — grows */}
+            <div className="flex-1 min-w-0">
+
+              {/* Company name */}
+              {customer.company && (
+                <div className="flex items-center gap-1 text-slate-500 text-xs sm:text-sm mb-0.5">
+                  <Building2 className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
+                  <span className="font-semibold text-slate-700 truncate">{customer.company}</span>
                 </div>
-                {/* Contact */}
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500 mb-2">
-                  {customer.email && <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 shrink-0" />{customer.email}</span>}
-                  {customer.phone && <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" />{customer.phone}</span>}
-                  <span className="flex items-center gap-1.5"><Hash className="h-3.5 w-3.5 shrink-0" />BC ID: {customer.bigcommerce_customer_id}</span>
-                  {customer.created_date && <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 shrink-0" />Joined {fmt.date(customer.created_date)}</span>}
-                  {customer.customer_group_name && (
-                    <span className="flex items-center gap-1.5">
-                      <Users className="h-3.5 w-3.5 shrink-0" />
-                      {customer.customer_group_name}
-                      {customer.customer_group_id && <span className="text-slate-400 ml-0.5">({customer.customer_group_id})</span>}
-                    </span>
+              )}
+
+              {/* Name + health */}
+              <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
+                <h1 className="text-base sm:text-xl font-bold text-slate-900 leading-tight">
+                  {[customer.first_name, customer.last_name].filter(Boolean).join(" ") || "—"}
+                </h1>
+                <HealthBadge health={customer.account_health} />
+              </div>
+
+              {/* Contact row */}
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs sm:text-sm text-slate-500 mb-2">
+                {customer.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3 shrink-0" /><span className="truncate max-w-[180px] sm:max-w-none">{customer.email}</span></span>}
+                {customer.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3 shrink-0" />{customer.phone}</span>}
+                <span className="flex items-center gap-1"><Hash className="h-3 w-3 shrink-0" />BC {customer.bigcommerce_customer_id}</span>
+                {customer.created_date && <span className="flex items-center gap-1 hidden sm:flex"><Calendar className="h-3 w-3 shrink-0" />Joined {fmt.date(customer.created_date)}</span>}
+                {customer.customer_group_name && (
+                  <span className="flex items-center gap-1">
+                    <Users className="h-3 w-3 shrink-0" />
+                    <span className="truncate max-w-[120px] sm:max-w-none">{customer.customer_group_name}</span>
+                    {customer.customer_group_id && <span className="text-slate-400">({customer.customer_group_id})</span>}
+                  </span>
+                )}
+                {customer.created_date && <span className="flex items-center gap-1 sm:hidden"><Calendar className="h-3 w-3 shrink-0" />Joined {fmt.date(customer.created_date)}</span>}
+              </div>
+
+              {/* Rep rows */}
+              <div className="flex flex-col gap-1 mb-2">
+                {/* Primary Rep */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs text-slate-500 font-medium w-[88px] shrink-0">Primary Rep:</span>
+                  {customer.primary_rep_name
+                    ? <Badge variant="secondary" className="text-xs gap-1 h-6"><UserCheck className="h-3 w-3" />{customer.primary_rep_name}</Badge>
+                    : <span className="text-xs text-slate-400">Unassigned</span>}
+                  {canAssignRep && (
+                    <>
+                      <button
+                        className="h-6 w-6 rounded border border-slate-200 flex items-center justify-center text-slate-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
+                        title={customer.primary_rep_name ? "Change rep" : "Assign rep"}
+                        data-testid="btn-assign-primary-rep"
+                        onClick={() => { setRepAssignMode("primary"); setSelectedRep(customer.primary_rep_id ? String(customer.primary_rep_id) : ""); setShowAssignRep(true); }}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      {customer.primary_rep_name && (
+                        <button
+                          className="h-6 w-6 rounded border border-slate-200 flex items-center justify-center text-slate-400 hover:border-red-300 hover:text-red-500 transition-colors"
+                          title="Remove rep"
+                          data-testid="btn-remove-primary-rep"
+                          onClick={() => handleRemoveRep("primary")}
+                        >
+                          <UserMinus className="h-3 w-3" />
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
-                {/* Primary Rep / Secondary Rep */}
-                <div className="flex flex-wrap gap-x-5 gap-y-1.5 mt-1">
-                  {/* Primary Rep */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-xs text-slate-500 font-medium shrink-0">Primary Rep:</span>
-                    {customer.primary_rep_name
-                      ? <Badge variant="secondary" className="text-xs gap-1"><UserCheck className="h-3 w-3" />{customer.primary_rep_name}</Badge>
-                      : <span className="text-xs text-slate-400">Unassigned</span>}
-                    {canAssignRep && (
-                      <>
-                        <Button size="sm" variant="outline" className="h-6 text-xs px-2" data-testid="btn-assign-primary-rep"
-                          onClick={() => { setRepAssignMode("primary"); setSelectedRep(customer.primary_rep_id ? String(customer.primary_rep_id) : ""); setShowAssignRep(true); }}>
-                          {customer.primary_rep_name ? "Change" : "Assign"}
-                        </Button>
-                        {customer.primary_rep_name && (
-                          <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-red-500 hover:text-red-700" data-testid="btn-remove-primary-rep"
-                            onClick={() => handleRemoveRep("primary")}>
-                            <UserMinus className="h-3 w-3 mr-1" />Remove
-                          </Button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                  {/* Secondary Rep */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-xs text-slate-500 font-medium shrink-0">Secondary Rep:</span>
-                    {customer.secondary_rep_name
-                      ? <Badge variant="secondary" className="text-xs gap-1"><UserCheck className="h-3 w-3" />{customer.secondary_rep_name}</Badge>
-                      : <span className="text-xs text-slate-400">Unassigned</span>}
-                    {canAssignRep && (
-                      <>
-                        <Button size="sm" variant="outline" className="h-6 text-xs px-2" data-testid="btn-assign-secondary-rep"
-                          onClick={() => { setRepAssignMode("secondary"); setSelectedRep(customer.secondary_rep_id ? String(customer.secondary_rep_id) : ""); setShowAssignRep(true); }}>
-                          {customer.secondary_rep_name ? "Change" : "Assign"}
-                        </Button>
-                        {customer.secondary_rep_name && (
-                          <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-red-500 hover:text-red-700" data-testid="btn-remove-secondary-rep"
-                            onClick={() => handleRemoveRep("secondary")}>
-                            <UserMinus className="h-3 w-3 mr-1" />Remove
-                          </Button>
-                        )}
-                      </>
-                    )}
-                  </div>
+                {/* Secondary Rep */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs text-slate-500 font-medium w-[88px] shrink-0">Secondary Rep:</span>
+                  {customer.secondary_rep_name
+                    ? <Badge variant="secondary" className="text-xs gap-1 h-6"><UserCheck className="h-3 w-3" />{customer.secondary_rep_name}</Badge>
+                    : <span className="text-xs text-slate-400">Unassigned</span>}
+                  {canAssignRep && (
+                    <>
+                      <button
+                        className="h-6 w-6 rounded border border-slate-200 flex items-center justify-center text-slate-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
+                        title={customer.secondary_rep_name ? "Change rep" : "Assign rep"}
+                        data-testid="btn-assign-secondary-rep"
+                        onClick={() => { setRepAssignMode("secondary"); setSelectedRep(customer.secondary_rep_id ? String(customer.secondary_rep_id) : ""); setShowAssignRep(true); }}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      {customer.secondary_rep_name && (
+                        <button
+                          className="h-6 w-6 rounded border border-slate-200 flex items-center justify-center text-slate-400 hover:border-red-300 hover:text-red-500 transition-colors"
+                          title="Remove rep"
+                          data-testid="btn-remove-secondary-rep"
+                          onClick={() => handleRemoveRep("secondary")}
+                        >
+                          <UserMinus className="h-3 w-3" />
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
-                {/* Address Book Dropdown */}
-                <div className="flex items-center gap-2 mt-1.5 min-w-0">
-                  <span className="text-xs text-slate-500 font-medium shrink-0">Address:</span>
-                  {loadingAddresses ? (
-                    <span className="text-xs text-slate-400">Loading…</span>
-                  ) : addressBook.length > 0 ? (
+              </div>
+
+              {/* Address row — with address type badge inline */}
+              <div className="flex items-center gap-2 min-w-0 mb-1.5">
+                <span className="text-xs text-slate-500 font-medium shrink-0">Address:</span>
+                {loadingAddresses ? (
+                  <span className="text-xs text-slate-400">Loading…</span>
+                ) : addressBook.length > 0 ? (
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
                     <Select
                       value={String(Math.min(selectedAddressIdx, addressBook.length - 1))}
                       onValueChange={v => setSelectedAddressIdx(parseInt(v))}
                     >
-                      <SelectTrigger className="h-6 text-xs flex-1 min-w-0 max-w-lg border border-slate-200 rounded-md px-2 gap-1 focus:ring-1 focus:ring-blue-400" data-testid="select-address-book">
+                      <SelectTrigger className="h-6 text-xs flex-1 min-w-0 max-w-sm border border-slate-200 rounded-md px-2 gap-1" data-testid="select-address-book">
                         <SelectValue>
                           <span className="truncate">{formatBcAddress(addressBook[Math.min(selectedAddressIdx, addressBook.length - 1)])}</span>
                         </SelectValue>
                       </SelectTrigger>
-                      <SelectContent className="max-w-lg">
+                      <SelectContent className="max-w-sm">
                         {addressBook.map((addr: any, i: number) => (
                           <SelectItem key={i} value={String(i)}>
                             <div className="py-0.5">
@@ -959,121 +990,126 @@ export default function CustomerProfile() {
                         ))}
                       </SelectContent>
                     </Select>
-                  ) : (
-                    <span className="text-xs text-slate-400">No addresses on file</span>
-                  )}
-                </div>
-
-                {/* Next Follow Up */}
-                {nextFollowUp && (
-                  <div className="flex items-center gap-1.5 mt-1.5">
-                    <span className="text-xs text-slate-500 font-medium shrink-0">Next Follow Up:</span>
-                    <span className={`text-xs font-medium flex items-center gap-1 ${nextFollowUp.is_overdue ? "text-red-600" : "text-blue-600"}`}>
-                      <Calendar className="h-3 w-3" />
-                      {fmt.date(nextFollowUp.due_date)} — {nextFollowUp.title}
-                      {nextFollowUp.is_overdue && <span className="text-[10px] font-normal text-red-400">(overdue)</span>}
+                    {/* Address type badge inline */}
+                    <span data-testid="text-address-type" className="shrink-0">
+                      {customer.address_type === "Commercial"
+                        ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700">Commercial</span>
+                        : customer.address_type === "Residential"
+                        ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700">Residential</span>
+                        : null}
                     </span>
                   </div>
+                ) : (
+                  <span className="text-xs text-slate-400">No addresses on file</span>
                 )}
+              </div>
 
-                {/* Customer Type / Address Type */}
-                <div className="flex items-center flex-wrap gap-x-5 gap-y-1 mt-1.5">
-                  {/* Account Type (SalesCore ERP field) */}
-                  {canManageAccountType ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-slate-500 font-medium">Account:</span>
-                      <Select value={customer.account_type ?? "customer"} onValueChange={v => handleMasterFieldChange("account_type", v)}>
-                        <SelectTrigger className="h-6 text-xs w-auto border border-slate-200 rounded-md px-2 gap-1 focus:ring-1 focus:ring-blue-400">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="customer">Customer</SelectItem>
-                          <SelectItem value="vendor">Vendor</SelectItem>
-                          <SelectItem value="internal">Internal</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ) : customer.account_type && customer.account_type !== "customer" ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-slate-500 font-medium">Account:</span>
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700 capitalize">{customer.account_type}</span>
-                    </div>
-                  ) : null}
-                  {/* Inactive state */}
-                  {customer.inactive_at ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-200 text-slate-600">Inactive</span>
-                      {customer.inactive_reason && <span className="text-xs text-slate-400 capitalize">{customer.inactive_reason.replace(/_/g, " ")}</span>}
-                      {canManageInactive && (
-                        <Button size="sm" variant="outline" className="h-5 text-[10px] px-2 text-green-700 border-green-300 hover:bg-green-50"
-                          onClick={async () => {
-                            try {
-                              await fetch(`/api/crm/customers/${id}`, {
-                                method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-                                body: JSON.stringify({ restore_active: true }),
-                              });
-                              queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
-                              toast({ title: "Customer restored to active" });
-                            } catch (e: any) { toast({ title: "Error", description: e.message, variant: "destructive" }); }
-                          }}>
-                          Restore
-                        </Button>
-                      )}
-                    </div>
-                  ) : canManageInactive ? (
-                    <div className="flex items-center gap-1.5">
-                      <Button size="sm" variant="ghost" className="h-5 text-[10px] px-2 text-slate-400 hover:text-red-600"
-                        onClick={async () => {
-                          const reason = window.prompt("Mark inactive? Enter reason (optional):", "") ?? null;
-                          if (reason === null) return; // cancelled
-                          try {
-                            await fetch(`/api/crm/customers/${id}`, {
-                              method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-                              body: JSON.stringify({ mark_inactive: true, inactive_reason: reason || null }),
-                            });
-                            queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
-                            toast({ title: "Customer marked inactive" });
-                          } catch (e: any) { toast({ title: "Error", description: e.message, variant: "destructive" }); }
-                        }}>
-                        Mark Inactive
-                      </Button>
-                    </div>
-                  ) : null}
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-slate-500 font-medium">Type:</span>
-                    <Select value={customer.customer_type ?? "Store"} onValueChange={v => handleMasterFieldChange("customer_type", v)}>
-                      <SelectTrigger className="h-6 text-xs w-auto border border-slate-200 rounded-md px-2 gap-1 focus:ring-1 focus:ring-blue-400" data-testid="select-customer-type">
+              {/* Next Follow Up */}
+              {nextFollowUp && (
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <span className="text-xs text-slate-500 font-medium shrink-0">Follow Up:</span>
+                  <span className={`text-xs font-medium flex items-center gap-1 ${nextFollowUp.is_overdue ? "text-red-600" : "text-blue-600"}`}>
+                    <Calendar className="h-3 w-3" />
+                    {fmt.date(nextFollowUp.due_date)} — <span className="truncate max-w-[140px] sm:max-w-none">{nextFollowUp.title}</span>
+                    {nextFollowUp.is_overdue && <span className="text-[10px] font-normal text-red-400">(overdue)</span>}
+                  </span>
+                </div>
+              )}
+
+              {/* Bottom meta row: Account type + customer type */}
+              <div className="flex items-center flex-wrap gap-x-4 gap-y-1">
+                {/* Account type */}
+                {canManageAccountType ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-slate-500 font-medium">Account:</span>
+                    <Select value={customer.account_type ?? "customer"} onValueChange={v => handleMasterFieldChange("account_type", v)}>
+                      <SelectTrigger className="h-6 text-xs w-auto border border-slate-200 rounded-md px-2 gap-1">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Store">Store</SelectItem>
-                        <SelectItem value="Distributor">Distributor</SelectItem>
+                        <SelectItem value="customer">Customer</SelectItem>
+                        <SelectItem value="vendor">Vendor</SelectItem>
+                        <SelectItem value="internal">Internal</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-slate-500 font-medium">Address Type:</span>
-                    <span className="text-xs text-slate-700 font-medium" data-testid="text-address-type">
-                      {customer.address_type === "Commercial"
-                        ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-green-100 text-green-700">Commercial</span>
-                        : customer.address_type === "Residential"
-                        ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-orange-100 text-orange-700">Residential</span>
-                        : <span className="text-slate-400 text-xs">Unknown</span>}
-                    </span>
+                ) : customer.account_type && customer.account_type !== "customer" ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-slate-500 font-medium">Account:</span>
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700 capitalize">{customer.account_type}</span>
                   </div>
+                ) : null}
+                {/* Customer type */}
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-slate-500 font-medium">Type:</span>
+                  <Select value={customer.customer_type ?? "Store"} onValueChange={v => handleMasterFieldChange("customer_type", v)}>
+                    <SelectTrigger className="h-6 text-xs w-auto border border-slate-200 rounded-md px-2 gap-1" data-testid="select-customer-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Store">Store</SelectItem>
+                      <SelectItem value="Distributor">Distributor</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </div>
 
-            {/* Days since last order — far right */}
-            {daysSince != null && (
-              <div className="shrink-0 text-right sm:border-l sm:pl-5 border-t sm:border-t-0 pt-3 sm:pt-0">
-                <p className={`text-4xl font-extrabold leading-none ${daysSince > 90 ? "text-red-500" : daysSince > 30 ? "text-amber-500" : "text-green-600"}`}>
-                  {daysSince}d
-                </p>
-                <p className="text-xs text-slate-400 mt-1">since last order</p>
-              </div>
-            )}
+            {/* Right column: status badge + days counter */}
+            <div className="shrink-0 flex flex-col items-end gap-2 sm:border-l sm:pl-4 min-w-[72px]">
+
+              {/* Active / Inactive status badge */}
+              {canManageInactive ? (
+                customer.inactive_at ? (
+                  <div className="flex flex-col items-end gap-0.5">
+                    <button
+                      onClick={async () => {
+                        try {
+                          await fetch(`/api/crm/customers/${id}`, {
+                            method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+                            body: JSON.stringify({ restore_active: true }),
+                          });
+                          queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
+                          toast({ title: "Customer restored to active" });
+                        } catch (e: any) { toast({ title: "Error", description: e.message, variant: "destructive" }); }
+                      }}
+                      className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200 hover:bg-red-200 transition-colors cursor-pointer"
+                      title="Click to restore active"
+                    >
+                      Inactive
+                    </button>
+                    {customer.inactive_reason && (
+                      <span className="text-[10px] text-slate-400 text-right capitalize leading-tight max-w-[90px]">
+                        {customer.inactive_reason.replace(/_/g, " ")}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setMarkInactiveReason(""); setMarkInactiveNotes(""); setShowMarkInactiveModal(true); }}
+                    className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200 hover:bg-green-200 transition-colors cursor-pointer"
+                    title="Click to mark inactive"
+                  >
+                    Active
+                  </button>
+                )
+              ) : (
+                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${customer.inactive_at ? "bg-red-100 text-red-700 border border-red-200" : "bg-green-100 text-green-700 border border-green-200"}`}>
+                  {customer.inactive_at ? "Inactive" : "Active"}
+                </span>
+              )}
+
+              {/* Days since last order */}
+              {daysSince != null && (
+                <div className="text-right mt-1">
+                  <p className={`text-3xl sm:text-4xl font-extrabold leading-none ${daysSince > 90 ? "text-red-500" : daysSince > 30 ? "text-amber-500" : "text-green-600"}`}>
+                    {daysSince}d
+                  </p>
+                  <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5">since last order</p>
+                </div>
+              )}
+            </div>
+
           </div>
         </div>
       </div>
@@ -1611,6 +1647,62 @@ export default function CustomerProfile() {
           }}
         />
       )}
+
+      {/* ── Mark Inactive Modal ─────────────────────────────────────────────── */}
+      <Dialog open={showMarkInactiveModal} onOpenChange={v => { if (!v) setShowMarkInactiveModal(false); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Mark Customer Inactive</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            <span className="font-medium">{customer?.company || [customer?.first_name, customer?.last_name].filter(Boolean).join(" ")}</span> will be hidden from active customer lists.
+          </p>
+          <div className="space-y-3 mt-1">
+            <div>
+              <Label className="text-xs mb-1.5 block">Reason</Label>
+              <Select value={markInactiveReason || "__none__"} onValueChange={v => setMarkInactiveReason(v === "__none__" ? "" : v)}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select reason…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No reason specified</SelectItem>
+                  <SelectItem value="no_longer_ordering">No Longer Ordering</SelectItem>
+                  <SelectItem value="closed">Business Closed</SelectItem>
+                  <SelectItem value="duplicate">Duplicate Account</SelectItem>
+                  <SelectItem value="test_account">Test Account</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs mb-1.5 block">Notes (optional)</Label>
+              <Textarea value={markInactiveNotes} onChange={e => setMarkInactiveNotes(e.target.value)} placeholder="Additional context…" rows={2} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowMarkInactiveModal(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={savingMarkInactive}
+              onClick={async () => {
+                setSavingMarkInactive(true);
+                try {
+                  const r = await fetch(`/api/crm/customers/${id}`, {
+                    method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+                    body: JSON.stringify({ mark_inactive: true, inactive_reason: markInactiveReason || null, inactive_notes: markInactiveNotes || null }),
+                  });
+                  if (!r.ok) throw new Error((await r.json()).error ?? "Failed");
+                  queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
+                  toast({ title: "Customer marked inactive" });
+                  setShowMarkInactiveModal(false);
+                } catch (e: any) {
+                  toast({ title: "Error", description: e.message, variant: "destructive" });
+                } finally { setSavingMarkInactive(false); }
+              }}
+            >
+              {savingMarkInactive ? "Saving…" : "Mark Inactive"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Add To Do Modal ──────────────────────────────────────────────────── */}
       <Dialog open={showAddTodo} onOpenChange={v => { if (!v) { setShowAddTodo(false); setTodoTitle(""); setTodoNote(""); setTodoPriority("medium"); setTodoDueDate(""); setTodoAssignedTo(""); } }}>
