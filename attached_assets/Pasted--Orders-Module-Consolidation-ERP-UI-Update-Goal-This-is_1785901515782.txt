@@ -1,0 +1,442 @@
+# Orders Module Consolidation & ERP UI Update
+
+Goal
+
+This is a full implementation of the new Orders module. The goal is to replace the existing fragmented order pages with a single centralized Orders experience that follows the SalesCore Design System already established in the CRM module.
+
+This is intended to be completed in one phase.
+
+Use the CRM module as the visual reference for typography, spacing, filters, tables, buttons, dialogs, badges, hover states, and responsiveness.
+
+Do not redesign independently.
+
+----------------------------------------------------
+
+Navigation
+
+Replace the current structure:
+
+Orders
+- My Orders
+- All Orders
+- BC Orders
+
+with
+
+Orders
+- Drafts (leave completely unchanged)
+- Orders
+
+Only Orders is being redesigned.
+
+----------------------------------------------------
+
+Data Source
+
+The Orders page should load from the local database only.
+
+Do not fetch directly from the BigCommerce API for page rendering.
+
+BigCommerce remains the source of truth, but the UI should use the local mirrored database for speed, consistency, searching, filtering, and future reporting.
+
+----------------------------------------------------
+
+Orders Page Layout
+
+Follow the CRM page layout.
+
+Page Header
+
+↓
+
+KPI Cards
+
+↓
+
+Search
+
+↓
+
+Filters
+
+↓
+
+Orders Table
+
+↓
+
+Pagination
+
+Desktop should maximize information density.
+
+Tablet should reduce spacing while preserving columns.
+
+Mobile should transition to expandable cards instead of wide tables.
+
+----------------------------------------------------
+
+KPI Cards
+
+Display KPIs based on the active filters.
+
+Total Orders
+
+Revenue
+
+Successful
+
+Pending
+
+Failed
+
+KPIs must always update according to the currently applied filters.
+
+----------------------------------------------------
+
+Filters
+
+Search
+
+Created By
+• Me
+• Individual User
+• All Users
+
+Sales Channel
+
+• Sales App
+
+• All Orders
+
+When Sales Channel = Sales App
+
+show an additional filter
+
+Sync Status
+
+• Successful
+
+• Failed
+
+Hide Sync Status when Sales Channel = All Orders.
+
+BigCommerce Status
+
+(show every BC order status)
+
+Date Range
+
+Clear Filters
+
+----------------------------------------------------
+
+Orders Table
+
+Use the CRM table styling.
+
+Columns
+
+Order #
+
+Customer
+
+Status
+
+Sales Channel
+
+Created By
+
+Last Updated
+
+Items
+
+Total
+
+Actions
+
+----------------------------------------------------
+
+Customer Column
+
+Match the CRM Customer list.
+
+Each row displays
+
+Customer Avatar
+(company initials if no logo)
+
+Company Name
+
+Primary Contact
+
+Email
+
+Clicking the customer name opens the Customer CRM page.
+
+----------------------------------------------------
+
+Actions
+
+Visible actions
+
+Print Invoice
+
+Send Invoice
+
+Download Invoice
+
+Context Menu (...)
+
+Open Details
+
+Print Invoice
+
+Send Invoice
+
+Download Invoice
+
+Re-Order (Inactive)
+
+The Re-Order item should exist but remain disabled.
+
+Do not implement functionality yet.
+
+----------------------------------------------------
+
+Expanded Order Preview
+
+Expanding a row should display
+
+Customer Summary
+
+Billing Address
+
+Shipping Address
+
+Customer Notes
+
+Staff Notes
+
+Products
+
+Each line item
+
+Quantity
+
+Unit Price
+
+Discount
+
+Tax
+
+Line Total
+
+If a tax was applied during checkout, display the tax amount for each applicable line item and include the overall order tax in the totals section.
+
+Shipping
+
+Subtotal
+
+Tax
+
+Shipping
+
+Grand Total
+
+Buttons
+
+Print Invoice
+
+Send Invoice
+
+Download Invoice
+
+----------------------------------------------------
+
+Order Details Page
+
+Clicking "Open Details" or the Order Number opens a dedicated Order Details page.
+
+This becomes the permanent ERP order page.
+
+Header
+
+Order Number
+
+Sales Channel
+
+BigCommerce Status
+
+Sync Status (Sales App orders only)
+
+Created By
+
+Created Date
+
+Updated Date
+
+Customer Information
+
+Customer Name
+
+Company
+
+Email
+
+Phone
+
+Billing Address
+
+Shipping Address
+
+Clicking the Customer Name opens the Customer CRM page.
+
+----------------------------------------------------
+
+Products Section
+
+Display every purchased product.
+
+Each line item should display
+
+Thumbnail
+
+Product Name
+
+Variant
+
+SKU
+
+Quantity
+
+Unit Price
+
+Discount
+
+Tax
+
+Line Total
+
+Clicking the Product Name should open the future Product CRM page.
+
+(Implement the navigation placeholder now if Product CRM is not yet complete.)
+
+----------------------------------------------------
+
+Totals
+
+Subtotal
+
+Tax
+
+Shipping
+
+Grand Total
+
+Store Credit Used (if applicable)
+
+Discounts (if applicable)
+
+----------------------------------------------------
+
+Timeline
+
+Display
+
+Order Created
+
+POS Created
+
+BigCommerce Synced
+
+Status Changes
+
+Future timeline events should automatically fit into this section.
+
+----------------------------------------------------
+
+Invoices
+
+Reuse the existing invoice system.
+
+Do not redesign invoice generation.
+
+Buttons
+
+Print Invoice
+
+Send Invoice
+
+Download Invoice
+
+Download Invoice should directly download the PDF instead of opening it first.
+
+Send Invoice should reuse the current implementation.
+
+----------------------------------------------------
+
+Responsiveness
+
+Desktop
+
+Dense table layout.
+
+Tablet
+
+Compact table with responsive spacing.
+
+Mobile
+
+Use expandable cards instead of forcing horizontal scrolling.
+
+Expanded cards should still display
+
+Customer
+
+Items
+
+Totals
+
+Status
+
+Actions
+
+without losing functionality.
+
+----------------------------------------------------
+
+Performance
+
+Continue using pagination.
+
+Avoid unnecessary API calls.
+
+Reuse existing components whenever possible.
+
+----------------------------------------------------
+
+Future Compatibility
+
+Leave placeholders (inactive) where appropriate for future ERP features such as
+
+Re-Order
+
+Product CRM navigation
+
+Order Timeline expansion
+
+Do not implement those features yet.
+
+----------------------------------------------------
+
+Important
+
+Do not modify Drafts.
+
+Do not move POS under Orders.
+
+Do not rename modules.
+
+Do not modify business logic unless required to support the new Orders experience.
+
+The goal is to consolidate the existing functionality into a modern ERP Orders module that follows the SalesCore Design System while remaining fully responsive on desktop, tablet, and mobile.

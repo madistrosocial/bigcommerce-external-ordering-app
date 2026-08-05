@@ -2855,6 +2855,38 @@ export async function registerRoutes(
     }
   });
 
+  // ── Consolidated Orders (new ERP Orders page) ─────────────────────────────
+  app.get("/api/orders/consolidated", requireAuth, async (req, res) => {
+    try {
+      const {
+        page = "1", limit = "50",
+        search = "", createdBy = "",
+        syncStatus = "", dateFrom = "", dateTo = "",
+      } = req.query as Record<string, string>;
+      const result = await storage.getConsolidatedOrders({
+        page: Math.max(1, parseInt(page)),
+        limit: Math.min(100, Math.max(1, parseInt(limit))),
+        search: search || undefined,
+        createdBy: createdBy ? parseInt(createdBy) : null,
+        syncStatus: syncStatus || undefined,
+        dateFrom: dateFrom ? new Date(dateFrom) : null,
+        dateTo: dateTo ? (() => { const d = new Date(dateTo); d.setHours(23, 59, 59, 999); return d; })() : null,
+      });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Single order detail (for the Orders detail page)
+  app.get("/api/orders/:id/detail", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+      const order = await storage.getOrderDetail(id);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      res.json(order);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // User summary — userId, name, role, group_name — accessible to any authenticated user
   app.get("/api/users/summary", requireAuth, async (_req, res) => {
     try {

@@ -25,6 +25,8 @@ import PriceTiersPage from "@/pages/admin/PriceTiers";
 import MyOrders from "@/pages/agent/MyOrders";
 import DraftOrders from "@/pages/agent/DraftOrders";
 import AllOrders from "@/pages/agent/AllOrders";
+import OrdersList from "@/pages/orders/OrdersList";
+import OrderDetail from "@/pages/orders/OrderDetail";
 import CreateCustomer from "@/pages/agent/CreateCustomer";
 import AllCustomers from "@/pages/agent/AllCustomers";
 import BCOrders from "@/pages/agent/BCOrders";
@@ -127,6 +129,12 @@ function Router() {
       {/* ── BC Orders ── */}
       <Route path="/orders/bc">
         {() => <ProtectedRoute component={BCOrders} />}
+      </Route>
+      <Route path="/orders/list">
+        {() => <ProtectedRoute component={OrdersList} />}
+      </Route>
+      <Route path="/orders/:id">
+        {() => <ProtectedRoute component={OrderDetail} />}
       </Route>
 
       {/* ── Customer routes ── */}

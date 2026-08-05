@@ -33,6 +33,8 @@ export interface IStorage {
   getPendingSyncOrders(): Promise<Order[]>;
   getDraftOrders(): Promise<Order[]>;
   updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void>;
+  getConsolidatedOrders(params: { page: number; limit: number; search?: string; createdBy?: number | null; syncStatus?: string; dateFrom?: Date | null; dateTo?: Date | null; }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; }; }>;
+  getOrderDetail(id: number): Promise<any | null>;
   updateOrderSyncError(id: number, error: string): Promise<void>;
   updateOrderForSubmission(id: number, updates: { bigcommerce_customer_id: number; billing_address: any; status: string }): Promise<void>;
   deleteOrder(id: number): Promise<void>;
@@ -294,6 +296,111 @@ export class DatabaseStorage implements IStorage {
 
   async getAllOrders(): Promise<Order[]> {
     return db.select().from(orders).orderBy(desc(orders.date));
+  }
+
+  async getConsolidatedOrders(params: {
+    page: number; limit: number; search?: string;
+    createdBy?: number | null; syncStatus?: string;
+    dateFrom?: Date | null; dateTo?: Date | null;
+  }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; }; }> {
+    const { page, limit, search, createdBy, syncStatus, dateFrom, dateTo } = params;
+    const offset = (page - 1) * limit;
+
+    const conds: any[] = [sql`${orders.status} != 'draft'`];
+    if (search) {
+      const q = `%${search}%`;
+      conds.push(or(
+        ilike(orders.customer_name, q),
+        ilike(orders.customer_email, q),
+        sql`CAST(${orders.bigcommerce_order_id} AS TEXT) ILIKE ${q}`,
+        sql`CAST(${orders.id} AS TEXT) ILIKE ${q}`,
+      ));
+    }
+    if (createdBy != null) conds.push(eq(orders.created_by_user_id, createdBy));
+    if (syncStatus)        conds.push(eq(orders.status, syncStatus));
+    if (dateFrom)          conds.push(sql`${orders.date} >= ${dateFrom}`);
+    if (dateTo)            conds.push(sql`${orders.date} <= ${dateTo}`);
+
+    const where = conds.length > 0 ? and(...conds) : undefined;
+
+    const [rows, [countRow], [kpiRow]] = await Promise.all([
+      db.select({
+        id: orders.id,
+        customer_name: orders.customer_name,
+        customer_email: orders.customer_email,
+        bigcommerce_customer_id: orders.bigcommerce_customer_id,
+        billing_address: orders.billing_address,
+        status: orders.status,
+        sync_error: orders.sync_error,
+        order_note: orders.order_note,
+        customer_note: orders.customer_note,
+        items: orders.items,
+        total: orders.total,
+        date: orders.date,
+        created_by_user_id: orders.created_by_user_id,
+        bigcommerce_order_id: orders.bigcommerce_order_id,
+        created_by_name: users.name,
+        company: customersMirror.company,
+        crm_customer_id: customersMirror.id,
+      })
+      .from(orders)
+      .leftJoin(users, eq(orders.created_by_user_id, users.id))
+      .leftJoin(customersMirror, eq(orders.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+      .where(where)
+      .orderBy(desc(orders.date))
+      .limit(limit)
+      .offset(offset),
+
+      db.select({ count: sql<number>`COUNT(*)` }).from(orders).where(where),
+
+      db.select({
+        total:      sql<number>`COUNT(*)`,
+        revenue:    sql<string>`COALESCE(SUM(${orders.total}), 0)`,
+        successful: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'synced')`,
+        pending:    sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'pending_sync')`,
+        failed:     sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'failed')`,
+      }).from(orders).where(where),
+    ]);
+
+    return {
+      orders: rows,
+      total: Number(countRow?.count ?? 0),
+      kpis: {
+        total:      Number(kpiRow?.total      ?? 0),
+        revenue:    parseFloat(String(kpiRow?.revenue ?? "0")),
+        successful: Number(kpiRow?.successful ?? 0),
+        pending:    Number(kpiRow?.pending    ?? 0),
+        failed:     Number(kpiRow?.failed     ?? 0),
+      },
+    };
+  }
+
+  async getOrderDetail(id: number): Promise<any | null> {
+    const [row] = await db.select({
+      id: orders.id,
+      customer_name: orders.customer_name,
+      customer_email: orders.customer_email,
+      bigcommerce_customer_id: orders.bigcommerce_customer_id,
+      billing_address: orders.billing_address,
+      status: orders.status,
+      sync_error: orders.sync_error,
+      order_note: orders.order_note,
+      customer_note: orders.customer_note,
+      items: orders.items,
+      total: orders.total,
+      date: orders.date,
+      created_by_user_id: orders.created_by_user_id,
+      bigcommerce_order_id: orders.bigcommerce_order_id,
+      google_sheets_logged: orders.google_sheets_logged,
+      created_by_name: users.name,
+      company: customersMirror.company,
+      crm_customer_id: customersMirror.id,
+    })
+    .from(orders)
+    .leftJoin(users, eq(orders.created_by_user_id, users.id))
+    .leftJoin(customersMirror, eq(orders.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+    .where(eq(orders.id, id));
+    return row ?? null;
   }
 
   async getOrdersByBcCustomerId(bcCustomerId: number, statuses: string[]): Promise<Order[]> {
