@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates } from "@shared/schema";
 import { eq, desc, and, inArray, gt, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
@@ -145,6 +145,15 @@ export interface IStorage {
   // POS Enhancements — Store Credit Usage
   createPosStoreCreditUsage(entry: InsertPosStoreCreditUsage): Promise<PosStoreCreditUsage>;
   getPosStoreCreditUsage(opts: { customerId?: number; cashierId?: number; orderSearch?: string; dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ rows: PosStoreCreditUsage[]; total: number }>;
+
+  // Store Credit Ledger
+  createStoreCreditLedger(entry: InsertStoreCreditLedger): Promise<StoreCreditLedgerEntry>;
+  getStoreCreditLedger(opts: { customerId?: number; issuedBy?: number; dateFrom?: string; dateTo?: string; search?: string; limit?: number; offset?: number }): Promise<{ rows: StoreCreditLedgerEntry[]; total: number }>;
+  updateCustomerStoreCreditBalance(customerId: number, delta: number): Promise<void>;
+
+  // Email Templates
+  getEmailTemplate(key: string): Promise<EmailTemplate | undefined>;
+  upsertEmailTemplate(key: string, data: { name: string; subject_template: string; body: string; updated_by?: number }): Promise<EmailTemplate>;
 
   // Reports — legacy (orders table)
   getSalesReport(opts: { view: string; dateFrom?: string; dateTo?: string; search?: string; status?: string; page?: number; limit?: number; sortBy?: string; sortDir?: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
@@ -1712,6 +1721,62 @@ export class DatabaseStorage implements IStorage {
 
     return { rows, total: countRows[0]?.count ?? 0 };
   }
+  // ─── Store Credit Ledger ──────────────────────────────────────────────────────
+
+  async createStoreCreditLedger(entry: InsertStoreCreditLedger): Promise<StoreCreditLedgerEntry> {
+    const result = await db.insert(storeCreditLedger).values(entry).returning();
+    return result[0];
+  }
+
+  async getStoreCreditLedger(opts: { customerId?: number; issuedBy?: number; dateFrom?: string; dateTo?: string; search?: string; limit?: number; offset?: number }): Promise<{ rows: StoreCreditLedgerEntry[]; total: number }> {
+    const { customerId, issuedBy, dateFrom, dateTo, search, limit = 50, offset = 0 } = opts;
+    const conditions: any[] = [];
+    if (customerId) conditions.push(eq(storeCreditLedger.customer_id, customerId));
+    if (issuedBy) conditions.push(eq(storeCreditLedger.issued_by, issuedBy));
+    if (dateFrom) conditions.push(sql`${storeCreditLedger.created_at} >= ${dateFrom}::timestamptz`);
+    if (dateTo) conditions.push(sql`${storeCreditLedger.created_at} <= ${dateTo}::timestamptz + interval '1 day'`);
+    if (search?.trim()) {
+      const s = `%${search.trim()}%`;
+      conditions.push(or(
+        ilike(storeCreditLedger.issued_by_name, s),
+        ilike(storeCreditLedger.reason, s),
+        sql`${storeCreditLedger.bigcommerce_order_id}::text ilike ${s}`,
+      ));
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(storeCreditLedger).where(where),
+      db.select().from(storeCreditLedger).where(where).orderBy(desc(storeCreditLedger.created_at)).limit(limit).offset(offset),
+    ]);
+    return { rows, total: countRows[0]?.count ?? 0 };
+  }
+
+  async updateCustomerStoreCreditBalance(customerId: number, delta: number): Promise<void> {
+    await db.update(customersMirror)
+      .set({ store_credit_balance: sql`GREATEST(0, COALESCE(store_credit_balance, 0) + ${delta.toFixed(2)}::numeric)` })
+      .where(eq(customersMirror.id, customerId));
+  }
+
+  // ─── Email Templates ──────────────────────────────────────────────────────────
+
+  async getEmailTemplate(key: string): Promise<EmailTemplate | undefined> {
+    const rows = await db.select().from(emailTemplates).where(eq(emailTemplates.key, key));
+    return rows[0];
+  }
+
+  async upsertEmailTemplate(key: string, data: { name: string; subject_template: string; body: string; updated_by?: number }): Promise<EmailTemplate> {
+    const existing = await this.getEmailTemplate(key);
+    if (existing) {
+      const rows = await db.update(emailTemplates)
+        .set({ ...data, updated_at: new Date() })
+        .where(eq(emailTemplates.key, key))
+        .returning();
+      return rows[0];
+    }
+    const rows = await db.insert(emailTemplates).values({ key, ...data }).returning();
+    return rows[0];
+  }
+
   // ─── Reports ──────────────────────────────────────────────────────────────────
 
   async getSalesReport(opts: {

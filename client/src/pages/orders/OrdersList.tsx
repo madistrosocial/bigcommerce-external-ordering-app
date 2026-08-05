@@ -1,18 +1,24 @@
 import { useState, useCallback, Fragment } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { getAuthHeaders } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { useTimeService } from "@/hooks/useTimeService";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Search, Filter, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   ShoppingBag, DollarSign, CheckCircle2, Clock, AlertCircle, Printer,
-  MoreHorizontal, ExternalLink, Send, Download, RotateCcw,
+  MoreHorizontal, ExternalLink, Send, Download, RotateCcw, Wallet, MessageSquare, Pencil,
 } from "lucide-react";
+import StoreCreditDialog from "@/components/orders/StoreCreditDialog";
+import type { StoreCreditOrder } from "@/components/orders/StoreCreditDialog";
+import EmailComposeDialog from "@/components/orders/EmailComposeDialog";
 
 // ── Reusable product name wrapper (no-op until Product CRM is implemented) ────
 function ProductLink({ name }: { name: string }) {
@@ -140,9 +146,74 @@ function KpiCard({ icon: Icon, label, value, color }: { icon: any; label: string
   );
 }
 
+// ── Email template helper ─────────────────────────────────────────────────────
+const DEFAULT_EMAIL_BODY = `Hello {customerName},
+
+Thank you for your most recent order with Mid Atlantic Distribution.  We apologize for any inconvenience, but due to an inventory error, there is an item that we are unable to fulfill in your order.  This item has been removed from your order and store credit has been issued to your account.
+
+Missing Items: {missingItems}
+
+Store Credit Applied: {creditAmount}
+
+
+You will be able to apply this credit at the point of checkout on future orders.  Please feel free to reach back out with any questions or concerns. Again, we thank you for your patience and understanding while we worked to resolve this matter as quickly and effectively as possible.
+We greatly appreciate your order with MA Distro and look forward to future business.
+
+
+
+Thank you,
+
+Mid Atlantic Distribution
+1000 Parliament Court, Suite #300
+Durham, North Carolina 27703
+Office 1(866)818-9598 Ext 0
+sales@midatlanticdistribution.com`;
+
+function buildStoreCreditEmail(opts: {
+  customerName: string; orderNumber: string; reason: string;
+  products: Array<{ name: string; sku: string; qty: number }>;
+  creditAmount: number; creditTax: number; template?: string;
+}) {
+  const missingItems = opts.products.map(p => `${p.qty}× ${p.name}${p.sku ? ` (${p.sku})` : ""}`).join(", ");
+  const totalCredit = opts.creditAmount + opts.creditTax;
+  const creditStr = totalCredit.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const body = opts.template || DEFAULT_EMAIL_BODY;
+  return body
+    .replace(/{customerName}/g, opts.customerName)
+    .replace(/{orderNumber}/g, opts.orderNumber)
+    .replace(/{reason}/g, opts.reason)
+    .replace(/{missingItems}/g, missingItems)
+    .replace(/{creditAmount}/g, creditStr);
+}
+
 // ── Expanded row preview ──────────────────────────────────────────────────────
 function ExpandedPreview({ order }: { order: ConsolidatedOrder }) {
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const { hasPermission } = usePermissions();
+  const canEditNote = hasPermission("crm", "notes_edit");
+  const [editingNote, setEditingNote] = useState<"staff" | "customer" | null>(null);
+  const [noteText, setNoteText] = useState("");
+
+  const saveNoteMutation = useMutation({
+    mutationFn: async ({ type, text }: { type: "staff" | "customer"; text: string }) => {
+      const r = await fetch(`/api/orders/${order.id}/note`, {
+        method: "PATCH",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(type === "staff" ? { note: text } : {}),
+          crm_customer_id: order.crm_customer_id,
+          bc_order_id: order.bigcommerce_order_id,
+        }),
+      });
+      if (!r.ok) throw new Error("Failed");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["orders", "consolidated"] });
+      setEditingNote(null);
+    },
+  });
+
   const addr = order.billing_address as any;
   const items = order.items ?? [];
   const subtotal = items.reduce((s, i) => s + parseFloat(i.price_at_sale) * i.quantity, 0);
@@ -217,9 +288,67 @@ function ExpandedPreview({ order }: { order: ConsolidatedOrder }) {
           </div>
         </div>
       )}
+
+      {/* Notes */}
+      <div className="border-t pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <div className="flex items-center justify-between mb-0.5">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Customer Notes</p>
+            {canEditNote && (
+              <button
+                className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-0.5 transition-colors"
+                onClick={() => { setNoteText(order.customer_note ?? ""); setEditingNote("customer"); }}
+              >
+                <Pencil className="h-2.5 w-2.5" /> Edit
+              </button>
+            )}
+          </div>
+          <p className="text-[12px] text-slate-600">{order.customer_note || <span className="text-slate-300">—</span>}</p>
+        </div>
+        <div>
+          <div className="flex items-center justify-between mb-0.5">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Staff Notes</p>
+            {canEditNote && (
+              <button
+                className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-0.5 transition-colors"
+                onClick={() => { setNoteText(order.order_note ?? ""); setEditingNote("staff"); }}
+              >
+                <Pencil className="h-2.5 w-2.5" /> Edit
+              </button>
+            )}
+          </div>
+          <p className="text-[12px] text-slate-600">{order.order_note || <span className="text-slate-300">—</span>}</p>
+        </div>
+      </div>
+
       {order.bigcommerce_order_id && (
         <p className="text-[11px] text-slate-400">BC Order #{order.bigcommerce_order_id}</p>
       )}
+
+      {/* Note edit dialog */}
+      <Dialog open={!!editingNote} onOpenChange={v => { if (!v) setEditingNote(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5">
+              <MessageSquare className="h-4 w-4 text-slate-400" />
+              Edit {editingNote === "staff" ? "Staff" : "Customer"} Notes
+            </DialogTitle>
+          </DialogHeader>
+          <Textarea value={noteText} onChange={e => setNoteText(e.target.value)} rows={5} className="text-sm" />
+          {saveNoteMutation.isError && (
+            <p className="text-sm text-red-600">{(saveNoteMutation.error as Error).message}</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingNote(null)}>Cancel</Button>
+            <Button
+              onClick={() => saveNoteMutation.mutate({ type: editingNote!, text: noteText })}
+              disabled={saveNoteMutation.isPending}
+            >
+              {saveNoteMutation.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -322,6 +451,23 @@ function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: Con
           </div>
         </div>
       )}
+      {/* Notes */}
+      <div className="border-t pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Customer Notes</p>
+          <p className="text-[12px] text-slate-600">
+            {bcOrder?.customer_message ? bcOrder.customer_message : <span className="text-slate-300">—</span>}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Staff Notes</p>
+          <p className="text-[12px] text-slate-600">
+            {bcOrder?.staff_notes
+              ? bcOrder.staff_notes.replace(/<[^>]+>/g, " ").trim()
+              : <span className="text-slate-300">—</span>}
+          </p>
+        </div>
+      </div>
       <p className="text-[11px] text-slate-400">BC Order #{bcOrderId}</p>
     </div>
   );
@@ -374,6 +520,30 @@ export default function OrdersList() {
   const [, setLocation] = useLocation();
   const fmt = useTimeService();
   const { currentUser } = useStore();
+
+  // ── Store Credit + Email dialog state ───────────────────────────────────────
+  const [storeCreditOrder, setStoreCreditOrder] = useState<ConsolidatedOrder | null>(null);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailData, setEmailData] = useState({ to: "", subject: "", body: "" });
+
+  const handleStoreCreditIssued = (result: {
+    order: ConsolidatedOrder; reason: string; creditAmount: number; creditTax: number;
+    selectedProducts: Array<{ name: string; sku: string; qty: number; unit_price: number; tax: number; line_total: number }>;
+  }) => {
+    const orderNum = result.order.bigcommerce_order_id ?? result.order.id ?? "";
+    const customerName = result.order.company || result.order.customer_name || "Valued Customer";
+    const body = buildStoreCreditEmail({
+      customerName, orderNumber: String(orderNum), reason: result.reason,
+      products: result.selectedProducts.map(p => ({ name: p.name, sku: p.sku, qty: p.qty })),
+      creditAmount: result.creditAmount, creditTax: result.creditTax,
+    });
+    setEmailData({
+      to: result.order.customer_email ?? "",
+      subject: `ORDER #${orderNum} - Missing Item Store Credit`,
+      body,
+    });
+    setEmailOpen(true);
+  };
 
   // ── Filter state ────────────────────────────────────────────────────────────
   const [showFilters, setShowFilters] = useState(false);
@@ -775,7 +945,7 @@ export default function OrdersList() {
                                   <MoreHorizontal className="h-3.5 w-3.5" />
                                 </button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuContent align="end" className="w-52">
                                 <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => openDetail(order)}>
                                   <ExternalLink className="h-3.5 w-3.5" /> Open Details
                                 </DropdownMenuItem>
@@ -789,14 +959,17 @@ export default function OrdersList() {
                                 <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => openInvoice(order)}>
                                   <Download className="h-3.5 w-3.5" /> Download Invoice
                                 </DropdownMenuItem>
-                                {!order.is_bc_mirror && (
-                                  <>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem disabled className="gap-2 text-slate-400 cursor-not-allowed">
-                                      <RotateCcw className="h-3.5 w-3.5" /> Re-Order
-                                    </DropdownMenuItem>
-                                  </>
-                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="gap-2 cursor-pointer text-blue-600 focus:text-blue-700"
+                                  onClick={() => setStoreCreditOrder(order)}
+                                >
+                                  <Wallet className="h-3.5 w-3.5" /> Store Credit
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem disabled className="gap-2 text-slate-400 cursor-not-allowed">
+                                  <RotateCcw className="h-3.5 w-3.5" /> Re-Order
+                                </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </div>
@@ -850,6 +1023,31 @@ export default function OrdersList() {
           </div>
         </div>
       )}
+
+      {/* ── Store Credit Dialog ───────────────────────────────────────────────── */}
+      <StoreCreditDialog
+        open={!!storeCreditOrder}
+        order={storeCreditOrder ? {
+          id: storeCreditOrder.id,
+          bigcommerce_order_id: storeCreditOrder.bigcommerce_order_id,
+          customer_name: storeCreditOrder.customer_name,
+          customer_email: storeCreditOrder.customer_email,
+          company: storeCreditOrder.company,
+          crm_customer_id: storeCreditOrder.crm_customer_id,
+          bigcommerce_customer_id: storeCreditOrder.bigcommerce_customer_id,
+        } : null}
+        onClose={() => setStoreCreditOrder(null)}
+        onIssued={result => handleStoreCreditIssued(result as any)}
+      />
+
+      {/* ── Email Compose Dialog ─────────────────────────────────────────────── */}
+      <EmailComposeDialog
+        open={emailOpen}
+        to={emailData.to}
+        subject={emailData.subject}
+        body={emailData.body}
+        onClose={() => setEmailOpen(false)}
+      />
     </div>
   );
 }

@@ -1,0 +1,388 @@
+Phase: Store Credit & Order Notes Enhancement
+
+This phase introduces a complete Store Credit workflow integrated into Orders, CRM, BigCommerce, email notifications, and customer activity history.
+
+1. Orders > Orders (Expanded Order View)
+
+Enhance the expandable order preview.
+
+Display Order Notes
+
+At the bottom of the expanded order preview display:
+
+Customer Note
+Staff Note
+
+Use the same styling used in the Full Order page.
+
+If either note is empty, display:
+
+—
+
+instead of an empty container.
+
+Edit Order Notes
+
+Respect the existing CRM permission system.
+
+If the signed-in user has permission to edit:
+
+Customer Notes
+Staff Notes
+
+display an Edit button beside each note.
+
+Editing should:
+
+update the order note
+sync immediately to BigCommerce
+update local database if applicable
+create an Activity entry inside the CRM Customer Timeline
+
+Example activity:
+
+Edited Staff Note
+
+Order #105442
+
+by John Smith
+
+Aug 6, 2026
+
+The same functionality should exist in:
+
+Expanded Order View
+Full Order View
+
+Reuse the same editor component.
+
+2. CRM Module
+
+Add a new submenu.
+
+CRM
+
+Customers
+
+To Do
+
+Reactivation
+
+Notes
+
+Store Credit
+Store Credit Page
+
+This page becomes the ledger for every credit transaction.
+
+Display:
+
+Date
+Customer
+Order #
+Type
+Issued
+Redeemed
+Manual Adjustment (future)
+Reason
+User
+Amount
+Running Balance
+
+Include:
+
+Search
+Customer Filter
+User Filter
+Date Filter
+Export CSV
+Export Excel
+3. Orders Context Menu
+
+Inside
+
+Orders > Orders
+
+add another option.
+
+...
+
+Open Details
+
+Print Invoice
+
+Send Invoice
+
+Download Invoice
+
+────────────
+
+Store Credit
+
+────────────
+
+Re-Order (Inactive)
+
+Use an appropriate wallet / credit icon.
+
+4. Store Credit Dialog
+
+When Store Credit is selected, display a modal.
+
+The modal title:
+
+Issue Store Credit
+
+Order #105442
+Reason
+
+Textbox
+
+Default value:
+
+Missing Items
+
+User may edit freely.
+
+Missing Items
+
+Display every order line.
+
+Each row contains:
+
+Checkbox
+
+Product
+
+SKU
+
+Ordered Qty
+
+Missing Qty
+
+Unit Price
+
+Tax
+
+Credit Total
+
+Checkbox behavior
+
+When unchecked
+
+Missing Qty is hidden.
+
+When checked
+
+Missing Qty input appears.
+
+Maximum quantity equals quantity ordered.
+
+Credit Calculation
+
+For every selected product:
+
+(Unit Price × Missing Qty)
+
++
+
+Tax (if charged)
+
+=
+
+Credit Amount
+
+Tax should come directly from the BigCommerce Order API.
+
+No database storage is needed.
+
+Fetch live.
+
+Bottom Summary
+
+Display
+
+Subtotal
+
+Tax
+
+Total Store Credit
+
+Button
+
+Issue Store Credit
+5. After Issue Store Credit
+
+When user clicks:
+
+Issue Store Credit
+
+perform everything as one transaction.
+
+Create Store Credit Ledger
+
+Insert a ledger record.
+
+Save:
+
+Customer
+
+Order
+
+Reason
+
+Products
+
+Missing Qty
+
+Credit Amount
+
+Tax
+
+Issued By
+
+Date
+
+Update Customer Store Credit
+
+Increase available balance.
+
+(Internally this should be backed by the ledger so every issuance and redemption remains fully auditable.)
+
+Create CRM Activity
+
+Add timeline activity.
+
+Example
+
+Store Credit Issued
+
+$24.00
+
+Order #103739
+
+Missing Items
+
+by John Smith
+Update BigCommerce Staff Note
+
+Append the following template to the Staff Note.
+
+Reuse the current note if one already exists.
+
+Append below it.
+
+Template
+
+==============================
+
+STORE CREDIT ISSUED
+
+Reason:
+Missing Items
+
+Missing Items:
+
+2 × Torch 10mg THC + 5mg CBD 12oz Beverages Pack of 4
+SKU: XXXXX
+
+Credit:
+$24.00
+
+Issued By:
+John Smith
+
+Issued:
+Aug 6, 2026
+
+==============================
+
+Sync this immediately to BigCommerce.
+
+6. Customer Email
+
+After Store Credit is successfully issued,
+
+display the email compose dialog.
+
+Reuse the application's existing email component.
+
+Populate:
+
+Recipient
+
+Customer Email
+
+Subject
+
+ORDER #103739
+
+Missing Item Store Credit
+
+Email body
+
+Reuse the attached template as the default.
+
+Populate dynamically.
+
+Include:
+
+Customer Name
+
+Order Number
+
+Reason
+
+Missing Products
+
+Store Credit Amount
+
+Company Signature
+
+User may edit before sending.
+
+The email is not automatically sent.
+
+User must click Send.
+
+7. Full Order Page
+
+At the top button group
+
+Current
+
+Print
+
+Send
+
+Download
+
+Change to
+
+Print
+
+Send
+
+Download
+
+Store Credit
+
+Clicking Store Credit opens the exact same dialog.
+
+No duplicate implementation.
+
+Reuse the component used by Orders List.
+
+8. UI Requirements
+Reuse existing modal component.
+Reuse permission system.
+Reuse invoice/email infrastructure.
+Reuse BigCommerce note synchronization.
+Reuse activity logging system.
+Mobile responsive.
+Tablet responsive.
+Desktop responsive.
+Follow the application's current design language.
+No browser-native dialogs.
+
+Implementation requirement: Treat Store Credit as a ledger-based system. Every issuance and redemption must create a transaction record. The customer's available balance should be derived from (or synchronized with) this ledger to provide a complete audit trail while maintaining good performance.

@@ -302,9 +302,39 @@ export const insertProductLinkLogSchema = createInsertSchema(productLinkLogs).om
 export const insertPromoFreeSkuTrackerSchema = createInsertSchema(promoFreeSkuTracker).omit({ id: true, created_at: true, updated_at: true });
 export const insertShipstationExportHistorySchema = createInsertSchema(shipstationExportHistory).omit({ id: true, created_at: true, export_date: true });
 
+// ─── Store Credit Ledger ──────────────────────────────────────────────────────
+export const storeCreditLedger = pgTable("store_credit_ledger", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  customer_id: integer("customer_id").references(() => customersMirror.id, { onDelete: "set null" }),
+  bigcommerce_customer_id: integer("bigcommerce_customer_id"),
+  bigcommerce_order_id: integer("bigcommerce_order_id"),
+  order_id: integer("order_id"),
+  type: text("type").notNull().default("issued"), // 'issued' | 'redeemed' | 'adjusted'
+  amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+  tax: decimal("tax", { precision: 14, scale: 2 }).notNull().default("0"),
+  reason: text("reason"),
+  products: jsonb("products"), // { name, sku, qty, unit_price, tax, line_total }[]
+  issued_by: integer("issued_by").references(() => users.id),
+  issued_by_name: text("issued_by_name"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ─── Email Templates ──────────────────────────────────────────────────────────
+export const emailTemplates = pgTable("email_templates", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  key: text("key").notNull().unique(),
+  name: text("name").notNull(),
+  subject_template: text("subject_template").notNull().default(""),
+  body: text("body").notNull().default(""),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+  updated_by: integer("updated_by").references(() => users.id),
+});
+
 // Insert schemas — POS Enhancements
 export const insertPosPriceOverrideAuditSchema = createInsertSchema(posPriceOverrideAudit).omit({ id: true, created_at: true });
 export const insertPosStoreCreditUsageSchema = createInsertSchema(posStoreCreditUsage).omit({ id: true, created_at: true });
+export const insertStoreCreditLedgerSchema = createInsertSchema(storeCreditLedger).omit({ id: true, created_at: true });
+export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({ id: true });
 
 // Insert schemas — CRM
 export const insertCrmCustomerSchema = createInsertSchema(customersMirror).omit({ id: true, created_at: true, updated_at: true });
@@ -343,6 +373,12 @@ export type InsertPosPriceOverrideAudit = z.infer<typeof insertPosPriceOverrideA
 export type PosPriceOverrideAudit = typeof posPriceOverrideAudit.$inferSelect;
 export type InsertPosStoreCreditUsage = z.infer<typeof insertPosStoreCreditUsageSchema>;
 export type PosStoreCreditUsage = typeof posStoreCreditUsage.$inferSelect;
+
+// Store Credit + Email Template types
+export type InsertStoreCreditLedger = z.infer<typeof insertStoreCreditLedgerSchema>;
+export type StoreCreditLedgerEntry = typeof storeCreditLedger.$inferSelect;
+export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
+export type EmailTemplate = typeof emailTemplates.$inferSelect;
 
 // CRM types
 export type InsertCrmCustomer = z.infer<typeof insertCrmCustomerSchema>;

@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Monitor, ShoppingBag, Package, BookOpen,
   ShoppingCart, Settings, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, LogOut, Truck, Wifi, WifiOff, Menu, X,
-  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart,
+  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart, Mail,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -145,6 +145,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("crm_customers") ? [{ label: "To Do", path: "/crm/todos" }] : []),
     ...(hasPermission("crm_reactivation") ? [{ label: "Reactivation", path: "/crm/reactivation" }] : []),
     ...(hasPermission("crm_notes") ? [{ label: "Notes", path: "/crm/notes" }] : []),
+    ...(hasPermission("crm_customers") ? [{ label: "Store Credit", path: "/crm/store-credit" }] : []),
   ];
 
   // Reporting children
@@ -181,6 +182,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     { label: "Invoice Settings", path: "/admin/invoice", icon: Receipt },
     { label: "ShipStation Export", path: "/admin/shipstation", icon: Ship },
     { label: "CRM Settings", path: "/admin/crm", icon: ContactRound },
+    { label: "Email Templates", path: "/admin/email-templates", icon: Mail },
   ];
 
   function isActive(path: string) { return location === path; }

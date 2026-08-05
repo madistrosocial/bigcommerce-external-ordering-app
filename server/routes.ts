@@ -2896,9 +2896,270 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ error: "Invalid order ID" });
-      const { note } = req.body;
-      await storage.updateOrderNote(id, note ?? "");
-      res.json({ ok: true });
+      const user = (req as any).authUser;
+      const { note, customer_note, crm_customer_id, bc_order_id } = req.body;
+
+      // Update local order note
+      if (note !== undefined) await storage.updateOrderNote(id, note ?? "");
+
+      // Sync to BC if order has a BC counterpart
+      let bcSuccess = false;
+      const resolvedBcId = bc_order_id ?? null;
+      if (resolvedBcId) {
+        try {
+          const { storeHash, token } = await getBcCreds();
+          if (storeHash && token) {
+            const body: Record<string, string> = {};
+            if (note !== undefined) body.staff_notes = note ?? "";
+            if (customer_note !== undefined) body.customer_message = customer_note ?? "";
+            if (Object.keys(body).length > 0) {
+              const bcResp = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${resolvedBcId}`, {
+                method: "PUT",
+                headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
+                body: JSON.stringify(body),
+              });
+              bcSuccess = bcResp.ok;
+            }
+          }
+        } catch (_) { /* BC failure is non-fatal */ }
+      }
+
+      // Create CRM activity note if customer linked
+      const resolvedCrmId = crm_customer_id ? parseInt(String(crm_customer_id)) : null;
+      if (resolvedCrmId && !isNaN(resolvedCrmId) && user) {
+        const orderLabel = resolvedBcId ? `Order #${resolvedBcId}` : `Order #${id}`;
+        if (note !== undefined) {
+          await storage.createCrmNote({
+            customer_id: resolvedCrmId,
+            note_type: "Order Note",
+            note: `Edited Staff Note\n${orderLabel}`,
+            order_id: resolvedBcId || undefined,
+            created_by: user.id,
+            activity_type: "note",
+          });
+          await storage.createCrmAuditLog({
+            user_id: user.id, action: "staff_note_updated", customer_id: resolvedCrmId,
+            detail: { order_id: id, bc_order_id: resolvedBcId },
+          });
+        }
+      }
+
+      res.json({ ok: true, bc_synced: bcSuccess });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Store Credit ─────────────────────────────────────────────────────────────
+
+  // POST /api/store-credit/issue
+  app.post("/api/store-credit/issue", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+      const {
+        customer_id, bigcommerce_customer_id, bigcommerce_order_id, order_id,
+        reason, amount, tax, products,
+      } = req.body;
+
+      const totalAmount = parseFloat(amount ?? "0");
+      const totalTax = parseFloat(tax ?? "0");
+
+      // 1. Create ledger record
+      const entry = await storage.createStoreCreditLedger({
+        customer_id: customer_id ? parseInt(String(customer_id)) : null,
+        bigcommerce_customer_id: bigcommerce_customer_id ? parseInt(String(bigcommerce_customer_id)) : null,
+        bigcommerce_order_id: bigcommerce_order_id ? parseInt(String(bigcommerce_order_id)) : null,
+        order_id: order_id ? parseInt(String(order_id)) : null,
+        type: "issued",
+        amount: totalAmount.toFixed(2),
+        tax: totalTax.toFixed(2),
+        reason: reason || "Missing Items",
+        products: products ?? [],
+        issued_by: user.id,
+        issued_by_name: user.name,
+      });
+
+      // 2. Update customer store credit balance
+      const crmId = customer_id ? parseInt(String(customer_id)) : null;
+      if (crmId) {
+        await storage.updateCustomerStoreCreditBalance(crmId, totalAmount + totalTax);
+      }
+
+      // 3. Also update BC store credit if bc customer id is available
+      if (bigcommerce_customer_id) {
+        try {
+          const { storeHash, token } = await getBcCreds();
+          if (storeHash && token) {
+            const bcCustomer = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bigcommerce_customer_id}`,
+              { headers: { "X-Auth-Token": String(token), Accept: "application/json" } }
+            );
+            if (bcCustomer.ok) {
+              const bcData = await bcCustomer.json();
+              const currentCredit = parseFloat(bcData.store_credit_amount ?? "0");
+              const newCredit = currentCredit + totalAmount + totalTax;
+              await fetch(
+                `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bigcommerce_customer_id}`,
+                {
+                  method: "PUT",
+                  headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
+                  body: JSON.stringify({ store_credit_amount: newCredit.toFixed(2) }),
+                }
+              );
+            }
+          }
+        } catch (_) { /* BC update is non-fatal */ }
+      }
+
+      // 4. Create CRM activity timeline note
+      if (crmId) {
+        const orderLabel = bigcommerce_order_id ? `Order #${bigcommerce_order_id}` : order_id ? `Order #${order_id}` : "";
+        const creditTotal = (totalAmount + totalTax).toFixed(2);
+        await storage.createCrmNote({
+          customer_id: crmId,
+          note_type: "Store Credit",
+          note: `Store Credit Issued\n$${creditTotal}\n${orderLabel}\n${reason || "Missing Items"}`,
+          order_id: bigcommerce_order_id || undefined,
+          created_by: user.id,
+          activity_type: "note",
+        });
+        await storage.createCrmAuditLog({
+          user_id: user.id, action: "store_credit_issued", customer_id: crmId,
+          detail: { amount: creditTotal, reason, bc_order_id: bigcommerce_order_id },
+        });
+      }
+
+      // 5. Append BC staff note and sync to BC
+      if (bigcommerce_order_id) {
+        try {
+          const { storeHash, token } = await getBcCreds();
+          if (storeHash && token) {
+            // Fetch existing staff notes
+            const existingResp = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bigcommerce_order_id}`,
+              { headers: { "X-Auth-Token": String(token), Accept: "application/json" } }
+            );
+            let existingNote = "";
+            if (existingResp.ok) {
+              const existingData = await existingResp.json();
+              existingNote = existingData.staff_notes ?? "";
+              // strip HTML if present
+              existingNote = existingNote.replace(/<[^>]+>/g, " ").trim();
+            }
+
+            const now = new Date();
+            const dateStr = now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+            const productLines = (products ?? []).map((p: any) =>
+              `${p.qty} × ${p.name}\nSKU: ${p.sku || "—"}`
+            ).join("\n\n");
+            const creditTotal = (totalAmount + totalTax).toFixed(2);
+
+            const noteBlock = [
+              "==============================",
+              "STORE CREDIT ISSUED",
+              `Reason: ${reason || "Missing Items"}`,
+              "",
+              "Missing Items:",
+              productLines,
+              "",
+              `Credit: $${creditTotal}`,
+              "",
+              `Issued By: ${user.name}`,
+              "",
+              `Issued: ${dateStr}`,
+              "==============================",
+            ].join("\n");
+
+            const combined = existingNote
+              ? `${existingNote}\n\n${noteBlock}`
+              : noteBlock;
+
+            await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bigcommerce_order_id}`,
+              {
+                method: "PUT",
+                headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
+                body: JSON.stringify({ staff_notes: combined }),
+              }
+            );
+
+            // Update mirror
+            await storage.updateCrmOrderNotes(parseInt(String(bigcommerce_order_id)), { staff_notes: combined });
+          }
+        } catch (_) { /* Non-fatal */ }
+      }
+
+      res.json({ ok: true, entry });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/store-credit/ledger
+  app.get("/api/store-credit/ledger", requireAuth, async (req, res) => {
+    try {
+      const { customer_id, issued_by, date_from, date_to, search, limit = "50", offset = "0" } = req.query as Record<string, string>;
+      const result = await storage.getStoreCreditLedger({
+        customerId: customer_id ? parseInt(customer_id) : undefined,
+        issuedBy: issued_by ? parseInt(issued_by) : undefined,
+        dateFrom: date_from || undefined,
+        dateTo: date_to || undefined,
+        search: search || undefined,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+      });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/email/send-plain — plain-text email (no PDF)
+  app.post("/api/email/send-plain", requireAuth, async (req, res) => {
+    try {
+      const { to, subject, body: emailBody } = req.body as { to: string; subject: string; body: string };
+      if (!to || !subject) return res.status(400).json({ error: "Missing required fields: to, subject" });
+
+      const setting = await storage.getSetting("invoice_settings").catch(() => null);
+      const cfg = setting?.value ?? {};
+      const smtpHost = cfg.smtp_host || "";
+      const smtpPort = Number(cfg.smtp_port) || 587;
+      const smtpUser = cfg.smtp_user || "";
+      const smtpPass = cfg.smtp_pass || "";
+      const smtpFrom = cfg.smtp_from || smtpUser;
+
+      if (!smtpHost || !smtpUser) {
+        return res.status(400).json({ error: "SMTP is not configured. Please set SMTP settings in Invoice Settings." });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: smtpHost, port: smtpPort, secure: smtpPort === 465,
+        auth: { user: smtpUser, pass: smtpPass },
+        connectionTimeout: 15000, greetingTimeout: 10000, socketTimeout: 20000,
+      });
+      await transporter.verify();
+      await transporter.sendMail({ from: smtpFrom, to, subject, text: emailBody ?? "" });
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/admin/email-templates/:key
+  app.get("/api/admin/email-templates/:key", requireAuth, async (req, res) => {
+    try {
+      const tmpl = await storage.getEmailTemplate(req.params.key);
+      if (!tmpl) return res.status(404).json({ error: "Template not found" });
+      res.json(tmpl);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/admin/email-templates/:key
+  app.put("/api/admin/email-templates/:key", requireAdmin, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const { name, subject_template, body } = req.body;
+      const tmpl = await storage.upsertEmailTemplate(req.params.key, {
+        name: name || req.params.key,
+        subject_template: subject_template || "",
+        body: body || "",
+        updated_by: user?.id,
+      });
+      res.json(tmpl);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

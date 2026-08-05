@@ -38,11 +38,13 @@ import PromoSkuTracker from "@/pages/tools/PromoSkuTracker";
 import InvoicePrintPage from "@/pages/InvoicePrintPage";
 import ShipStationExportPage from "@/pages/admin/ShipStationExport";
 import CRMSettings from "@/pages/admin/CRMSettings";
+import EmailTemplates from "@/pages/admin/EmailTemplates";
 import CRMCustomers from "@/pages/crm/Customers";
 import CustomerProfile from "@/pages/crm/CustomerProfile";
 import CRMReactivation from "@/pages/crm/Reactivation";
 import CRMNotes from "@/pages/crm/CRMNotes";
 import CRMToDo from "@/pages/crm/ToDo";
+import StoreCreditLedger from "@/pages/crm/StoreCreditLedger";
 import PriceOverrideAuditPage from "@/pages/admin/reports/PriceOverrideAudit";
 import StoreCreditUsageReportPage from "@/pages/admin/reports/StoreCreditUsageReport";
 import SalesReportPage from "@/pages/admin/reports/SalesReport";
@@ -208,8 +210,14 @@ function Router() {
       <Route path="/crm/todos">
         {() => <ProtectedRoute component={CRMToDo} />}
       </Route>
+      <Route path="/crm/store-credit">
+        {() => <ProtectedRoute component={StoreCreditLedger} />}
+      </Route>
       <Route path="/admin/crm">
         {() => <ProtectedRoute component={CRMSettings} role="admin" />}
+      </Route>
+      <Route path="/admin/email-templates">
+        {() => <ProtectedRoute component={EmailTemplates} role="admin" />}
       </Route>
 
       {/* ── Reporting routes ── */}

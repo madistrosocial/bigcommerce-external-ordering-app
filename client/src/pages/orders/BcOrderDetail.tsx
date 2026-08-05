@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { getAuthHeaders } from "@/lib/api";
@@ -5,8 +6,11 @@ import { useTimeService } from "@/hooks/useTimeService";
 import {
   ArrowLeft, Printer, Send, Download,
   Package, User, FileText, CheckCircle2, Clock,
-  AlertCircle, Mail, Phone, ExternalLink, MessageSquare,
+  AlertCircle, Mail, Phone, ExternalLink, MessageSquare, Wallet,
 } from "lucide-react";
+import StoreCreditDialog from "@/components/orders/StoreCreditDialog";
+import type { StoreCreditOrder } from "@/components/orders/StoreCreditDialog";
+import EmailComposeDialog from "@/components/orders/EmailComposeDialog";
 import { Button } from "@/components/ui/button";
 
 // ── Reusable product name wrapper (no-op until Product CRM is implemented) ────
@@ -84,6 +88,10 @@ export default function BcOrderDetail() {
     staleTime: 60_000,
   });
 
+  const [storeCreditOpen, setStoreCreditOpen] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailData, setEmailData] = useState({ to: "", subject: "", body: "" });
+
   const openInvoice = () => window.open(`/invoice/${bcOrderId}`, "_blank");
 
   if (isLoading) {
@@ -142,7 +150,7 @@ export default function BcOrderDetail() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
             <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={openInvoice}>
               <Printer className="h-3.5 w-3.5" /> Print
             </Button>
@@ -151,6 +159,13 @@ export default function BcOrderDetail() {
             </Button>
             <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={openInvoice}>
               <Download className="h-3.5 w-3.5" /> Download
+            </Button>
+            <Button
+              size="sm" variant="outline"
+              className="h-8 text-xs gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50"
+              onClick={() => setStoreCreditOpen(true)}
+            >
+              <Wallet className="h-3.5 w-3.5" /> Store Credit
             </Button>
           </div>
         </div>
@@ -363,6 +378,43 @@ export default function BcOrderDetail() {
           </div>
         </div>
       </div>
+
+      {/* ── Store Credit Dialog ─────────────────────────────────────────────── */}
+      {data && (
+        <StoreCreditDialog
+          open={storeCreditOpen}
+          order={{
+            id: undefined,
+            bigcommerce_order_id: parseInt(String(bcOrderId ?? "0")) || undefined,
+            customer_name: [billing.first_name, billing.last_name].filter(Boolean).join(" ") || undefined,
+            customer_email: billing.email || undefined,
+            company: billing.company || undefined,
+            crm_customer_id: crm_customer_id || undefined,
+            bigcommerce_customer_id: order.customer_id || undefined,
+          }}
+          onClose={() => setStoreCreditOpen(false)}
+          onIssued={result => {
+            const orderNum = bcOrderId ?? "";
+            const customerName = billing.company || [billing.first_name, billing.last_name].filter(Boolean).join(" ") || "Valued Customer";
+            const totalCredit = result.creditAmount + result.creditTax;
+            const creditStr = totalCredit.toLocaleString("en-US", { style: "currency", currency: "USD" });
+            const missingItems = result.selectedProducts.map((p: any) => `${p.qty}× ${p.name}${p.sku ? ` (${p.sku})` : ""}`).join(", ");
+            const body = `Hello ${customerName},\n\nThank you for your most recent order with Mid Atlantic Distribution.  We apologize for any inconvenience, but due to an inventory error, there is an item that we are unable to fulfill in your order.  This item has been removed from your order and store credit has been issued to your account.\n\nMissing Items: ${missingItems}\n\nStore Credit Applied: ${creditStr}\n\n\nYou will be able to apply this credit at the point of checkout on future orders.  Please feel free to reach back out with any questions or concerns. Again, we thank you for your patience and understanding while we worked to resolve this matter as quickly and effectively as possible.\nWe greatly appreciate your order with MA Distro and look forward to future business.\n\n\n\nThank you,\n\nMid Atlantic Distribution\n1000 Parliament Court, Suite #300\nDurham, North Carolina 27703\nOffice 1(866)818-9598 Ext 0\nsales@midatlanticdistribution.com`;
+            setEmailData({ to: billing.email ?? "", subject: `ORDER #${orderNum} - Missing Item Store Credit`, body });
+            setStoreCreditOpen(false);
+            setEmailOpen(true);
+          }}
+        />
+      )}
+
+      {/* ── Email Compose Dialog ──────────────────────────────────────────────── */}
+      <EmailComposeDialog
+        open={emailOpen}
+        to={emailData.to}
+        subject={emailData.subject}
+        body={emailData.body}
+        onClose={() => setEmailOpen(false)}
+      />
     </div>
   );
 }
