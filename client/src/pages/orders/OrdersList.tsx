@@ -4,7 +4,6 @@ import { useLocation } from "wouter";
 import { getAuthHeaders } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { useTimeService } from "@/hooks/useTimeService";
-import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -196,6 +195,120 @@ function ExpandedPreview({ order }: { order: ConsolidatedOrder }) {
   );
 }
 
+// ── BC expanded row preview — fetches line items from BC API ─────────────────
+function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: ConsolidatedOrder }) {
+  const { data, isLoading } = useQuery<{ order: any; products: any[] }>({
+    queryKey: ["bc-order-detail", bcOrderId],
+    queryFn: async () => {
+      const r = await fetch(`/api/bigcommerce/orders/${bcOrderId}/detail`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    staleTime: 120_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="bg-slate-50 border-t px-4 py-4 text-[12px] text-slate-400 italic">
+        Loading order details…
+      </div>
+    );
+  }
+
+  const bcOrder = data?.order;
+  const items: any[] = data?.products ?? [];
+  const billing = bcOrder?.billing_address ?? {};
+  const grandTotal = parseFloat(bcOrder?.total_inc_tax ?? order.total ?? "0");
+  const subtotalEx = parseFloat(bcOrder?.subtotal_ex_tax ?? "0");
+  const totalTax   = parseFloat(bcOrder?.total_tax ?? "0");
+  const shipping   = parseFloat(bcOrder?.shipping_cost_inc_tax ?? bcOrder?.base_shipping_cost ?? "0");
+
+  const staffNote = (bcOrder?.staff_notes ?? order.order_note ?? "").replace(/<[^>]+>/g, " ").trim();
+  const custNote  = bcOrder?.customer_message ?? order.customer_note ?? "";
+
+  return (
+    <div className="bg-slate-50 border-t px-4 py-3 space-y-3 text-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Customer */}
+        <div>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Customer</p>
+          <p className="text-[13px] font-semibold text-slate-800">{order.company || order.customer_name}</p>
+          {order.company && <p className="text-[12px] text-slate-500">{order.customer_name}</p>}
+          {order.customer_email && <p className="text-[11px] text-slate-400">{order.customer_email}</p>}
+        </div>
+
+        {/* Billing address */}
+        {billing?.street_1 && (
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Billing Address</p>
+            <p className="text-[12px] text-slate-600 leading-relaxed">
+              {[billing.first_name, billing.last_name].filter(Boolean).join(" ")}
+              {billing.company && <><br />{billing.company}</>}
+              <br />{billing.street_1}{billing.street_2 ? `, ${billing.street_2}` : ""}
+              <br />{billing.city}{billing.state ? `, ${billing.state}` : ""} {billing.zip}
+              <br />{billing.country}
+            </p>
+          </div>
+        )}
+
+        {/* Notes */}
+        <div className="space-y-1">
+          {staffNote && (
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Staff Note</p>
+              <p className="text-[12px] text-slate-600">{staffNote}</p>
+            </div>
+          )}
+          {custNote && (
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Customer Note</p>
+              <p className="text-[12px] text-slate-600">{custNote}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Line items */}
+      {items.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
+            Items ({items.length})
+          </p>
+          <div className="space-y-1">
+            {items.map((item: any, i: number) => {
+              const qty      = Number(item.quantity ?? 0);
+              const lineTotal = parseFloat(item.total_inc_tax ?? "0");
+              const lineTax  = parseFloat(item.total_tax ?? "0");
+              const discount = parseFloat(item.discount_amount ?? "0");
+              return (
+                <div key={i} className="flex items-center justify-between text-[12px] gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                    <span className="shrink-0 text-slate-400 font-medium">{qty}×</span>
+                    <span className="text-slate-700 truncate">{item.name}</span>
+                    {item.sku && <span className="text-slate-400 font-mono shrink-0">{item.sku}</span>}
+                    {lineTax > 0 && <span className="text-slate-300 shrink-0 text-[10px]">+{fmtCurrency(lineTax)} tax</span>}
+                    {discount > 0 && <span className="text-green-600 shrink-0 text-[10px]">-{fmtCurrency(discount)}</span>}
+                  </div>
+                  <span className="text-slate-700 font-medium shrink-0 tabular-nums">{fmtCurrency(lineTotal)}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="border-t mt-2 pt-2 flex justify-end">
+            <div className="space-y-0.5 text-right">
+              {subtotalEx > 0 && <div className="text-[11px] text-slate-400">Subtotal (ex. tax): {fmtCurrency(subtotalEx)}</div>}
+              {totalTax  > 0 && <div className="text-[11px] text-slate-400">Tax: {fmtCurrency(totalTax)}</div>}
+              {shipping  > 0 && <div className="text-[11px] text-slate-400">Shipping: {fmtCurrency(shipping)}</div>}
+              <div className="text-[13px] font-bold text-slate-900 tabular-nums">Total: {fmtCurrency(grandTotal)}</div>
+            </div>
+          </div>
+        </div>
+      )}
+      <p className="text-[11px] text-slate-400">BC Order #{bcOrderId}</p>
+    </div>
+  );
+}
+
 // ── Mobile order card ─────────────────────────────────────────────────────────
 function MobileOrderCard({ order, onOpenDetail, onPrint }: {
   order: ConsolidatedOrder; onOpenDetail: () => void; onPrint: () => void;
@@ -221,7 +334,9 @@ function MobileOrderCard({ order, onOpenDetail, onPrint }: {
       </button>
       {open && (
         <>
-          <ExpandedPreview order={order} />
+          {order.is_bc_mirror && order.bigcommerce_order_id
+            ? <BcExpandedPreview bcOrderId={order.bigcommerce_order_id} order={order} />
+            : <ExpandedPreview order={order} />}
           <div className="flex gap-2 px-4 py-2 border-t bg-white">
             <Button size="sm" variant="outline" className="h-7 text-xs gap-1 flex-1" onClick={onPrint}>
               <Printer className="h-3 w-3" /> Print
@@ -340,7 +455,11 @@ export default function OrdersList() {
 
   const openDetail = (order: ConsolidatedOrder) => {
     if (order.is_bc_mirror) {
-      openInvoice(order);
+      if (order.bigcommerce_order_id) {
+        setLocation(`/orders/bc/${order.bigcommerce_order_id}`);
+      } else {
+        openInvoice(order);
+      }
     } else {
       setLocation(`/orders/${order.id}`);
     }
@@ -621,8 +740,7 @@ export default function OrdersList() {
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-48">
                                 <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => openDetail(order)}>
-                                  <ExternalLink className="h-3.5 w-3.5" />
-                                  {order.is_bc_mirror ? "Open Invoice" : "Open Details"}
+                                  <ExternalLink className="h-3.5 w-3.5" /> Open Details
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => openInvoice(order)}>
@@ -652,7 +770,9 @@ export default function OrdersList() {
                       {isExpanded && (
                         <tr className="border-b border-slate-100">
                           <td colSpan={salesChannel === "salesapp" ? 9 : 7} className="p-0">
-                            <ExpandedPreview order={order} />
+                            {order.is_bc_mirror && order.bigcommerce_order_id
+                              ? <BcExpandedPreview bcOrderId={order.bigcommerce_order_id} order={order} />
+                              : <ExpandedPreview order={order} />}
                           </td>
                         </tr>
                       )}

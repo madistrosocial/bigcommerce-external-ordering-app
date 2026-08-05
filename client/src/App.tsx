@@ -27,6 +27,7 @@ import DraftOrders from "@/pages/agent/DraftOrders";
 import AllOrders from "@/pages/agent/AllOrders";
 import OrdersList from "@/pages/orders/OrdersList";
 import OrderDetail from "@/pages/orders/OrderDetail";
+import BcOrderDetail from "@/pages/orders/BcOrderDetail";
 import CreateCustomer from "@/pages/agent/CreateCustomer";
 import AllCustomers from "@/pages/agent/AllCustomers";
 import BCOrders from "@/pages/agent/BCOrders";
@@ -132,6 +133,9 @@ function Router() {
       </Route>
       <Route path="/orders/list">
         {() => <ProtectedRoute component={OrdersList} />}
+      </Route>
+      <Route path="/orders/bc/:id">
+        {() => <ProtectedRoute component={BcOrderDetail} />}
       </Route>
       <Route path="/orders/:id">
         {() => <ProtectedRoute component={OrderDetail} />}
