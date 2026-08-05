@@ -2979,36 +2979,75 @@ export async function registerRoutes(
         issued_by_name: user.name,
       });
 
-      // 2. Update customer store credit balance
-      const crmId = customer_id ? parseInt(String(customer_id)) : null;
-      if (crmId) {
-        await storage.updateCustomerStoreCreditBalance(crmId, totalAmount + totalTax);
+      // 2. Update local customers_mirror store_credit_balance
+      //    Prefer crm_customer_id (customers_mirror.id / local PK).
+      //    If not provided, fall back to looking up the record by bigcommerce_customer_id.
+      let crmId = customer_id ? parseInt(String(customer_id)) : null;
+      const bcCustId = bigcommerce_customer_id ? parseInt(String(bigcommerce_customer_id)) : null;
+
+      if (!crmId && bcCustId) {
+        // Look up the local CRM row by BC customer id so the local balance is always updated
+        const foundId = await storage.getCrmIdByBcCustomerId(bcCustId);
+        if (foundId) crmId = foundId;
       }
 
-      // 3. Also update BC store credit if bc customer id is available
-      if (bigcommerce_customer_id) {
+      let localUpdated = false;
+      if (crmId) {
+        await storage.updateCustomerStoreCreditBalance(crmId, totalAmount + totalTax);
+        localUpdated = true;
+      }
+
+      // 3. Update BC store credit using v3 API (same path as POS flow — v2 store_credit_amount is read-only)
+      //    Read current balance via v2 (v3 doesn't expose store_credit_amount directly),
+      //    then write the new value via v3 customers PUT.
+      let bcUpdated = false;
+      let bcUpdateError: string | null = null;
+      let bcCreditBefore: number | null = null;
+      let bcCreditAfter: number | null = null;
+      if (bcCustId) {
         try {
           const { storeHash, token } = await getBcCreds();
           if (storeHash && token) {
-            const bcCustomer = await fetch(
-              `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bigcommerce_customer_id}`,
+            // Read current balance from v2
+            const bcReadRes = await fetch(
+              `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bcCustId}`,
               { headers: { "X-Auth-Token": String(token), Accept: "application/json" } }
             );
-            if (bcCustomer.ok) {
-              const bcData = await bcCustomer.json();
-              const currentCredit = parseFloat(bcData.store_credit_amount ?? "0");
-              const newCredit = currentCredit + totalAmount + totalTax;
-              await fetch(
-                `https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${bigcommerce_customer_id}`,
+            if (bcReadRes.ok) {
+              const bcData = await bcReadRes.json();
+              bcCreditBefore = parseFloat(bcData.store_credit_amount ?? bcData.store_credit ?? "0");
+              const newCredit = bcCreditBefore + totalAmount + totalTax;
+              bcCreditAfter = newCredit;
+
+              // Write via v3 API — the only reliable write path (v2 store_credit_amount is effectively read-only)
+              const bcWriteRes = await fetch(
+                `https://api.bigcommerce.com/stores/${storeHash}/v3/customers`,
                 {
                   method: "PUT",
                   headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
-                  body: JSON.stringify({ store_credit_amount: newCredit.toFixed(2) }),
+                  body: JSON.stringify([{ id: bcCustId, store_credit_amounts: [{ amount: newCredit }] }]),
                 }
               );
+              if (bcWriteRes.ok) {
+                bcUpdated = true;
+                // Mirror the exact new balance locally so the CRM page is immediately consistent
+                if (crmId) {
+                  await storage.setCustomerStoreCreditBalance(crmId, newCredit);
+                }
+              } else {
+                const errBody = await bcWriteRes.text();
+                bcUpdateError = `BC v3 write failed (${bcWriteRes.status}): ${errBody.slice(0, 300)}`;
+              }
+            } else {
+              const errBody = await bcReadRes.text();
+              bcUpdateError = `BC v2 read failed (${bcReadRes.status}): ${errBody.slice(0, 200)}`;
             }
+          } else {
+            bcUpdateError = "BC credentials not configured";
           }
-        } catch (_) { /* BC update is non-fatal */ }
+        } catch (e: any) {
+          bcUpdateError = `BC update exception: ${e.message}`;
+        }
       }
 
       // 4. Create CRM activity timeline note
@@ -3048,26 +3087,26 @@ export async function registerRoutes(
             }
 
             const now = new Date();
-            const dateStr = now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-            const productLines = (products ?? []).map((p: any) =>
-              `${p.qty} × ${p.name}\nSKU: ${p.sku || "—"}`
-            ).join("\n\n");
+            const dateStr = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
             const creditTotal = (totalAmount + totalTax).toFixed(2);
 
+            // Compact note format (matches image spec):
+            // Missing Items : {date}
+            // {qty} × {name} (#{bcOrderId})
+            // SKU: {sku}
+            //
+            // Credit: ${amount}
+            // Issued By: {name}
+            const productLines = (products ?? []).map((p: any) =>
+              `${p.qty} × ${p.name}${bigcommerce_order_id ? ` (#${bigcommerce_order_id})` : ""}\nSKU: ${p.sku || "—"}`
+            ).join("\n");
+
             const noteBlock = [
-              "==============================",
-              "STORE CREDIT ISSUED",
-              `Reason: ${reason || "Missing Items"}`,
-              "",
-              "Missing Items:",
+              `Missing Items : ${dateStr}`,
               productLines,
               "",
               `Credit: $${creditTotal}`,
-              "",
               `Issued By: ${user.name}`,
-              "",
-              `Issued: ${dateStr}`,
-              "==============================",
             ].join("\n");
 
             const combined = existingNote
@@ -3089,7 +3128,32 @@ export async function registerRoutes(
         } catch (_) { /* Non-fatal */ }
       }
 
-      res.json({ ok: true, entry });
+      // Verbose debug payload so the caller can verify every ID used in the flow
+      res.json({
+        ok: true,
+        entry,
+        debug: {
+          // IDs used throughout
+          crm_customer_id_sent: customer_id ?? null,        // what the frontend sent
+          crm_id_resolved: crmId,                           // customers_mirror.id used for local update (may differ if we looked up by bc id)
+          bigcommerce_customer_id: bcCustId,                // BC customer ID used for BC update
+          bigcommerce_order_id: bigcommerce_order_id ?? null,
+          // Balance tables
+          balance_table: "customers_mirror",
+          balance_column: "store_credit_balance",
+          // Local update
+          local_balance_updated: localUpdated,
+          // BC update
+          bc_balance_updated: bcUpdated,
+          bc_credit_before: bcCreditBefore,
+          bc_credit_after: bcCreditAfter,
+          bc_update_error: bcUpdateError,
+          // Credit amount
+          credit_subtotal: totalAmount,
+          credit_tax: totalTax,
+          credit_total: totalAmount + totalTax,
+        },
+      });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

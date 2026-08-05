@@ -148,6 +148,8 @@ export interface IStorage {
 
   // Store Credit Ledger
   createStoreCreditLedger(entry: InsertStoreCreditLedger): Promise<StoreCreditLedgerEntry>;
+  getCrmIdByBcCustomerId(bcCustomerId: number): Promise<number | null>;
+  setCustomerStoreCreditBalance(crmId: number, newBalance: number): Promise<void>;
   getStoreCreditLedger(opts: { customerId?: number; issuedBy?: number; dateFrom?: string; dateTo?: string; search?: string; limit?: number; offset?: number }): Promise<{ rows: StoreCreditLedgerEntry[]; total: number }>;
   updateCustomerStoreCreditBalance(customerId: number, delta: number): Promise<void>;
 
@@ -1755,6 +1757,21 @@ export class DatabaseStorage implements IStorage {
     await db.update(customersMirror)
       .set({ store_credit_balance: sql`GREATEST(0, COALESCE(store_credit_balance, 0) + ${delta.toFixed(2)}::numeric)` })
       .where(eq(customersMirror.id, customerId));
+  }
+
+  async getCrmIdByBcCustomerId(bcCustomerId: number): Promise<number | null> {
+    const rows = await db
+      .select({ id: customersMirror.id })
+      .from(customersMirror)
+      .where(eq(customersMirror.bigcommerce_customer_id, bcCustomerId))
+      .limit(1);
+    return rows[0]?.id ?? null;
+  }
+
+  async setCustomerStoreCreditBalance(crmId: number, newBalance: number): Promise<void> {
+    await db.update(customersMirror)
+      .set({ store_credit_balance: newBalance.toFixed(2) })
+      .where(eq(customersMirror.id, crmId));
   }
 
   // ─── Email Templates ──────────────────────────────────────────────────────────
