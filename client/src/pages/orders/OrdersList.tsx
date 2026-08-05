@@ -121,8 +121,10 @@ function KpiCard({ icon: Icon, label, value, color }: { icon: any; label: string
 
 // ── Expanded row preview ──────────────────────────────────────────────────────
 function ExpandedPreview({ order }: { order: ConsolidatedOrder }) {
+  const [, setLocation] = useLocation();
   const addr = order.billing_address as any;
   const total = parseFloat(order.total);
+  const crmHref = order.crm_customer_id ? `/crm/customers/${order.crm_customer_id}` : null;
   return (
     <div className="bg-slate-50 border-t px-4 py-3 space-y-3 text-sm">
       {order.sync_error && (
@@ -134,7 +136,13 @@ function ExpandedPreview({ order }: { order: ConsolidatedOrder }) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Customer</p>
-          <p className="text-[13px] font-semibold text-slate-800">{order.company || order.customer_name}</p>
+          <p
+            className={`text-[13px] font-semibold leading-tight ${crmHref ? "text-blue-600 cursor-pointer hover:underline" : "text-slate-800"}`}
+            onClick={crmHref ? () => setLocation(crmHref) : undefined}
+          >
+            {order.company || order.customer_name}
+            {crmHref && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
+          </p>
           {order.company && <p className="text-[12px] text-slate-500">{order.customer_name}</p>}
           {order.customer_email && <p className="text-[11px] text-slate-400">{order.customer_email}</p>}
         </div>
@@ -197,6 +205,7 @@ function ExpandedPreview({ order }: { order: ConsolidatedOrder }) {
 
 // ── BC expanded row preview — fetches line items from BC API ─────────────────
 function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: ConsolidatedOrder }) {
+  const [, setLocation] = useLocation();
   const { data, isLoading } = useQuery<{ order: any; products: any[] }>({
     queryKey: ["bc-order-detail", bcOrderId],
     queryFn: async () => {
@@ -230,12 +239,23 @@ function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: Con
     <div className="bg-slate-50 border-t px-4 py-3 space-y-3 text-sm">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {/* Customer */}
-        <div>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Customer</p>
-          <p className="text-[13px] font-semibold text-slate-800">{order.company || order.customer_name}</p>
-          {order.company && <p className="text-[12px] text-slate-500">{order.customer_name}</p>}
-          {order.customer_email && <p className="text-[11px] text-slate-400">{order.customer_email}</p>}
-        </div>
+        {(() => {
+          const crmHref = order.crm_customer_id ? `/crm/customers/${order.crm_customer_id}` : null;
+          return (
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Customer</p>
+              <p
+                className={`text-[13px] font-semibold leading-tight ${crmHref ? "text-blue-600 cursor-pointer hover:underline" : "text-slate-800"}`}
+                onClick={crmHref ? () => setLocation(crmHref) : undefined}
+              >
+                {order.company || order.customer_name}
+                {crmHref && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
+              </p>
+              {order.company && <p className="text-[12px] text-slate-500">{order.customer_name}</p>}
+              {order.customer_email && <p className="text-[11px] text-slate-400">{order.customer_email}</p>}
+            </div>
+          );
+        })()}
 
         {/* Billing address */}
         {billing?.street_1 && (
@@ -323,7 +343,7 @@ function MobileOrderCard({ order, onOpenDetail, onPrint }: {
           {initials}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-semibold text-slate-900 truncate">{order.company || order.customer_name}</p>
+          <p className="text-[13px] font-semibold text-slate-900 truncate leading-snug">{order.company || order.customer_name}</p>
           <p className="text-[11px] text-slate-400">#{order.bigcommerce_order_id || order.id} · {order.date && fmt.relative(order.date)}</p>
         </div>
         <div className="text-right shrink-0 mr-1">
@@ -678,7 +698,16 @@ export default function OrdersList() {
                               {initials}
                             </div>
                             <div className="min-w-0">
-                              <p className="text-[13px] font-semibold text-slate-900 truncate leading-tight">{order.company || order.customer_name}</p>
+                              {order.crm_customer_id ? (
+                                <p
+                                  className="text-[13px] font-semibold text-blue-600 hover:underline cursor-pointer truncate leading-tight"
+                                  onClick={e => { e.stopPropagation(); setLocation(`/crm/customers/${order.crm_customer_id}`); }}
+                                >
+                                  {order.company || order.customer_name}
+                                </p>
+                              ) : (
+                                <p className="text-[13px] font-semibold text-slate-900 truncate leading-tight">{order.company || order.customer_name}</p>
+                              )}
                               {order.company && <p className="text-[11px] text-slate-500 truncate leading-tight">{order.customer_name}</p>}
                               {order.customer_email && <p className="text-[11px] text-slate-400 truncate leading-tight">{order.customer_email}</p>}
                             </div>

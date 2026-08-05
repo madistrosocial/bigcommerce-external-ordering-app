@@ -5,7 +5,7 @@ import { useTimeService } from "@/hooks/useTimeService";
 import {
   ArrowLeft, Printer, Send, Download,
   Package, User, FileText, CheckCircle2, Clock,
-  AlertCircle, Mail, Phone, MapPin,
+  AlertCircle, Mail, Phone, ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -66,7 +66,7 @@ export default function BcOrderDetail() {
   const fmt = useTimeService();
   const bcOrderId = params?.id;
 
-  const { data, isLoading, error } = useQuery<{ order: any; products: any[] }>({
+  const { data, isLoading, error } = useQuery<{ order: any; products: any[]; crm_customer_id: number | null }>({
     queryKey: ["bc-order-detail", bcOrderId],
     queryFn: async () => {
       const r = await fetch(`/api/bigcommerce/orders/${bcOrderId}/detail`, {
@@ -101,7 +101,7 @@ export default function BcOrderDetail() {
     );
   }
 
-  const { order, products } = data;
+  const { order, products, crm_customer_id } = data;
   const billing = order.billing_address ?? {};
   const items: any[] = Array.isArray(products) ? products : [];
 
@@ -152,7 +152,7 @@ export default function BcOrderDetail() {
       </div>
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
-      <div className="px-4 py-4 space-y-4 max-w-5xl mx-auto">
+      <div className="px-4 py-4 space-y-4">
 
         {/* ── Customer + Address ───────────────────────────────────────────── */}
         <div className="bg-white border rounded-xl p-4">
@@ -167,11 +167,20 @@ export default function BcOrderDetail() {
                   {initials}
                 </div>
                 <div>
-                  {billing.company && (
-                    <p className="text-[13px] font-semibold text-slate-900 leading-tight">{billing.company}</p>
-                  )}
-                  <p className={`leading-tight ${billing.company ? "text-[12px] text-slate-500" : "text-[13px] font-semibold text-slate-900"}`}>
+                  {billing.company ? (
+                    <p
+                      className={`text-[13px] font-semibold leading-tight ${crm_customer_id ? "text-blue-600 cursor-pointer hover:underline" : "text-slate-900"}`}
+                      onClick={crm_customer_id ? () => setLocation(`/crm/customers/${crm_customer_id}`) : undefined}
+                    >
+                      {billing.company}
+                      {crm_customer_id && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
+                    </p>
+                  ) : null}
+                  <p className={`leading-tight ${billing.company ? "text-[12px] text-slate-500" : `text-[13px] font-semibold ${crm_customer_id ? "text-blue-600 cursor-pointer hover:underline" : "text-slate-900"}`}`}
+                     onClick={!billing.company && crm_customer_id ? () => setLocation(`/crm/customers/${crm_customer_id}`) : undefined}
+                  >
                     {[billing.first_name, billing.last_name].filter(Boolean).join(" ") || "—"}
+                    {!billing.company && crm_customer_id && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
                   </p>
                 </div>
               </div>
@@ -255,7 +264,11 @@ export default function BcOrderDetail() {
                         ? <span className="text-green-600">-{fmtCurrency(discount)}</span>
                         : <span className="text-slate-300">—</span>}
                     </td>
-                    <td className="px-4 py-2.5 text-right text-[13px] text-slate-500 tabular-nums">{fmtCurrency(lineTax)}</td>
+                    <td className="px-4 py-2.5 text-right text-[13px] tabular-nums">
+                      {lineTax > 0
+                        ? <span className="text-slate-500">{fmtCurrency(lineTax)}</span>
+                        : <span className="text-slate-300">—</span>}
+                    </td>
                     <td className="px-4 py-2.5 text-right text-[13px] font-semibold text-slate-900 tabular-nums">{fmtCurrency(lineTotal)}</td>
                   </tr>
                 );
@@ -271,14 +284,18 @@ export default function BcOrderDetail() {
                   <span>Subtotal (ex. tax)</span>
                   <span className="tabular-nums font-medium">{fmtCurrency(subtotalExTax)}</span>
                 </div>
-                <div className="flex justify-between text-[13px] text-slate-600">
-                  <span>Tax</span>
-                  <span className="tabular-nums font-medium">{fmtCurrency(totalTax)}</span>
-                </div>
-                <div className="flex justify-between text-[13px] text-slate-600">
-                  <span>Shipping</span>
-                  <span className="tabular-nums font-medium">{fmtCurrency(shipping)}</span>
-                </div>
+                {totalTax > 0 && (
+                  <div className="flex justify-between text-[13px] text-slate-600">
+                    <span>Tax</span>
+                    <span className="tabular-nums font-medium">{fmtCurrency(totalTax)}</span>
+                  </div>
+                )}
+                {shipping > 0 && (
+                  <div className="flex justify-between text-[13px] text-slate-600">
+                    <span>Shipping</span>
+                    <span className="tabular-nums font-medium">{fmtCurrency(shipping)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-[14px] font-bold text-slate-900 border-t pt-1.5 mt-1.5">
                   <span>Grand Total</span>
                   <span className="tabular-nums">{fmtCurrency(grandTotal)}</span>

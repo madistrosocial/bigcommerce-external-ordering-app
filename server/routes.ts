@@ -3254,7 +3254,18 @@ export async function registerRoutes(
         return { ...p, catalogue_price: cataloguePrice };
       });
 
-      res.json({ order, products: enrichedProducts });
+      // Look up CRM customer ID via BC customer_id so the frontend can link to the CRM page
+      let crm_customer_id: number | null = null;
+      if (order.customer_id) {
+        try {
+          const crmCustomer = await storage.getCrmCustomerByBcId(order.customer_id);
+          if (crmCustomer) crm_customer_id = crmCustomer.id;
+        } catch {
+          // best-effort
+        }
+      }
+
+      res.json({ order, products: enrichedProducts, crm_customer_id });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

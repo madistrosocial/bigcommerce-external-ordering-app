@@ -162,7 +162,7 @@ export default function OrderDetail() {
       </div>
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
-      <div className="px-4 py-4 space-y-4 max-w-5xl mx-auto">
+      <div className="px-4 py-4 space-y-4">
 
         {/* Sync error banner */}
         {order.sync_error && (
@@ -186,15 +186,21 @@ export default function OrderDetail() {
                   {initials}
                 </div>
                 <div>
-                  {order.company && (
-                    <p className="text-[13px] font-semibold text-slate-900 leading-tight">{order.company}</p>
-                  )}
+                  {order.company ? (
+                    <p
+                      className={`text-[13px] font-semibold leading-tight ${order.crm_customer_id ? "text-blue-600 cursor-pointer hover:underline" : "text-slate-900"}`}
+                      onClick={order.crm_customer_id ? () => setLocation(`/crm/customers/${order.crm_customer_id}`) : undefined}
+                    >
+                      {order.company}
+                      {order.crm_customer_id && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
+                    </p>
+                  ) : null}
                   <p
-                    className={`leading-tight ${order.company ? "text-[12px] text-slate-500" : "text-[13px] font-semibold text-slate-900"} ${order.crm_customer_id ? "cursor-pointer text-blue-600 hover:underline" : ""}`}
-                    onClick={order.crm_customer_id ? () => setLocation(`/crm/customers/${order.crm_customer_id}`) : undefined}
+                    className={`leading-tight ${order.company ? "text-[12px] text-slate-500" : `text-[13px] font-semibold ${order.crm_customer_id ? "text-blue-600 cursor-pointer hover:underline" : "text-slate-900"}`}`}
+                    onClick={!order.company && order.crm_customer_id ? () => setLocation(`/crm/customers/${order.crm_customer_id}`) : undefined}
                   >
                     {order.customer_name}
-                    {order.crm_customer_id && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
+                    {!order.company && order.crm_customer_id && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
                   </p>
                 </div>
               </div>
