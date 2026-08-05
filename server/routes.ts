@@ -2891,6 +2891,17 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // PATCH /api/orders/:id/note — update staff note on a local Sales App order
+  app.patch("/api/orders/:id/note", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid order ID" });
+      const { note } = req.body;
+      await storage.updateOrderNote(id, note ?? "");
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // User summary — userId, name, role, group_name — accessible to any authenticated user
   app.get("/api/users/summary", requireAuth, async (_req, res) => {
     try {

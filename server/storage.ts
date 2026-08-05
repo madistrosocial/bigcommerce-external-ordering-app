@@ -33,6 +33,7 @@ export interface IStorage {
   getPendingSyncOrders(): Promise<Order[]>;
   getDraftOrders(): Promise<Order[]>;
   updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void>;
+  updateOrderNote(id: number, note: string): Promise<void>;
   getConsolidatedOrders(params: { page: number; limit: number; search?: string; createdBy?: number | null; syncStatus?: string; bcStatus?: string; dateFrom?: Date | null; dateTo?: Date | null; salesChannel?: "salesapp" | "allorders"; }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }>;
   getOrderDetail(id: number): Promise<any | null>;
   updateOrderSyncError(id: number, error: string): Promise<void>;
@@ -273,6 +274,10 @@ export class DatabaseStorage implements IStorage {
       status, 
       ...(bcOrderId && { bigcommerce_order_id: bcOrderId }) 
     }).where(eq(orders.id, id));
+  }
+
+  async updateOrderNote(id: number, note: string): Promise<void> {
+    await db.update(orders).set({ order_note: note }).where(eq(orders.id, id));
   }
 
   async updateOrderSyncError(id: number, error: string): Promise<void> {

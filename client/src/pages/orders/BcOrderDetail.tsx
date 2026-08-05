@@ -5,9 +5,14 @@ import { useTimeService } from "@/hooks/useTimeService";
 import {
   ArrowLeft, Printer, Send, Download,
   Package, User, FileText, CheckCircle2, Clock,
-  AlertCircle, Mail, Phone, ExternalLink,
+  AlertCircle, Mail, Phone, ExternalLink, MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+// ── Reusable product name wrapper (no-op until Product CRM is implemented) ────
+function ProductLink({ name }: { name: string }) {
+  return <span>{name}</span>;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtCurrency(v: string | number | null | undefined): string {
@@ -159,7 +164,7 @@ export default function BcOrderDetail() {
           <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
             <User className="h-4 w-4 text-slate-400" /> Customer Information
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Identity */}
             <div>
               <div className="flex items-center gap-2.5 mb-2">
@@ -203,26 +208,6 @@ export default function BcOrderDetail() {
             </div>
 
             <AddressBlock address={order.billing_address} label="Billing Address" />
-
-            {/* Notes */}
-            <div className="space-y-2">
-              {order.staff_notes && (
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Staff Notes</p>
-                  <p className="text-[13px] text-slate-600 leading-relaxed"
-                     dangerouslySetInnerHTML={{ __html: order.staff_notes.replace(/<[^>]+>/g, " ") }} />
-                </div>
-              )}
-              {order.customer_message && (
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Customer Note</p>
-                  <p className="text-[13px] text-slate-600 leading-relaxed">{order.customer_message}</p>
-                </div>
-              )}
-              {!order.staff_notes && !order.customer_message && (
-                <p className="text-[12px] text-slate-400 italic">No notes</p>
-              )}
-            </div>
           </div>
         </div>
 
@@ -254,7 +239,7 @@ export default function BcOrderDetail() {
                 return (
                   <tr key={i} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-2.5">
-                      <p className="text-[13px] font-medium text-slate-900">{item.name}</p>
+                      <p className="text-[13px] font-medium text-slate-900"><ProductLink name={item.name} /></p>
                       {item.sku && <p className="text-[11px] text-slate-400 font-mono">{item.sku}</p>}
                     </td>
                     <td className="px-4 py-2.5 text-right text-[13px] font-medium text-slate-700 tabular-nums">{qty}</td>
@@ -304,6 +289,34 @@ export default function BcOrderDetail() {
             </div>
           </div>
         </div>
+
+        {/* ── Notes ────────────────────────────────────────────────────────── */}
+        {(order.staff_notes || order.customer_message) && (
+          <div className="bg-white border rounded-xl p-4">
+            <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
+              <MessageSquare className="h-4 w-4 text-slate-400" /> Notes
+            </h2>
+            <div className="space-y-4">
+              {/* Customer Notes — read-only */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Customer Notes</p>
+                {order.customer_message
+                  ? <p className="text-[13px] text-slate-600 leading-relaxed">{order.customer_message}</p>
+                  : <p className="text-[12px] text-slate-400 italic">No customer notes</p>}
+              </div>
+
+              {/* Staff Notes — read-only for BC orders */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Staff Notes</p>
+                {order.staff_notes
+                  ? <p className="text-[13px] text-slate-600 leading-relaxed">
+                      {order.staff_notes.replace(/<[^>]+>/g, " ").trim()}
+                    </p>
+                  : <p className="text-[12px] text-slate-400 italic">No staff notes</p>}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Timeline ─────────────────────────────────────────────────────── */}
         <div className="bg-white border rounded-xl p-4">

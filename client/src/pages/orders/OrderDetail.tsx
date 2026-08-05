@@ -1,13 +1,17 @@
+import { useState } from "react";
 import { useRoute, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAuthHeaders } from "@/lib/api";
 import { useTimeService } from "@/hooks/useTimeService";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   ArrowLeft, Printer, Send, Download, ExternalLink,
-  Package, User, MapPin, FileText, CheckCircle2, Clock,
-  AlertCircle, Building2, Mail, Phone,
+  Package, User, FileText, CheckCircle2, Clock,
+  AlertCircle, Mail, Phone, MessageSquare, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface OrderItem {
@@ -36,6 +40,11 @@ interface OrderDetailData {
   created_by_name: string | null;
   company: string | null;
   crm_customer_id: number | null;
+}
+
+// ── Reusable product name wrapper (no-op until Product CRM is implemented) ────
+function ProductLink({ name }: { name: string }) {
+  return <span>{name}</span>;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -78,7 +87,14 @@ export default function OrderDetail() {
   const [, params] = useRoute("/orders/:id");
   const [, setLocation] = useLocation();
   const fmt = useTimeService();
+  const { hasPermission } = usePermissions();
+  const queryClient = useQueryClient();
   const id = params?.id;
+
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteText, setNoteText] = useState("");
+
+  const canEditNote = hasPermission("crm", "notes_edit");
 
   const { data: order, isLoading, error } = useQuery<OrderDetailData>({
     queryKey: ["order", "detail", id],
@@ -88,6 +104,21 @@ export default function OrderDetail() {
       return r.json();
     },
     enabled: !!id,
+  });
+
+  const saveNoteMutation = useMutation({
+    mutationFn: async (note: string) => {
+      const r = await fetch(`/api/orders/${id}/note`, {
+        method: "PATCH",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ note }),
+      });
+      if (!r.ok) throw new Error("Failed to save note");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["order", "detail", id] });
+      setEditingNote(false);
+    },
   });
 
   const openInvoice = () => {
@@ -177,8 +208,7 @@ export default function OrderDetail() {
           <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
             <User className="h-4 w-4 text-slate-400" /> Customer Information
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Identity */}
             <div>
               <div className="flex items-center gap-2.5 mb-2">
@@ -222,25 +252,6 @@ export default function OrderDetail() {
 
             {/* Billing address */}
             <AddressBlock address={order.billing_address} label="Billing Address" />
-
-            {/* Notes */}
-            <div className="space-y-2">
-              {order.order_note && (
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Staff Notes</p>
-                  <p className="text-[13px] text-slate-600 leading-relaxed">{order.order_note}</p>
-                </div>
-              )}
-              {order.customer_note && (
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Customer Notes</p>
-                  <p className="text-[13px] text-slate-600 leading-relaxed">{order.customer_note}</p>
-                </div>
-              )}
-              {!order.order_note && !order.customer_note && (
-                <p className="text-[12px] text-slate-400 italic">No notes</p>
-              )}
-            </div>
           </div>
         </div>
 
@@ -268,7 +279,7 @@ export default function OrderDetail() {
                 return (
                   <tr key={i} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-2.5">
-                      <p className="text-[13px] font-medium text-slate-900">{item.name}</p>
+                      <p className="text-[13px] font-medium text-slate-900"><ProductLink name={item.name} /></p>
                       {item.sku && <p className="text-[11px] text-slate-400 font-mono">{item.sku}</p>}
                     </td>
                     <td className="px-4 py-2.5 text-right text-[13px] font-medium text-slate-700 tabular-nums">{item.quantity}</td>
@@ -306,6 +317,66 @@ export default function OrderDetail() {
             </div>
           </div>
         </div>
+
+        {/* ── Notes ────────────────────────────────────────────────────────── */}
+        <div className="bg-white border rounded-xl p-4">
+          <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
+            <MessageSquare className="h-4 w-4 text-slate-400" /> Notes
+          </h2>
+          <div className="space-y-4">
+            {/* Customer Notes — read-only */}
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Customer Notes</p>
+              {order.customer_note
+                ? <p className="text-[13px] text-slate-600 leading-relaxed">{order.customer_note}</p>
+                : <p className="text-[12px] text-slate-400 italic">No customer notes</p>}
+            </div>
+
+            {/* Staff Notes — editable if canEditNote */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Staff Notes</p>
+                {canEditNote && (
+                  <Button
+                    size="sm" variant="outline"
+                    className="h-6 text-[11px] px-2 gap-1"
+                    onClick={() => { setNoteText(order.order_note ?? ""); setEditingNote(true); }}
+                  >
+                    <Pencil className="h-3 w-3" /> Edit
+                  </Button>
+                )}
+              </div>
+              {order.order_note
+                ? <p className="text-[13px] text-slate-600 leading-relaxed">{order.order_note}</p>
+                : <p className="text-[12px] text-slate-400 italic">No staff notes</p>}
+            </div>
+          </div>
+        </div>
+
+        {/* Staff Notes edit dialog */}
+        <Dialog open={editingNote} onOpenChange={v => { if (!v) setEditingNote(false); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Edit Staff Notes</DialogTitle>
+            </DialogHeader>
+            <Textarea
+              value={noteText}
+              onChange={e => setNoteText(e.target.value)}
+              rows={5}
+              placeholder="Enter internal staff notes…"
+              className="text-sm"
+            />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditingNote(false)}>Cancel</Button>
+              <Button
+                onClick={() => saveNoteMutation.mutate(noteText)}
+                disabled={saveNoteMutation.isPending}
+              >
+                {saveNoteMutation.isPending ? "Saving…" : "Save"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* ── Timeline ─────────────────────────────────────────────────────── */}
         <div className="bg-white border rounded-xl p-4">
