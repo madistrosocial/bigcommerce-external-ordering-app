@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -17,6 +18,7 @@ import {
   Search, FileText, FileSpreadsheet, ArrowUp, ArrowDown, ArrowUpDown,
   ChevronLeft, ChevronRight, User, Settings2, X, Users, AlertTriangle,
   TrendingUp, HeartPulse, Activity, Phone, Mail, Filter, UserX, UserCheck,
+  MoreHorizontal,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTimeService } from "@/hooks/useTimeService";
@@ -30,40 +32,37 @@ type SortField =
 
 type HealthFilter = "" | "Healthy" | "Watch" | "At Risk" | "Lost";
 
+// Original column order restored; first col is combined customer identity.
+// "Days Since" is merged into the Last Order cell — no separate column for it.
 const ALL_COLUMNS = [
-  // Combined customer identity column (required sticky)
-  { key: "customer",       label: "Customer",       required: true,  defaultW: 280 },
-  // Recommended columns per design spec
-  { key: "primary_rep",    label: "Primary Rep",    required: false, defaultW: 140 },
-  { key: "status",         label: "Status",         required: false, defaultW: 110 },
-  { key: "last_order",     label: "Last Order",     required: false, defaultW: 130 },
-  { key: "revenue",        label: "Lifetime Sales", required: false, defaultW: 130 },
-  { key: "store_credit",   label: "Store Credit",   required: false, defaultW: 120 },
-  { key: "orders",         label: "Orders",         required: false, defaultW: 90  },
-  { key: "last_follow_up", label: "Next Follow Up", required: false, defaultW: 160 },
-  // Additional columns available via column picker
-  { key: "secondary_rep",  label: "Secondary Rep",  required: false, defaultW: 140 },
-  { key: "phone",          label: "Phone",          required: false, defaultW: 130 },
+  { key: "customer",       label: "Customer",       required: true,  defaultW: 260 },
+  { key: "phone",          label: "Phone",          required: false, defaultW: 132 },
   { key: "city",           label: "City",           required: false, defaultW: 130 },
-  { key: "state",          label: "State",          required: false, defaultW: 110 },
-  { key: "customer_group", label: "Customer Group", required: false, defaultW: 180 },
-  { key: "customer_type",  label: "Cust. Type",     required: false, defaultW: 120 },
-  { key: "address_type",   label: "Addr. Type",     required: false, defaultW: 110 },
-  { key: "days_since",     label: "Days Since",     required: false, defaultW: 110 },
+  { key: "state",          label: "State",          required: false, defaultW: 88  },
+  { key: "customer_group", label: "Customer Group", required: false, defaultW: 170 },
+  { key: "customer_type",  label: "Cust. Type",     required: false, defaultW: 100 },
+  { key: "address_type",   label: "Addr. Type",     required: false, defaultW: 114 },
+  { key: "primary_rep",    label: "Primary Rep",    required: false, defaultW: 150 },
+  { key: "secondary_rep",  label: "Secondary Rep",  required: false, defaultW: 150 },
+  { key: "last_order",     label: "Last Order",     required: false, defaultW: 155 }, // includes days-since sub-line
+  { key: "orders",         label: "Orders",         required: false, defaultW: 72  },
+  { key: "revenue",        label: "Revenue",        required: false, defaultW: 114 },
+  { key: "store_credit",   label: "Store Credit",   required: false, defaultW: 118 },
+  { key: "last_follow_up", label: "Last Action",    required: false, defaultW: 155 },
 ] as const;
 
 type ColKey = typeof ALL_COLUMNS[number]["key"];
+// Default visible mirrors original defaults (matches screenshot columns minus separate days_since)
 const DEFAULT_VISIBLE = new Set<ColKey>([
-  "customer", "primary_rep", "status", "last_order",
-  "revenue", "store_credit", "orders", "last_follow_up",
+  "customer", "phone", "state", "customer_group", "last_order", "orders", "revenue",
 ]);
 const DEFAULT_WIDTHS: Record<ColKey, number> = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c.defaultW])) as Record<ColKey, number>;
 const COL_MIN_WIDTHS: Record<ColKey, number> = {
-  customer: 220, primary_rep: 110, status: 90,
-  last_order: 110, revenue: 110, store_credit: 100,
-  orders: 70, last_follow_up: 130,
-  secondary_rep: 110, phone: 110, city: 100, state: 80,
-  customer_group: 140, customer_type: 90, address_type: 85, days_since: 80,
+  customer: 200, phone: 110, city: 90, state: 70,
+  customer_group: 120, customer_type: 80, address_type: 90,
+  primary_rep: 110, secondary_rep: 110,
+  last_order: 120, orders: 60, revenue: 90, store_credit: 90,
+  last_follow_up: 120,
 };
 
 const PAGE_SIZE = 50;
@@ -153,8 +152,8 @@ export default function CRMCustomers() {
   const { hasPermission } = usePermissions();
   const canExport = hasPermission("crm", "export");
 
-  const colKey    = `crm_cols_v3_${currentUser?.id ?? "guest"}`;
-  const widthKey  = `crm_col_widths_v2_${currentUser?.id ?? "guest"}`;
+  const colKey    = `crm_cols_v4_${currentUser?.id ?? "guest"}`;
+  const widthKey  = `crm_col_widths_v3_${currentUser?.id ?? "guest"}`;
   const filterKey = `crm_customers_filters_${currentUser?.id ?? "guest"}`;
 
   // ── Column visibility ─────────────────────────────────────────────────────
@@ -772,40 +771,36 @@ export default function CRMCustomers() {
           >
             <colgroup>
               {vis("customer")       && <col style={{ width: colWidths.customer }} />}
-              {vis("primary_rep")    && <col style={{ width: colWidths.primary_rep }} />}
-              {vis("status")         && <col style={{ width: colWidths.status }} />}
-              {vis("last_order")     && <col style={{ width: colWidths.last_order }} />}
-              {vis("revenue")        && <col style={{ width: colWidths.revenue }} />}
-              {vis("store_credit")   && <col style={{ width: colWidths.store_credit }} />}
-              {vis("orders")         && <col style={{ width: colWidths.orders }} />}
-              {vis("last_follow_up") && <col style={{ width: colWidths.last_follow_up }} />}
-              {vis("secondary_rep")  && <col style={{ width: colWidths.secondary_rep }} />}
               {vis("phone")          && <col style={{ width: colWidths.phone }} />}
               {vis("city")           && <col style={{ width: colWidths.city }} />}
               {vis("state")          && <col style={{ width: colWidths.state }} />}
               {vis("customer_group") && <col style={{ width: colWidths.customer_group }} />}
               {vis("customer_type")  && <col style={{ width: colWidths.customer_type }} />}
               {vis("address_type")   && <col style={{ width: colWidths.address_type }} />}
-              {vis("days_since")     && <col style={{ width: colWidths.days_since }} />}
+              {vis("primary_rep")    && <col style={{ width: colWidths.primary_rep }} />}
+              {vis("secondary_rep")  && <col style={{ width: colWidths.secondary_rep }} />}
+              {vis("last_order")     && <col style={{ width: colWidths.last_order }} />}
+              {vis("orders")         && <col style={{ width: colWidths.orders }} />}
+              {vis("revenue")        && <col style={{ width: colWidths.revenue }} />}
+              {vis("store_credit")   && <col style={{ width: colWidths.store_credit }} />}
+              {vis("last_follow_up") && <col style={{ width: colWidths.last_follow_up }} />}
             </colgroup>
             <thead className="sticky top-0 bg-slate-50 border-b z-10">
               <tr>
                 {vis("customer")       && sortTh("company",              "Customer",       "customer",       true)}
-                {vis("primary_rep")    && sortTh("primary_rep_name",     "Primary Rep",    "primary_rep")}
-                {vis("status")         && plainTh("Status",                                "status")}
-                {vis("last_order")     && sortTh("last_order_date",      "Last Order",     "last_order")}
-                {vis("revenue")        && sortTh("lifetime_revenue",     "Lifetime Sales", "revenue")}
-                {vis("store_credit")   && sortTh("store_credit_balance", "Store Credit",   "store_credit")}
-                {vis("orders")         && sortTh("lifetime_orders",      "Orders",         "orders")}
-                {vis("last_follow_up") && sortTh("last_follow_up",       "Next Follow Up", "last_follow_up")}
-                {vis("secondary_rep")  && sortTh("secondary_rep_name",   "Secondary Rep",  "secondary_rep")}
                 {vis("phone")          && plainTh("Phone",                                 "phone")}
                 {vis("city")           && sortTh("city",                  "City",           "city")}
                 {vis("state")          && sortTh("state",                 "State",          "state")}
                 {vis("customer_group") && sortTh("customer_group_name",  "Customer Group", "customer_group")}
                 {vis("customer_type")  && sortTh("customer_type",        "Cust. Type",     "customer_type")}
                 {vis("address_type")   && sortTh("address_type",         "Addr. Type",     "address_type")}
-                {vis("days_since")     && sortTh("days_since_order",     "Days Since",     "days_since")}
+                {vis("primary_rep")    && sortTh("primary_rep_name",     "Primary Rep",    "primary_rep")}
+                {vis("secondary_rep")  && sortTh("secondary_rep_name",   "Secondary Rep",  "secondary_rep")}
+                {vis("last_order")     && sortTh("last_order_date",      "Last Order",     "last_order")}
+                {vis("orders")         && sortTh("lifetime_orders",      "Orders",         "orders")}
+                {vis("revenue")        && sortTh("lifetime_revenue",     "Revenue",        "revenue")}
+                {vis("store_credit")   && sortTh("store_credit_balance", "Store Credit",   "store_credit")}
+                {vis("last_follow_up") && sortTh("last_follow_up",       "Last Action",    "last_follow_up")}
               </tr>
             </thead>
             <tbody>
@@ -816,15 +811,10 @@ export default function CRMCustomers() {
                   : days > 90 ? "text-red-500 font-semibold"
                   : days > 30 ? "text-amber-500"
                   : "text-green-600";
-                const stateVal = (c.shipping_address as any)?.state
-                  || (c.billing_address as any)?.state
-                  || null;
-                const cityVal = (c.shipping_address as any)?.city
-                  || (c.billing_address as any)?.city
-                  || null;
+                const stateVal = (c.shipping_address as any)?.state || (c.billing_address as any)?.state || null;
+                const cityVal  = (c.shipping_address as any)?.city  || (c.billing_address as any)?.city  || null;
                 const followUpDate = (c as any).last_action_date ?? null;
-                const followUpBy = (c as any).last_action_type ?? null;
-                // Avatar initials from company name
+                const followUpBy   = (c as any).last_action_type  ?? null;
                 const initials = (c.company || [c.first_name, c.last_name].filter(Boolean).join(" ") || "?")
                   .split(/\s+/).slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
 
@@ -835,7 +825,7 @@ export default function CRMCustomers() {
                     className="group border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors"
                     onClick={() => setLocation(`/crm/customers/${c.id}`)}
                   >
-                    {/* ── Combined Customer column ── */}
+                    {/* ── Customer (combined: avatar + company + name + email) ── */}
                     {vis("customer") && (
                       <td
                         className="px-3 py-2 sticky left-0 z-10 bg-white group-hover:bg-slate-50 transition-colors border-r border-slate-100"
@@ -862,126 +852,48 @@ export default function CRMCustomers() {
                             </div>
                             {c.email && (
                               <div className="text-[11px] text-slate-400 truncate leading-tight">
-                                <a
-                                  href={`mailto:${c.email}`}
-                                  onClick={e => e.stopPropagation()}
-                                  className="hover:text-blue-500 transition-colors"
-                                >
+                                <a href={`mailto:${c.email}`} onClick={e => e.stopPropagation()} className="hover:text-blue-500 transition-colors">
                                   {c.email}
                                 </a>
                               </div>
                             )}
                           </div>
-                        </div>
-                        {/* Inline actions on hover */}
-                        {canManageInactive && (
-                          <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            {c.inactive_at ? (
-                              <button
-                                className="text-[10px] text-green-600 hover:text-green-800 flex items-center gap-0.5"
-                                onClick={e => { e.stopPropagation(); handleRestore(c); }}
-                              >
-                                <UserCheck className="h-2.5 w-2.5" /> Restore
-                              </button>
-                            ) : (
-                              <button
-                                className="text-[10px] text-slate-400 hover:text-red-600 flex items-center gap-0.5"
-                                onClick={e => { e.stopPropagation(); setMarkInactiveCustomer(c); }}
-                              >
-                                <UserX className="h-2.5 w-2.5" /> Deactivate
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    )}
-
-                    {/* ── Primary Rep ── */}
-                    {vis("primary_rep") && (
-                      <td className="px-3 py-2">
-                        {c.primary_rep_name
-                          ? <span className="text-[13px] font-medium text-slate-700">{c.primary_rep_name}</span>
-                          : <span className="text-slate-300">—</span>}
-                      </td>
-                    )}
-
-                    {/* ── Status (health + active/inactive) ── */}
-                    {vis("status") && (
-                      <td className="px-3 py-2">
-                        <div className="flex flex-col gap-0.5">
-                          {c.account_health && (
-                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold w-fit ${
-                              c.account_health === "Healthy" ? "bg-green-100 text-green-700"
-                              : c.account_health === "Watch" ? "bg-yellow-100 text-yellow-700"
-                              : c.account_health === "At Risk" ? "bg-orange-100 text-orange-700"
-                              : c.account_health === "Lost" ? "bg-red-100 text-red-700"
-                              : "bg-slate-100 text-slate-500"
-                            }`}>{c.account_health}</span>
-                          )}
-                          {c.inactive_at && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-500 w-fit">Inactive</span>
+                          {/* ⋯ context menu — visible only on row hover */}
+                          {canManageInactive && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 h-6 w-6 rounded flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-200"
+                                  onClick={e => e.stopPropagation()}
+                                  title="Actions"
+                                >
+                                  <MoreHorizontal className="h-3.5 w-3.5" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44" onClick={e => e.stopPropagation()}>
+                                {c.inactive_at ? (
+                                  <DropdownMenuItem
+                                    className="gap-2 text-green-700 focus:text-green-700 focus:bg-green-50 cursor-pointer"
+                                    onClick={e => { e.stopPropagation(); handleRestore(c); }}
+                                  >
+                                    <UserCheck className="h-3.5 w-3.5" /> Restore Active
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem
+                                    className="gap-2 text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer"
+                                    onClick={e => { e.stopPropagation(); setMarkInactiveCustomer(c); }}
+                                  >
+                                    <UserX className="h-3.5 w-3.5" /> Deactivate
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           )}
                         </div>
                       </td>
                     )}
 
-                    {/* ── Last Order ── */}
-                    {vis("last_order") && (
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {c.last_order_date ? (
-                          <div>
-                            <div className="text-[13px] font-medium text-slate-700">{fmt.relative(c.last_order_date)}</div>
-                            {days != null && <div className={`text-[11px] ${daysColor}`}>{days}d ago</div>}
-                          </div>
-                        ) : <span className="text-slate-300">—</span>}
-                      </td>
-                    )}
-
-                    {/* ── Lifetime Sales ── */}
-                    {vis("revenue") && (
-                      <td className="px-3 py-2 text-right">
-                        <span className="text-[13px] font-semibold text-slate-900 tabular-nums">{fmtCurrency(c.lifetime_revenue)}</span>
-                      </td>
-                    )}
-
-                    {/* ── Store Credit ── */}
-                    {vis("store_credit") && (
-                      <td className="px-3 py-2 text-right">
-                        {Number(c.store_credit_balance ?? 0) > 0
-                          ? <span className="text-[13px] font-semibold text-teal-700 tabular-nums">{fmtCurrency(c.store_credit_balance)}</span>
-                          : <span className="text-slate-300">—</span>}
-                      </td>
-                    )}
-
-                    {/* ── Orders ── */}
-                    {vis("orders") && (
-                      <td className="px-3 py-2 text-right">
-                        <span className="text-[13px] font-medium text-slate-700 tabular-nums">{(c.lifetime_orders ?? 0).toLocaleString()}</span>
-                      </td>
-                    )}
-
-                    {/* ── Next Follow Up (last activity) ── */}
-                    {vis("last_follow_up") && (
-                      <td className="px-3 py-2">
-                        {followUpDate ? (
-                          <div>
-                            <div className="text-[13px] font-medium text-slate-700 whitespace-nowrap">{fmt.relative(followUpDate)}</div>
-                            {followUpBy && <div className="text-[11px] text-slate-400 truncate">{followUpBy}</div>}
-                          </div>
-                        ) : <span className="text-slate-300 text-[12px]">No activity</span>}
-                      </td>
-                    )}
-
-                    {/* ── Secondary Rep ── */}
-                    {vis("secondary_rep") && (
-                      <td className="px-3 py-2">
-                        {c.secondary_rep_name
-                          ? <span className="text-[13px] font-medium text-slate-700">{c.secondary_rep_name}</span>
-                          : <span className="text-slate-300">—</span>}
-                      </td>
-                    )}
-
-                    {/* ── Phone ── */}
+                    {/* Original column order restored ── */}
                     {vis("phone") && (
                       <td className="px-3 py-2 truncate" style={{ maxWidth: colWidths.phone }}>
                         {c.phone
@@ -989,8 +901,6 @@ export default function CRMCustomers() {
                           : <span className="text-slate-300">—</span>}
                       </td>
                     )}
-
-                    {/* ── City / State / Group / Type / Addr Type / Days Since ── */}
                     {vis("city")           && <td className="px-3 py-2 text-[13px] text-slate-700">{cityVal  || <span className="text-slate-300">—</span>}</td>}
                     {vis("state")          && <td className="px-3 py-2 text-[13px] text-slate-700">{stateVal || <span className="text-slate-300">—</span>}</td>}
                     {vis("customer_group") && <td className="px-3 py-2 text-[13px] text-slate-600 truncate" style={{ maxWidth: colWidths.customer_group }}>{c.customer_group_name || <span className="text-slate-300">—</span>}</td>}
@@ -1012,7 +922,58 @@ export default function CRMCustomers() {
                           : <span className="text-slate-300">—</span>}
                       </td>
                     )}
-                    {vis("days_since") && <td className={`px-3 py-2 text-[13px] font-medium whitespace-nowrap ${daysColor}`}>{days != null ? `${days}d` : <span className="text-slate-300">—</span>}</td>}
+                    {vis("primary_rep") && (
+                      <td className="px-3 py-2">
+                        {c.primary_rep_name
+                          ? <Badge variant="secondary" className="text-xs font-medium">{c.primary_rep_name}</Badge>
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                    )}
+                    {vis("secondary_rep") && (
+                      <td className="px-3 py-2">
+                        {c.secondary_rep_name
+                          ? <Badge variant="secondary" className="text-xs font-medium">{c.secondary_rep_name}</Badge>
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                    )}
+                    {/* Last Order — merged with Days Since sub-line */}
+                    {vis("last_order") && (
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {c.last_order_date ? (
+                          <div>
+                            <div className="text-[13px] font-medium text-slate-700">{fmt.relative(c.last_order_date)}</div>
+                            {days != null && <div className={`text-[11px] tabular-nums ${daysColor}`}>{days}d ago</div>}
+                          </div>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                    )}
+                    {vis("orders") && (
+                      <td className="px-3 py-2 text-right">
+                        <span className="text-[13px] font-medium text-slate-700 tabular-nums">{(c.lifetime_orders ?? 0).toLocaleString()}</span>
+                      </td>
+                    )}
+                    {vis("revenue") && (
+                      <td className="px-3 py-2 text-right">
+                        <span className="text-[13px] font-semibold text-slate-900 tabular-nums">{fmtCurrency(c.lifetime_revenue)}</span>
+                      </td>
+                    )}
+                    {vis("store_credit") && (
+                      <td className="px-3 py-2 text-right">
+                        {Number(c.store_credit_balance ?? 0) > 0
+                          ? <span className="text-[13px] font-semibold text-teal-700 tabular-nums">{fmtCurrency(c.store_credit_balance)}</span>
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                    )}
+                    {vis("last_follow_up") && (
+                      <td className="px-3 py-2">
+                        {followUpDate ? (
+                          <div>
+                            <div className="text-[13px] font-medium text-slate-700 whitespace-nowrap">{fmt.relative(followUpDate)}</div>
+                            {followUpBy && <div className="text-[11px] text-slate-400 truncate">{followUpBy}</div>}
+                          </div>
+                        ) : <span className="text-slate-300 text-[12px]">—</span>}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
