@@ -1,0 +1,154 @@
+The new Orders module is working well and follows the intended design direction. Before considering this feature complete, implement the remaining filters and behavior from the original specification.
+
+--------------------------------
+
+Sales Channel Filter
+
+Add a new filter:
+
+Sales Channel
+
+Options:
+
+• Sales App
+• All Orders
+
+Definitions:
+
+Sales App
+Display only orders created through the Sales App / POS.
+
+All Orders
+Display every order that exists in BigCommerce, including:
+
+• Website orders
+• Orders created from the Sales App that successfully synced to BigCommerce
+
+--------------------------------
+
+Sync Status Filter
+
+The Sync Status filter should ONLY be visible when Sales Channel = Sales App.
+
+Options:
+
+• Successful
+• Failed
+
+Hide this filter completely when Sales Channel = All Orders because every order in this view already exists in BigCommerce.
+
+--------------------------------
+
+Created By Filter
+
+Keep the existing filter but support:
+
+• Me
+• Any individual user
+• All Users
+
+This filter only applies to Sales App orders.
+
+If Sales Channel = All Orders, disable or hide this filter since website orders have no Sales App user.
+
+--------------------------------
+
+BigCommerce Status Filter
+
+Expand the status filter to include every BigCommerce order status.
+
+Examples:
+
+Awaiting Payment
+
+Awaiting Fulfillment
+
+Awaiting Shipment
+
+Completed
+
+Cancelled
+
+Declined
+
+Refunded
+
+Manual Verification Required
+
+Disputed
+
+Archived
+
+etc.
+
+This filter should always represent the actual BigCommerce order status.
+
+--------------------------------
+
+Search
+
+Continue supporting search by:
+
+Order Number
+
+Company Name
+
+Customer Name
+
+Email
+
+Phone (if available)
+
+--------------------------------
+
+Date Filter
+
+Retain the current date range filter.
+
+KPIs should always update according to every active filter.
+
+--------------------------------
+
+Filter Behavior
+
+Sales Channel controls which additional filters are displayed.
+
+Sales App
+
+Show:
+
+Created By
+
+Sync Status
+
+All Orders
+
+Hide:
+
+Created By
+
+Sync Status
+
+This keeps the UI clean and avoids filters that don't apply.
+
+--------------------------------
+
+Clear Filters
+
+Reset every filter back to its default state.
+
+--------------------------------
+
+Performance
+
+Do not query BigCommerce.
+
+Continue using the local mirrored database.
+
+--------------------------------
+
+Do not redesign the page.
+
+Do not change the layout.
+
+This update only completes the missing filter behavior from the original specification.

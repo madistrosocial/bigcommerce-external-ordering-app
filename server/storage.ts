@@ -33,7 +33,7 @@ export interface IStorage {
   getPendingSyncOrders(): Promise<Order[]>;
   getDraftOrders(): Promise<Order[]>;
   updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void>;
-  getConsolidatedOrders(params: { page: number; limit: number; search?: string; createdBy?: number | null; syncStatus?: string; dateFrom?: Date | null; dateTo?: Date | null; }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; }; }>;
+  getConsolidatedOrders(params: { page: number; limit: number; search?: string; createdBy?: number | null; syncStatus?: string; bcStatus?: string; dateFrom?: Date | null; dateTo?: Date | null; salesChannel?: "salesapp" | "allorders"; }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }>;
   getOrderDetail(id: number): Promise<any | null>;
   updateOrderSyncError(id: number, error: string): Promise<void>;
   updateOrderForSubmission(id: number, updates: { bigcommerce_customer_id: number; billing_address: any; status: string }): Promise<void>;
@@ -300,12 +300,91 @@ export class DatabaseStorage implements IStorage {
 
   async getConsolidatedOrders(params: {
     page: number; limit: number; search?: string;
-    createdBy?: number | null; syncStatus?: string;
+    createdBy?: number | null; syncStatus?: string; bcStatus?: string;
     dateFrom?: Date | null; dateTo?: Date | null;
-  }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; }; }> {
-    const { page, limit, search, createdBy, syncStatus, dateFrom, dateTo } = params;
+    salesChannel?: "salesapp" | "allorders";
+  }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }> {
+    const { page, limit, search, createdBy, syncStatus, bcStatus, dateFrom, dateTo, salesChannel = "salesapp" } = params;
     const offset = (page - 1) * limit;
 
+    // ── All Orders mode: pull from customerOrdersMirror (BC-synced data) ──────
+    if (salesChannel === "allorders") {
+      const conds: any[] = [];
+      if (search) {
+        const q = `%${search}%`;
+        conds.push(or(
+          ilike(customerOrdersMirror.customer_name, q),
+          ilike(customerOrdersMirror.customer_email, q),
+          sql`CAST(${customerOrdersMirror.bigcommerce_order_id} AS TEXT) ILIKE ${q}`,
+          sql`CAST(${customerOrdersMirror.order_number} AS TEXT) ILIKE ${q}`,
+          ilike(customersMirror.phone, q),
+        ));
+      }
+      if (bcStatus)   conds.push(eq(customerOrdersMirror.status, bcStatus));
+      if (dateFrom)   conds.push(sql`${customerOrdersMirror.order_date} >= ${dateFrom}`);
+      if (dateTo)     conds.push(sql`${customerOrdersMirror.order_date} <= ${dateTo}`);
+      const where = conds.length > 0 ? and(...conds) : undefined;
+
+      const [rows, [countRow], [kpiRow]] = await Promise.all([
+        db.select({
+          id: customerOrdersMirror.id,
+          customer_name: customerOrdersMirror.customer_name,
+          customer_email: customerOrdersMirror.customer_email,
+          bigcommerce_customer_id: customerOrdersMirror.bigcommerce_customer_id,
+          billing_address: sql<null>`NULL::jsonb`,
+          status: customerOrdersMirror.status,
+          bc_status: customerOrdersMirror.status,
+          sync_error: sql<null>`NULL::text`,
+          order_note: customerOrdersMirror.staff_notes,
+          customer_note: customerOrdersMirror.customer_order_notes,
+          items: sql<string>`'[]'::json`,
+          total: customerOrdersMirror.order_total,
+          date: customerOrdersMirror.order_date,
+          created_by_user_id: sql<null>`NULL::int`,
+          bigcommerce_order_id: customerOrdersMirror.bigcommerce_order_id,
+          created_by_name: sql<null>`NULL::text`,
+          company: customersMirror.company,
+          crm_customer_id: customersMirror.id,
+          is_bc_mirror: sql<boolean>`TRUE`,
+        })
+        .from(customerOrdersMirror)
+        .leftJoin(customersMirror, eq(customerOrdersMirror.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+        .where(where)
+        .orderBy(sql`${customerOrdersMirror.order_date} DESC NULLS LAST`)
+        .limit(limit).offset(offset),
+
+        db.select({ count: sql<number>`COUNT(*)` })
+          .from(customerOrdersMirror)
+          .leftJoin(customersMirror, eq(customerOrdersMirror.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+          .where(where),
+
+        db.select({
+          total:               sql<number>`COUNT(*)`,
+          revenue:             sql<string>`COALESCE(SUM(${customerOrdersMirror.order_total}), 0)`,
+          completed:           sql<number>`COUNT(*) FILTER (WHERE ${customerOrdersMirror.status} = 'Completed')`,
+          awaitingFulfillment: sql<number>`COUNT(*) FILTER (WHERE ${customerOrdersMirror.status} = 'Awaiting Fulfillment')`,
+          cancelled:           sql<number>`COUNT(*) FILTER (WHERE ${customerOrdersMirror.status} = 'Cancelled')`,
+        })
+        .from(customerOrdersMirror)
+        .leftJoin(customersMirror, eq(customerOrdersMirror.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+        .where(where),
+      ]);
+
+      return {
+        orders: rows,
+        total: Number(countRow?.count ?? 0),
+        kpis: {
+          total:               Number(kpiRow?.total               ?? 0),
+          revenue:             parseFloat(String(kpiRow?.revenue  ?? "0")),
+          successful:          0, pending: 0, failed: 0,
+          completed:           Number(kpiRow?.completed           ?? 0),
+          awaitingFulfillment: Number(kpiRow?.awaitingFulfillment ?? 0),
+          cancelled:           Number(kpiRow?.cancelled           ?? 0),
+        },
+      };
+    }
+
+    // ── Sales App mode: pull from local orders table ──────────────────────────
     const conds: any[] = [sql`${orders.status} != 'draft'`];
     if (search) {
       const q = `%${search}%`;
@@ -314,6 +393,7 @@ export class DatabaseStorage implements IStorage {
         ilike(orders.customer_email, q),
         sql`CAST(${orders.bigcommerce_order_id} AS TEXT) ILIKE ${q}`,
         sql`CAST(${orders.id} AS TEXT) ILIKE ${q}`,
+        ilike(customersMirror.phone, q),
       ));
     }
     if (createdBy != null) conds.push(eq(orders.created_by_user_id, createdBy));
@@ -321,7 +401,14 @@ export class DatabaseStorage implements IStorage {
     if (dateFrom)          conds.push(sql`${orders.date} >= ${dateFrom}`);
     if (dateTo)            conds.push(sql`${orders.date} <= ${dateTo}`);
 
+    const bcStatusCond = bcStatus ? eq(customerOrdersMirror.status, bcStatus) : undefined;
     const where = conds.length > 0 ? and(...conds) : undefined;
+    const fullWhere = bcStatusCond ? and(where, bcStatusCond) : where;
+
+    const baseQuery = () => db.from(orders)
+      .leftJoin(users, eq(orders.created_by_user_id, users.id))
+      .leftJoin(customersMirror, eq(orders.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+      .leftJoin(customerOrdersMirror, eq(orders.bigcommerce_order_id, customerOrdersMirror.bigcommerce_order_id));
 
     const [rows, [countRow], [kpiRow]] = await Promise.all([
       db.select({
@@ -331,6 +418,7 @@ export class DatabaseStorage implements IStorage {
         bigcommerce_customer_id: orders.bigcommerce_customer_id,
         billing_address: orders.billing_address,
         status: orders.status,
+        bc_status: customerOrdersMirror.status,
         sync_error: orders.sync_error,
         order_note: orders.order_note,
         customer_note: orders.customer_note,
@@ -342,16 +430,21 @@ export class DatabaseStorage implements IStorage {
         created_by_name: users.name,
         company: customersMirror.company,
         crm_customer_id: customersMirror.id,
+        is_bc_mirror: sql<boolean>`FALSE`,
       })
       .from(orders)
       .leftJoin(users, eq(orders.created_by_user_id, users.id))
       .leftJoin(customersMirror, eq(orders.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
-      .where(where)
+      .leftJoin(customerOrdersMirror, eq(orders.bigcommerce_order_id, customerOrdersMirror.bigcommerce_order_id))
+      .where(fullWhere)
       .orderBy(desc(orders.date))
-      .limit(limit)
-      .offset(offset),
+      .limit(limit).offset(offset),
 
-      db.select({ count: sql<number>`COUNT(*)` }).from(orders).where(where),
+      db.select({ count: sql<number>`COUNT(*)` })
+        .from(orders)
+        .leftJoin(customersMirror, eq(orders.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+        .leftJoin(customerOrdersMirror, eq(orders.bigcommerce_order_id, customerOrdersMirror.bigcommerce_order_id))
+        .where(fullWhere),
 
       db.select({
         total:      sql<number>`COUNT(*)`,
@@ -359,18 +452,23 @@ export class DatabaseStorage implements IStorage {
         successful: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'synced')`,
         pending:    sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'pending_sync')`,
         failed:     sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'failed')`,
-      }).from(orders).where(where),
+      })
+      .from(orders)
+      .leftJoin(customersMirror, eq(orders.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+      .leftJoin(customerOrdersMirror, eq(orders.bigcommerce_order_id, customerOrdersMirror.bigcommerce_order_id))
+      .where(fullWhere),
     ]);
 
     return {
       orders: rows,
       total: Number(countRow?.count ?? 0),
       kpis: {
-        total:      Number(kpiRow?.total      ?? 0),
-        revenue:    parseFloat(String(kpiRow?.revenue ?? "0")),
-        successful: Number(kpiRow?.successful ?? 0),
-        pending:    Number(kpiRow?.pending    ?? 0),
-        failed:     Number(kpiRow?.failed     ?? 0),
+        total:               Number(kpiRow?.total      ?? 0),
+        revenue:             parseFloat(String(kpiRow?.revenue ?? "0")),
+        successful:          Number(kpiRow?.successful ?? 0),
+        pending:             Number(kpiRow?.pending    ?? 0),
+        failed:              Number(kpiRow?.failed     ?? 0),
+        completed: 0, awaitingFulfillment: 0, cancelled: 0,
       },
     };
   }

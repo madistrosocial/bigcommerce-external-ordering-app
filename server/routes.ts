@@ -2861,7 +2861,9 @@ export async function registerRoutes(
       const {
         page = "1", limit = "50",
         search = "", createdBy = "",
-        syncStatus = "", dateFrom = "", dateTo = "",
+        syncStatus = "", bcStatus = "",
+        dateFrom = "", dateTo = "",
+        salesChannel = "salesapp",
       } = req.query as Record<string, string>;
       const result = await storage.getConsolidatedOrders({
         page: Math.max(1, parseInt(page)),
@@ -2869,8 +2871,10 @@ export async function registerRoutes(
         search: search || undefined,
         createdBy: createdBy ? parseInt(createdBy) : null,
         syncStatus: syncStatus || undefined,
+        bcStatus: bcStatus || undefined,
         dateFrom: dateFrom ? new Date(dateFrom) : null,
         dateTo: dateTo ? (() => { const d = new Date(dateTo); d.setHours(23, 59, 59, 999); return d; })() : null,
+        salesChannel: (salesChannel === "allorders" ? "allorders" : "salesapp"),
       });
       res.json(result);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
