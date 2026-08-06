@@ -6,4 +6,4 @@
 - [Native BC store credit checkout](bc-native-store-credit.md) — full OAuth flow for native store_credit_amount on POS orders; requires clientId+clientSecret in bigcommerce_config setting.
 - [Reports Module architecture](reports-module.md) — shared engine pattern; individual reports supply config only; use getAllPermissions() not getPermissions() in seeds.
 - [BC order note editing pattern](bc-order-note-editing.md) — PATCH /api/bigcommerce/orders/:bcOrderId/notes is the canonical endpoint; field names are staff_notes + customer_message (not customer_note).
-- [CustomerOrdersPanel reuse](customer-orders-panel.md) — CRM CustomerProfile uses CustomerOrdersPanel (not OrdersTable); the panel owns its own data fetching, pagination, expansion, and note editing.
+- [CustomerOrdersPanel reuse](customer-orders-panel.md) — CRM CustomerProfile uses CustomerOrdersPanel with customerInfo prop; panel uses BcOrderExpandedRow + BcOrderActionsMenu; order # links to /orders/bc/:id.

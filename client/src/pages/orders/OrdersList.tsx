@@ -19,6 +19,7 @@ import {
 import StoreCreditDialog from "@/components/orders/StoreCreditDialog";
 import type { StoreCreditOrder } from "@/components/orders/StoreCreditDialog";
 import EmailComposeDialog from "@/components/orders/EmailComposeDialog";
+import BcOrderExpandedRow from "@/components/orders/BcOrderExpandedRow";
 
 // ── Reusable product name wrapper (no-op until Product CRM is implemented) ────
 function ProductLink({ name }: { name: string }) {
@@ -353,205 +354,7 @@ function ExpandedPreview({ order }: { order: ConsolidatedOrder }) {
   );
 }
 
-// ── BC expanded row preview — fetches line items from BC API ─────────────────
-function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: ConsolidatedOrder }) {
-  const [, setLocation] = useLocation();
-  const queryClient = useQueryClient();
-  const { hasPermission } = usePermissions();
-  const canEditNote = hasPermission("crm", "notes_edit");
-  const [editingNote, setEditingNote] = useState<"staff" | "customer" | null>(null);
-
-  const { data, isLoading } = useQuery<{ order: any; products: any[] }>({
-    queryKey: ["bc-order-detail", bcOrderId],
-    queryFn: async () => {
-      const r = await fetch(`/api/bigcommerce/orders/${bcOrderId}/detail`, { headers: getAuthHeaders() });
-      if (!r.ok) throw new Error("Failed");
-      return r.json();
-    },
-    staleTime: 120_000,
-  });
-
-  const [editNoteText, setEditNoteText] = useState("");
-
-  const saveNoteMutation = useMutation({
-    mutationFn: async ({ type, text }: { type: "staff" | "customer"; text: string }) => {
-      const r = await fetch(`/api/bigcommerce/orders/${bcOrderId}/notes`, {
-        method: "PATCH",
-        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...(type === "staff" ? { staff_notes: text } : { customer_message: text }),
-          crm_customer_id: order.crm_customer_id,
-        }),
-      });
-      if (!r.ok) throw new Error("Failed to save note");
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["bc-order-detail", bcOrderId] });
-      queryClient.invalidateQueries({ queryKey: ["orders", "consolidated"] });
-      setEditingNote(null);
-    },
-  });
-
-  if (isLoading) {
-    return (
-      <div className="bg-slate-50 border-t px-4 py-4 text-[12px] text-slate-400 italic">
-        Loading order details…
-      </div>
-    );
-  }
-
-  const bcOrder = data?.order;
-  const items: any[] = data?.products ?? [];
-  const billing = bcOrder?.billing_address ?? {};
-  const grandTotal = parseFloat(bcOrder?.total_inc_tax ?? order.total ?? "0");
-  const subtotalEx = parseFloat(bcOrder?.subtotal_ex_tax ?? "0");
-  const totalTax   = parseFloat(bcOrder?.total_tax ?? "0");
-  const shipping   = parseFloat(bcOrder?.shipping_cost_inc_tax ?? bcOrder?.base_shipping_cost ?? "0");
-  const crmHref    = order.crm_customer_id ? `/crm/customers/${order.crm_customer_id}` : null;
-
-  return (
-    <div className="bg-slate-50 border-t px-4 py-3 space-y-3 text-sm">
-      {/* Customer + Billing */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Customer</p>
-          <p
-            className={`text-[13px] font-semibold leading-tight ${crmHref ? "text-blue-600 cursor-pointer hover:underline" : "text-slate-800"}`}
-            onClick={crmHref ? () => setLocation(crmHref) : undefined}
-          >
-            {order.company || order.customer_name}
-            {crmHref && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
-          </p>
-          {order.company && <p className="text-[12px] text-slate-500">{order.customer_name}</p>}
-          {order.customer_email && <p className="text-[11px] text-slate-400">{order.customer_email}</p>}
-        </div>
-        {billing?.street_1 && (
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Billing Address</p>
-            <p className="text-[12px] text-slate-600 leading-relaxed">
-              {[billing.first_name, billing.last_name].filter(Boolean).join(" ")}
-              {billing.company && <><br />{billing.company}</>}
-              <br />{billing.street_1}{billing.street_2 ? `, ${billing.street_2}` : ""}
-              <br />{billing.city}{billing.state ? `, ${billing.state}` : ""} {billing.zip}
-              <br />{billing.country}
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Products */}
-      {items.length > 0 && (
-        <div>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
-            Products ({items.length})
-          </p>
-          <div className="space-y-1">
-            {items.map((item: any, i: number) => {
-              const qty       = Number(item.quantity ?? 0);
-              const lineTotal = parseFloat(item.total_inc_tax ?? "0");
-              const lineTax   = parseFloat(item.total_tax ?? "0");
-              const discount  = parseFloat(item.discount_amount ?? "0");
-              return (
-                <div key={i} className="flex items-center justify-between text-[12px] gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                    <span className="shrink-0 text-slate-400 font-medium">{qty}×</span>
-                    <ProductLink name={item.name} />
-                    {item.sku && <span className="text-slate-400 font-mono shrink-0 text-[10px]">{item.sku}</span>}
-                    {lineTax  > 0 && <span className="text-slate-300 shrink-0 text-[10px]">+{fmtCurrency(lineTax)} tax</span>}
-                    {discount > 0 && <span className="text-green-600 shrink-0 text-[10px]">-{fmtCurrency(discount)}</span>}
-                  </div>
-                  <span className="text-slate-700 font-medium shrink-0 tabular-nums">{fmtCurrency(lineTotal)}</span>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Order Summary */}
-          <div className="border-t mt-2 pt-2 flex justify-end">
-            <div className="space-y-0.5 text-right">
-              {subtotalEx > 0 && <div className="text-[11px] text-slate-400">Subtotal (ex. tax): {fmtCurrency(subtotalEx)}</div>}
-              {totalTax  > 0 && <div className="text-[11px] text-slate-400">Tax: {fmtCurrency(totalTax)}</div>}
-              {shipping  > 0 && <div className="text-[11px] text-slate-400">Shipping: {fmtCurrency(shipping)}</div>}
-              <div className="text-[13px] font-bold text-slate-900 tabular-nums">Grand Total: {fmtCurrency(grandTotal)}</div>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Notes — editable */}
-      <div className="border-t pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <div className="flex items-center justify-between mb-0.5">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Customer Notes</p>
-            {canEditNote && (
-              <button
-                className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-0.5 transition-colors"
-                onClick={() => { setEditNoteText(bcOrder?.customer_message ?? ""); setEditingNote("customer"); }}
-              >
-                <Pencil className="h-2.5 w-2.5" /> Edit
-              </button>
-            )}
-          </div>
-          <p className="text-[12px] text-slate-600 whitespace-pre-wrap">
-            {bcOrder?.customer_message || <span className="text-slate-300">—</span>}
-          </p>
-        </div>
-        <div>
-          <div className="flex items-center justify-between mb-0.5">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Staff Notes</p>
-            {canEditNote && (
-              <button
-                className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-0.5 transition-colors"
-                onClick={() => { setEditNoteText(bcOrder?.staff_notes?.replace(/<[^>]+>/g, " ").trim() ?? ""); setEditingNote("staff"); }}
-              >
-                <Pencil className="h-2.5 w-2.5" /> Edit
-              </button>
-            )}
-          </div>
-          <p className="text-[12px] text-slate-600 whitespace-pre-wrap">
-            {bcOrder?.staff_notes
-              ? bcOrder.staff_notes.replace(/<[^>]+>/g, " ").trim()
-              : <span className="text-slate-300">—</span>}
-          </p>
-        </div>
-      </div>
-      <p className="text-[11px] text-slate-400">BC Order #{bcOrderId}</p>
-
-      {/* Note editor dialog */}
-      <Dialog open={!!editingNote} onOpenChange={v => { if (!v) setEditingNote(null); }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-1.5 text-sm">
-              <MessageSquare className="h-4 w-4 text-slate-400" />
-              Edit {editingNote === "staff" ? "Staff" : "Customer"} Notes
-            </DialogTitle>
-          </DialogHeader>
-          <Textarea
-            key={editingNote}
-            value={editNoteText}
-            onChange={e => setEditNoteText(e.target.value)}
-            rows={5}
-            className="text-sm resize-none"
-          />
-          {saveNoteMutation.isError && (
-            <p className="text-xs text-red-600">{(saveNoteMutation.error as Error).message}</p>
-          )}
-          <p className="text-[11px] text-slate-400">
-            Syncs to BigCommerce and creates a CRM timeline event.
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingNote(null)}>Cancel</Button>
-            <Button
-              onClick={() => saveNoteMutation.mutate({ type: editingNote!, text: editNoteText })}
-              disabled={saveNoteMutation.isPending}
-            >
-              {saveNoteMutation.isPending ? "Saving…" : "Save"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
+// BcExpandedPreview extracted → client/src/components/orders/BcOrderExpandedRow.tsx
 
 // ── Mobile order card ─────────────────────────────────────────────────────────
 function MobileOrderCard({ order, onOpenDetail, onPrint }: {
@@ -579,7 +382,15 @@ function MobileOrderCard({ order, onOpenDetail, onPrint }: {
       {open && (
         <>
           {order.is_bc_mirror && order.bigcommerce_order_id
-            ? <BcExpandedPreview bcOrderId={order.bigcommerce_order_id} order={order} />
+            ? <BcOrderExpandedRow
+                bcOrderId={order.bigcommerce_order_id}
+                crmCustomerId={order.crm_customer_id}
+                crmHref={order.crm_customer_id ? `/crm/customers/${order.crm_customer_id}` : null}
+                customerLabel={order.company || order.customer_name}
+                customerSubLabel={order.company ? order.customer_name : undefined}
+                customerEmail={order.customer_email}
+                syncError={order.sync_error}
+              />
             : <ExpandedPreview order={order} />}
           <div className="flex gap-2 px-4 py-2 border-t bg-white">
             <Button size="sm" variant="outline" className="h-7 text-xs gap-1 flex-1" onClick={onPrint}>
@@ -1061,7 +872,15 @@ export default function OrdersList() {
                         <tr className="border-b border-slate-100">
                           <td colSpan={salesChannel === "salesapp" ? 9 : 8} className="p-0">
                             {order.is_bc_mirror && order.bigcommerce_order_id
-                              ? <BcExpandedPreview bcOrderId={order.bigcommerce_order_id} order={order} />
+                              ? <BcOrderExpandedRow
+                                  bcOrderId={order.bigcommerce_order_id}
+                                  crmCustomerId={order.crm_customer_id}
+                                  crmHref={order.crm_customer_id ? `/crm/customers/${order.crm_customer_id}` : null}
+                                  customerLabel={order.company || order.customer_name}
+                                  customerSubLabel={order.company ? order.customer_name : undefined}
+                                  customerEmail={order.customer_email}
+                                  syncError={order.sync_error}
+                                />
                               : <ExpandedPreview order={order} />}
                           </td>
                         </tr>

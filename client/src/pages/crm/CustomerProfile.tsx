@@ -1138,7 +1138,16 @@ export default function CustomerProfile() {
                     View All Orders →
                   </Button>
                 </div>
-                <CustomerOrdersPanel crmCustomerId={id} limit={20} />
+                <CustomerOrdersPanel
+                  crmCustomerId={id}
+                  limit={20}
+                  customerInfo={{
+                    name: customer.company || [customer.first_name, customer.last_name].filter(Boolean).join(" "),
+                    email: customer.email ?? null,
+                    company: customer.company ?? null,
+                    bigcommerceCustomerId: customer.bigcommerce_customer_id ?? null,
+                  }}
+                />
               </div>
             </div>
           )}
@@ -1149,7 +1158,15 @@ export default function CustomerProfile() {
               <div className="px-4 py-3 border-b bg-slate-50">
                 <h2 className="text-sm font-semibold text-slate-700">Order History</h2>
               </div>
-              <CustomerOrdersPanel crmCustomerId={id} />
+              <CustomerOrdersPanel
+                crmCustomerId={id}
+                customerInfo={{
+                  name: customer.company || [customer.first_name, customer.last_name].filter(Boolean).join(" "),
+                  email: customer.email ?? null,
+                  company: customer.company ?? null,
+                  bigcommerceCustomerId: customer.bigcommerce_customer_id ?? null,
+                }}
+              />
             </div>
           )}
 
