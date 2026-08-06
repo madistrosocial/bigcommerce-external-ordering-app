@@ -1,16 +1,18 @@
 import { useState } from "react";
 import { useRoute, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAuthHeaders } from "@/lib/api";
 import { useTimeService } from "@/hooks/useTimeService";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   ArrowLeft, Printer, Send, Download,
   Package, User, FileText, CheckCircle2, Clock,
-  AlertCircle, Mail, Phone, ExternalLink, MessageSquare, Wallet,
+  AlertCircle, Mail, Phone, ExternalLink, MessageSquare, Wallet, Pencil,
 } from "lucide-react";
 import StoreCreditDialog from "@/components/orders/StoreCreditDialog";
 import type { StoreCreditOrder } from "@/components/orders/StoreCreditDialog";
 import EmailComposeDialog from "@/components/orders/EmailComposeDialog";
+import OrderNoteEditorDialog from "@/components/orders/OrderNoteEditorDialog";
 import { Button } from "@/components/ui/button";
 
 // ── Reusable product name wrapper (no-op until Product CRM is implemented) ────
@@ -88,9 +90,32 @@ export default function BcOrderDetail() {
     staleTime: 60_000,
   });
 
+  const queryClient = useQueryClient();
+  const { hasPermission } = usePermissions();
+  const canEditNote = hasPermission("crm", "notes_edit");
+
   const [storeCreditOpen, setStoreCreditOpen] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailData, setEmailData] = useState({ to: "", subject: "", body: "" });
+  const [editingBcNote, setEditingBcNote] = useState<"staff" | "customer" | null>(null);
+
+  const saveNoteMutation = useMutation({
+    mutationFn: async ({ type, text }: { type: "staff" | "customer"; text: string }) => {
+      const r = await fetch(`/api/bigcommerce/orders/${bcOrderId}/notes`, {
+        method: "PATCH",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(type === "staff" ? { staff_notes: text } : { customer_message: text }),
+          crm_customer_id: data?.crm_customer_id ?? undefined,
+        }),
+      });
+      if (!r.ok) throw new Error("Failed to save note");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["bc-order-detail", bcOrderId] });
+      setEditingBcNote(null);
+    },
+  });
 
   const openInvoice = () => window.open(`/invoice/${bcOrderId}`, "_blank");
 
@@ -305,33 +330,63 @@ export default function BcOrderDetail() {
           </div>
         </div>
 
-        {/* ── Notes ────────────────────────────────────────────────────────── */}
-        {(order.staff_notes || order.customer_message) && (
-          <div className="bg-white border rounded-xl p-4">
-            <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
-              <MessageSquare className="h-4 w-4 text-slate-400" /> Notes
-            </h2>
-            <div className="space-y-4">
-              {/* Customer Notes — read-only */}
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Customer Notes</p>
-                {order.customer_message
-                  ? <p className="text-[13px] text-slate-600 leading-relaxed">{order.customer_message}</p>
-                  : <p className="text-[12px] text-slate-400 italic">No customer notes</p>}
+        {/* ── Notes — always shown, editable ─────────────────────────────── */}
+        <div className="bg-white border rounded-xl p-4">
+          <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
+            <MessageSquare className="h-4 w-4 text-slate-400" /> Notes
+          </h2>
+          <div className="space-y-4">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Customer Notes</p>
+                {canEditNote && (
+                  <button
+                    className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-0.5 transition-colors"
+                    onClick={() => setEditingBcNote("customer")}
+                  >
+                    <Pencil className="h-2.5 w-2.5" /> Edit
+                  </button>
+                )}
               </div>
+              {order.customer_message
+                ? <p className="text-[13px] text-slate-600 leading-relaxed whitespace-pre-wrap">{order.customer_message}</p>
+                : <p className="text-[12px] text-slate-300 italic">No customer notes</p>}
+            </div>
 
-              {/* Staff Notes — read-only for BC orders */}
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Staff Notes</p>
-                {order.staff_notes
-                  ? <p className="text-[13px] text-slate-600 leading-relaxed">
-                      {order.staff_notes.replace(/<[^>]+>/g, " ").trim()}
-                    </p>
-                  : <p className="text-[12px] text-slate-400 italic">No staff notes</p>}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Staff Notes</p>
+                {canEditNote && (
+                  <button
+                    className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-0.5 transition-colors"
+                    onClick={() => setEditingBcNote("staff")}
+                  >
+                    <Pencil className="h-2.5 w-2.5" /> Edit
+                  </button>
+                )}
               </div>
+              {order.staff_notes
+                ? <p className="text-[13px] text-slate-600 leading-relaxed whitespace-pre-wrap">
+                    {order.staff_notes.replace(/<[^>]+>/g, " ").trim()}
+                  </p>
+                : <p className="text-[12px] text-slate-300 italic">No staff notes</p>}
             </div>
           </div>
-        )}
+        </div>
+
+        <OrderNoteEditorDialog
+          open={!!editingBcNote}
+          type={editingBcNote ?? "staff"}
+          initialText={
+            editingBcNote === "staff"
+              ? (order.staff_notes?.replace(/<[^>]+>/g, " ").trim() ?? "")
+              : (order.customer_message ?? "")
+          }
+          onSave={text => saveNoteMutation.mutate({ type: editingBcNote!, text })}
+          onClose={() => { setEditingBcNote(null); saveNoteMutation.reset(); }}
+          isPending={saveNoteMutation.isPending}
+          error={saveNoteMutation.isError ? (saveNoteMutation.error as Error).message : null}
+        />
 
         {/* ── Timeline ─────────────────────────────────────────────────────── */}
         <div className="bg-white border rounded-xl p-4">

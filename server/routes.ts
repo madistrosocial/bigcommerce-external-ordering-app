@@ -2899,8 +2899,9 @@ export async function registerRoutes(
       const user = (req as any).authUser;
       const { note, customer_note, crm_customer_id, bc_order_id } = req.body;
 
-      // Update local order note
+      // Update local order notes (both staff and customer)
       if (note !== undefined) await storage.updateOrderNote(id, note ?? "");
+      if (customer_note !== undefined) await storage.updateOrderCustomerNote(id, customer_note ?? "");
 
       // Sync to BC if order has a BC counterpart
       let bcSuccess = false;
@@ -2919,32 +2920,114 @@ export async function registerRoutes(
                 body: JSON.stringify(body),
               });
               bcSuccess = bcResp.ok;
+              if (bcResp.ok) {
+                // Keep mirror in sync
+                await storage.updateCrmOrderNotes(resolvedBcId, {
+                  ...(note !== undefined ? { staff_notes: note ?? "" } : {}),
+                  ...(customer_note !== undefined ? { customer_order_notes: customer_note ?? "" } : {}),
+                });
+              }
             }
           }
         } catch (_) { /* BC failure is non-fatal */ }
       }
 
-      // Create CRM activity note if customer linked
+      // Create CRM activity notes for any changed field
       const resolvedCrmId = crm_customer_id ? parseInt(String(crm_customer_id)) : null;
       if (resolvedCrmId && !isNaN(resolvedCrmId) && user) {
         const orderLabel = resolvedBcId ? `Order #${resolvedBcId}` : `Order #${id}`;
         if (note !== undefined) {
           await storage.createCrmNote({
-            customer_id: resolvedCrmId,
-            note_type: "Order Note",
+            customer_id: resolvedCrmId, note_type: "Order Note",
             note: `Edited Staff Note\n${orderLabel}`,
-            order_id: resolvedBcId || undefined,
-            created_by: user.id,
-            activity_type: "note",
+            order_id: resolvedBcId || undefined, created_by: user.id, activity_type: "note",
           });
           await storage.createCrmAuditLog({
             user_id: user.id, action: "staff_note_updated", customer_id: resolvedCrmId,
             detail: { order_id: id, bc_order_id: resolvedBcId },
           });
         }
+        if (customer_note !== undefined) {
+          await storage.createCrmNote({
+            customer_id: resolvedCrmId, note_type: "Order Note",
+            note: `Edited Customer Note\n${orderLabel}`,
+            order_id: resolvedBcId || undefined, created_by: user.id, activity_type: "note",
+          });
+          await storage.createCrmAuditLog({
+            user_id: user.id, action: "customer_note_updated", customer_id: resolvedCrmId,
+            detail: { order_id: id, bc_order_id: resolvedBcId },
+          });
+        }
       }
 
       res.json({ ok: true, bc_synced: bcSuccess });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PATCH /api/bigcommerce/orders/:bcOrderId/notes — edit staff/customer notes on a BC-native order
+  // Syncs directly to BC v2, updates local mirror, and creates CRM timeline events.
+  app.patch("/api/bigcommerce/orders/:bcOrderId/notes", requireAuth, async (req, res) => {
+    try {
+      const bcOrderId = parseInt(req.params.bcOrderId);
+      if (isNaN(bcOrderId)) return res.status(400).json({ error: "Invalid BC order ID" });
+      const user = (req as any).authUser;
+      const { staff_notes, customer_message, crm_customer_id } = req.body;
+
+      if (staff_notes === undefined && customer_message === undefined) {
+        return res.status(400).json({ error: "Provide staff_notes and/or customer_message" });
+      }
+
+      // 1. Sync to BigCommerce v2
+      let bcSynced = false;
+      try {
+        const { storeHash, token } = await getBcCreds();
+        if (storeHash && token) {
+          const body: Record<string, string> = {};
+          if (staff_notes !== undefined) body.staff_notes = staff_notes ?? "";
+          if (customer_message !== undefined) body.customer_message = customer_message ?? "";
+          const bcResp = await fetch(
+            `https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${bcOrderId}`,
+            { method: "PUT", headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) }
+          );
+          bcSynced = bcResp.ok;
+        }
+      } catch (_) { /* non-fatal */ }
+
+      // 2. Update local mirror regardless of BC result (keep local consistent)
+      await storage.updateCrmOrderNotes(bcOrderId, {
+        ...(staff_notes !== undefined ? { staff_notes: staff_notes ?? "" } : {}),
+        ...(customer_message !== undefined ? { customer_order_notes: customer_message ?? "" } : {}),
+      });
+
+      // 3. CRM timeline events
+      const resolvedCrmId = crm_customer_id ? parseInt(String(crm_customer_id)) : null;
+      if (resolvedCrmId && !isNaN(resolvedCrmId) && user) {
+        const orderLabel = `Order #${bcOrderId}`;
+        if (staff_notes !== undefined) {
+          await storage.createCrmNote({
+            customer_id: resolvedCrmId, note_type: "Order Note",
+            note: `Edited Staff Note\n${orderLabel}`,
+            order_id: bcOrderId, created_by: user.id, activity_type: "note",
+          });
+          await storage.createCrmAuditLog({
+            user_id: user.id, action: "staff_note_updated", customer_id: resolvedCrmId,
+            detail: { bc_order_id: bcOrderId },
+          });
+        }
+        if (customer_message !== undefined) {
+          await storage.createCrmNote({
+            customer_id: resolvedCrmId, note_type: "Order Note",
+            note: `Edited Customer Note\n${orderLabel}`,
+            order_id: bcOrderId, created_by: user.id, activity_type: "note",
+          });
+          await storage.createCrmAuditLog({
+            user_id: user.id, action: "customer_note_updated", customer_id: resolvedCrmId,
+            detail: { bc_order_id: bcOrderId },
+          });
+        }
+      }
+
+      res.json({ ok: true, bc_synced: bcSynced });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

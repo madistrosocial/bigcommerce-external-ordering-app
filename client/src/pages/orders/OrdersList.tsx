@@ -201,7 +201,7 @@ function ExpandedPreview({ order }: { order: ConsolidatedOrder }) {
         method: "PATCH",
         headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...(type === "staff" ? { note: text } : {}),
+          ...(type === "staff" ? { note: text } : { customer_note: text }),
           crm_customer_id: order.crm_customer_id,
           bc_order_id: order.bigcommerce_order_id,
         }),
@@ -356,6 +356,11 @@ function ExpandedPreview({ order }: { order: ConsolidatedOrder }) {
 // ── BC expanded row preview — fetches line items from BC API ─────────────────
 function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: ConsolidatedOrder }) {
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const { hasPermission } = usePermissions();
+  const canEditNote = hasPermission("crm", "notes_edit");
+  const [editingNote, setEditingNote] = useState<"staff" | "customer" | null>(null);
+
   const { data, isLoading } = useQuery<{ order: any; products: any[] }>({
     queryKey: ["bc-order-detail", bcOrderId],
     queryFn: async () => {
@@ -364,6 +369,25 @@ function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: Con
       return r.json();
     },
     staleTime: 120_000,
+  });
+
+  const saveNoteMutation = useMutation({
+    mutationFn: async ({ type, text }: { type: "staff" | "customer"; text: string }) => {
+      const r = await fetch(`/api/bigcommerce/orders/${bcOrderId}/notes`, {
+        method: "PATCH",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(type === "staff" ? { staff_notes: text } : { customer_message: text }),
+          crm_customer_id: order.crm_customer_id,
+        }),
+      });
+      if (!r.ok) throw new Error("Failed to save note");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["bc-order-detail", bcOrderId] });
+      queryClient.invalidateQueries({ queryKey: ["orders", "consolidated"] });
+      setEditingNote(null);
+    },
   });
 
   if (isLoading) {
@@ -451,17 +475,37 @@ function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: Con
           </div>
         </div>
       )}
-      {/* Notes */}
+      {/* Notes — editable */}
       <div className="border-t pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Customer Notes</p>
-          <p className="text-[12px] text-slate-600">
-            {bcOrder?.customer_message ? bcOrder.customer_message : <span className="text-slate-300">—</span>}
+          <div className="flex items-center justify-between mb-0.5">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Customer Notes</p>
+            {canEditNote && (
+              <button
+                className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-0.5 transition-colors"
+                onClick={() => setEditingNote("customer")}
+              >
+                <Pencil className="h-2.5 w-2.5" /> Edit
+              </button>
+            )}
+          </div>
+          <p className="text-[12px] text-slate-600 whitespace-pre-wrap">
+            {bcOrder?.customer_message || <span className="text-slate-300">—</span>}
           </p>
         </div>
         <div>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Staff Notes</p>
-          <p className="text-[12px] text-slate-600">
+          <div className="flex items-center justify-between mb-0.5">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Staff Notes</p>
+            {canEditNote && (
+              <button
+                className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-0.5 transition-colors"
+                onClick={() => setEditingNote("staff")}
+              >
+                <Pencil className="h-2.5 w-2.5" /> Edit
+              </button>
+            )}
+          </div>
+          <p className="text-[12px] text-slate-600 whitespace-pre-wrap">
             {bcOrder?.staff_notes
               ? bcOrder.staff_notes.replace(/<[^>]+>/g, " ").trim()
               : <span className="text-slate-300">—</span>}
@@ -469,6 +513,49 @@ function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: Con
         </div>
       </div>
       <p className="text-[11px] text-slate-400">BC Order #{bcOrderId}</p>
+
+      {/* Note editor dialog */}
+      <Dialog open={!!editingNote} onOpenChange={v => { if (!v) setEditingNote(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5 text-sm">
+              <MessageSquare className="h-4 w-4 text-slate-400" />
+              Edit {editingNote === "staff" ? "Staff" : "Customer"} Notes
+            </DialogTitle>
+          </DialogHeader>
+          <Textarea
+            key={editingNote}
+            defaultValue={
+              editingNote === "staff"
+                ? (bcOrder?.staff_notes?.replace(/<[^>]+>/g, " ").trim() ?? "")
+                : (bcOrder?.customer_message ?? "")
+            }
+            rows={5}
+            className="text-sm resize-none"
+            ref={el => el && ((el as any)._textareaEl = el)}
+            onChange={() => {}}
+            id="bc-note-textarea"
+          />
+          {saveNoteMutation.isError && (
+            <p className="text-xs text-red-600">{(saveNoteMutation.error as Error).message}</p>
+          )}
+          <p className="text-[11px] text-slate-400">
+            Syncs to BigCommerce and creates a CRM timeline event.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingNote(null)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                const el = document.getElementById("bc-note-textarea") as HTMLTextAreaElement | null;
+                if (el) saveNoteMutation.mutate({ type: editingNote!, text: el.value });
+              }}
+              disabled={saveNoteMutation.isPending}
+            >
+              {saveNoteMutation.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

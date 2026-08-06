@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useTimeService } from "@/hooks/useTimeService";
+import CustomerOrdersPanel from "@/components/orders/CustomerOrdersPanel";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -360,120 +361,8 @@ function NoteModal({ open, onClose, onSave, onSaveTodo, saving, initial, title, 
 
 // ─── Order Notes Modal (editable) ─────────────────────────────────────────────
 
-function OrderNotesModal({ order, customerId, onClose, onSaved }: { order: any; customerId: number; onClose: () => void; onSaved: () => void }) {
-  const fmt = useTimeService();
-  const { toast } = useToast();
-  const [custNote, setCustNote]   = useState(order?.customer_order_notes ?? "");
-  const [staffNote, setStaffNote] = useState(order?.staff_notes ?? "");
-  const [saving, setSaving]       = useState(false);
-  const isDirty = custNote !== (order?.customer_order_notes ?? "") || staffNote !== (order?.staff_notes ?? "");
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const r = await fetch(`/api/crm/customers/${customerId}/orders/${order.bigcommerce_order_id}/notes`, {
-        method: "PUT",
-        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ customer_note: custNote, staff_notes: staffNote }),
-      });
-      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to save");
-      toast({ title: "Notes saved" });
-      onSaved();
-      onClose();
-    } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
-    } finally { setSaving(false); }
-  };
-
-  return (
-    <Dialog open={!!order} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="w-[95vw] max-w-[95vw] h-[95vh] max-h-[95vh] flex flex-col">
-        <DialogHeader className="shrink-0">
-          <DialogTitle>Order #{order?.order_number ?? order?.bigcommerce_order_id}</DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-wrap gap-2 text-sm text-slate-500 mb-3 shrink-0">
-          {order?.order_date && <span>{fmt.dateTime(order.order_date)}</span>}
-          {order?.status && <Badge variant={statusColor(order.status)} className="capitalize text-xs">{order.status}</Badge>}
-          {order?.order_total && <span className="font-semibold text-slate-800">{fmtCurrency(order.order_total)}</span>}
-        </div>
-        <div className="flex flex-col gap-4 flex-1 overflow-y-auto min-h-0">
-          <div className="flex flex-col flex-1 min-h-0">
-            <Label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block shrink-0">Customer Order Note</Label>
-            <Textarea value={custNote} onChange={e => setCustNote(e.target.value)} className="flex-1 resize-none min-h-0" placeholder="No customer note…" data-testid="textarea-customer-note" />
-          </div>
-          <div className="flex flex-col flex-1 min-h-0">
-            <Label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block shrink-0">Staff Note</Label>
-            <Textarea value={staffNote} onChange={e => setStaffNote(e.target.value)} className="flex-1 resize-none min-h-0" placeholder="No staff note…" data-testid="textarea-staff-note" />
-          </div>
-        </div>
-        <DialogFooter className="shrink-0 pt-3">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={!isDirty || saving} data-testid="btn-save-order-notes">
-            {saving ? "Saving…" : "Save"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── Orders Table ─────────────────────────────────────────────────────────────
-
-function OrdersTable({ orders, onRowClick }: { orders: any[]; onRowClick: (o: any) => void }) {
-  const fmt = useTimeService();
-  if (orders.length === 0) {
-    return <div className="flex items-center justify-center h-32 text-slate-400 text-sm">No orders found.</div>;
-  }
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[680px]">
-        <thead>
-          <tr className="border-b bg-slate-50">
-            <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Order #</th>
-            <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">Date & Time</th>
-            <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Status</th>
-            <th className="px-4 py-2.5 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Total</th>
-            <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Customer Note</th>
-            <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Staff Note</th>
-          </tr>
-        </thead>
-        <tbody>
-          {orders.map((o: any) => {
-            const hasNotes = !!(o.staff_notes || o.customer_order_notes);
-            return (
-              <tr
-                key={o.id}
-                data-testid={`row-order-${o.bigcommerce_order_id}`}
-                className="border-b last:border-0 hover:bg-slate-50 transition-colors cursor-pointer"
-                onClick={() => onRowClick(o)}
-              >
-                <td className="px-3 py-2.5 font-mono text-xs text-blue-600 whitespace-nowrap w-24">
-                  #{o.order_number ?? o.bigcommerce_order_id}
-                  {(o.staff_notes || o.customer_order_notes) && <span className="ml-1 text-amber-500 text-[10px]">📝</span>}
-                </td>
-                <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap text-xs w-32">{fmt.dateTime(o.order_date)}</td>
-                <td className="px-3 py-2.5 w-24">
-                  <Badge variant={statusColor(o.status)} className="text-xs capitalize">{o.status ?? "—"}</Badge>
-                </td>
-                <td className="px-3 py-2.5 text-right font-medium text-slate-800 whitespace-nowrap w-24">{fmtCurrency(o.order_total)}</td>
-                <td className="px-3 py-2.5">
-                  {o.customer_order_notes
-                    ? <span className="block truncate text-xs text-slate-500 max-w-xs">{o.customer_order_notes}</span>
-                    : <span className="text-slate-300 text-xs">—</span>}
-                </td>
-                <td className="px-3 py-2.5">
-                  {o.staff_notes
-                    ? <span className="block truncate text-xs text-slate-500 max-w-xs">{o.staff_notes}</span>
-                    : <span className="text-slate-300 text-xs">—</span>}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+// OrderNotesModal and OrdersTable have been replaced by CustomerOrdersPanel
+// which handles its own data fetching, expandable rows, and note editing.
 
 // ─── Tab type ─────────────────────────────────────────────────────────────────
 
@@ -525,14 +414,9 @@ export default function CustomerProfile() {
   const [repAssignMode, setRepAssignMode]   = useState<"primary" | "secondary">("primary");
   const [selectedRep, setSelectedRep]       = useState("");
   const [assignSaving, setAssignSaving]     = useState(false);
-  const [orderModal, setOrderModal]         = useState<any | null>(null);
   const [generalNotesEdit, setGeneralNotesEdit] = useState<string | null>(null); // null = not loaded yet
   const [savingBcNotes, setSavingBcNotes]   = useState(false);
   const [selectedAddressIdx, setSelectedAddressIdx] = useState(0);
-
-  // Orders tab pagination
-  const [ordersPage, setOrdersPage]         = useState(1);
-  const [ordersPageSize, setOrdersPageSize] = useState(25);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -555,17 +439,6 @@ export default function CustomerProfile() {
     },
     enabled: !!id,
     staleTime: 60_000,
-  });
-
-  const { data: orders = [], isLoading: loadingOrders } = useQuery({
-    queryKey: ["crm", "customer", id, "orders"],
-    queryFn: async () => {
-      const r = await fetch(`/api/crm/customers/${id}/orders`, { headers: getAuthHeaders() });
-      if (!r.ok) throw new Error("Failed to load orders");
-      return r.json();
-    },
-    enabled: !!id,
-    staleTime: 0,
   });
 
   const { data: notes = [], isLoading: loadingNotes } = useQuery({
@@ -789,23 +662,9 @@ export default function CustomerProfile() {
     ? Math.floor((Date.now() - new Date(customer.last_order_date).getTime()) / 86_400_000)
     : null;
 
-  // Overview: latest 5 notes, latest 10 timeline, latest 20 orders
+  // Overview: latest 5 notes, latest 10 timeline
   const recentNotes    = (notes as any[]).slice(0, 5);
   const recentTimeline = (timeline as any[]).slice(0, 10);
-  const recentOrders   = (orders as any[]).slice(0, 20);
-
-  // Orders tab pagination
-  const allOrders      = orders as any[];
-  const pageSize       = ordersPageSize === -1 ? allOrders.length : ordersPageSize;
-  const totalOrderPages = ordersPageSize === -1 ? 1 : Math.max(1, Math.ceil(allOrders.length / ordersPageSize));
-  const pagedOrders    = ordersPageSize === -1
-    ? allOrders
-    : allOrders.slice((ordersPage - 1) * pageSize, ordersPage * pageSize);
-
-  const handlePageSizeChange = (val: string) => {
-    setOrdersPageSize(val === "all" ? -1 : parseInt(val));
-    setOrdersPage(1);
-  };
 
   // ── Tab nav ────────────────────────────────────────────────────────────────
 
@@ -837,7 +696,7 @@ export default function CustomerProfile() {
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
     { id: "overview",  label: "Overview",  icon: <User className="h-3.5 w-3.5" /> },
-    { id: "orders",    label: "Orders",    icon: <ShoppingBag className="h-3.5 w-3.5" />, count: allOrders.length || undefined },
+    { id: "orders",    label: "Orders",    icon: <ShoppingBag className="h-3.5 w-3.5" /> },
     { id: "notes",     label: "Actions",   icon: <MessageSquare className="h-3.5 w-3.5" />, count: totalActions || undefined },
     { id: "timeline",  label: "Timeline",  icon: <Clock className="h-3.5 w-3.5" /> },
   ];
@@ -1267,11 +1126,7 @@ export default function CustomerProfile() {
                     View All Orders →
                   </Button>
                 </div>
-                {loadingOrders ? (
-                  <div className="flex items-center justify-center h-24 text-slate-400 text-sm">Loading orders…</div>
-                ) : (
-                  <OrdersTable orders={recentOrders} onRowClick={setOrderModal} />
-                )}
+                <CustomerOrdersPanel crmCustomerId={id} limit={20} />
               </div>
             </div>
           )}
@@ -1279,67 +1134,10 @@ export default function CustomerProfile() {
           {/* ── ORDERS TAB ────────────────────────────────────────────────── */}
           {activeTab === "orders" && (
             <div>
-              {/* Controls row */}
-              <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between gap-3 flex-wrap">
-                <h2 className="text-sm font-semibold text-slate-700">
-                  Order History
-                  {allOrders.length > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">({allOrders.length} total)</span>}
-                </h2>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500">Rows per page</span>
-                  <Select value={ordersPageSize === -1 ? "all" : String(ordersPageSize)} onValueChange={handlePageSizeChange}>
-                    <SelectTrigger className="h-7 text-xs w-20" data-testid="select-orders-page-size">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="25">25</SelectItem>
-                      <SelectItem value="50">50</SelectItem>
-                      <SelectItem value="100">100</SelectItem>
-                      <SelectItem value="all">All</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="px-4 py-3 border-b bg-slate-50">
+                <h2 className="text-sm font-semibold text-slate-700">Order History</h2>
               </div>
-
-              {loadingOrders ? (
-                <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading orders…</div>
-              ) : (
-                <OrdersTable orders={pagedOrders} onRowClick={setOrderModal} />
-              )}
-
-              {/* Pagination */}
-              {ordersPageSize !== -1 && totalOrderPages > 1 && (
-                <div className="px-4 py-3 border-t flex items-center justify-between bg-slate-50">
-                  <p className="text-xs text-slate-500">
-                    Page {ordersPage} of {totalOrderPages} &nbsp;·&nbsp; {allOrders.length} orders
-                  </p>
-                  <div className="flex items-center gap-1">
-                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setOrdersPage(1)} disabled={ordersPage === 1} data-testid="btn-orders-first">
-                      «
-                    </Button>
-                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setOrdersPage(p => Math.max(1, p - 1))} disabled={ordersPage === 1} data-testid="btn-orders-prev">
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    {/* Page numbers */}
-                    {Array.from({ length: Math.min(5, totalOrderPages) }, (_, i) => {
-                      const start = Math.max(1, Math.min(ordersPage - 2, totalOrderPages - 4));
-                      const pg = start + i;
-                      if (pg > totalOrderPages) return null;
-                      return (
-                        <Button key={pg} variant={pg === ordersPage ? "default" : "outline"} size="sm" className="h-7 min-w-[28px] px-2 text-xs" onClick={() => setOrdersPage(pg)}>
-                          {pg}
-                        </Button>
-                      );
-                    })}
-                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setOrdersPage(p => Math.min(totalOrderPages, p + 1))} disabled={ordersPage === totalOrderPages} data-testid="btn-orders-next">
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setOrdersPage(totalOrderPages)} disabled={ordersPage === totalOrderPages} data-testid="btn-orders-last">
-                      »
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <CustomerOrdersPanel crmCustomerId={id} />
             </div>
           )}
 
@@ -1638,17 +1436,6 @@ export default function CustomerProfile() {
         </DialogContent>
       </Dialog>
 
-      {orderModal && (
-        <OrderNotesModal
-          order={orderModal}
-          customerId={id}
-          onClose={() => setOrderModal(null)}
-          onSaved={() => {
-            queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "orders"] });
-            queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
-          }}
-        />
-      )}
 
       {/* ── Mark Inactive Modal ─────────────────────────────────────────────── */}
       <Dialog open={showMarkInactiveModal} onOpenChange={v => { if (!v) setShowMarkInactiveModal(false); }}>
