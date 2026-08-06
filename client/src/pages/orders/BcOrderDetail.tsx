@@ -199,55 +199,92 @@ export default function BcOrderDetail() {
       {/* ── Body ───────────────────────────────────────────────────────────── */}
       <div className="px-4 py-4 space-y-4">
 
-        {/* ── Customer + Address ───────────────────────────────────────────── */}
-        <div className="bg-white border rounded-xl p-4">
-          <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
-            <User className="h-4 w-4 text-slate-400" /> Customer Information
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Identity */}
-            <div>
-              <div className="flex items-center gap-2.5 mb-2">
-                <div className="h-9 w-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[11px] font-bold shrink-0">
-                  {initials}
-                </div>
-                <div>
-                  {billing.company ? (
-                    <p
-                      className={`text-[13px] font-semibold leading-tight ${crm_customer_id ? "text-blue-600 cursor-pointer hover:underline" : "text-slate-900"}`}
-                      onClick={crm_customer_id ? () => setLocation(`/crm/customers/${crm_customer_id}`) : undefined}
-                    >
-                      {billing.company}
-                      {crm_customer_id && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
-                    </p>
-                  ) : null}
-                  <p className={`leading-tight ${billing.company ? "text-[12px] text-slate-500" : `text-[13px] font-semibold ${crm_customer_id ? "text-blue-600 cursor-pointer hover:underline" : "text-slate-900"}`}`}
-                     onClick={!billing.company && crm_customer_id ? () => setLocation(`/crm/customers/${crm_customer_id}`) : undefined}
-                  >
-                    {[billing.first_name, billing.last_name].filter(Boolean).join(" ") || "—"}
-                    {!billing.company && crm_customer_id && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
-                  </p>
-                </div>
-              </div>
-              <div className="space-y-1">
-                {billing.email && (
-                  <p className="text-[12px] text-slate-500 flex items-center gap-1.5">
-                    <Mail className="h-3 w-3 shrink-0 text-slate-400" />
-                    <a href={`mailto:${billing.email}`} className="hover:text-blue-500 transition-colors">
-                      {billing.email}
-                    </a>
-                  </p>
-                )}
-                {billing.phone && (
-                  <p className="text-[12px] text-slate-500 flex items-center gap-1.5">
-                    <Phone className="h-3 w-3 shrink-0 text-slate-400" />
-                    {billing.phone}
-                  </p>
-                )}
-              </div>
+        {/* ── Customer Profile Card (matches CRM CustomerProfile style) ─────── */}
+        <div className="bg-white border rounded-xl p-4 sm:p-5 shadow-sm">
+          <div className="flex gap-3 sm:gap-4">
+
+            {/* Avatar */}
+            <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-[13px] font-bold shrink-0 mt-0.5">
+              {initials}
             </div>
 
-            <AddressBlock address={order.billing_address} label="Billing Address" />
+            {/* Main info — grows */}
+            <div className="flex-1 min-w-0">
+
+              {/* Company name */}
+              {billing.company && (
+                <div className="flex items-center gap-1 text-slate-500 text-xs sm:text-sm mb-0.5">
+                  <CheckCircle2 className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0 text-slate-400" />
+                  <span
+                    className={`font-semibold truncate ${crm_customer_id ? "text-blue-700 cursor-pointer hover:underline" : "text-slate-700"}`}
+                    onClick={crm_customer_id ? () => setLocation(`/crm/customers/${crm_customer_id}`) : undefined}
+                  >
+                    {billing.company}
+                    {crm_customer_id && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
+                  </span>
+                </div>
+              )}
+
+              {/* Contact name */}
+              <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
+                <h2
+                  className={`text-base sm:text-xl font-bold leading-tight ${!billing.company && crm_customer_id ? "text-blue-700 cursor-pointer hover:underline" : "text-slate-900"}`}
+                  onClick={!billing.company && crm_customer_id ? () => setLocation(`/crm/customers/${crm_customer_id}`) : undefined}
+                >
+                  {[billing.first_name, billing.last_name].filter(Boolean).join(" ") || "—"}
+                  {!billing.company && crm_customer_id && <ExternalLink className="h-3 w-3 inline ml-0.5 opacity-60" />}
+                </h2>
+              </div>
+
+              {/* Contact row — email / phone */}
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs sm:text-sm text-slate-500 mb-2">
+                {billing.email && (
+                  <span className="flex items-center gap-1">
+                    <Mail className="h-3 w-3 shrink-0" />
+                    <a href={`mailto:${billing.email}`} className="hover:text-blue-600 transition-colors truncate max-w-[200px] sm:max-w-none">
+                      {billing.email}
+                    </a>
+                  </span>
+                )}
+                {billing.phone && (
+                  <span className="flex items-center gap-1">
+                    <Phone className="h-3 w-3 shrink-0" />{billing.phone}
+                  </span>
+                )}
+                {order.date_created && (
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3 shrink-0" />Order placed {fmt.dateTime(order.date_created)}
+                  </span>
+                )}
+                {order.payment_method && (
+                  <span className="flex items-center gap-1">
+                    <FileText className="h-3 w-3 shrink-0" />{order.payment_method}
+                  </span>
+                )}
+              </div>
+
+              {/* Billing Address row */}
+              {billing.street_1 && (
+                <div className="flex items-start gap-2 min-w-0">
+                  <span className="text-xs text-slate-500 font-medium shrink-0 mt-px">Address:</span>
+                  <span className="text-xs text-slate-600 leading-relaxed">
+                    {billing.street_1}{billing.street_2 ? `, ${billing.street_2}` : ""}{", "}
+                    {billing.city}{billing.state ? `, ${billing.state}` : ""} {billing.zip}{billing.country ? `, ${billing.country}` : ""}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Right stat — order total (replaces "Active | days since last order") */}
+            <div className="shrink-0 text-right flex flex-col items-end gap-0.5 hidden sm:flex">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-200">
+                Order
+              </span>
+              <span className="text-3xl font-black text-slate-900 tabular-nums leading-none mt-1">
+                {fmtCurrency(order.total_inc_tax)}
+              </span>
+              <span className="text-xs text-slate-400">total incl. tax</span>
+            </div>
           </div>
         </div>
 

@@ -139,7 +139,7 @@ export default function StoreCreditDialog({ open, order, onClose, onIssued }: Pr
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
+      <DialogContent className="w-[90vw] max-w-[90vw] max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Wallet className="h-5 w-5 text-blue-600" />
