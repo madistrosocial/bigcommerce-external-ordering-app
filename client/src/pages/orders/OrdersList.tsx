@@ -371,6 +371,8 @@ function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: Con
     staleTime: 120_000,
   });
 
+  const [editNoteText, setEditNoteText] = useState("");
+
   const saveNoteMutation = useMutation({
     mutationFn: async ({ type, text }: { type: "staff" | "customer"; text: string }) => {
       const r = await fetch(`/api/bigcommerce/orders/${bcOrderId}/notes`, {
@@ -483,7 +485,7 @@ function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: Con
             {canEditNote && (
               <button
                 className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-0.5 transition-colors"
-                onClick={() => setEditingNote("customer")}
+                onClick={() => { setEditNoteText(bcOrder?.customer_message ?? ""); setEditingNote("customer"); }}
               >
                 <Pencil className="h-2.5 w-2.5" /> Edit
               </button>
@@ -499,7 +501,7 @@ function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: Con
             {canEditNote && (
               <button
                 className="text-[10px] text-slate-400 hover:text-blue-600 flex items-center gap-0.5 transition-colors"
-                onClick={() => setEditingNote("staff")}
+                onClick={() => { setEditNoteText(bcOrder?.staff_notes?.replace(/<[^>]+>/g, " ").trim() ?? ""); setEditingNote("staff"); }}
               >
                 <Pencil className="h-2.5 w-2.5" /> Edit
               </button>
@@ -525,16 +527,10 @@ function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: Con
           </DialogHeader>
           <Textarea
             key={editingNote}
-            defaultValue={
-              editingNote === "staff"
-                ? (bcOrder?.staff_notes?.replace(/<[^>]+>/g, " ").trim() ?? "")
-                : (bcOrder?.customer_message ?? "")
-            }
+            value={editNoteText}
+            onChange={e => setEditNoteText(e.target.value)}
             rows={5}
             className="text-sm resize-none"
-            ref={el => el && ((el as any)._textareaEl = el)}
-            onChange={() => {}}
-            id="bc-note-textarea"
           />
           {saveNoteMutation.isError && (
             <p className="text-xs text-red-600">{(saveNoteMutation.error as Error).message}</p>
@@ -545,10 +541,7 @@ function BcExpandedPreview({ bcOrderId, order }: { bcOrderId: number; order: Con
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingNote(null)}>Cancel</Button>
             <Button
-              onClick={() => {
-                const el = document.getElementById("bc-note-textarea") as HTMLTextAreaElement | null;
-                if (el) saveNoteMutation.mutate({ type: editingNote!, text: el.value });
-              }}
+              onClick={() => saveNoteMutation.mutate({ type: editingNote!, text: editNoteText })}
               disabled={saveNoteMutation.isPending}
             >
               {saveNoteMutation.isPending ? "Saving…" : "Save"}

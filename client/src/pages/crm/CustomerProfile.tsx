@@ -441,6 +441,18 @@ export default function CustomerProfile() {
     staleTime: 60_000,
   });
 
+  // Needed for the "link note to order" dropdown in NoteModal
+  const { data: orders = [] } = useQuery({
+    queryKey: ["crm", "customer", id, "orders"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/customers/${id}/orders`, { headers: getAuthHeaders() });
+      if (!r.ok) return [];
+      return r.json();
+    },
+    enabled: !!id,
+    staleTime: 120_000,
+  });
+
   const { data: notes = [], isLoading: loadingNotes } = useQuery({
     queryKey: ["crm", "customer", id, "notes"],
     queryFn: async () => {
