@@ -2856,8 +2856,19 @@ export async function registerRoutes(
   });
 
   // ── Consolidated Orders (new ERP Orders page) ─────────────────────────────
+  // Permission: orders:view  → see ALL orders across all users/channels
+  //             (no permission) → only own Sales App orders (createdBy forced to self)
   app.get("/api/orders/consolidated", requireAuth, async (req, res) => {
     try {
+      const authUser = (req as any).authUser;
+
+      // Determine if caller has unrestricted access
+      let hasOrdersView = authUser.role === "admin";
+      if (!hasOrdersView) {
+        const perms = await storage.getUserPermissionStrings(authUser.id);
+        hasOrdersView = perms.includes("orders:view");
+      }
+
       const {
         page = "1", limit = "50",
         search = "", createdBy = "",
@@ -2865,16 +2876,25 @@ export async function registerRoutes(
         dateFrom = "", dateTo = "",
         salesChannel = "salesapp",
       } = req.query as Record<string, string>;
+
+      // Restricted users: lock to their own Sales App orders regardless of params
+      const effectiveCreatedBy = hasOrdersView
+        ? (createdBy ? parseInt(createdBy) : null)
+        : authUser.id;
+      const effectiveSalesChannel = hasOrdersView
+        ? (salesChannel === "allorders" ? "allorders" : "salesapp")
+        : "salesapp";
+
       const result = await storage.getConsolidatedOrders({
         page: Math.max(1, parseInt(page)),
         limit: Math.min(100, Math.max(1, parseInt(limit))),
         search: search || undefined,
-        createdBy: createdBy ? parseInt(createdBy) : null,
-        syncStatus: syncStatus || undefined,
-        bcStatus: bcStatus || undefined,
+        createdBy: effectiveCreatedBy,
+        syncStatus: hasOrdersView ? (syncStatus || undefined) : undefined,
+        bcStatus: hasOrdersView ? (bcStatus || undefined) : undefined,
         dateFrom: dateFrom ? new Date(dateFrom) : null,
         dateTo: dateTo ? (() => { const d = new Date(dateTo); d.setHours(23, 59, 59, 999); return d; })() : null,
-        salesChannel: (salesChannel === "allorders" ? "allorders" : "salesapp"),
+        salesChannel: effectiveSalesChannel,
       });
       res.json(result);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -6813,10 +6833,12 @@ export async function registerRoutes(
   // POST /api/reports/export-log — Audit log for every CSV/Excel export
   app.post("/api/reports/export-log", requireAuth, async (req, res) => {
     try {
-      const { user_id, user_name, report_name, view_name, filters, export_type, row_count } = req.body;
+      const authUser = (req as any).authUser;
+      const { report_name, view_name, filters, export_type, row_count } = req.body;
+      // Always use the server-side authenticated user — never trust client-supplied identity
       await storage.logReportExport({
-        user_id: user_id ?? null,
-        user_name: String(user_name ?? ""),
+        user_id: authUser.id,
+        user_name: authUser.name ?? authUser.username ?? "",
         report_name: String(report_name ?? ""),
         view_name: String(view_name ?? ""),
         filters: filters ?? {},

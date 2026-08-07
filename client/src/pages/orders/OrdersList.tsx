@@ -411,6 +411,9 @@ export default function OrdersList() {
   const [, setLocation] = useLocation();
   const fmt = useTimeService();
   const { currentUser } = useStore();
+  const { hasPermission } = usePermissions();
+  // Without orders:view, users see only their own Sales App orders (enforced on server too)
+  const canViewAll = hasPermission("orders", "view");
 
   // ── Store Credit + Email dialog state ───────────────────────────────────────
   const [storeCreditOrder, setStoreCreditOrder] = useState<ConsolidatedOrder | null>(null);
@@ -438,6 +441,7 @@ export default function OrdersList() {
 
   // ── Filter state ────────────────────────────────────────────────────────────
   const [showFilters, setShowFilters] = useState(false);
+  // Restricted users are locked to salesapp; canViewAll is stable so this init is fine
   const [salesChannel, setSalesChannel] = useState<SalesChannel>("allorders");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -480,7 +484,10 @@ export default function OrdersList() {
     setPage(1);
   };
 
-  const resolvedCreatedBy = createdBy === "me" ? String(currentUser?.id ?? "") : (createdBy || "");
+  // Restricted users are always locked to their own orders; the server enforces this too
+  const resolvedCreatedBy = !canViewAll
+    ? String(currentUser?.id ?? "")
+    : (createdBy === "me" ? String(currentUser?.id ?? "") : (createdBy || ""));
 
   // ── Users for "Created By" dropdown ─────────────────────────────────────────
   const { data: allUsers = [] } = useQuery<{ id: number; name: string }[]>({
@@ -581,16 +588,22 @@ export default function OrdersList() {
             <p className="text-xs text-slate-400 mt-0.5">{total.toLocaleString()} orders</p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Sales Channel toggle — always visible */}
-            <Select value={salesChannel} onValueChange={v => handleChannelChange(v as SalesChannel)}>
-              <SelectTrigger className="h-8 text-xs w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="salesapp">Sales App</SelectItem>
-                <SelectItem value="allorders">All Orders</SelectItem>
-              </SelectContent>
-            </Select>
+            {/* Sales Channel toggle — only shown to users with orders:view */}
+            {canViewAll ? (
+              <Select value={salesChannel} onValueChange={v => handleChannelChange(v as SalesChannel)}>
+                <SelectTrigger className="h-8 text-xs w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="salesapp">Sales App</SelectItem>
+                  <SelectItem value="allorders">All Orders</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : (
+              <span className="text-xs text-slate-400 px-2 py-1 border border-slate-200 rounded-md bg-slate-50">
+                My Orders
+              </span>
+            )}
             <Button
               size="sm"
               variant={showFilters ? "default" : "outline"}
@@ -623,8 +636,8 @@ export default function OrdersList() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {/* Created By — Sales App only */}
-              {salesChannel === "salesapp" && (
+              {/* Created By — Sales App only; hidden when user is restricted to own orders */}
+              {salesChannel === "salesapp" && canViewAll && (
                 <Select value={createdBy || "__all__"} onValueChange={v => { setCreatedBy(v === "__all__" ? "" : v); setPage(1); }}>
                   <SelectTrigger className="h-8 text-xs w-40">
                     <SelectValue placeholder="Created By" />

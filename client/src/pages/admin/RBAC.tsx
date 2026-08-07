@@ -300,12 +300,13 @@ function PermissionsTab() {
   });
 
   const PRESETS = [
-    { module: "admin", action: "view", description: "Access admin area" },
-    { module: "pos", action: "view", description: "Access POS" },
-    { module: "orders", action: "view", description: "View orders" },
-    { module: "inventory", action: "push", description: "Push inventory" },
-    { module: "pricing", action: "view", description: "View pricing" },
-    { module: "reports", action: "view", description: "View reports" },
+    { module: "admin",       action: "view", description: "Access Admin area and settings" },
+    { module: "pos",         action: "view", description: "Access Point of Sale" },
+    { module: "orders",      action: "view", description: "View ALL orders — without this permission users only see their own Sales App orders" },
+    { module: "crm",         action: "notes_edit", description: "Edit staff and customer notes on orders" },
+    { module: "reporting_sales",                  action: "view", description: "Access Sales Report in Reporting" },
+    { module: "reporting_price_override_audit",   action: "view", description: "Access Price Override Audit report" },
+    { module: "reporting_store_credit_usage",     action: "view", description: "Access Store Credit Usage report" },
   ];
 
   const existingKeys = new Set(perms.map((p: RbacPermission) => `${p.module}:${p.action}`));
