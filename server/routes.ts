@@ -5252,6 +5252,67 @@ export async function registerRoutes(
     return "ok";
   }
 
+  // ── Dedup cleanup for bc_order_line_items (run once to fix duplicate sync) ───
+  const dedupState = { running: false, deleted: 0, error: null as string | null, finishedAt: null as string | null };
+
+  app.get("/api/crm/sync/line-items/dedup-status", requireAuth, (_req, res) => {
+    res.json({ ...dedupState });
+  });
+
+  app.post("/api/crm/sync/line-items/dedup", requireAuth, async (_req, res) => {
+    if (dedupState.running) return res.json({ started: false, already_running: true, ...dedupState });
+    dedupState.running = true; dedupState.deleted = 0; dedupState.error = null; dedupState.finishedAt = null;
+    res.json({ started: true, message: "Dedup started — poll /api/crm/sync/line-items/dedup-status for progress." });
+
+    // Run in background — create new table, swap, add unique index
+    ;(async () => {
+      try {
+        const { db } = await import("../db");
+        const { sql } = await import("drizzle-orm");
+        // Step 1: create deduplicated copy
+        await db.execute(sql.raw(`
+          CREATE TABLE bc_order_line_items_deduped AS
+          SELECT DISTINCT ON (bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0))
+            *
+          FROM bc_order_line_items
+          ORDER BY bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0), id ASC
+        `));
+        // Step 2: count how many will be removed
+        const [orig, deduped] = await Promise.all([
+          db.execute(sql.raw(`SELECT COUNT(*)::int AS c FROM bc_order_line_items`)),
+          db.execute(sql.raw(`SELECT COUNT(*)::int AS c FROM bc_order_line_items_deduped`)),
+        ]);
+        dedupState.deleted = ((orig.rows[0] as any).c ?? 0) - ((deduped.rows[0] as any).c ?? 0);
+        // Step 3: swap tables atomically
+        await db.execute(sql.raw(`ALTER TABLE bc_order_line_items RENAME TO bc_order_line_items_old`));
+        await db.execute(sql.raw(`ALTER TABLE bc_order_line_items_deduped RENAME TO bc_order_line_items`));
+        // Restore sequence/identity: re-add generated identity column
+        await db.execute(sql.raw(`ALTER TABLE bc_order_line_items ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY`));
+        await db.execute(sql.raw(`SELECT setval(pg_get_serial_sequence('bc_order_line_items','id'), (SELECT MAX(id) FROM bc_order_line_items))`));
+        // Step 4: add unique index to prevent future dupes
+        await db.execute(sql.raw(`
+          CREATE UNIQUE INDEX bc_order_line_items_order_product_variant_unique
+          ON bc_order_line_items (bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0))
+        `));
+        // Step 5: drop backup
+        await db.execute(sql.raw(`DROP TABLE bc_order_line_items_old`));
+        dedupState.finishedAt = new Date().toISOString();
+        dedupState.running = false;
+        console.log(`[dedup] Done. Removed ${dedupState.deleted} duplicate line items.`);
+      } catch (e: any) {
+        dedupState.error = e.message;
+        dedupState.running = false;
+        console.error("[dedup] Error:", e.message);
+        // Cleanup temp table if it exists
+        try {
+          const { db } = await import("../db");
+          const { sql } = await import("drizzle-orm");
+          await db.execute(sql.raw(`DROP TABLE IF EXISTS bc_order_line_items_deduped`));
+        } catch {}
+      }
+    })();
+  });
+
   // In-memory state for the long-running full line-items sync (background job)
   const liSyncState = {
     running: false,

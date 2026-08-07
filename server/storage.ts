@@ -1962,7 +1962,9 @@ export class DatabaseStorage implements IStorage {
     if (!items.length) return;
     const CHUNK = 200;
     for (let i = 0; i < items.length; i += CHUNK) {
-      await db.insert(bcOrderLineItems).values(items.slice(i, i + CHUNK));
+      // ON CONFLICT DO NOTHING relies on the unique index on
+      // (bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0))
+      await db.insert(bcOrderLineItems).values(items.slice(i, i + CHUNK)).onConflictDoNothing();
     }
   }
 
@@ -1981,7 +1983,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async searchLineItemsByQuery(query: string, limit = 40): Promise<Array<{ bigcommerce_product_id: number; product_name: string; brand_name: string; sku: string; variant_label: string | null }>> {
-    const safeQ = query.replace(/'/g, "''").replace(/%/g, "\\%").replace(/_/g, "\\_");
+    // Only escape single quotes to prevent SQL injection; no ESCAPE clause needed
+    // since % and _ false-positives are acceptable in a search dropdown.
+    const safeQ = query.replace(/'/g, "''");
     const res = await db.execute(sql.raw(`
       SELECT DISTINCT
         li.bigcommerce_product_id,
@@ -1991,9 +1995,9 @@ export class DatabaseStorage implements IStorage {
         li.variant_label
       FROM bc_order_line_items li
       LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
-      WHERE li.sku ILIKE '%${safeQ}%' ESCAPE '\\'
-         OR li.product_name ILIKE '%${safeQ}%' ESCAPE '\\'
-      ORDER BY li.sku
+      WHERE li.sku ILIKE '%${safeQ}%'
+         OR li.product_name ILIKE '%${safeQ}%'
+      ORDER BY product_name, li.sku
       LIMIT ${limit}
     `));
     return res.rows as Array<{ bigcommerce_product_id: number; product_name: string; brand_name: string; sku: string; variant_label: string | null }>;
@@ -2055,8 +2059,16 @@ export class DatabaseStorage implements IStorage {
     const sortCol = sortColMap[sortBy] ?? "qty_sold";
     const dir = sortDir === "asc" ? "ASC" : "DESC";
 
+    // Dedup subquery prevents double-counting when sync has run multiple times
+    const dedupLi = `(
+      SELECT DISTINCT ON (bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0))
+        *
+      FROM bc_order_line_items
+      ORDER BY bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0), id ASC
+    )`;
+
     const baseFrom = `
-      FROM bc_order_line_items li
+      FROM ${dedupLi} li
       LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
       LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
       WHERE 1=1
@@ -2162,10 +2174,18 @@ export class DatabaseStorage implements IStorage {
       ${skuCond}
     `;
 
+    // Dedup subquery prevents double-counting when sync has run multiple times
+    const dedupLi = `(
+      SELECT DISTINCT ON (bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0))
+        *
+      FROM bc_order_line_items
+      ORDER BY bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0), id ASC
+    )`;
+
     const [countRes, dataRes] = await Promise.all([
       db.execute(sql.raw(`
         SELECT COUNT(*)::int AS total
-        FROM bc_order_line_items li
+        FROM ${dedupLi} li
         LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
         ${whereCond}
@@ -2188,7 +2208,7 @@ export class DatabaseStorage implements IStorage {
           li.base_price AS unit_price,
           li.order_date,
           COALESCE(com.status, 'Unknown') AS bc_status
-        FROM bc_order_line_items li
+        FROM ${dedupLi} li
         LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
         ${whereCond}
@@ -2227,6 +2247,14 @@ export class DatabaseStorage implements IStorage {
       ? `AND COALESCE(com.status, '') = '${bcStatusFilter.replace(/'/g, "''")}'`
       : "";
 
+    // Dedup subquery prevents double-counting when sync has run multiple times
+    const dedupLi = `(
+      SELECT DISTINCT ON (bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0))
+        *
+      FROM bc_order_line_items
+      ORDER BY bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0), id ASC
+    )`;
+
     const res = await db.execute(sql.raw(`
       SELECT
         COUNT(DISTINCT li.bigcommerce_product_id)::int AS total_products,
@@ -2245,7 +2273,7 @@ export class DatabaseStorage implements IStorage {
             0
           )
         ), 0)::int AS total_current_stock
-      FROM bc_order_line_items li
+      FROM ${dedupLi} li
       LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
       LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
       WHERE 1=1
