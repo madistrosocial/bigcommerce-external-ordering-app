@@ -14,7 +14,15 @@ import { getAuthHeaders } from "@/lib/api";
 
 interface Brand { id: number; name: string; }
 interface Category { id: number; name: string; parent_id?: number; }
-interface ProductOption { id: number; bigcommerce_id: number; name: string; sku: string; brand_name?: string; }
+interface ProductOption {
+  id: number;
+  bigcommerce_id: number;
+  name: string;
+  sku: string;
+  brand_name?: string;
+  match_type?: "product" | "sku";
+  variant_label?: string | null;
+}
 interface TreeNode extends Category { children: TreeNode[]; }
 
 // ─── Category tree helpers ─────────────────────────────────────────────────
@@ -176,6 +184,7 @@ interface DetailRow {
   quantity: number;
   unit_price: string;
   order_date: string | null;
+  bc_status: string;
 }
 
 interface ReportParams {
@@ -184,6 +193,8 @@ interface ReportParams {
   brandId: string;
   categoryIds: number[];
   bcProductIds: number[];
+  skuFilter: string;      // specific variant SKU (empty = no SKU filter)
+  bcStatusFilter: string; // BC order status (empty = all statuses)
 }
 
 interface ReportStats {
@@ -267,6 +278,29 @@ function EmptyState({ hasParams, noData }: { hasParams: boolean; noData?: boolea
   );
 }
 
+function BcStatusBadge({ status }: { status: string | null | undefined }) {
+  const s = status ?? "Unknown";
+  const cls =
+    s === "Completed" || s === "Shipped"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+      : s === "Awaiting Fulfillment" || s === "Awaiting Shipment" || s === "Partially Shipped"
+        ? "bg-blue-50 text-blue-700 border-blue-200"
+        : s === "Awaiting Payment" || s === "Pending"
+          ? "bg-amber-50 text-amber-700 border-amber-200"
+          : s === "Incomplete"
+            ? "bg-orange-50 text-orange-700 border-orange-200"
+            : s === "Cancelled" || s === "Declined"
+              ? "bg-red-50 text-red-700 border-red-200"
+              : s === "Refunded" || s === "Partially Refunded"
+                ? "bg-purple-50 text-purple-700 border-purple-200"
+                : "bg-slate-50 text-slate-600 border-slate-200";
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${cls} whitespace-nowrap`}>
+      {s}
+    </span>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function SalesReport() {
@@ -285,13 +319,17 @@ export default function SalesReport() {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [productSearch, setProductSearch] = useState("");
   const [selectedProducts, setSelectedProducts] = useState<ProductOption[]>([]);
+  const [selectedSkus, setSelectedSkus] = useState<string[]>([]); // variant-SKU level filters
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [bcStatusFilter, setBcStatusFilter] = useState(""); // "" = all statuses
 
   const clearFilters = () => {
     setSelectedBrandId("");
     setSelectedCategoryIds([]);
     setProductSearch("");
     setSelectedProducts([]);
+    setSelectedSkus([]);
+    setBcStatusFilter("");
   };
 
   // ── Confirmed params (only update on "Generate Report") ────────────────
@@ -350,6 +388,8 @@ export default function SalesReport() {
     if (reportParams.brandId) p.brandId = reportParams.brandId;
     if (reportParams.categoryIds.length > 0) p.categoryIds = reportParams.categoryIds.join(",");
     if (reportParams.bcProductIds.length > 0) p.bcProductIds = reportParams.bcProductIds.join(",");
+    if (reportParams.skuFilter) p.skuFilter = reportParams.skuFilter;
+    if (reportParams.bcStatusFilter) p.bcStatusFilter = reportParams.bcStatusFilter;
     return new URLSearchParams(p).toString();
   };
 
@@ -386,7 +426,14 @@ export default function SalesReport() {
   // ─── Handlers ────────────────────────────────────────────────────────────
 
   const handleGenerate = () => {
-    setReportParams({ dateFrom, dateTo, brandId: selectedBrandId, categoryIds: selectedCategoryIds, bcProductIds: selectedProducts.map(p => p.bigcommerce_id) });
+    setReportParams({
+      dateFrom, dateTo,
+      brandId: selectedBrandId,
+      categoryIds: selectedCategoryIds,
+      bcProductIds: selectedProducts.map(p => p.bigcommerce_id),
+      skuFilter: selectedSkus.length === 1 ? selectedSkus[0] : "",
+      bcStatusFilter,
+    });
     setPage(0);
     setExpandedProducts(new Set());
     setGeneratingKey(k => k + 1);
@@ -407,7 +454,13 @@ export default function SalesReport() {
   };
 
   const addProduct = (p: ProductOption) => {
-    if (!selectedProducts.find(x => x.bigcommerce_id === p.bigcommerce_id)) setSelectedProducts(prev => [...prev, p]);
+    if (p.match_type === "sku") {
+      // Add as a SKU-level filter (variant-specific)
+      if (!selectedSkus.includes(p.sku)) setSelectedSkus(prev => [...prev, p.sku]);
+    } else {
+      // Add as product-level filter
+      if (!selectedProducts.find(x => x.bigcommerce_id === p.bigcommerce_id)) setSelectedProducts(prev => [...prev, p]);
+    }
     setProductSearch("");
     setShowSearchDropdown(false);
   };
@@ -425,10 +478,10 @@ export default function SalesReport() {
 
       const hdrs = activeView === "summary"
         ? ["Product", "Brand", "Variant", "SKU", "Qty Sold", "Current Stock"]
-        : ["Product", "Brand", "Variant", "SKU", "Order #", "Customer", "Qty", "Unit Price", "Date"];
+        : ["Product", "Brand", "Variant", "SKU", "Order #", "Customer", "Qty", "Unit Price", "Date", "BC Status"];
       const csvRows = activeView === "summary"
         ? rows.map(r => [r.product_name, r.brand_name, r.variant_label ?? "", r.sku, r.qty_sold, r.current_stock])
-        : rows.map(r => [r.product_name, r.brand_name, r.variant_label ?? "", r.sku, r.display_order_number ?? r.order_number, r.customer_name, r.quantity, r.unit_price, fmtDate(String(r.order_date ?? ""))]);
+        : rows.map(r => [r.product_name, r.brand_name, r.variant_label ?? "", r.sku, r.display_order_number ?? r.order_number, r.customer_name, r.quantity, r.unit_price, fmtDate(String(r.order_date ?? "")), r.bc_status ?? ""]);
       const csv = [hdrs, ...csvRows].map(row => row.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
 
       const blob = new Blob([csv], { type: "text/csv" });
@@ -533,24 +586,65 @@ export default function SalesReport() {
                 />
               </div>
 
+              {/* BC Order Status filter */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-slate-500">BC Order Status</label>
+                <div className="relative">
+                  <select value={bcStatusFilter} onChange={e => setBcStatusFilter(e.target.value)} className="appearance-none border border-slate-200 rounded-md px-3 py-1.5 pr-8 text-sm text-slate-700 bg-white hover:border-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer w-full" data-testid="select-bc-status">
+                    <option value="">All Statuses</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Awaiting Fulfillment">Awaiting Fulfillment</option>
+                    <option value="Awaiting Shipment">Awaiting Shipment</option>
+                    <option value="Shipped">Shipped</option>
+                    <option value="Partially Shipped">Partially Shipped</option>
+                    <option value="Awaiting Payment">Awaiting Payment</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Incomplete">Incomplete</option>
+                    <option value="Cancelled">Cancelled</option>
+                    <option value="Declined">Declined</option>
+                    <option value="Refunded">Refunded</option>
+                    <option value="Partially Refunded">Partially Refunded</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                </div>
+              </div>
+
               {/* Product Search */}
               <div className="flex flex-col gap-1 relative sm:col-span-2 lg:col-span-1" onMouseDown={e => e.stopPropagation()}>
-                <label className="text-xs font-medium text-slate-500">Product Search</label>
+                <label className="text-xs font-medium text-slate-500">Product / SKU Search</label>
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-                  <Input ref={searchRef} value={productSearch} onChange={e => { setProductSearch(e.target.value); setShowSearchDropdown(true); }} onFocus={() => setShowSearchDropdown(true)} placeholder="Search products…" className="pl-8 h-8 text-sm border-slate-200 w-full" data-testid="input-product-search" />
+                  <Input ref={searchRef} value={productSearch} onChange={e => { setProductSearch(e.target.value); setShowSearchDropdown(true); }} onFocus={() => setShowSearchDropdown(true)} placeholder="Search by name or SKU…" className="pl-8 h-8 text-sm border-slate-200 w-full" data-testid="input-product-search" />
                   {showSearchDropdown && searchResults.length > 0 && (
-                    <div className="absolute top-full left-0 mt-1 w-full min-w-[260px] bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
-                      {searchResults.map(p => (
-                        <button key={p.bigcommerce_id} onMouseDown={e => { e.preventDefault(); addProduct(p); }} className="w-full text-left px-3 py-2 hover:bg-slate-50 text-sm flex flex-col border-b border-slate-100 last:border-0" data-testid={`option-product-${p.bigcommerce_id}`}>
+                    <div className="absolute top-full left-0 mt-1 w-full min-w-[300px] bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-72 overflow-y-auto">
+                      {/* Product name matches */}
+                      {searchResults.filter(p => p.match_type !== "sku").length > 0 && (
+                        <div className="px-3 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50 border-b border-slate-100">Products</div>
+                      )}
+                      {searchResults.filter(p => p.match_type !== "sku").map((p, i) => (
+                        <button key={`prod-${p.bigcommerce_id}-${i}`} onMouseDown={e => { e.preventDefault(); addProduct(p); }} className="w-full text-left px-3 py-2 hover:bg-slate-50 text-sm flex flex-col border-b border-slate-100 last:border-0" data-testid={`option-product-${p.bigcommerce_id}`}>
                           <span className="font-medium text-slate-800 truncate">{p.name}</span>
                           <span className="text-xs text-slate-400">{p.sku}{p.brand_name ? ` · ${p.brand_name}` : ""}</span>
+                        </button>
+                      ))}
+                      {/* SKU variant matches */}
+                      {searchResults.filter(p => p.match_type === "sku").length > 0 && (
+                        <div className="px-3 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50 border-b border-slate-100 border-t border-slate-200">Variant SKUs</div>
+                      )}
+                      {searchResults.filter(p => p.match_type === "sku").map(p => (
+                        <button key={`sku-${p.sku}`} onMouseDown={e => { e.preventDefault(); addProduct(p); }} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm flex items-center gap-2 border-b border-slate-100 last:border-0" data-testid={`option-sku-${p.sku}`}>
+                          <span className="shrink-0 bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded">SKU</span>
+                          <div className="min-w-0">
+                            <span className="font-mono text-slate-800 text-xs font-medium">{p.sku}</span>
+                            {p.variant_label && <span className="text-slate-400 text-xs"> · {p.variant_label}</span>}
+                            <p className="text-xs text-slate-400 truncate">{p.name}</p>
+                          </div>
                         </button>
                       ))}
                     </div>
                   )}
                   {showSearchDropdown && productSearch.length >= 1 && searchResults.length === 0 && (
-                    <div className="absolute top-full left-0 mt-1 w-full min-w-[180px] bg-white border border-slate-200 rounded-lg shadow-lg z-50 px-3 py-2 text-sm text-slate-400">No products found</div>
+                    <div className="absolute top-full left-0 mt-1 w-full min-w-[180px] bg-white border border-slate-200 rounded-lg shadow-lg z-50 px-3 py-2 text-sm text-slate-400">No products or SKUs found</div>
                   )}
                 </div>
               </div>
@@ -559,7 +653,7 @@ export default function SalesReport() {
               <div className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:flex-1 lg:justify-end">
                 <button
                   onClick={clearFilters}
-                  disabled={!selectedBrandId && selectedCategoryIds.length === 0 && selectedProducts.length === 0}
+                  disabled={!selectedBrandId && selectedCategoryIds.length === 0 && selectedProducts.length === 0 && selectedSkus.length === 0 && !bcStatusFilter}
                   className="flex items-center gap-1.5 border border-slate-200 rounded-md px-3 py-1.5 text-sm bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   data-testid="button-clear-filters"
                 >
@@ -604,6 +698,19 @@ export default function SalesReport() {
                   </span>
                 ))}
                 <button onClick={() => setSelectedProducts([])} className="text-xs text-slate-400 hover:text-slate-600 ml-1" data-testid="button-clear-products">Clear all</button>
+              </div>
+            )}
+            {/* SKU chips (variant-level filters) */}
+            {selectedSkus.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-slate-100">
+                <span className="text-xs text-slate-500 self-center">SKU:</span>
+                {selectedSkus.map(sku => (
+                  <span key={sku} className="inline-flex items-center gap-1 bg-violet-50 text-violet-700 text-xs px-2 py-0.5 rounded-full border border-violet-100" data-testid={`chip-sku-${sku}`}>
+                    <span className="font-mono font-medium">{sku}</span>
+                    <button onClick={() => setSelectedSkus(prev => prev.filter(s => s !== sku))} className="hover:text-violet-900"><X className="h-2.5 w-2.5" /></button>
+                  </span>
+                ))}
+                <button onClick={() => setSelectedSkus([])} className="text-xs text-slate-400 hover:text-slate-600 ml-1">Clear all</button>
               </div>
             )}
           </div>
@@ -711,6 +818,7 @@ export default function SalesReport() {
                         <th className="text-right px-4 py-3 font-medium text-slate-600"><button onClick={() => handleSort("qty")} className="flex items-center justify-end ml-auto hover:text-slate-800">Qty <SortIcon col="qty" sortBy={sortBy} sortDir={sortDir} /></button></th>
                         <th className="text-right px-4 py-3 font-medium text-slate-600">Unit Price</th>
                         <th className="text-left px-4 py-3 font-medium text-slate-600"><button onClick={() => handleSort("order_date")} className="flex items-center hover:text-slate-800">Date <SortIcon col="order_date" sortBy={sortBy} sortDir={sortDir} /></button></th>
+                        <th className="text-left px-4 py-3 font-medium text-slate-600"><button onClick={() => handleSort("bc_status")} className="flex items-center hover:text-slate-800">BC Status <SortIcon col="bc_status" sortBy={sortBy} sortDir={sortDir} /></button></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -724,6 +832,7 @@ export default function SalesReport() {
                           <td className="px-4 py-2.5 text-right text-blue-600 font-medium">{fmtNum(r.quantity)}</td>
                           <td className="px-4 py-2.5 text-right text-slate-600">${Number(r.unit_price || 0).toFixed(2)}</td>
                           <td className="px-4 py-2.5 text-slate-500 text-xs">{fmtDate(r.order_date)}</td>
+                          <td className="px-4 py-2.5"><BcStatusBadge status={r.bc_status} /></td>
                         </tr>
                       ))}
                     </tbody>

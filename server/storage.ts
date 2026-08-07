@@ -169,11 +169,12 @@ export interface IStorage {
   truncateBcOrderLineItems(): Promise<void>;
   getCrmOrdersForLineItemSync(since?: string): Promise<Array<{ bigcommerce_order_id: number; order_date: Date | null; customer_name: string | null; customer_email: string | null; bigcommerce_customer_id: number | null }>>;
   searchProductsForReport(query: string, limit?: number): Promise<Product[]>;
+  searchLineItemsByQuery(query: string, limit?: number): Promise<Array<{ bigcommerce_product_id: number; product_name: string; brand_name: string; sku: string; variant_label: string | null }>>;
   getProductsByBrandId(brandId: number): Promise<Product[]>;
   getProductsByCategoryId(categoryId: number): Promise<Product[]>;
-  getSalesReportSummary(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; page: number; limit: number; sortBy: string; sortDir: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
-  getSalesReportDetails(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; page: number; limit: number; sortBy: string; sortDir: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
-  getSalesReportStats(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[] }): Promise<{ totalProducts: number; totalVariants: number; totalQtySold: number; totalCurrentStock: number }>;
+  getSalesReportSummary(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string; page: number; limit: number; sortBy: string; sortDir: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
+  getSalesReportDetails(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string; page: number; limit: number; sortBy: string; sortDir: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
+  getSalesReportStats(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string }): Promise<{ totalProducts: number; totalVariants: number; totalQtySold: number; totalCurrentStock: number }>;
   getRecentExportLogs(limit?: number): Promise<Record<string, unknown>[]>;
 }
 
@@ -1979,6 +1980,25 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
+  async searchLineItemsByQuery(query: string, limit = 40): Promise<Array<{ bigcommerce_product_id: number; product_name: string; brand_name: string; sku: string; variant_label: string | null }>> {
+    const safeQ = query.replace(/'/g, "''").replace(/%/g, "\\%").replace(/_/g, "\\_");
+    const res = await db.execute(sql.raw(`
+      SELECT DISTINCT
+        li.bigcommerce_product_id,
+        COALESCE(p.name, li.product_name) AS product_name,
+        COALESCE(p.brand_name, '') AS brand_name,
+        li.sku,
+        li.variant_label
+      FROM bc_order_line_items li
+      LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+      WHERE li.sku ILIKE '%${safeQ}%' ESCAPE '\\'
+         OR li.product_name ILIKE '%${safeQ}%' ESCAPE '\\'
+      ORDER BY li.sku
+      LIMIT ${limit}
+    `));
+    return res.rows as Array<{ bigcommerce_product_id: number; product_name: string; brand_name: string; sku: string; variant_label: string | null }>;
+  }
+
   async getProductsByBrandId(brandId: number): Promise<Product[]> {
     return db.select().from(products).where(eq(products.brand_id, brandId));
   }
@@ -1994,12 +2014,14 @@ export class DatabaseStorage implements IStorage {
     dateFrom?: string;
     dateTo?: string;
     bcProductIds?: number[];
+    skuFilter?: string;
+    bcStatusFilter?: string;
     page: number;
     limit: number;
     sortBy: string;
     sortDir: string;
   }): Promise<{ rows: Record<string, unknown>[]; total: number }> {
-    const { dateFrom, dateTo, bcProductIds, page, limit, sortBy, sortDir } = opts;
+    const { dateFrom, dateTo, bcProductIds, skuFilter, bcStatusFilter, page, limit, sortBy, sortDir } = opts;
     const offset = page * limit;
 
     const dateFromCond = dateFrom
@@ -2014,6 +2036,14 @@ export class DatabaseStorage implements IStorage {
         : bcProductIds.length > 0
           ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
           : "AND 1=0";
+    // SKU-level filter (for variant-specific searches)
+    const skuCond = skuFilter
+      ? `AND li.sku = '${skuFilter.replace(/'/g, "''")}'`
+      : "";
+    // BC status filter: empty/undefined = all statuses; otherwise filter to exact status
+    const statusCond = bcStatusFilter
+      ? `AND COALESCE(com.status, '') = '${bcStatusFilter.replace(/'/g, "''")}'`
+      : "";
 
     const sortColMap: Record<string, string> = {
       qty_sold: "qty_sold",
@@ -2030,10 +2060,11 @@ export class DatabaseStorage implements IStorage {
       LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
       LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
       WHERE 1=1
-      AND COALESCE(com.status, '') NOT IN ('Cancelled', 'Declined', 'Refunded', 'Partially Refunded')
+      ${statusCond}
       ${dateFromCond}
       ${dateToCond}
       ${productCond}
+      ${skuCond}
     `;
 
     const [countRes, dataRes] = await Promise.all([
@@ -2082,12 +2113,14 @@ export class DatabaseStorage implements IStorage {
     dateFrom?: string;
     dateTo?: string;
     bcProductIds?: number[];
+    skuFilter?: string;
+    bcStatusFilter?: string;
     page: number;
     limit: number;
     sortBy: string;
     sortDir: string;
   }): Promise<{ rows: Record<string, unknown>[]; total: number }> {
-    const { dateFrom, dateTo, bcProductIds, page, limit, sortBy, sortDir } = opts;
+    const { dateFrom, dateTo, bcProductIds, skuFilter, bcStatusFilter, page, limit, sortBy, sortDir } = opts;
     const offset = page * limit;
 
     const dateFromCond = dateFrom
@@ -2102,6 +2135,12 @@ export class DatabaseStorage implements IStorage {
         : bcProductIds.length > 0
           ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
           : "AND 1=0";
+    const skuCond = skuFilter
+      ? `AND li.sku = '${skuFilter.replace(/'/g, "''")}'`
+      : "";
+    const statusCond = bcStatusFilter
+      ? `AND COALESCE(com.status, '') = '${bcStatusFilter.replace(/'/g, "''")}'`
+      : "";
 
     const sortColMap: Record<string, string> = {
       order_date: "li.order_date",
@@ -2109,15 +2148,18 @@ export class DatabaseStorage implements IStorage {
       product_name: "product_name",
       customer_name: "li.customer_name",
       order_number: "li.bigcommerce_order_id",
+      bc_status: "com.status",
     };
     const sortCol = sortColMap[sortBy] ?? "li.order_date";
     const dir = sortDir === "asc" ? "ASC" : "DESC";
 
     const whereCond = `
       WHERE 1=1
+      ${statusCond}
       ${dateFromCond}
       ${dateToCond}
       ${productCond}
+      ${skuCond}
     `;
 
     const [countRes, dataRes] = await Promise.all([
@@ -2127,7 +2169,6 @@ export class DatabaseStorage implements IStorage {
         LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
         ${whereCond}
-        AND COALESCE(com.status, '') NOT IN ('Cancelled', 'Declined', 'Refunded', 'Partially Refunded')
       `)),
       db.execute(sql.raw(`
         SELECT
@@ -2145,12 +2186,12 @@ export class DatabaseStorage implements IStorage {
           li.customer_email,
           li.quantity,
           li.base_price AS unit_price,
-          li.order_date
+          li.order_date,
+          COALESCE(com.status, 'Unknown') AS bc_status
         FROM bc_order_line_items li
         LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
         ${whereCond}
-        AND COALESCE(com.status, '') NOT IN ('Cancelled', 'Declined', 'Refunded', 'Partially Refunded')
         ORDER BY ${sortCol} ${dir}
         LIMIT ${limit} OFFSET ${offset}
       `)),
@@ -2166,8 +2207,10 @@ export class DatabaseStorage implements IStorage {
     dateFrom?: string;
     dateTo?: string;
     bcProductIds?: number[];
+    skuFilter?: string;
+    bcStatusFilter?: string;
   }): Promise<{ totalProducts: number; totalVariants: number; totalQtySold: number; totalCurrentStock: number }> {
-    const { dateFrom, dateTo, bcProductIds } = opts;
+    const { dateFrom, dateTo, bcProductIds, skuFilter, bcStatusFilter } = opts;
 
     const dateFromCond = dateFrom ? `AND li.order_date >= '${dateFrom}'::date` : "";
     const dateToCond = dateTo ? `AND li.order_date < '${dateTo}'::date + interval '1 day'` : "";
@@ -2177,6 +2220,12 @@ export class DatabaseStorage implements IStorage {
         : bcProductIds.length > 0
           ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
           : "AND 1=0";
+    const skuCond = skuFilter
+      ? `AND li.sku = '${skuFilter.replace(/'/g, "''")}'`
+      : "";
+    const statusCond = bcStatusFilter
+      ? `AND COALESCE(com.status, '') = '${bcStatusFilter.replace(/'/g, "''")}'`
+      : "";
 
     const res = await db.execute(sql.raw(`
       SELECT
@@ -2200,10 +2249,11 @@ export class DatabaseStorage implements IStorage {
       LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
       LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
       WHERE 1=1
-      AND COALESCE(com.status, '') NOT IN ('Cancelled', 'Declined', 'Refunded', 'Partially Refunded')
+      ${statusCond}
       ${dateFromCond}
       ${dateToCond}
       ${productCond}
+      ${skuCond}
     `));
 
     const row = res.rows[0] as any;

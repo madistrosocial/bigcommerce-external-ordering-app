@@ -6658,14 +6658,58 @@ export async function registerRoutes(
     try {
       const q = String(req.query.q ?? "").trim();
       if (!q || q.length < 1) return res.json([]);
-      const results = await storage.searchProductsForReport(q, 20);
-      res.json(results.map(p => ({
+
+      // 1. Search the products catalog (by name and base SKU)
+      const catalogResults = await storage.searchProductsForReport(q, 30);
+      const productHits = catalogResults.map(p => ({
         id: p.id,
         bigcommerce_id: p.bigcommerce_id,
         name: p.name,
         sku: p.sku,
         brand_name: p.brand_name ?? "",
-      })));
+        match_type: "product" as const,
+        variant_label: null as string | null,
+      }));
+
+      // 2. Also search bc_order_line_items for variant-level SKU matches and
+      //    products not yet synced to the local products catalog.
+      const lineItemHitsRaw = await storage.searchLineItemsByQuery(q, 40);
+
+      const catalogBcIds = new Set(productHits.map(p => p.bigcommerce_id));
+      const extraProducts: typeof productHits = [];
+      const skuHits: Array<{
+        id: number; bigcommerce_id: number; name: string; sku: string;
+        brand_name: string; match_type: "sku"; variant_label: string | null;
+      }> = [];
+      const seenSkus = new Set<string>();
+
+      for (const row of lineItemHitsRaw) {
+        const bcId = row.bigcommerce_product_id;
+        const sku = row.sku ?? "";
+        const isSkuMatch = sku.toLowerCase().includes(q.toLowerCase());
+
+        if (isSkuMatch && !seenSkus.has(sku)) {
+          seenSkus.add(sku);
+          skuHits.push({
+            id: 0, bigcommerce_id: bcId,
+            name: row.product_name ?? "",
+            sku, brand_name: row.brand_name ?? "",
+            match_type: "sku",
+            variant_label: row.variant_label ?? null,
+          });
+        } else if (!isSkuMatch && !catalogBcIds.has(bcId)) {
+          // Product found in line items only (not in catalog)
+          catalogBcIds.add(bcId);
+          extraProducts.push({
+            id: 0, bigcommerce_id: bcId,
+            name: row.product_name ?? "",
+            sku, brand_name: row.brand_name ?? "",
+            match_type: "product", variant_label: null,
+          });
+        }
+      }
+
+      res.json([...productHits, ...extraProducts, ...skuHits].slice(0, 50));
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -6785,15 +6829,23 @@ export async function registerRoutes(
         categoryIds: categoryIdsRaw,
         bcProductIds: bcProductIdsRaw,
         selectAll,
+        skuFilter,
+        bcStatusFilter,
         sortBy = "qty_sold",
         sortDir = "desc",
       } = req.query as Record<string, string>;
       const page = Math.max(0, parseInt(String(req.query.page ?? "0")));
-      const limit = Math.min(parseInt(String(req.query.limit ?? "20")), 200);
+      // Allow up to 50 000 rows for export calls (client sends limit=10000)
+      const limit = Math.min(parseInt(String(req.query.limit ?? "20")), 50000);
 
       const resolvedIds = await resolveReportProductIds({ brandId, categoryIdsRaw, bcProductIdsRaw });
 
-      const opts = { dateFrom, dateTo, bcProductIds: resolvedIds, page, limit, sortBy, sortDir };
+      const opts = {
+        dateFrom, dateTo, bcProductIds: resolvedIds,
+        skuFilter: skuFilter || undefined,
+        bcStatusFilter: bcStatusFilter || undefined,
+        page, limit, sortBy, sortDir,
+      };
       const [result, totalLineItems] = await Promise.all([
         view === "summary"
           ? storage.getSalesReportSummary(opts)
@@ -6812,11 +6864,15 @@ export async function registerRoutes(
   // GET /api/reports/sales/stats — aggregate stats for the report sidebar
   app.get("/api/reports/sales/stats", requirePermission("reporting_sales"), async (req, res) => {
     try {
-      const { dateFrom, dateTo, brandId, categoryIds: categoryIdsRaw, bcProductIds: raw } = req.query as Record<string, string>;
+      const { dateFrom, dateTo, brandId, categoryIds: categoryIdsRaw, bcProductIds: raw, skuFilter, bcStatusFilter } = req.query as Record<string, string>;
 
       const resolvedIds = await resolveReportProductIds({ brandId, categoryIdsRaw, bcProductIdsRaw: raw });
 
-      const stats = await storage.getSalesReportStats({ dateFrom, dateTo, bcProductIds: resolvedIds });
+      const stats = await storage.getSalesReportStats({
+        dateFrom, dateTo, bcProductIds: resolvedIds,
+        skuFilter: skuFilter || undefined,
+        bcStatusFilter: bcStatusFilter || undefined,
+      });
       res.json({ ...stats, dateFrom, dateTo });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
