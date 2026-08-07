@@ -475,38 +475,39 @@ export default function SalesReport() {
     <div className="flex flex-col min-h-full bg-slate-50">
 
       {/* Header */}
-      <div className="px-6 py-4 border-b border-slate-200 bg-white">
-        <div className="flex items-center justify-between">
+      <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-200 bg-white">
+        <div className="flex items-start sm:items-center justify-between gap-2">
           <div>
-            <p className="text-xs text-slate-400 mb-0.5">Reports &rsaquo; Sales Report</p>
-            <h1 className="text-2xl font-bold text-slate-800">Sales Report</h1>
-            <p className="text-sm text-slate-500 mt-0.5">View product sales performance across all orders</p>
+            <p className="text-xs text-slate-400 mb-0.5">Reports › Sales Report</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Sales Report</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5 hidden sm:block">View product sales performance across all orders</p>
           </div>
-          <Button variant="outline" size="sm" className="gap-1.5 text-slate-600">
+          <Button variant="outline" size="sm" className="gap-1.5 text-slate-600 shrink-0">
             <Settings2 className="h-4 w-4" />
-            Report Engine
+            <span className="hidden sm:inline">Report Engine</span>
           </Button>
         </div>
       </div>
 
       {/* Body */}
-      <div className="flex flex-1 gap-4 p-4 sm:p-6 min-h-0">
+      <div className="flex flex-1 flex-col lg:flex-row gap-4 p-3 sm:p-4 lg:p-6 min-h-0">
 
         {/* ── Main ── */}
         <div className="flex-1 min-w-0 space-y-3">
 
           {/* Filters */}
-          <div className="bg-white border border-slate-200 rounded-lg p-4">
-            <div className="flex flex-wrap items-end gap-3">
+          <div className="bg-white border border-slate-200 rounded-lg p-3 sm:p-4">
+            {/* Row 1: Date + Brand + Category + Product Search */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap items-end gap-2 sm:gap-3">
 
               {/* Date Range */}
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-1">
                 <label className="text-xs font-medium text-slate-500">Date Range</label>
                 <div className="flex items-center gap-1.5 border border-slate-200 rounded-md px-2.5 py-1.5 bg-white hover:border-slate-300 transition-colors">
                   <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                  <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border-0 p-0 text-sm text-slate-700 focus:ring-0 focus:outline-none bg-transparent w-28" data-testid="input-date-from" />
+                  <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border-0 p-0 text-sm text-slate-700 focus:ring-0 focus:outline-none bg-transparent flex-1 min-w-0" data-testid="input-date-from" />
                   <span className="text-slate-400 text-sm">–</span>
-                  <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border-0 p-0 text-sm text-slate-700 focus:ring-0 focus:outline-none bg-transparent w-28" data-testid="input-date-to" />
+                  <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border-0 p-0 text-sm text-slate-700 focus:ring-0 focus:outline-none bg-transparent flex-1 min-w-0" data-testid="input-date-to" />
                 </div>
               </div>
 
@@ -514,7 +515,7 @@ export default function SalesReport() {
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-slate-500">Brand</label>
                 <div className="relative">
-                  <select value={selectedBrandId} onChange={e => setSelectedBrandId(e.target.value)} className="appearance-none border border-slate-200 rounded-md px-3 py-1.5 pr-8 text-sm text-slate-700 bg-white hover:border-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer min-w-[140px]" data-testid="select-brand">
+                  <select value={selectedBrandId} onChange={e => setSelectedBrandId(e.target.value)} className="appearance-none border border-slate-200 rounded-md px-3 py-1.5 pr-8 text-sm text-slate-700 bg-white hover:border-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer w-full" data-testid="select-brand">
                     <option value="">All Brands</option>
                     {brands.map(b => <option key={b.id} value={String(b.id)}>{b.name}</option>)}
                   </select>
@@ -533,13 +534,13 @@ export default function SalesReport() {
               </div>
 
               {/* Product Search */}
-              <div className="flex flex-col gap-1 relative" onMouseDown={e => e.stopPropagation()}>
+              <div className="flex flex-col gap-1 relative sm:col-span-2 lg:col-span-1" onMouseDown={e => e.stopPropagation()}>
                 <label className="text-xs font-medium text-slate-500">Product Search</label>
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-                  <Input ref={searchRef} value={productSearch} onChange={e => { setProductSearch(e.target.value); setShowSearchDropdown(true); }} onFocus={() => setShowSearchDropdown(true)} placeholder="Search products..." className="pl-8 h-8 text-sm w-44 border-slate-200" data-testid="input-product-search" />
+                  <Input ref={searchRef} value={productSearch} onChange={e => { setProductSearch(e.target.value); setShowSearchDropdown(true); }} onFocus={() => setShowSearchDropdown(true)} placeholder="Search products…" className="pl-8 h-8 text-sm border-slate-200 w-full" data-testid="input-product-search" />
                   {showSearchDropdown && searchResults.length > 0 && (
-                    <div className="absolute top-full left-0 mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                    <div className="absolute top-full left-0 mt-1 w-full min-w-[260px] bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
                       {searchResults.map(p => (
                         <button key={p.bigcommerce_id} onMouseDown={e => { e.preventDefault(); addProduct(p); }} className="w-full text-left px-3 py-2 hover:bg-slate-50 text-sm flex flex-col border-b border-slate-100 last:border-0" data-testid={`option-product-${p.bigcommerce_id}`}>
                           <span className="font-medium text-slate-800 truncate">{p.name}</span>
@@ -549,14 +550,13 @@ export default function SalesReport() {
                     </div>
                   )}
                   {showSearchDropdown && productSearch.length >= 1 && searchResults.length === 0 && (
-                    <div className="absolute top-full left-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50 px-3 py-2 text-sm text-slate-400">No products found</div>
+                    <div className="absolute top-full left-0 mt-1 w-full min-w-[180px] bg-white border border-slate-200 rounded-lg shadow-lg z-50 px-3 py-2 text-sm text-slate-400">No products found</div>
                   )}
                 </div>
               </div>
 
-              {/* Clear Filters */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-slate-500 invisible">Clear</label>
+              {/* Clear + Export + Generate — right-aligned on desktop, full-width stacked on mobile */}
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:flex-1 lg:justify-end">
                 <button
                   onClick={clearFilters}
                   disabled={!selectedBrandId && selectedCategoryIds.length === 0 && selectedProducts.length === 0}
@@ -564,35 +564,28 @@ export default function SalesReport() {
                   data-testid="button-clear-filters"
                 >
                   <X className="h-3.5 w-3.5" />
-                  Clear Filters
+                  Clear
                 </button>
-              </div>
 
-              <div className="flex-1" />
+                {/* Export dropdown */}
+                <div className="relative" onMouseDown={e => e.stopPropagation()}>
+                  <Button variant="outline" size="sm" onClick={() => setShowExportMenu(v => !v)} disabled={!reportParams || isExporting} className="gap-1.5 h-8 border-slate-300 text-slate-700 hover:bg-slate-50" data-testid="button-export">
+                    {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                    Export
+                    <ChevronDown className="h-3 w-3 text-slate-400" />
+                  </Button>
+                  {showExportMenu && (
+                    <div className="absolute top-full right-0 mt-1 w-44 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                      <button onMouseDown={e => { e.preventDefault(); handleExport("excel"); }} className="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-slate-50 text-sm text-slate-700 border-b border-slate-100" data-testid="button-export-excel">
+                        <FileSpreadsheet className="h-4 w-4 text-green-600" /> Export to Excel
+                      </button>
+                      <button onMouseDown={e => { e.preventDefault(); handleExport("csv"); }} className="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-slate-50 text-sm text-slate-700" data-testid="button-export-csv">
+                        <FileText className="h-4 w-4 text-green-600" /> Export to CSV
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-              {/* Export dropdown */}
-              <div className="flex flex-col gap-1 relative" onMouseDown={e => e.stopPropagation()}>
-                <label className="text-xs font-medium text-slate-500 invisible">Export</label>
-                <Button variant="outline" size="sm" onClick={() => setShowExportMenu(v => !v)} disabled={!reportParams || isExporting} className="gap-1.5 h-8 border-slate-300 text-slate-700 hover:bg-slate-50" data-testid="button-export">
-                  {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                  Export
-                  <ChevronDown className="h-3 w-3 text-slate-400" />
-                </Button>
-                {showExportMenu && (
-                  <div className="absolute top-full right-0 mt-1 w-44 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
-                    <button onMouseDown={e => { e.preventDefault(); handleExport("excel"); }} className="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-slate-50 text-sm text-slate-700 border-b border-slate-100" data-testid="button-export-excel">
-                      <FileSpreadsheet className="h-4 w-4 text-green-600" /> Export to Excel
-                    </button>
-                    <button onMouseDown={e => { e.preventDefault(); handleExport("csv"); }} className="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-slate-50 text-sm text-slate-700" data-testid="button-export-csv">
-                      <FileText className="h-4 w-4 text-green-600" /> Export to CSV
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Generate Report */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-slate-500 invisible">Generate</label>
                 <Button onClick={handleGenerate} disabled={isLoading} size="sm" className="h-8 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white" data-testid="button-generate-report">
                   {isLoading && reportParams ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                   Generate Report
@@ -601,7 +594,7 @@ export default function SalesReport() {
             </div>
 
             {/* Product chips */}
-            {selectedProducts.length > 0 && !selectAll && (
+            {selectedProducts.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-slate-100">
                 <span className="text-xs text-slate-500 self-center">Selected:</span>
                 {selectedProducts.map(p => (
@@ -779,7 +772,7 @@ export default function SalesReport() {
         </div>
 
         {/* ── Right Sidebar ── */}
-        <div className="w-72 shrink-0 space-y-4">
+        <div className="w-full lg:w-72 shrink-0 space-y-4">
 
           {/* Report Summary */}
           <div className="bg-white border border-slate-200 rounded-lg p-4">
