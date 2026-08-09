@@ -6,8 +6,9 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Mail, Send } from "lucide-react";
+import RichTextEditor from "@/components/editor/RichTextEditor";
+import { ensureHtml, stripHtml } from "@/components/editor/RichTextEditor";
 
 interface Props {
   open: boolean;
@@ -20,21 +21,26 @@ interface Props {
 export default function EmailComposeDialog({ open, to, subject, body, onClose }: Props) {
   const [toField, setTo] = useState(to);
   const [subjectField, setSubject] = useState(subject);
-  const [bodyField, setBody] = useState(body);
+  const [bodyHtml, setBodyHtml] = useState(ensureHtml(body));
 
   // Sync when parent props change (new compose request)
   useEffect(() => {
     setTo(to);
     setSubject(subject);
-    setBody(body);
+    setBodyHtml(ensureHtml(body));
   }, [to, subject, body]);
 
   const sendMutation = useMutation({
     mutationFn: async () => {
-      const r = await fetch("/api/email/send-plain", {
+      const r = await fetch("/api/email/send-html", {
         method: "POST",
         headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ to: toField, subject: subjectField, body: bodyField }),
+        body: JSON.stringify({
+          to: toField,
+          subject: subjectField,
+          html: bodyHtml,
+          text: stripHtml(bodyHtml),
+        }),
       });
       if (!r.ok) { const e = await r.json(); throw new Error(e.error ?? "Send failed"); }
       return r.json();
@@ -63,12 +69,7 @@ export default function EmailComposeDialog({ open, to, subject, body, onClose }:
           </div>
           <div className="flex-1">
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Message</label>
-            <Textarea
-              value={bodyField}
-              onChange={e => setBody(e.target.value)}
-              rows={14}
-              className="text-sm font-mono resize-none"
-            />
+            <RichTextEditor value={bodyHtml} onChange={setBodyHtml} minHeight={260} />
           </div>
           {sendMutation.isError && (
             <p className="text-sm text-red-600">{(sendMutation.error as Error).message}</p>

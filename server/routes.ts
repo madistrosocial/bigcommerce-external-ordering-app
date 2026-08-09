@@ -3278,7 +3278,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // POST /api/email/send-plain — plain-text email (no PDF)
+  // POST /api/email/send-plain — plain-text email (no PDF) [legacy]
   app.post("/api/email/send-plain", requireAuth, async (req, res) => {
     try {
       const { to, subject, body: emailBody } = req.body as { to: string; subject: string; body: string };
@@ -3303,6 +3303,39 @@ export async function registerRoutes(
       });
       await transporter.verify();
       await transporter.sendMail({ from: smtpFrom, to, subject, text: emailBody ?? "" });
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/email/send-html — rich-text (HTML) email
+  app.post("/api/email/send-html", requireAuth, async (req, res) => {
+    try {
+      const { to, subject, html, text } = req.body as { to: string; subject: string; html: string; text?: string };
+      if (!to || !subject) return res.status(400).json({ error: "Missing required fields: to, subject" });
+
+      const setting = await storage.getSetting("invoice_settings").catch(() => null);
+      const cfg = setting?.value ?? {};
+      const smtpHost = cfg.smtp_host || "";
+      const smtpPort = Number(cfg.smtp_port) || 587;
+      const smtpUser = cfg.smtp_user || "";
+      const smtpPass = cfg.smtp_pass || "";
+      const smtpFrom = cfg.smtp_from || smtpUser;
+
+      if (!smtpHost || !smtpUser) {
+        return res.status(400).json({ error: "SMTP is not configured. Please set SMTP settings in Invoice Settings." });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: smtpHost, port: smtpPort, secure: smtpPort === 465,
+        auth: { user: smtpUser, pass: smtpPass },
+        connectionTimeout: 15000, greetingTimeout: 10000, socketTimeout: 20000,
+      });
+      await transporter.verify();
+      await transporter.sendMail({
+        from: smtpFrom, to, subject,
+        html: html ?? "",
+        text: text ?? html?.replace(/<[^>]+>/g, "") ?? "",
+      });
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });

@@ -3,8 +3,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAuthHeaders } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Mail, Save, RotateCcw, ChevronDown, ChevronRight } from "lucide-react";
+import RichTextEditor from "@/components/editor/RichTextEditor";
+import { ensureHtml } from "@/components/editor/RichTextEditor";
 
 const DEFAULT_STORE_CREDIT_BODY = `Hello {customerName},
 
@@ -53,7 +54,7 @@ function TemplateEditor({ templateKey, defaultName, defaultSubject, defaultBody,
   const [expanded, setExpanded] = useState(true);
   const [name, setName] = useState(defaultName);
   const [subject, setSubject] = useState(defaultSubject);
-  const [body, setBody] = useState(defaultBody);
+  const [body, setBody] = useState(ensureHtml(defaultBody));
   const [dirty, setDirty] = useState(false);
 
   const { data: saved } = useQuery<EmailTemplate>({
@@ -71,7 +72,7 @@ function TemplateEditor({ templateKey, defaultName, defaultSubject, defaultBody,
     if (saved) {
       setName(saved.name);
       setSubject(saved.subject_template);
-      setBody(saved.body);
+      setBody(ensureHtml(saved.body));
       setDirty(false);
     }
   }, [saved]);
@@ -95,7 +96,7 @@ function TemplateEditor({ templateKey, defaultName, defaultSubject, defaultBody,
   const reset = () => {
     setName(saved?.name ?? defaultName);
     setSubject(saved?.subject_template ?? defaultSubject);
-    setBody(saved?.body ?? defaultBody);
+    setBody(ensureHtml(saved?.body ?? defaultBody));
     setDirty(false);
   };
 
@@ -126,6 +127,9 @@ function TemplateEditor({ templateKey, defaultName, defaultSubject, defaultBody,
                 <span key={v} className="inline-flex items-center px-1.5 py-0.5 bg-blue-100 text-blue-800 text-[11px] font-mono rounded">{v}</span>
               ))}
             </div>
+            <p className="text-[10px] text-blue-500 mt-1.5">
+              Tip: type variables exactly as shown — they are substituted when the email is generated.
+            </p>
           </div>
 
           <div>
@@ -140,11 +144,10 @@ function TemplateEditor({ templateKey, defaultName, defaultSubject, defaultBody,
 
           <div>
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Body</label>
-            <Textarea
+            <RichTextEditor
               value={body}
-              onChange={e => { setBody(e.target.value); setDirty(true); }}
-              rows={18}
-              className="text-sm font-mono resize-y"
+              onChange={html => { setBody(html); setDirty(true); }}
+              minHeight={320}
             />
           </div>
 
