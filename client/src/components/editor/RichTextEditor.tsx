@@ -111,7 +111,7 @@ export default function RichTextEditor({ value, onChange, minHeight = 300 }: Pro
     if (!editor) return;
     const incoming = ensureHtml(value);
     if (editor.getHTML() !== incoming) {
-      editor.commands.setContent(incoming, false, { preserveWhitespace: "full" });
+      editor.commands.setContent(incoming, false);
     }
   }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
 
