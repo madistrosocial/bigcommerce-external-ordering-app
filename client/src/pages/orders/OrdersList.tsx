@@ -414,6 +414,7 @@ export default function OrdersList() {
   const { hasPermission } = usePermissions();
   // Without orders:view, users see only their own Sales App orders (enforced on server too)
   const canViewAll = hasPermission("orders", "view");
+  const canExport  = hasPermission("orders", "export");
 
   // ── Store Credit + Email dialog state ───────────────────────────────────────
   const [storeCreditOrder, setStoreCreditOrder] = useState<ConsolidatedOrder | null>(null);
@@ -452,6 +453,7 @@ export default function OrdersList() {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const [exporting, setExporting] = useState(false);
 
   const debounce = useCallback((val: string) => {
     setSearch(val);
@@ -534,6 +536,65 @@ export default function OrdersList() {
     });
   };
 
+  // ── Export ────────────────────────────────────────────────────────────────
+  const doExport = async (format: "csv" | "xls") => {
+    setExporting(true);
+    try {
+      const exportParams = new URLSearchParams({
+        page: "1", limit: "10000",
+        search: debouncedSearch,
+        createdBy: salesChannel === "salesapp" ? resolvedCreatedBy : "",
+        syncStatus: salesChannel === "salesapp" ? syncStatus : "",
+        bcStatus, dateFrom, dateTo, salesChannel,
+      });
+      const r = await fetch(`/api/orders/consolidated?${exportParams}`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Export failed");
+      const result: OrdersData = await r.json();
+      const orders = result.orders;
+
+      const rows = orders.map(o => {
+        const items = (o.items ?? []).map(i => `${i.quantity}x ${i.name}`).join("; ");
+        return [
+          o.bigcommerce_order_id ? `#${o.bigcommerce_order_id}` : `#${o.id}`,
+          o.company || o.customer_name || "",
+          o.customer_email || "",
+          o.is_bc_mirror ? "BigCommerce" : "Sales App",
+          o.status,
+          o.bc_status || "",
+          o.date ? new Date(o.date).toLocaleDateString() : "",
+          Number(o.total).toFixed(2),
+          items,
+          o.created_by_name || "",
+        ];
+      });
+
+      const headers = ["Order #", "Customer", "Email", "Channel", "Status", "BC Status", "Date", "Total", "Items", "Created By"];
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const filename = `sales-history-${dateStr}.${format}`;
+
+      if (format === "csv") {
+        const csvRows = [headers, ...rows].map(row =>
+          row.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")
+        );
+        const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // XLS: tab-separated values (opens directly in Excel)
+        const xlsRows = [headers, ...rows].map(row => row.map(v => String(v ?? "")).join("\t"));
+        const blob = new Blob([xlsRows.join("\n")], { type: "application/vnd.ms-excel" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      console.error("Export error:", e);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const openInvoice = (order: ConsolidatedOrder) => {
     const id = order.bigcommerce_order_id || order.id;
     window.open(`/invoice/${id}`, "_blank");
@@ -584,7 +645,7 @@ export default function OrdersList() {
       <div className="border-b bg-white px-4 py-3 shrink-0">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="min-w-0">
-            <h1 className="text-lg font-bold text-slate-800">Orders</h1>
+            <h1 className="text-lg font-bold text-slate-800">Sales History</h1>
             <p className="text-xs text-slate-400 mt-0.5">{total.toLocaleString()} orders</p>
           </div>
           <div className="flex items-center gap-2">
@@ -603,6 +664,25 @@ export default function OrdersList() {
               <span className="text-xs text-slate-400 px-2 py-1 border border-slate-200 rounded-md bg-slate-50">
                 My Orders
               </span>
+            )}
+            {canExport && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" className="h-8 text-xs gap-1" disabled={exporting || total === 0}>
+                    <Download className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">{exporting ? "Exporting…" : "Export"}</span>
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => doExport("csv")} className="gap-2 cursor-pointer text-sm">
+                    <Download className="h-3.5 w-3.5" /> Download CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => doExport("xls")} className="gap-2 cursor-pointer text-sm">
+                    <Download className="h-3.5 w-3.5" /> Download XLS
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             <Button
               size="sm"

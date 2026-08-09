@@ -228,7 +228,7 @@ function Router() {
         {() => <ProtectedRoute component={PriceOverrideAuditPage} />}
       </Route>
       <Route path="/reports/store-credit-usage">
-        {() => <ProtectedRoute component={StoreCreditUsageReportPage} />}
+        {() => { window.location.replace("/crm/store-credit"); return null; }}
       </Route>
 
       <Route component={NotFound} />

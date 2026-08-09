@@ -445,7 +445,6 @@ export default function CRMCustomers() {
 
   // ── Table helpers ─────────────────────────────────────────────────────────
   const thBase = "relative px-1 py-1 sm:px-3 sm:py-2.5 text-left text-[10px] sm:text-[11px] font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap select-none";
-  const stickyTh = `${thBase} sticky left-0 z-20 bg-slate-50`;
 
   const ResizeHandle = ({ col }: { col: ColKey }) => (
     <div
@@ -459,7 +458,7 @@ export default function CRMCustomers() {
 
   const sortTh = (field: SortField, label: string, col: ColKey, sticky = false) => (
     <th
-      className={sticky ? stickyTh : thBase}
+      className={thBase}
       style={{ width: colWidths[col], minWidth: COL_MIN_WIDTHS[col] }}
     >
       <span
@@ -787,7 +786,7 @@ export default function CRMCustomers() {
             </colgroup>
             <thead className="sticky top-0 bg-slate-50 border-b z-10">
               <tr>
-                {vis("customer")       && sortTh("company",              "Customer",       "customer",       true)}
+                {vis("customer")       && sortTh("company",              "Customer",       "customer")}
                 {vis("phone")          && plainTh("Phone",                                 "phone")}
                 {vis("city")           && sortTh("city",                  "City",           "city")}
                 {vis("state")          && sortTh("state",                 "State",          "state")}
@@ -828,7 +827,7 @@ export default function CRMCustomers() {
                     {/* ── Customer (combined: avatar + company + name + email) ── */}
                     {vis("customer") && (
                       <td
-                        className="px-3 py-2 sticky left-0 z-10 bg-white group-hover:bg-slate-50 transition-colors border-r border-slate-100"
+                        className="px-3 py-2"
                         style={{ maxWidth: colWidths.customer }}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">

@@ -151,7 +151,7 @@ export interface IStorage {
   createStoreCreditLedger(entry: InsertStoreCreditLedger): Promise<StoreCreditLedgerEntry>;
   getCrmIdByBcCustomerId(bcCustomerId: number): Promise<number | null>;
   setCustomerStoreCreditBalance(crmId: number, newBalance: number): Promise<void>;
-  getStoreCreditLedger(opts: { customerId?: number; issuedBy?: number; dateFrom?: string; dateTo?: string; search?: string; limit?: number; offset?: number }): Promise<{ rows: StoreCreditLedgerEntry[]; total: number }>;
+  getStoreCreditLedger(opts: { customerId?: number; issuedBy?: number; dateFrom?: string; dateTo?: string; search?: string; type?: string; limit?: number; offset?: number }): Promise<{ rows: StoreCreditLedgerEntry[]; total: number }>;
   updateCustomerStoreCreditBalance(customerId: number, delta: number): Promise<void>;
 
   // Email Templates
@@ -1736,13 +1736,14 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async getStoreCreditLedger(opts: { customerId?: number; issuedBy?: number; dateFrom?: string; dateTo?: string; search?: string; limit?: number; offset?: number }): Promise<{ rows: StoreCreditLedgerEntry[]; total: number }> {
-    const { customerId, issuedBy, dateFrom, dateTo, search, limit = 50, offset = 0 } = opts;
+  async getStoreCreditLedger(opts: { customerId?: number; issuedBy?: number; dateFrom?: string; dateTo?: string; search?: string; type?: string; limit?: number; offset?: number }): Promise<{ rows: StoreCreditLedgerEntry[]; total: number }> {
+    const { customerId, issuedBy, dateFrom, dateTo, search, type, limit = 50, offset = 0 } = opts;
     const conditions: any[] = [];
     if (customerId) conditions.push(eq(storeCreditLedger.customer_id, customerId));
     if (issuedBy) conditions.push(eq(storeCreditLedger.issued_by, issuedBy));
     if (dateFrom) conditions.push(sql`${storeCreditLedger.created_at} >= ${dateFrom}::timestamptz`);
     if (dateTo) conditions.push(sql`${storeCreditLedger.created_at} <= ${dateTo}::timestamptz + interval '1 day'`);
+    if (type && type !== "all" && type !== "usage") conditions.push(eq(storeCreditLedger.type, type));
     if (search?.trim()) {
       const s = `%${search.trim()}%`;
       conditions.push(or(

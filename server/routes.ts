@@ -3263,13 +3263,14 @@ export async function registerRoutes(
   // GET /api/store-credit/ledger
   app.get("/api/store-credit/ledger", requireAuth, async (req, res) => {
     try {
-      const { customer_id, issued_by, date_from, date_to, search, limit = "50", offset = "0" } = req.query as Record<string, string>;
+      const { customer_id, issued_by, date_from, date_to, search, type, limit = "50", offset = "0" } = req.query as Record<string, string>;
       const result = await storage.getStoreCreditLedger({
         customerId: customer_id ? parseInt(customer_id) : undefined,
         issuedBy: issued_by ? parseInt(issued_by) : undefined,
         dateFrom: date_from || undefined,
         dateTo: date_to || undefined,
         search: search || undefined,
+        type: type || undefined,
         limit: parseInt(limit),
         offset: parseInt(offset),
       });
@@ -6635,7 +6636,7 @@ export async function registerRoutes(
   });
 
   // GET /api/pos/store-credit-usage — Reporting > Store Credit Usage
-  app.get("/api/pos/store-credit-usage", requirePermission("reporting_store_credit_usage"), async (req, res) => {
+  app.get("/api/pos/store-credit-usage", requireAuth, async (req, res) => {
     try {
       const { customerId, cashierId, orderSearch, dateFrom, dateTo, sortBy, sortDir } = req.query as Record<string, string>;
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);

@@ -117,7 +117,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   // Orders children (all permission-gated)
   const ordersChildren: NavLeaf[] = [
     ...(hasPermission("orders_drafts") ? [{ label: "Drafts", path: "/orders/drafts" }] : []),
-    ...(hasPermission("orders_all") ? [{ label: "Orders", path: "/orders/list" }] : []),
+    ...(hasPermission("orders_all") ? [{ label: "Sales History", path: "/orders/list" }] : []),
   ];
 
   // Customers children
@@ -152,7 +152,6 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const reportingChildren: NavLeaf[] = [
     ...(hasPermission("reporting_sales") ? [{ label: "Sales Report", path: "/reports/sales" }] : []),
     ...(hasPermission("reporting_price_override_audit") ? [{ label: "Price Override Audit", path: "/reports/price-override-audit" }] : []),
-    ...(hasPermission("reporting_store_credit_usage") ? [{ label: "Store Credit Usage", path: "/reports/store-credit-usage" }] : []),
   ];
 
   // Build final nav list — only include items the user can access
