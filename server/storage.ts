@@ -2210,7 +2210,7 @@ export class DatabaseStorage implements IStorage {
           li.base_price AS unit_price,
           li.order_date,
           COALESCE(com.status, 'Unknown') AS bc_status
-        FROM ${dedupLi} li
+        FROM bc_order_line_items li
         LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
         ${whereCond}
