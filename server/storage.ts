@@ -1980,7 +1980,7 @@ export class DatabaseStorage implements IStorage {
     if (!items.length) return;
     const CHUNK = 200;
     for (let i = 0; i < items.length; i += CHUNK) {
-      // ON CONFLICT DO NOTHING relies on the unique index on
+        // ON CONFLICT DO NOTHING against the unique index uq_bc_order_line_items_business_key
       // (bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0))
       await db.insert(bcOrderLineItems).values(items.slice(i, i + CHUNK)).onConflictDoNothing();
     }
@@ -2077,16 +2077,8 @@ export class DatabaseStorage implements IStorage {
     const sortCol = sortColMap[sortBy] ?? "qty_sold";
     const dir = sortDir === "asc" ? "ASC" : "DESC";
 
-    // Dedup subquery prevents double-counting when sync has run multiple times
-    const dedupLi = `(
-      SELECT DISTINCT ON (bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0))
-        *
-      FROM bc_order_line_items
-      ORDER BY bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0), id ASC
-    )`;
-
     const baseFrom = `
-      FROM ${dedupLi} li
+      FROM bc_order_line_items li
       LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
       LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
       WHERE 1=1
@@ -2192,18 +2184,10 @@ export class DatabaseStorage implements IStorage {
       ${skuCond}
     `;
 
-    // Dedup subquery prevents double-counting when sync has run multiple times
-    const dedupLi = `(
-      SELECT DISTINCT ON (bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0))
-        *
-      FROM bc_order_line_items
-      ORDER BY bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0), id ASC
-    )`;
-
     const [countRes, dataRes] = await Promise.all([
       db.execute(sql.raw(`
         SELECT COUNT(*)::int AS total
-        FROM ${dedupLi} li
+        FROM bc_order_line_items li
         LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
         ${whereCond}
@@ -2265,20 +2249,12 @@ export class DatabaseStorage implements IStorage {
       ? `AND COALESCE(com.status, '') = '${bcStatusFilter.replace(/'/g, "''")}'`
       : "";
 
-    // Dedup subquery prevents double-counting when sync has run multiple times
-    const dedupLi = `(
-      SELECT DISTINCT ON (bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0))
-        *
-      FROM bc_order_line_items
-      ORDER BY bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0), id ASC
-    )`;
-
     // Two-phase approach: aggregate qty/counts from line items (fast with index),
     // then compute stock only for the distinct product/variant set (avoids per-row JSONB expansion)
     const res = await db.execute(sql.raw(`
       WITH filtered_li AS (
         SELECT li.bigcommerce_product_id, li.variant_id, li.sku, li.quantity
-        FROM ${dedupLi} li
+        FROM bc_order_line_items li
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
         WHERE 1=1
         ${statusCond}

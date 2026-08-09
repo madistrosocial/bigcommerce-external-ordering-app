@@ -410,8 +410,11 @@ export const bcOrderLineItems = pgTable("bc_order_line_items", {
   bigcommerce_customer_id: integer("bigcommerce_customer_id"),
   created_at: timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({
-  // Covers the DISTINCT ON dedup query: ORDER BY order_id, product_id, variant_id, id
-  dedupIdx: index("idx_bc_order_line_items_dedup").on(t.bigcommerce_order_id, t.bigcommerce_product_id, t.variant_id, t.id),
+  // UNIQUE business-key index — enforces no duplicates at write time.
+  // Functional expression COALESCE(variant_id, 0) means this index was created
+  // directly via raw SQL: CREATE UNIQUE INDEX uq_bc_order_line_items_business_key
+  // ON bc_order_line_items (bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0))
+  // Drizzle does not support functional unique indexes in schema syntax; created manually.
   // Covers date-range WHERE clause on order_date
   orderDateIdx: index("idx_bc_order_line_items_order_date").on(t.order_date),
   // Covers product-level filtering

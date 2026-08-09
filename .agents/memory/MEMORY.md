@@ -7,3 +7,4 @@
 - [Reports Module architecture](reports-module.md) — shared engine pattern; individual reports supply config only; use getAllPermissions() not getPermissions() in seeds.
 - [BC order note editing pattern](bc-order-note-editing.md) — PATCH /api/bigcommerce/orders/:bcOrderId/notes is the canonical endpoint; field names are staff_notes + customer_message (not customer_note).
 - [CustomerOrdersPanel reuse](customer-orders-panel.md) — CRM CustomerProfile uses CustomerOrdersPanel with customerInfo prop; panel uses BcOrderExpandedRow + BcOrderActionsMenu; order # links to /orders/bc/:id.
+- [BC line items uniqueness](bc-line-items-uniqueness.md) — UNIQUE functional index on (order_id, product_id, COALESCE(variant_id,0)); no query-time dedup; full sync truncates line items only (not customers/orders).
