@@ -981,8 +981,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCrmCustomerCount(): Promise<number> {
-    const result = await db.select({ count: sql<number>`count(*)::int` }).from(customersMirror);
-    return result[0]?.count ?? 0;
+    // Use fast approximate count from pg statistics (near-instant on large tables)
+    const result = await db.execute(sql.raw(
+      `SELECT COALESCE(n_live_tup, 0)::int AS cnt FROM pg_stat_user_tables WHERE relname = 'customers_mirror' LIMIT 1`
+    ));
+    const approx = (result.rows[0] as any)?.cnt;
+    if (approx != null && approx > 0) return approx;
+    // Fallback to exact count only when table is empty or stats not yet available
+    const exact = await db.select({ count: sql<number>`count(*)::int` }).from(customersMirror);
+    return exact[0]?.count ?? 0;
   }
 
   async getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null })[]> {
@@ -1098,8 +1105,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCrmOrderCount(): Promise<number> {
-    const result = await db.select({ count: sql<number>`count(*)::int` }).from(customerOrdersMirror);
-    return result[0]?.count ?? 0;
+    const result = await db.execute(sql.raw(
+      `SELECT COALESCE(n_live_tup, 0)::int AS cnt FROM pg_stat_user_tables WHERE relname = 'customer_orders_mirror' LIMIT 1`
+    ));
+    const approx = (result.rows[0] as any)?.cnt;
+    if (approx != null && approx > 0) return approx;
+    const exact = await db.select({ count: sql<number>`count(*)::int` }).from(customerOrdersMirror);
+    return exact[0]?.count ?? 0;
   }
 
   async updateCrmCustomerStats(bcCustomerId: number, stats: { lifetime_orders: number; lifetime_revenue: string; last_order_date: Date | null }): Promise<void> {
@@ -1634,8 +1646,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getBcOrderLineItemsCount(): Promise<number> {
-    const result = await db.select({ count: sql<number>`count(*)::int` }).from(bcOrderLineItems);
-    return result[0]?.count ?? 0;
+    const result = await db.execute(sql.raw(
+      `SELECT COALESCE(n_live_tup, 0)::int AS cnt FROM pg_stat_user_tables WHERE relname = 'bc_order_line_items' LIMIT 1`
+    ));
+    const approx = (result.rows[0] as any)?.cnt;
+    if (approx != null && approx > 0) return approx;
+    const exact = await db.select({ count: sql<number>`count(*)::int` }).from(bcOrderLineItems);
+    return exact[0]?.count ?? 0;
   }
 
   async truncateBcOrderLineItems(): Promise<void> {
@@ -2256,33 +2273,48 @@ export class DatabaseStorage implements IStorage {
       ORDER BY bigcommerce_order_id, bigcommerce_product_id, COALESCE(variant_id, 0), id ASC
     )`;
 
+    // Two-phase approach: aggregate qty/counts from line items (fast with index),
+    // then compute stock only for the distinct product/variant set (avoids per-row JSONB expansion)
     const res = await db.execute(sql.raw(`
-      SELECT
-        COUNT(DISTINCT li.bigcommerce_product_id)::int AS total_products,
-        COUNT(DISTINCT (li.bigcommerce_product_id, li.variant_id, li.sku))::int AS total_variants,
-        SUM(li.quantity)::int AS total_qty_sold,
-        COALESCE(SUM(
-          COALESCE(
-            (
-              SELECT CAST(CAST(v->>'inventory_level' AS numeric) AS int)
-              FROM jsonb_array_elements(p.variants) AS v
-              WHERE v->>'id' IS NOT NULL
-                AND CAST(v->>'id' AS int) = li.variant_id
-              LIMIT 1
-            ),
-            p.stock_level,
-            0
-          )
+      WITH filtered_li AS (
+        SELECT li.bigcommerce_product_id, li.variant_id, li.sku, li.quantity
+        FROM ${dedupLi} li
+        LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
+        WHERE 1=1
+        ${statusCond}
+        ${dateFromCond}
+        ${dateToCond}
+        ${productCond}
+        ${skuCond}
+      ),
+      agg AS (
+        SELECT
+          COUNT(DISTINCT bigcommerce_product_id)::int AS total_products,
+          COUNT(DISTINCT (bigcommerce_product_id, variant_id, sku))::int AS total_variants,
+          SUM(quantity)::int AS total_qty_sold
+        FROM filtered_li
+      ),
+      distinct_pv AS (
+        SELECT DISTINCT bigcommerce_product_id, variant_id FROM filtered_li
+      ),
+      stock AS (
+        SELECT COALESCE(SUM(
+          CASE
+            WHEN dpv.variant_id IS NOT NULL THEN
+              COALESCE(
+                (SELECT CAST(v->>'stock_level' AS int)
+                 FROM jsonb_array_elements(p.variants) v
+                 WHERE (v->>'id') IS NOT NULL AND CAST(v->>'id' AS int) = dpv.variant_id
+                 LIMIT 1),
+                p.stock_level, 0
+              )
+            ELSE COALESCE(p.stock_level, 0)
+          END
         ), 0)::int AS total_current_stock
-      FROM ${dedupLi} li
-      LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
-      LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
-      WHERE 1=1
-      ${statusCond}
-      ${dateFromCond}
-      ${dateToCond}
-      ${productCond}
-      ${skuCond}
+        FROM distinct_pv dpv
+        LEFT JOIN products p ON p.bigcommerce_id = dpv.bigcommerce_product_id
+      )
+      SELECT agg.*, stock.total_current_stock FROM agg, stock
     `));
 
     const row = res.rows[0] as any;

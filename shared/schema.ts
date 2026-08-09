@@ -409,7 +409,14 @@ export const bcOrderLineItems = pgTable("bc_order_line_items", {
   customer_email: text("customer_email"),
   bigcommerce_customer_id: integer("bigcommerce_customer_id"),
   created_at: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => ({
+  // Covers the DISTINCT ON dedup query: ORDER BY order_id, product_id, variant_id, id
+  dedupIdx: index("idx_bc_order_line_items_dedup").on(t.bigcommerce_order_id, t.bigcommerce_product_id, t.variant_id, t.id),
+  // Covers date-range WHERE clause on order_date
+  orderDateIdx: index("idx_bc_order_line_items_order_date").on(t.order_date),
+  // Covers product-level filtering
+  productIdx: index("idx_bc_order_line_items_product").on(t.bigcommerce_product_id),
+}));
 
 export const insertBcOrderLineItemSchema = createInsertSchema(bcOrderLineItems).omit({ id: true, created_at: true });
 export type InsertBcOrderLineItem = z.infer<typeof insertBcOrderLineItemSchema>;
