@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates } from "@shared/schema";
-import { eq, desc, and, inArray, gt, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
+import { eq, desc, and, inArray, gt, gte, lt, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 export interface IStorage {
@@ -54,7 +54,8 @@ export interface IStorage {
 
   // Inventory push log operations
   createInventoryPushLog(entry: InsertInventoryPushLog): Promise<InventoryPushLog>;
-  getInventoryPushLogs(limit?: number): Promise<InventoryPushLog[]>;
+  getInventoryPushLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<{ rows: InventoryPushLog[]; total: number }>;
+  getInventoryPushLogUsernames(): Promise<string[]>;
 
   // Product link log operations
   createProductLinkLog(entry: InsertProductLinkLog): Promise<ProductLinkLog>;
@@ -584,10 +585,32 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async getInventoryPushLogs(limit = 100): Promise<InventoryPushLog[]> {
-    return db.select().from(inventoryPushLogs)
-      .orderBy(desc(inventoryPushLogs.created_at))
-      .limit(limit);
+  async getInventoryPushLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<{ rows: InventoryPushLog[]; total: number }> {
+    const { page, limit, search, username, dateFrom, dateTo } = opts;
+    const offset = page * limit;
+    const conditions = [];
+    if (search) conditions.push(or(ilike(inventoryPushLogs.product_name, `%${search}%`), ilike(inventoryPushLogs.sku, `%${search}%`))!);
+    if (username) conditions.push(eq(inventoryPushLogs.username, username));
+    if (dateFrom) conditions.push(gte(inventoryPushLogs.created_at, new Date(dateFrom)));
+    if (dateTo) {
+      const end = new Date(dateTo);
+      end.setDate(end.getDate() + 1);
+      conditions.push(lt(inventoryPushLogs.created_at, end));
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const [countRes, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(inventoryPushLogs).where(where),
+      db.select().from(inventoryPushLogs).where(where).orderBy(desc(inventoryPushLogs.created_at)).limit(limit).offset(offset),
+    ]);
+    return { rows: rows as InventoryPushLog[], total: countRes[0]?.count ?? 0 };
+  }
+
+  async getInventoryPushLogUsernames(): Promise<string[]> {
+    const result = await db.selectDistinct({ username: inventoryPushLogs.username })
+      .from(inventoryPushLogs)
+      .where(sql`${inventoryPushLogs.username} != ''`)
+      .orderBy(inventoryPushLogs.username);
+    return result.map(r => r.username);
   }
 
   async createProductLinkLog(entry: InsertProductLinkLog): Promise<ProductLinkLog> {

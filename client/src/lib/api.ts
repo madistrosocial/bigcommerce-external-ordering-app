@@ -737,11 +737,34 @@ export async function pushInventory(data: {
   return res.json();
 }
 
-export async function getInventoryPushLogs(): Promise<InventoryPushLog[]> {
-  const res = await fetch(`${API_BASE}/inventory/push-logs`, {
+export async function getInventoryPushLogs(opts?: {
+  page?: number;
+  limit?: number;
+  search?: string;
+  username?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<{ rows: InventoryPushLog[]; total: number }> {
+  const params = new URLSearchParams();
+  if (opts?.page !== undefined) params.set("page", String(opts.page));
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts?.search) params.set("search", opts.search);
+  if (opts?.username) params.set("username", opts.username);
+  if (opts?.dateFrom) params.set("dateFrom", opts.dateFrom);
+  if (opts?.dateTo) params.set("dateTo", opts.dateTo);
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/inventory/push-logs${qs ? `?${qs}` : ""}`, {
     headers: getAuthHeaders()
   });
   if (!res.ok) throw new Error('Failed to fetch inventory push logs');
+  return res.json();
+}
+
+export async function getInventoryPushLogUsernames(): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/inventory/push-logs/usernames`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) throw new Error('Failed to fetch log usernames');
   return res.json();
 }
 

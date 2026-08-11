@@ -152,8 +152,11 @@ export default function DashboardPage() {
   });
 
   const { data: allPushLogs = [], isLoading: logsLoading } = useQuery({
-    queryKey: ["inventory-push-logs"],
-    queryFn: getInventoryPushLogs,
+    queryKey: ["inventory-push-logs-dashboard"],
+    queryFn: async () => {
+      const result = await getInventoryPushLogs({ page: 0, limit: 10000 });
+      return result.rows;
+    },
   });
 
   const isLoading = ordersLoading || logsLoading;

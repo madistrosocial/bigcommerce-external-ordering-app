@@ -1,18 +1,77 @@
+import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import * as api from "@/lib/api";
 import { useTimeService } from "@/hooks/useTimeService";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Package, Loader2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ArrowLeft, Package, Loader2, ChevronLeft, ChevronRight, Search, X } from "lucide-react";
+
+const PAGE_SIZE = 25;
 
 export default function InventoryPushLogs() {
   const [, navigate] = useLocation();
   const fmt = useTimeService();
 
-  const { data: logs = [], isLoading } = useQuery({
-    queryKey: ["inventory-push-logs"],
-    queryFn: api.getInventoryPushLogs,
+  // Filter state
+  const [search, setSearch] = useState("");
+  const [username, setUsername] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(0);
+
+  // Applied filters (committed on Enter / blur for search, immediate for others)
+  const [appliedSearch, setAppliedSearch] = useState("");
+
+  const applySearch = useCallback(() => {
+    setAppliedSearch(search);
+    setPage(0);
+  }, [search]);
+
+  const clearFilters = () => {
+    setSearch("");
+    setAppliedSearch("");
+    setUsername("");
+    setDateFrom("");
+    setDateTo("");
+    setPage(0);
+  };
+
+  const hasFilters = appliedSearch || username || dateFrom || dateTo;
+
+  // Usernames for dropdown
+  const { data: usernames = [] } = useQuery<string[]>({
+    queryKey: ["inventory-push-log-usernames"],
+    queryFn: api.getInventoryPushLogUsernames,
   });
+
+  // Log data
+  const { data, isLoading } = useQuery<{ rows: api.InventoryPushLog[]; total: number }>({
+    queryKey: ["inventory-push-logs", page, appliedSearch, username, dateFrom, dateTo],
+    queryFn: () =>
+      api.getInventoryPushLogs({
+        page,
+        limit: PAGE_SIZE,
+        search: appliedSearch || undefined,
+        username: username || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+      }),
+    placeholderData: (prev) => prev,
+  });
+
+  const logs = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  const rangeEnd = Math.min((page + 1) * PAGE_SIZE, total);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -29,18 +88,80 @@ export default function InventoryPushLogs() {
         </Button>
         <div className="flex items-center gap-2">
           <Package className="h-5 w-5 text-slate-600" />
-          <h1 className="text-base font-bold text-slate-800">
-            Manual Inventory Push Logs
-          </h1>
+          <h1 className="text-base font-bold text-slate-800">Manual Inventory Push Logs</h1>
         </div>
         <span className="ml-auto text-xs text-slate-400">
-          {logs.length} record{logs.length !== 1 ? "s" : ""}
+          {isLoading ? "Loading…" : `${total.toLocaleString()} record${total !== 1 ? "s" : ""}`}
         </span>
       </header>
 
+      {/* Filter bar */}
+      <div className="bg-white border-b px-4 py-3 flex flex-wrap items-center gap-2 shrink-0">
+        {/* Product / SKU search */}
+        <div className="relative flex-1 min-w-[180px] max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+          <Input
+            className="pl-7 h-8 text-sm"
+            placeholder="Product name or SKU…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && applySearch()}
+            onBlur={applySearch}
+          />
+        </div>
+
+        {/* Date from */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-slate-500 whitespace-nowrap">From</span>
+          <Input
+            type="date"
+            className="h-8 text-sm w-36"
+            value={dateFrom}
+            onChange={(e) => { setDateFrom(e.target.value); setPage(0); }}
+          />
+        </div>
+
+        {/* Date to */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-slate-500 whitespace-nowrap">To</span>
+          <Input
+            type="date"
+            className="h-8 text-sm w-36"
+            value={dateTo}
+            onChange={(e) => { setDateTo(e.target.value); setPage(0); }}
+          />
+        </div>
+
+        {/* User dropdown */}
+        {usernames.length > 0 && (
+          <Select
+            value={username || "all"}
+            onValueChange={(v) => { setUsername(v === "all" ? "" : v); setPage(0); }}
+          >
+            <SelectTrigger className="h-8 text-sm w-40">
+              <SelectValue placeholder="All users" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All users</SelectItem>
+              {usernames.map((u) => (
+                <SelectItem key={u} value={u}>{u}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {/* Clear filters */}
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-500" onClick={clearFilters}>
+            <X className="h-3.5 w-3.5 mr-1" />
+            Clear
+          </Button>
+        )}
+      </div>
+
       {/* Content */}
-      <div className="flex-1 overflow-auto px-4 py-4">
-        {isLoading ? (
+      <div className="flex-1 overflow-auto px-4 py-4 flex flex-col gap-3">
+        {isLoading && !data ? (
           <div className="flex items-center justify-center py-20 text-slate-400">
             <Loader2 className="h-6 w-6 animate-spin mr-2" />
             Loading logs…
@@ -48,10 +169,10 @@ export default function InventoryPushLogs() {
         ) : logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400">
             <Package className="h-12 w-12 mb-3 opacity-30" />
-            <p className="text-sm">No inventory pushes recorded yet.</p>
+            <p className="text-sm">{hasFilters ? "No logs match the current filters." : "No inventory pushes recorded yet."}</p>
           </div>
         ) : (
-          <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div className={`bg-white rounded-lg border shadow-sm overflow-hidden transition-opacity ${isLoading ? "opacity-60" : ""}`}>
             <table className="w-full text-sm" data-testid="table-push-logs">
               <thead className="bg-slate-50 border-b">
                 <tr>
@@ -100,6 +221,40 @@ export default function InventoryPushLogs() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {total > 0 && (
+          <div className="flex items-center justify-between px-1">
+            <p className="text-xs text-slate-500">
+              Showing {rangeStart.toLocaleString()}–{rangeEnd.toLocaleString()} of {total.toLocaleString()} result{total !== 1 ? "s" : ""}
+            </p>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                disabled={page === 0 || isLoading}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                <span className="ml-1 text-xs">Previous</span>
+              </Button>
+              <span className="text-xs text-slate-500 px-2">
+                Page {page + 1} of {Math.max(1, totalPages)}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                disabled={page >= totalPages - 1 || isLoading}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                <span className="mr-1 text-xs">Next</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         )}
       </div>

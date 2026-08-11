@@ -2826,11 +2826,25 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/inventory/push-logs/usernames", requireAuth, async (_req, res) => {
+    try {
+      const usernames = await storage.getInventoryPushLogUsernames();
+      res.json(usernames);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/inventory/push-logs", requireAuth, async (req, res) => {
     try {
-      const limit = parseInt(req.query.limit as string) || 100;
-      const logs = await storage.getInventoryPushLogs(limit);
-      res.json(logs);
+      const page = Math.max(0, parseInt(req.query.page as string) || 0);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 25));
+      const search = (req.query.search as string) || undefined;
+      const username = (req.query.username as string) || undefined;
+      const dateFrom = (req.query.dateFrom as string) || undefined;
+      const dateTo = (req.query.dateTo as string) || undefined;
+      const result = await storage.getInventoryPushLogs({ page, limit, search, username, dateFrom, dateTo });
+      res.json(result);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
