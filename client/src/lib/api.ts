@@ -760,6 +760,29 @@ export async function getInventoryPushLogs(opts?: {
   return res.json();
 }
 
+export async function exportInventoryPushLogs(opts?: {
+  search?: string;
+  username?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<{ blob: Blob; filename: string }> {
+  const params = new URLSearchParams();
+  if (opts?.search)   params.set("search",   opts.search);
+  if (opts?.username) params.set("username", opts.username);
+  if (opts?.dateFrom) params.set("dateFrom", opts.dateFrom);
+  if (opts?.dateTo)   params.set("dateTo",   opts.dateTo);
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/inventory/push-logs/export${qs ? `?${qs}` : ""}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to export inventory push logs");
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match?.[1] ?? `inventory-push-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+  return { blob, filename };
+}
+
 export async function getInventoryPushLogUsernames(): Promise<string[]> {
   const res = await fetch(`${API_BASE}/inventory/push-logs/usernames`, {
     headers: getAuthHeaders()

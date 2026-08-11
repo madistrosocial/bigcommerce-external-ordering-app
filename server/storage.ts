@@ -56,6 +56,7 @@ export interface IStorage {
   createInventoryPushLog(entry: InsertInventoryPushLog): Promise<InventoryPushLog>;
   getInventoryPushLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<{ rows: InventoryPushLog[]; total: number }>;
   getInventoryPushLogUsernames(): Promise<string[]>;
+  getInventoryPushLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<InventoryPushLog[]>;
 
   // Product link log operations
   createProductLinkLog(entry: InsertProductLinkLog): Promise<ProductLinkLog>;
@@ -603,6 +604,21 @@ export class DatabaseStorage implements IStorage {
       db.select().from(inventoryPushLogs).where(where).orderBy(desc(inventoryPushLogs.created_at)).limit(limit).offset(offset),
     ]);
     return { rows: rows as InventoryPushLog[], total: countRes[0]?.count ?? 0 };
+  }
+
+  async getInventoryPushLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<InventoryPushLog[]> {
+    const { search, username, dateFrom, dateTo } = opts;
+    const conditions = [];
+    if (search) conditions.push(or(ilike(inventoryPushLogs.product_name, `%${search}%`), ilike(inventoryPushLogs.sku, `%${search}%`))!);
+    if (username) conditions.push(eq(inventoryPushLogs.username, username));
+    if (dateFrom) conditions.push(gte(inventoryPushLogs.created_at, new Date(dateFrom)));
+    if (dateTo) {
+      const end = new Date(dateTo);
+      end.setDate(end.getDate() + 1);
+      conditions.push(lt(inventoryPushLogs.created_at, end));
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    return db.select().from(inventoryPushLogs).where(where).orderBy(desc(inventoryPushLogs.created_at)) as Promise<InventoryPushLog[]>;
   }
 
   async getInventoryPushLogUsernames(): Promise<string[]> {

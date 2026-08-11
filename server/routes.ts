@@ -2835,6 +2835,52 @@ export async function registerRoutes(
     }
   });
 
+  // Export endpoint — no row cap; generates CSV server-side with formula-injection neutralization
+  app.get("/api/inventory/push-logs/export", requireAuth, async (req, res) => {
+    try {
+      const search   = (req.query.search   as string) || undefined;
+      const username = (req.query.username as string) || undefined;
+      const dateFrom = (req.query.dateFrom as string) || undefined;
+      const dateTo   = (req.query.dateTo   as string) || undefined;
+      const rows = await storage.getInventoryPushLogsForExport({ search, username, dateFrom, dateTo });
+
+      // Neutralize CSV formula injection (=, +, -, @, tab, CR as first char)
+      const neutralize = (val: string | number | null | undefined): string => {
+        const s = val == null ? "" : String(val);
+        return s.length > 0 && ["=", "+", "-", "@", "\t", "\r"].includes(s[0]) ? `'${s}` : s;
+      };
+      const escapeCell = (val: string | number | null | undefined): string => {
+        const s = neutralize(val);
+        return s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")
+          ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+
+      const filename = `inventory-push-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+      const lines: string[] = [
+        ["Date", "User", "Product", "Variant", "SKU", "Before", "Added", "After", "Reason"].join(","),
+      ];
+      for (const log of rows) {
+        lines.push([
+          escapeCell(log.created_at ? new Date(log.created_at).toISOString() : ""),
+          escapeCell((log as any).username || `User #${log.user_id}`),
+          escapeCell((log as any).product_name || `Product #${log.product_id}`),
+          escapeCell((log as any).variant_name || `Variant #${log.variant_id}`),
+          escapeCell(log.sku),
+          escapeCell(log.previous_inventory),
+          escapeCell(log.quantity_added),
+          escapeCell(log.new_inventory),
+          escapeCell(log.reason || ""),
+        ].join(","));
+      }
+      res.send(lines.join("\n"));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/inventory/push-logs", requireAuth, async (req, res) => {
     try {
       const page = Math.max(0, parseInt(req.query.page as string) || 0);

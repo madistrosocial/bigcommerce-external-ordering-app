@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Package, Loader2, ChevronLeft, ChevronRight, Search, X } from "lucide-react";
+import { ArrowLeft, Package, Loader2, ChevronLeft, ChevronRight, Search, X, Download } from "lucide-react";
 
 const PAGE_SIZE = 25;
 
@@ -26,6 +26,7 @@ export default function InventoryPushLogs() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(0);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Applied filters (committed on Enter / blur for search, immediate for others)
   const [appliedSearch, setAppliedSearch] = useState("");
@@ -45,6 +46,29 @@ export default function InventoryPushLogs() {
   };
 
   const hasFilters = appliedSearch || username || dateFrom || dateTo;
+
+  const exportCSV = useCallback(async () => {
+    setIsExporting(true);
+    try {
+      const { blob, filename } = await api.exportInventoryPushLogs({
+        search: appliedSearch || undefined,
+        username: username || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+      });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("CSV export failed", err);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [appliedSearch, username, dateFrom, dateTo]);
 
   // Usernames for dropdown
   const { data: usernames = [] } = useQuery<string[]>({
@@ -157,6 +181,23 @@ export default function InventoryPushLogs() {
             Clear
           </Button>
         )}
+
+        {/* Export CSV */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs ml-auto"
+          disabled={isLoading || isExporting}
+          onClick={exportCSV}
+          data-testid="button-export-csv"
+        >
+          {isExporting ? (
+            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+          ) : (
+            <Download className="h-3.5 w-3.5 mr-1" />
+          )}
+          {isExporting ? "Exporting…" : "Export CSV"}
+        </Button>
       </div>
 
       {/* Content */}
