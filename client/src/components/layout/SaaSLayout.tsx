@@ -129,6 +129,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   // Inventory children
   const inventoryChildren: NavLeaf[] = [
     ...(hasPermission("inventory_push") ? [{ label: "Push Inventory", path: "/inventory/push" }] : []),
+    ...(hasPermission("inventory_audit") ? [{ label: "Inventory Audit", path: "/inventory/audit" }] : []),
     ...(hasPermission("inventory_logs") ? [{ label: "Push Logs", path: "/inventory-push-logs" }] : []),
   ];
 
@@ -177,6 +178,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     { label: "User Management", path: "/admin/users", icon: Users },
     ...(role === "admin" ? [{ label: "User Groups", path: "/admin/groups", icon: UsersRound }] : []),
     { label: "BC Integration", path: "/admin/integration", icon: Plug },
+    { label: "SKUVault", path: "/admin/skuvault", icon: Plug },
     { label: "Price Tiers", path: "/admin/price-tiers", icon: Layers },
     { label: "Invoice Settings", path: "/admin/invoice", icon: Receipt },
     { label: "ShipStation Export", path: "/admin/shipstation", icon: Ship },

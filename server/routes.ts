@@ -17,6 +17,9 @@ import cron from "node-cron";
 import * as FtpClientLib from "basic-ftp";
 import SftpClient from "ssh2-sftp-client";
 import { Readable } from "stream";
+import { db } from "../db";
+import { sql } from "drizzle-orm";
+import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, testSkuVaultConnection, type SkuVaultConfig } from "./skuvault";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
 const DEFAULT_INVOICE_TEMPLATE = `<!DOCTYPE html>
@@ -2739,88 +2742,115 @@ export async function registerRoutes(
 
   // ===== INVENTORY PUSH =====
 
+  // Ensure partial unique index for audit tasks (one pending task per SKU)
+  db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_audit_tasks_sku_pending
+    ON inventory_audit_tasks (sku) WHERE status = 'pending'
+  `)).catch(() => {}); // Ignore if table not yet created; will succeed after db:push
+
   app.post("/api/inventory/push", requireAuth, async (req, res) => {
     try {
-      const { product_id, variant_id, sku, quantity_added, reason, product_name, variant_name } = req.body as {
-        product_id: number;
-        variant_id: number;
-        sku: string;
-        quantity_added: number;
-        reason?: string;
-        product_name?: string;
-        variant_name?: string;
+      const {
+        product_id, variant_id, sku, quantity_added, reason, product_name, variant_name,
+        push_to_bigcommerce = true,
+        push_to_skuvault = false,
+      } = req.body as {
+        product_id: number; variant_id: number; sku: string; quantity_added: number;
+        reason?: string; product_name?: string; variant_name?: string;
+        push_to_bigcommerce?: boolean; push_to_skuvault?: boolean;
       };
       const authUser = (req as any).authUser;
 
       if (!product_id || !variant_id || !quantity_added || quantity_added <= 0) {
         return res.status(400).json({ error: "product_id, variant_id, and quantity_added (>0) are required" });
       }
-
-      const setting = await storage.getSetting("bigcommerce_config");
-      let storeHash = process.env.BC_STORE_HASH;
-      let token = process.env.BC_TOKEN;
-      if (setting?.value) {
-        const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
-        storeHash = cfg.storeHash || storeHash;
-        token = cfg.token || token;
-      }
-      if (!storeHash || !token) {
-        return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      if (!push_to_bigcommerce && !push_to_skuvault) {
+        return res.status(400).json({ error: "At least one destination must be selected" });
       }
 
-      // 1. Fetch current inventory
-      const getRes = await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product_id}/variants/${variant_id}`,
-        {
-          headers: {
-            "X-Auth-Token": String(token),
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
+      let previous_inventory = 0;
+      let new_inventory = 0;
+      let svResult: any = null;
+
+      // ── BigCommerce push ────────────────────────────────────────────────────
+      if (push_to_bigcommerce) {
+        const bcSetting = await storage.getSetting("bigcommerce_config");
+        let storeHash = process.env.BC_STORE_HASH;
+        let token = process.env.BC_TOKEN;
+        if (bcSetting?.value) {
+          const cfg = typeof bcSetting.value === "string" ? JSON.parse(bcSetting.value) : bcSetting.value;
+          storeHash = cfg.storeHash || storeHash;
+          token = cfg.token || token;
         }
-      );
-      if (!getRes.ok) {
-        throw new Error(`Failed to fetch variant: ${getRes.statusText}`);
-      }
-      const variantData = await getRes.json();
-      const previous_inventory: number = variantData.data?.inventory_level ?? 0;
-      const new_inventory = previous_inventory + quantity_added;
+        if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
 
-      // 2. Update BC inventory
-      const putRes = await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product_id}/variants/${variant_id}`,
-        {
-          method: "PUT",
-          headers: {
-            "X-Auth-Token": String(token),
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({ inventory_level: new_inventory }),
+        const getRes = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product_id}/variants/${variant_id}`,
+          { headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" } }
+        );
+        if (!getRes.ok) throw new Error(`Failed to fetch variant: ${getRes.statusText}`);
+        const variantData = await getRes.json();
+        previous_inventory = variantData.data?.inventory_level ?? 0;
+        new_inventory = previous_inventory + quantity_added;
+
+        const putRes = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product_id}/variants/${variant_id}`,
+          { method: "PUT", headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ inventory_level: new_inventory }) }
+        );
+        if (!putRes.ok) {
+          const errData = await putRes.json().catch(() => ({}));
+          throw new Error(`Failed to update BigCommerce inventory: ${JSON.stringify(errData)}`);
         }
-      );
-      if (!putRes.ok) {
-        const errData = await putRes.json().catch(() => ({}));
-        throw new Error(`Failed to update inventory: ${JSON.stringify(errData)}`);
       }
 
-      // 3. Log the push
+      // ── SKUVault push ───────────────────────────────────────────────────────
+      if (push_to_skuvault) {
+        const svSetting = await storage.getSetting("skuvault_config");
+        const svCfg = svSetting?.value ? (typeof svSetting.value === "string" ? JSON.parse(svSetting.value) : svSetting.value) : null;
+        if (!svCfg?.tenantToken || !svCfg?.userToken) {
+          return res.status(400).json({ error: "SKUVault credentials not configured. Please set them in Settings > SKUVault." });
+        }
+        const svCfgTyped: SkuVaultConfig = { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseLocation: svCfg.warehouseLocation };
+        const svPushResult = await addSkuVaultInventory(svCfgTyped, [{ sku, quantityToAdd: quantity_added }]);
+        const svItem = svPushResult.results[0];
+        if (svItem?.error) throw new Error(`SKUVault push failed for ${sku}: ${svItem.error}`);
+        if (!push_to_bigcommerce) {
+          previous_inventory = 0;
+          new_inventory = svItem?.newQty ?? quantity_added;
+        }
+        svResult = svPushResult;
+
+        // Create or update audit task for SKUVault push
+        try {
+          await storage.createOrUpdateAuditTask({
+            sku, product_id, variant_id,
+            product_name: product_name || "",
+            variant_name: variant_name || "",
+            quantity_added,
+            system_qty: svItem?.newQty ?? (previous_inventory + quantity_added),
+            created_by: authUser.id,
+            source: "manual_push",
+          });
+        } catch (auditErr: any) {
+          console.warn("[audit] Failed to create/update audit task:", auditErr.message);
+        }
+      }
+
+      // ── Log the push ────────────────────────────────────────────────────────
       const logEntry: InsertInventoryPushLog = {
         user_id: authUser.id,
         username: authUser.username || "",
-        sku,
-        product_id,
-        variant_id,
+        sku, product_id, variant_id,
         product_name: product_name || "",
         variant_name: variant_name || "",
-        previous_inventory,
-        new_inventory,
-        quantity_added,
+        previous_inventory, new_inventory, quantity_added,
         reason: reason || null,
+        push_to_bigcommerce: !!push_to_bigcommerce,
+        push_to_skuvault: !!push_to_skuvault,
       };
       const log = await storage.createInventoryPushLog(logEntry);
 
-      res.json({ success: true, previous_inventory, new_inventory, log });
+      res.json({ success: true, previous_inventory, new_inventory, log, skuvault: svResult });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -5667,6 +5697,23 @@ export async function registerRoutes(
     } catch (_) { /* non-fatal — permissions may already exist */ }
   })();
 
+  // ── Inventory Audit permission auto-seed ──────────────────────────────────────
+  await (async () => {
+    const AUDIT_PERMS: Array<{ module: string; action: string; description: string }> = [
+      { module: "inventory_audit", action: "view", description: "Inventory Audit: View audit queue and history" },
+      { module: "inventory_audit", action: "audit", description: "Inventory Audit: Complete audits and adjust SKUVault inventory" },
+    ];
+    try {
+      const existing = await storage.getAllPermissions();
+      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+      for (const p of AUDIT_PERMS) {
+        if (!existingSet.has(`${p.module}:${p.action}`)) {
+          await storage.createPermission({ module: p.module, action: p.action, description: p.description });
+        }
+      }
+    } catch (_) { /* non-fatal */ }
+  })();
+
   // ── Reports permission auto-seed ──────────────────────────────────────────────
   await (async () => {
     const REPORT_PERMS: Array<{ module: string; action: string; description: string }> = [
@@ -7029,6 +7076,196 @@ export async function registerRoutes(
         bcStatusFilter: bcStatusFilter || undefined,
       });
       res.json({ ...stats, dateFrom, dateTo });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── SKUVault Settings ──────────────────────────────────────────────────────
+
+  app.get("/api/settings/skuvault", requireAuth, async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("skuvault_config");
+      const cfg = setting?.value ? (typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value) : {};
+      // Never expose tokens — mask them
+      res.json({
+        tenantToken: cfg.tenantToken ? "••••••••" : "",
+        userToken: cfg.userToken ? "••••••••" : "",
+        warehouseLocation: cfg.warehouseLocation || "GENERAL",
+        hasCredentials: !!(cfg.tenantToken && cfg.userToken),
+        lastTestedAt: cfg.lastTestedAt || null,
+        lastTestOk: cfg.lastTestOk ?? null,
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/settings/skuvault", requireAuth, async (req, res) => {
+    try {
+      const { tenantToken, userToken, warehouseLocation } = req.body as { tenantToken?: string; userToken?: string; warehouseLocation?: string };
+      const existing = await storage.getSetting("skuvault_config");
+      const current = existing?.value ? (typeof existing.value === "string" ? JSON.parse(existing.value) : existing.value) : {};
+      const updated: Record<string, any> = { ...current };
+      // Only update if the incoming value is not the masked placeholder
+      if (tenantToken && tenantToken !== "••••••••") updated.tenantToken = tenantToken;
+      if (userToken && userToken !== "••••••••") updated.userToken = userToken;
+      if (warehouseLocation !== undefined) updated.warehouseLocation = warehouseLocation || "GENERAL";
+      await storage.setSetting("skuvault_config", updated);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/settings/skuvault/test", requireAuth, async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("skuvault_config");
+      const cfg = setting?.value ? (typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value) : {};
+      if (!cfg.tenantToken || !cfg.userToken) return res.status(400).json({ ok: false, message: "SKUVault credentials not configured." });
+      const result = await testSkuVaultConnection({ tenantToken: cfg.tenantToken, userToken: cfg.userToken, warehouseLocation: cfg.warehouseLocation });
+      // Persist test result
+      await storage.setSetting("skuvault_config", { ...cfg, lastTestedAt: new Date().toISOString(), lastTestOk: result.ok });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ ok: false, message: e.message }); }
+  });
+
+  // ── Inventory Audit Queue ──────────────────────────────────────────────────
+
+  app.get("/api/inventory/audit/kpis", requireAuth, async (_req, res) => {
+    try {
+      const kpis = await storage.getAuditKPIs();
+      res.json(kpis);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/inventory/audit", requireAuth, async (req, res) => {
+    try {
+      const page = Math.max(0, parseInt(String(req.query.page ?? "0")));
+      const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit ?? "10"))));
+      const search = (req.query.search as string) || undefined;
+      const status = (req.query.status as string) || "pending";
+      const source = (req.query.source as string) || undefined;
+      const dateFrom = (req.query.dateFrom as string) || undefined;
+      const dateTo = (req.query.dateTo as string) || undefined;
+      const result = await storage.getAuditQueue({ page, limit, search, status, source, dateFrom, dateTo });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/inventory/audit/product/:productId/tasks", requireAuth, async (req, res) => {
+    try {
+      const productId = parseInt(req.params.productId);
+      const status = (req.query.status as string) || undefined;
+      const tasks = await storage.getAuditTasksForProduct(productId, status);
+      res.json(tasks);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/inventory/audit/tasks/:id", requireAuth, async (req, res) => {
+    try {
+      const task = await storage.getAuditTask(parseInt(req.params.id));
+      if (!task) return res.status(404).json({ error: "Task not found" });
+      res.json(task);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/inventory/audit/tasks/:id/complete", requireAuth, async (req, res) => {
+    try {
+      const authUser = (req as any).authUser;
+      const id = parseInt(req.params.id);
+      const { physical_qty, reason, notes } = req.body as { physical_qty: number; reason: string; notes?: string };
+      if (physical_qty === undefined || physical_qty < 0) return res.status(400).json({ error: "physical_qty must be >= 0" });
+      if (!reason) return res.status(400).json({ error: "reason is required" });
+
+      const task = await storage.getAuditTask(id);
+      if (!task) return res.status(404).json({ error: "Task not found" });
+
+      const variance = physical_qty - (task.system_qty ?? 0);
+
+      // Fetch SKUVault config
+      const svSetting = await storage.getSetting("skuvault_config");
+      const svCfg = svSetting?.value ? (typeof svSetting.value === "string" ? JSON.parse(svSetting.value) : svSetting.value) : null;
+      if (!svCfg?.tenantToken || !svCfg?.userToken) {
+        return res.status(400).json({ error: "SKUVault credentials not configured." });
+      }
+
+      // Get fresh system qty from SKUVault before completing
+      let freshSystemQty = task.system_qty ?? 0;
+      let qtyWarning: string | null = null;
+      try {
+        const svGet = await getSkuVaultInventory({ tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseLocation: svCfg.warehouseLocation }, [task.sku]);
+        const svItem = (svGet.Items ?? []).find((i: any) => i.Sku === task.sku);
+        freshSystemQty = svItem?.QuantityAvailable ?? svItem?.QuantityOnHand ?? freshSystemQty;
+        if (freshSystemQty !== (task.system_qty ?? 0)) {
+          qtyWarning = `SKUVault quantity changed since task creation (was ${task.system_qty}, now ${freshSystemQty}).`;
+        }
+      } catch { /* Use stored qty if fetch fails */ }
+
+      // Set inventory in SKUVault to the physical count
+      const svSet = await setSkuVaultInventory(
+        { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseLocation: svCfg.warehouseLocation || "GENERAL" },
+        [{ sku: task.sku, quantity: physical_qty }]
+      );
+
+      const svErrors = (svSet.Errors ?? []).filter((e: any) => e.Sku === task.sku);
+      if (svErrors.length > 0) {
+        return res.status(502).json({ error: `SKUVault rejected the adjustment: ${svErrors[0].ErrorMessages?.join("; ")}` });
+      }
+
+      const completed = await storage.completeAuditTask(id, {
+        physical_qty, variance, reason, notes,
+        completed_by: authUser.id,
+        skuvault_result: svSet,
+      });
+      res.json({ ...completed, warning: qtyWarning });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/inventory/audit/tasks/batch-complete", requireAuth, async (req, res) => {
+    try {
+      const authUser = (req as any).authUser;
+      const { items, reason, notes } = req.body as {
+        items: { id: number; physical_qty: number; variance: number }[];
+        reason: string;
+        notes?: string;
+      };
+      if (!items?.length) return res.status(400).json({ error: "items array is required" });
+      if (!reason) return res.status(400).json({ error: "reason is required" });
+
+      const svSetting = await storage.getSetting("skuvault_config");
+      const svCfg = svSetting?.value ? (typeof svSetting.value === "string" ? JSON.parse(svSetting.value) : svSetting.value) : null;
+      if (!svCfg?.tenantToken || !svCfg?.userToken) return res.status(400).json({ error: "SKUVault credentials not configured." });
+
+      // Fetch all tasks
+      const tasks = await Promise.all(items.map((i) => storage.getAuditTask(i.id)));
+
+      // Build SKUVault set payload
+      const svItems = items.map((item, idx) => ({ sku: tasks[idx]?.sku ?? "", quantity: item.physical_qty }))
+        .filter((i) => i.sku);
+      const svSet = await setSkuVaultInventory(
+        { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseLocation: svCfg.warehouseLocation || "GENERAL" },
+        svItems
+      );
+      const svErrorsBySku: Record<string, string> = {};
+      for (const e of svSet.Errors ?? []) {
+        svErrorsBySku[e.Sku] = e.ErrorMessages?.join("; ") || "Unknown error";
+      }
+
+      const results: { id: number; sku: string; success: boolean; error?: string }[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const task = tasks[i];
+        const sku = task?.sku ?? "";
+        if (svErrorsBySku[sku]) {
+          await storage.failAuditTask(item.id);
+          results.push({ id: item.id, sku, success: false, error: svErrorsBySku[sku] });
+        } else {
+          await storage.completeAuditTask(item.id, {
+            physical_qty: item.physical_qty,
+            variance: item.variance,
+            reason, notes,
+            completed_by: authUser.id,
+            skuvault_result: svSet,
+          });
+          results.push({ id: item.id, sku, success: true });
+        }
+      }
+      res.json({ results });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

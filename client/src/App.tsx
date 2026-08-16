@@ -21,6 +21,8 @@ import Cart from "@/pages/agent/Cart";
 import POSPage from "@/pages/agent/POS";
 import InventoryPushLogs from "@/pages/agent/InventoryPushLogs";
 import InventoryPushPage from "@/pages/agent/InventoryPush";
+import InventoryAuditPage from "@/pages/agent/InventoryAudit";
+import AdminSkuvaultPage from "@/pages/admin/AdminSkuvault";
 import PriceTiersPage from "@/pages/admin/PriceTiers";
 import MyOrders from "@/pages/agent/MyOrders";
 import DraftOrders from "@/pages/agent/DraftOrders";
@@ -125,6 +127,9 @@ function Router() {
       <Route path="/inventory/push">
         {() => <ProtectedRoute component={InventoryPushPage} />}
       </Route>
+      <Route path="/inventory/audit">
+        {() => <ProtectedRoute component={InventoryAuditPage} />}
+      </Route>
       <Route path="/inventory/logs">
         {() => <Redirect to="/inventory-push-logs" />}
       </Route>
@@ -166,6 +171,9 @@ function Router() {
       </Route>
       <Route path="/admin/integration">
         {() => <ProtectedRoute component={AdminIntegrationPage} role="admin" />}
+      </Route>
+      <Route path="/admin/skuvault">
+        {() => <ProtectedRoute component={AdminSkuvaultPage} role="admin" />}
       </Route>
       <Route path="/admin/invoice">
         {() => <ProtectedRoute component={InvoiceSettingsPage} role="admin" />}

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks } from "@shared/schema";
 import { eq, desc, and, inArray, gt, gte, lt, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
@@ -57,6 +57,15 @@ export interface IStorage {
   getInventoryPushLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<{ rows: InventoryPushLog[]; total: number }>;
   getInventoryPushLogUsernames(): Promise<string[]>;
   getInventoryPushLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<InventoryPushLog[]>;
+
+  // Inventory audit task operations
+  createOrUpdateAuditTask(opts: { sku: string; product_id: number; variant_id: number; product_name: string; variant_name: string; quantity_added: number; system_qty: number; created_by: number; source?: string }): Promise<InventoryAuditTask>;
+  getAuditKPIs(): Promise<{ totalPendingTasks: number; skusToAudit: number; totalPendingQty: number; lastAuditAt: Date | null; lastAuditBy: string | null }>;
+  getAuditQueue(opts: { page: number; limit: number; search?: string; status?: string; source?: string; dateFrom?: string; dateTo?: string }): Promise<{ groups: any[]; total: number }>;
+  getAuditTasksForProduct(productId: number, status?: string): Promise<InventoryAuditTask[]>;
+  getAuditTask(id: number): Promise<InventoryAuditTask | undefined>;
+  completeAuditTask(id: number, data: { physical_qty: number; variance: number; reason: string; notes?: string; completed_by: number; skuvault_result?: any }): Promise<InventoryAuditTask>;
+  failAuditTask(id: number): Promise<void>;
 
   // Product link log operations
   createProductLinkLog(entry: InsertProductLinkLog): Promise<ProductLinkLog>;
@@ -627,6 +636,153 @@ export class DatabaseStorage implements IStorage {
       .where(sql`${inventoryPushLogs.username} != ''`)
       .orderBy(inventoryPushLogs.username);
     return result.map(r => r.username);
+  }
+
+  // ── Inventory audit task methods ──────────────────────────────────────────
+
+  async createOrUpdateAuditTask(opts: { sku: string; product_id: number; variant_id: number; product_name: string; variant_name: string; quantity_added: number; system_qty: number; created_by: number; source?: string }): Promise<InventoryAuditTask> {
+    const { sku, product_id, variant_id, product_name, variant_name, quantity_added, system_qty, created_by, source = "manual_push" } = opts;
+    const now = new Date();
+    // Try to find an existing pending task for this SKU
+    const existing = await db.select().from(inventoryAuditTasks)
+      .where(and(eq(inventoryAuditTasks.sku, sku), eq(inventoryAuditTasks.status, "pending")))
+      .limit(1);
+    if (existing.length > 0) {
+      // Accumulate the push
+      const task = existing[0];
+      const updated = await db.update(inventoryAuditTasks)
+        .set({
+          total_push_qty: (task.total_push_qty ?? 0) + quantity_added,
+          push_count: (task.push_count ?? 0) + 1,
+          last_push_at: now,
+          system_qty,
+          product_name: product_name || task.product_name,
+          variant_name: variant_name || task.variant_name,
+        })
+        .where(eq(inventoryAuditTasks.id, task.id))
+        .returning();
+      return updated[0];
+    }
+    // Create new pending task
+    const created = await db.insert(inventoryAuditTasks).values({
+      sku, product_id, variant_id, product_name, variant_name,
+      status: "pending", source,
+      total_push_qty: quantity_added, push_count: 1,
+      last_push_at: now, system_qty,
+      created_by,
+    }).returning();
+    return created[0];
+  }
+
+  async getAuditKPIs(): Promise<{ totalPendingTasks: number; skusToAudit: number; totalPendingQty: number; lastAuditAt: Date | null; lastAuditBy: string | null }> {
+    const [pendingAgg, lastCompleted] = await Promise.all([
+      db.select({
+        product_count: sql<number>`COUNT(DISTINCT product_id)::int`,
+        sku_count: sql<number>`COUNT(*)::int`,
+        total_qty: sql<number>`COALESCE(SUM(total_push_qty),0)::int`,
+      }).from(inventoryAuditTasks).where(eq(inventoryAuditTasks.status, "pending")),
+      db.select({
+        completed_at: inventoryAuditTasks.completed_at,
+        completed_by_id: inventoryAuditTasks.completed_by,
+      }).from(inventoryAuditTasks)
+        .where(eq(inventoryAuditTasks.status, "completed"))
+        .orderBy(desc(inventoryAuditTasks.completed_at)).limit(1),
+    ]);
+    const agg = pendingAgg[0];
+    let lastAuditBy: string | null = null;
+    if (lastCompleted[0]?.completed_by_id) {
+      const u = await db.select({ name: users.name, username: users.username })
+        .from(users).where(eq(users.id, lastCompleted[0].completed_by_id)).limit(1);
+      lastAuditBy = u[0]?.name || u[0]?.username || null;
+    }
+    return {
+      totalPendingTasks: agg?.product_count ?? 0,
+      skusToAudit: agg?.sku_count ?? 0,
+      totalPendingQty: agg?.total_qty ?? 0,
+      lastAuditAt: lastCompleted[0]?.completed_at ?? null,
+      lastAuditBy,
+    };
+  }
+
+  async getAuditQueue(opts: { page: number; limit: number; search?: string; status?: string; source?: string; dateFrom?: string; dateTo?: string }): Promise<{ groups: any[]; total: number }> {
+    const { page, limit, search, status = "pending", source, dateFrom, dateTo } = opts;
+    const conditions: any[] = [eq(inventoryAuditTasks.status, status)];
+    if (search) conditions.push(or(ilike(inventoryAuditTasks.sku, `%${search}%`), ilike(inventoryAuditTasks.product_name, `%${search}%`))!);
+    if (source) conditions.push(eq(inventoryAuditTasks.source, source));
+    if (dateFrom) conditions.push(gte(inventoryAuditTasks.last_push_at, new Date(dateFrom)));
+    if (dateTo) {
+      const end = new Date(dateTo); end.setDate(end.getDate() + 1);
+      conditions.push(lt(inventoryAuditTasks.last_push_at, end));
+    }
+    const where = and(...conditions);
+
+    // Count distinct products
+    const [countRes, rawGroups] = await Promise.all([
+      db.select({ cnt: sql<number>`COUNT(DISTINCT product_id)::int` })
+        .from(inventoryAuditTasks).where(where),
+      db.select({
+        product_id: inventoryAuditTasks.product_id,
+        product_name: inventoryAuditTasks.product_name,
+        sku_count: sql<number>`COUNT(*)::int`,
+        total_push_qty: sql<number>`COALESCE(SUM(total_push_qty),0)::int`,
+        last_push_at: sql<Date>`MAX(last_push_at)`,
+        source: inventoryAuditTasks.source,
+        status: inventoryAuditTasks.status,
+      }).from(inventoryAuditTasks).where(where)
+        .groupBy(inventoryAuditTasks.product_id, inventoryAuditTasks.product_name, inventoryAuditTasks.source, inventoryAuditTasks.status)
+        .orderBy(sql`MAX(last_push_at) DESC`)
+        .limit(limit).offset(page * limit),
+    ]);
+
+    // For each group, get the sku group prefix from the first SKU
+    const groups = rawGroups.map((g) => ({
+      ...g,
+      sku_group: null as string | null, // populated below
+    }));
+
+    // Fetch sku_group (first 8 chars of sku) for display
+    for (const group of groups) {
+      const firstSku = await db.select({ sku: inventoryAuditTasks.sku })
+        .from(inventoryAuditTasks)
+        .where(and(eq(inventoryAuditTasks.product_id, group.product_id), eq(inventoryAuditTasks.status, status)))
+        .limit(1);
+      group.sku_group = firstSku[0]?.sku?.slice(0, 8).toUpperCase() ?? null;
+    }
+
+    return { groups, total: countRes[0]?.cnt ?? 0 };
+  }
+
+  async getAuditTasksForProduct(productId: number, status?: string): Promise<InventoryAuditTask[]> {
+    const conditions: any[] = [eq(inventoryAuditTasks.product_id, productId)];
+    if (status) conditions.push(eq(inventoryAuditTasks.status, status));
+    return db.select().from(inventoryAuditTasks)
+      .where(and(...conditions))
+      .orderBy(asc(inventoryAuditTasks.variant_name)) as Promise<InventoryAuditTask[]>;
+  }
+
+  async getAuditTask(id: number): Promise<InventoryAuditTask | undefined> {
+    const result = await db.select().from(inventoryAuditTasks)
+      .where(eq(inventoryAuditTasks.id, id)).limit(1);
+    return result[0] as InventoryAuditTask | undefined;
+  }
+
+  async completeAuditTask(id: number, data: { physical_qty: number; variance: number; reason: string; notes?: string; completed_by: number; skuvault_result?: any }): Promise<InventoryAuditTask> {
+    const result = await db.update(inventoryAuditTasks).set({
+      status: "completed",
+      physical_qty: data.physical_qty,
+      variance: data.variance,
+      reason: data.reason,
+      notes: data.notes || null,
+      completed_by: data.completed_by,
+      completed_at: new Date(),
+      skuvault_result: data.skuvault_result ?? null,
+    }).where(eq(inventoryAuditTasks.id, id)).returning();
+    return result[0] as InventoryAuditTask;
+  }
+
+  async failAuditTask(id: number): Promise<void> {
+    await db.update(inventoryAuditTasks).set({ status: "failed" })
+      .where(eq(inventoryAuditTasks.id, id));
   }
 
   async createProductLinkLog(entry: InsertProductLinkLog): Promise<ProductLinkLog> {

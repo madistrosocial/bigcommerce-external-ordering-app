@@ -125,6 +125,8 @@ export const inventoryPushLogs = pgTable("inventory_push_logs", {
   new_inventory: integer("new_inventory").notNull(),
   quantity_added: integer("quantity_added").notNull(),
   reason: text("reason"),
+  push_to_bigcommerce: boolean("push_to_bigcommerce").notNull().default(true),
+  push_to_skuvault: boolean("push_to_skuvault").notNull().default(false),
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -424,6 +426,48 @@ export const bcOrderLineItems = pgTable("bc_order_line_items", {
 export const insertBcOrderLineItemSchema = createInsertSchema(bcOrderLineItems).omit({ id: true, created_at: true });
 export type InsertBcOrderLineItem = z.infer<typeof insertBcOrderLineItemSchema>;
 export type BcOrderLineItem = typeof bcOrderLineItems.$inferSelect;
+
+// ─── Inventory Audit Tasks ────────────────────────────────────────────────────
+
+export const inventoryAuditTasks = pgTable("inventory_audit_tasks", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  sku: text("sku").notNull(),
+  product_id: integer("product_id").notNull(),
+  variant_id: integer("variant_id").notNull(),
+  product_name: text("product_name").notNull().default(""),
+  variant_name: text("variant_name").notNull().default(""),
+  // 'pending' | 'completed' | 'failed'
+  status: text("status").notNull().default("pending"),
+  source: text("source").notNull().default("manual_push"),
+  // Aggregated push history (updated each time a new push happens while pending)
+  total_push_qty: integer("total_push_qty").notNull().default(0),
+  push_count: integer("push_count").notNull().default(0),
+  last_push_at: timestamp("last_push_at"),
+  // System quantity at time of last push (for change-detection warning)
+  system_qty: integer("system_qty"),
+  // Filled in during audit completion
+  physical_qty: integer("physical_qty"),
+  variance: integer("variance"),
+  reason: text("reason"),
+  notes: text("notes"),
+  skuvault_result: jsonb("skuvault_result"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  completed_at: timestamp("completed_at"),
+  created_by: integer("created_by").references(() => users.id),
+  completed_by: integer("completed_by").references(() => users.id),
+}, (t) => ({
+  skuIdx: index("idx_audit_tasks_sku").on(t.sku),
+  statusIdx: index("idx_audit_tasks_status").on(t.status),
+  productIdx: index("idx_audit_tasks_product").on(t.product_id),
+}));
+// NOTE: A partial unique index is created at server startup:
+//   CREATE UNIQUE INDEX IF NOT EXISTS uq_audit_tasks_sku_pending
+//   ON inventory_audit_tasks (sku) WHERE status = 'pending';
+// This enforces at most ONE pending audit task per SKU at the DB level.
+
+export const insertInventoryAuditTaskSchema = createInsertSchema(inventoryAuditTasks).omit({ id: true, created_at: true });
+export type InsertInventoryAuditTask = z.infer<typeof insertInventoryAuditTaskSchema>;
+export type InventoryAuditTask = typeof inventoryAuditTasks.$inferSelect;
 
 // ─── Report Export Audit Log ──────────────────────────────────────────────────
 

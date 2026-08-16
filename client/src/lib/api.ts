@@ -724,7 +724,9 @@ export async function pushInventory(data: {
   reason?: string;
   product_name?: string;
   variant_name?: string;
-}): Promise<{ success: boolean; previous_inventory: number; new_inventory: number; log: InventoryPushLog }> {
+  push_to_bigcommerce?: boolean;
+  push_to_skuvault?: boolean;
+}): Promise<{ success: boolean; previous_inventory: number; new_inventory: number; log: InventoryPushLog; skuvault?: any }> {
   const res = await fetch(`${API_BASE}/inventory/push`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -734,6 +736,120 @@ export async function pushInventory(data: {
     const err = await res.json().catch(() => ({ error: 'Failed to push inventory' }));
     throw new Error(err.error || 'Failed to push inventory');
   }
+  return res.json();
+}
+
+// ─── Inventory Audit ─────────────────────────────────────────────────────────
+
+export interface InventoryAuditTask {
+  id: number;
+  sku: string;
+  product_id: number;
+  variant_id: number;
+  product_name: string;
+  variant_name: string;
+  status: string;
+  source: string;
+  total_push_qty: number;
+  push_count: number;
+  last_push_at: string | null;
+  system_qty: number | null;
+  physical_qty: number | null;
+  variance: number | null;
+  reason: string | null;
+  notes: string | null;
+  skuvault_result: any;
+  created_at: string;
+  completed_at: string | null;
+  created_by: number | null;
+  completed_by: number | null;
+}
+
+export interface AuditProductGroup {
+  product_id: number;
+  product_name: string;
+  sku_count: number;
+  total_push_qty: number;
+  last_push_at: string | null;
+  source: string;
+  status: string;
+  sku_group: string | null;
+}
+
+export interface AuditKPIs {
+  totalPendingTasks: number;
+  skusToAudit: number;
+  totalPendingQty: number;
+  lastAuditAt: string | null;
+  lastAuditBy: string | null;
+}
+
+export async function getAuditKPIs(): Promise<AuditKPIs> {
+  const res = await fetch(`${API_BASE}/inventory/audit/kpis`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch audit KPIs');
+  return res.json();
+}
+
+export async function getAuditQueue(opts?: { page?: number; limit?: number; search?: string; status?: string; source?: string; dateFrom?: string; dateTo?: string }): Promise<{ groups: AuditProductGroup[]; total: number }> {
+  const params = new URLSearchParams();
+  if (opts?.page !== undefined) params.set('page', String(opts.page));
+  if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts?.search) params.set('search', opts.search);
+  if (opts?.status) params.set('status', opts.status);
+  if (opts?.source) params.set('source', opts.source);
+  if (opts?.dateFrom) params.set('dateFrom', opts.dateFrom);
+  if (opts?.dateTo) params.set('dateTo', opts.dateTo);
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/inventory/audit${qs ? `?${qs}` : ''}`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch audit queue');
+  return res.json();
+}
+
+export async function getAuditTasksForProduct(productId: number, status?: string): Promise<InventoryAuditTask[]> {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  const res = await fetch(`${API_BASE}/inventory/audit/product/${productId}/tasks?${params}`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch audit tasks');
+  return res.json();
+}
+
+export async function completeAuditTask(id: number, data: { physical_qty: number; variance: number; reason: string; notes?: string }): Promise<InventoryAuditTask> {
+  const res = await fetch(`${API_BASE}/inventory/audit/tasks/${id}/complete`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) { const e = await res.json().catch(() => ({ error: 'Failed' })); throw new Error(e.error); }
+  return res.json();
+}
+
+export async function batchCompleteAuditTasks(items: { id: number; physical_qty: number; variance: number }[], reason: string, notes?: string): Promise<{ results: { id: number; sku: string; success: boolean; error?: string }[] }> {
+  const res = await fetch(`${API_BASE}/inventory/audit/tasks/batch-complete`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ items, reason, notes }),
+  });
+  if (!res.ok) { const e = await res.json().catch(() => ({ error: 'Failed' })); throw new Error(e.error); }
+  return res.json();
+}
+
+export async function getSkuVaultSettings(): Promise<{ tenantToken: string; userToken: string; warehouseLocation: string; hasCredentials: boolean; lastTestedAt?: string; lastTestOk?: boolean }> {
+  const res = await fetch(`${API_BASE}/settings/skuvault`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch SKUVault settings');
+  return res.json();
+}
+
+export async function saveSkuVaultSettings(data: { tenantToken: string; userToken: string; warehouseLocation?: string }): Promise<void> {
+  const res = await fetch(`${API_BASE}/settings/skuvault`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) { const e = await res.json().catch(() => ({ error: 'Failed' })); throw new Error(e.error); }
+}
+
+export async function testSkuVaultConnection(): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/settings/skuvault/test`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+  });
+  if (!res.ok) { const e = await res.json().catch(() => ({ error: 'Failed' })); throw new Error(e.error); }
   return res.json();
 }
 

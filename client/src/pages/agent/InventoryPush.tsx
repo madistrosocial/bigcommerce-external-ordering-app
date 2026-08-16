@@ -5,7 +5,7 @@ import * as api from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Package, Search, X, Plus, Minus, Loader2 } from "lucide-react";
+import { Package, Search, X, Plus, Minus, Loader2, CheckSquare, Square } from "lucide-react";
 
 // ─── Helpers (same as POS.tsx) ────────────────────────────────────────────────
 
@@ -39,6 +39,8 @@ export default function InventoryPushPage() {
   const [reason, setReason] = useState("");
   const [showConfirm, setShowConfirm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pushToBigcommerce, setPushToBigcommerce] = useState(true);
+  const [pushToSkuvault, setPushToSkuvault] = useState(true);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,6 +98,8 @@ export default function InventoryPushPage() {
         reason: reason || undefined,
         product_name: selectedProduct.name,
         variant_name: variantLabel(selectedVariant) || selectedVariant.sku || "",
+        push_to_bigcommerce: pushToBigcommerce,
+        push_to_skuvault: pushToSkuvault,
       });
       toast({
         title: "Inventory Updated",
@@ -301,37 +305,69 @@ export default function InventoryPushPage() {
                     />
                   </div>
 
-                  {!showConfirm ? (
-                    <Button
-                      className="w-full h-12 text-base font-semibold"
-                      disabled={quantity <= 0}
-                      onClick={() => setShowConfirm(true)}
-                      data-testid="button-push-inv-confirm-open"
-                    >
-                      <Package className="h-4 w-4 mr-2" />
-                      Push {quantity} Unit{quantity !== 1 ? "s" : ""} to BigCommerce
-                    </Button>
-                  ) : (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
-                      <p className="text-sm font-semibold text-amber-800">Confirm Inventory Push</p>
-                      <p className="text-sm text-amber-700">
-                        Add <strong>{quantity}</strong> unit{quantity !== 1 ? "s" : ""} to{" "}
-                        <strong>{variantLabel(selectedVariant) || selectedVariant.sku}</strong> on BigCommerce.
-                        <br />
-                        Stock: <strong>{selectedVariant.stock_level ?? 0}</strong> →{" "}
-                        <strong>{(selectedVariant.stock_level ?? 0) + quantity}</strong>
-                        {reason && (<><br />Reason: <em>{reason}</em></>)}
-                      </p>
-                      <div className="flex gap-2">
-                        <Button variant="outline" onClick={() => setShowConfirm(false)} data-testid="button-push-inv-cancel">
-                          Cancel
-                        </Button>
-                        <Button disabled={isSubmitting} onClick={handleSubmit} data-testid="button-push-inv-submit">
-                          {isSubmitting ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Pushing…</> : "Confirm Push"}
-                        </Button>
-                      </div>
+                  {/* Destination selection */}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">
+                      Push Destination
+                    </label>
+                    <div className="flex flex-col gap-2">
+                      {[
+                        { label: "BigCommerce", value: pushToBigcommerce, set: setPushToBigcommerce },
+                        { label: "SKUVault", value: pushToSkuvault, set: setPushToSkuvault },
+                      ].map(({ label, value, set }) => (
+                        <button
+                          key={label}
+                          type="button"
+                          onClick={() => set((v) => !v)}
+                          className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-sm font-medium text-left transition-colors"
+                          style={{ background: value ? "#eff6ff" : undefined, borderColor: value ? "#93c5fd" : undefined, color: value ? "#1d4ed8" : "#475569" }}
+                        >
+                          {value ? <CheckSquare className="h-4 w-4 text-blue-500 shrink-0" /> : <Square className="h-4 w-4 text-slate-400 shrink-0" />}
+                          {label}
+                        </button>
+                      ))}
                     </div>
-                  )}
+                    {!pushToBigcommerce && !pushToSkuvault && (
+                      <p className="text-xs text-red-500 mt-1.5">Select at least one destination.</p>
+                    )}
+                  </div>
+
+                  {(() => {
+                    const dest = [pushToBigcommerce && "BigCommerce", pushToSkuvault && "SKUVault"].filter(Boolean).join(" + ") || "…";
+                    const btnLabel = `Push ${quantity} Unit${quantity !== 1 ? "s" : ""} to ${dest}`;
+                    return !showConfirm ? (
+                      <Button
+                        className="w-full h-12 text-base font-semibold"
+                        disabled={quantity <= 0 || (!pushToBigcommerce && !pushToSkuvault)}
+                        onClick={() => setShowConfirm(true)}
+                        data-testid="button-push-inv-confirm-open"
+                      >
+                        <Package className="h-4 w-4 mr-2" />
+                        {btnLabel}
+                      </Button>
+                    ) : (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
+                        <p className="text-sm font-semibold text-amber-800">Confirm Inventory Push</p>
+                        <p className="text-sm text-amber-700">
+                          Add <strong>{quantity}</strong> unit{quantity !== 1 ? "s" : ""} to{" "}
+                          <strong>{variantLabel(selectedVariant) || selectedVariant.sku}</strong> on <strong>{dest}</strong>.
+                          <br />
+                          Stock: <strong>{selectedVariant.stock_level ?? 0}</strong> →{" "}
+                          <strong>{(selectedVariant.stock_level ?? 0) + quantity}</strong>
+                          {reason && (<><br />Reason: <em>{reason}</em></>)}
+                          {pushToSkuvault && <><br /><span className="text-amber-600 font-medium">An audit task will be created for warehouse verification.</span></>}
+                        </p>
+                        <div className="flex gap-2">
+                          <Button variant="outline" onClick={() => setShowConfirm(false)} data-testid="button-push-inv-cancel">
+                            Cancel
+                          </Button>
+                          <Button disabled={isSubmitting} onClick={handleSubmit} data-testid="button-push-inv-submit">
+                            {isSubmitting ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Pushing…</> : "Confirm Push"}
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </>
