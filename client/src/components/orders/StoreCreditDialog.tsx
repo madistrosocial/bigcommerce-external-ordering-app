@@ -79,7 +79,7 @@ export default function StoreCreditDialog({ open, order, onClose, onIssued }: Pr
   const creditLines = selectedItems.map((item, _) => {
     const idx = items.indexOf(item);
     const missingQty = selected[idx]?.missing_qty ?? 0;
-    const unitPrice = parseFloat(item.price_inc_tax ?? item.price_ex_tax ?? "0");
+    const unitPrice = parseFloat(item.price_ex_tax ?? item.price_inc_tax ?? "0");
     const unitTax = parseFloat(item.total_tax ?? "0") / Math.max(1, Number(item.quantity ?? 1));
     const lineTax = unitTax * missingQty;
     const lineTotal = unitPrice * missingQty;
@@ -189,7 +189,7 @@ export default function StoreCreditDialog({ open, order, onClose, onIssued }: Pr
                       const isChecked = sel?.checked ?? false;
                       const maxQty = Number(item.quantity ?? 0);
                       const missingQty = sel?.missing_qty ?? 0;
-                      const unitPrice = parseFloat(item.price_inc_tax ?? item.price_ex_tax ?? "0");
+                      const unitPrice = parseFloat(item.price_ex_tax ?? item.price_inc_tax ?? "0");
                       const unitTax = parseFloat(item.total_tax ?? "0") / Math.max(1, maxQty);
                       const lineTotal = unitPrice * missingQty + unitTax * missingQty;
                       return (

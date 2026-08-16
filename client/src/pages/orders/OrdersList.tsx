@@ -137,11 +137,11 @@ const PAGE_SIZE = 50;
 // ── KPI card ──────────────────────────────────────────────────────────────────
 function KpiCard({ icon: Icon, label, value, color }: { icon: any; label: string; value: string | number; color: string }) {
   return (
-    <div className={`bg-white border rounded-lg px-3 py-2.5 sm:px-4 sm:py-3 flex items-center gap-3 ${color}`}>
-      <div className="shrink-0"><Icon className="h-4 w-4 sm:h-5 sm:w-5" /></div>
-      <div className="min-w-0">
-        <p className="text-[10px] sm:text-xs text-slate-500 font-medium uppercase tracking-wide leading-tight">{label}</p>
-        <p className="text-base sm:text-2xl font-bold text-slate-900 tabular-nums leading-tight truncate">{value}</p>
+    <div className={`bg-white border rounded-lg px-2.5 py-2 sm:px-4 sm:py-3 flex items-center gap-2 sm:gap-3 min-w-[96px] shrink-0 sm:min-w-0 sm:flex-1 ${color}`}>
+      <div className="hidden sm:block shrink-0"><Icon className="h-5 w-5" /></div>
+      <div className="min-w-0 w-full">
+        <p className="text-[9px] sm:text-xs text-slate-500 font-medium uppercase tracking-wide leading-tight whitespace-nowrap overflow-hidden text-ellipsis">{label}</p>
+        <p className="text-sm sm:text-2xl font-bold text-slate-900 tabular-nums leading-tight whitespace-nowrap">{value}</p>
       </div>
     </div>
   );
@@ -633,7 +633,7 @@ export default function OrdersList() {
       {/* ── KPI cards ──────────────────────────────────────────────────────── */}
       {data && (
         <div className="border-b bg-white px-3 sm:px-4 py-2 sm:py-3 shrink-0">
-          <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+          <div className="flex gap-1.5 sm:gap-2 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {kpiCards.map(c => (
               <KpiCard key={c.label} icon={c.icon} label={c.label} value={c.value} color={c.color} />
             ))}
