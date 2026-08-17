@@ -40,6 +40,7 @@ export const MODULES = [
   { key: "customers_create",   label: "Customers › Create Customer" },
   { key: "customers_all",      label: "Customers › All Customers" },
   { key: "inventory_push",     label: "Inventory › Push Inventory" },
+  { key: "inventory_audit",    label: "Inventory › Audit Queue" },
   { key: "inventory_logs",     label: "Inventory › Push Logs" },
   { key: "pricing",            label: "Price Tiers" },
   { key: "reports",            label: "Reports" },
@@ -71,6 +72,10 @@ export const CRM_ACTION_PERMS = [
 export const ORDERS_ACTION_PERMS = [
   { module: "orders", action: "view",   label: "View All Orders",       description: "Can see all orders from all channels and users. Without this, only their own Sales App orders are visible." },
   { module: "orders", action: "export", label: "Export Sales History",  description: "Can export the Sales History report to CSV or Excel." },
+];
+
+export const INVENTORY_AUDIT_ACTION_PERMS = [
+  { module: "inventory_audit", action: "audit", label: "Complete Audits",  description: "Can enter physical counts, submit audit results, and adjust SKUVault inventory. Requires Audit Queue access above." },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -447,6 +452,57 @@ function UserDetail({
           </div>
         </div>
 
+        {/* Inventory Audit permissions */}
+        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Lock className="h-3.5 w-3.5 text-slate-500" />
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Inventory Audit Permissions</span>
+            </div>
+            {groupId !== "none" && (
+              <span className="text-[10px] text-blue-600 flex items-center gap-1">
+                <UsersRound className="h-3 w-3" /> (G) = from group
+              </span>
+            )}
+          </div>
+          <div className="divide-y">
+            {INVENTORY_AUDIT_ACTION_PERMS.map(p => {
+              const perm = permMap.get(`${p.module}:${p.action}`);
+              const permId = perm?.id ?? null;
+              const isBusy = busyKey === `${user.id}-inv-audit-${p.action}`;
+              const directEnabled = perm ? userHasPerm(user, perm.id) : false;
+              const fromGroup = !directEnabled && perm ? groupPerms.has(perm.id) : false;
+              const effectiveEnabled = directEnabled || fromGroup;
+              return (
+                <div key={p.action} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex-1 min-w-0 pr-4">
+                    <p className="text-sm text-slate-700">
+                      {p.label}
+                      {fromGroup && <span className="ml-2 text-[10px] text-blue-500 font-medium">(G)</span>}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">{p.description}</p>
+                  </div>
+                  {permId === null ? (
+                    <span className="text-[10px] text-slate-400 italic shrink-0">N/A</span>
+                  ) : isBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" />
+                  ) : (
+                    <Switch
+                      checked={effectiveEnabled}
+                      disabled={fromGroup}
+                      onCheckedChange={v => onToggleModule(user.id, `inv-audit-${p.action}`, v, permId)}
+                      data-testid={`toggle-inv-audit-${p.action}-${user.id}`}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="px-4 py-2 text-[11px] text-slate-400 border-t bg-slate-50">
+            "Inventory › Audit Queue" module access above controls who can <em>see</em> the queue. This section controls who can <em>submit</em> audits.
+          </p>
+        </div>
+
         <div className="h-4" />
       </div>
     </div>
@@ -509,6 +565,16 @@ export default function AdminUsersPage() {
     if (!missing.length) return;
     Promise.all(
       missing.map(p => createPermission({ module: p.module, action: p.action, description: p.label }).catch(() => {})),
+    ).then(() => queryClient.invalidateQueries({ queryKey: ["permissions"] }));
+  }, [permsLoading, permissions.length]);
+
+  // Auto-create any missing Inventory Audit action permissions
+  useEffect(() => {
+    if (permsLoading) return;
+    const missing = INVENTORY_AUDIT_ACTION_PERMS.filter(p => !permMap.has(`${p.module}:${p.action}`));
+    if (!missing.length) return;
+    Promise.all(
+      missing.map(p => createPermission({ module: p.module, action: p.action, description: p.description }).catch(() => {})),
     ).then(() => queryClient.invalidateQueries({ queryKey: ["permissions"] }));
   }, [permsLoading, permissions.length]);
 

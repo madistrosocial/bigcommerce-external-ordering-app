@@ -7,7 +7,7 @@ import {
   getAdminUsers,
   RbacRole, RbacPermission, RbacUser,
 } from "@/lib/api";
-import { MODULES, CRM_ACTION_PERMS } from "./AdminUsers";
+import { MODULES, CRM_ACTION_PERMS, INVENTORY_AUDIT_ACTION_PERMS } from "./AdminUsers";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -112,6 +112,21 @@ function GroupDetail({
     const perm = permMap.get(`${module}:${action}`);
     if (!perm) return;
     setBusyPerm(`crm-${action}`);
+    try {
+      if (enabled) await addPermissionToRole(group.id, perm.id);
+      else await removePermissionFromRole(group.id, perm.id);
+      await queryClient.invalidateQueries({ queryKey: ["roles"] });
+      await queryClient.invalidateQueries({ queryKey: ["user-permissions"] });
+      toast({ title: enabled ? "Permission added to group" : "Permission removed from group", description: `${module}:${action}` });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setBusyPerm(null); }
+  };
+
+  const handleToggleActionPerm = async (module: string, action: string, busyId: string, enabled: boolean) => {
+    const perm = permMap.get(`${module}:${action}`);
+    if (!perm) return;
+    setBusyPerm(busyId);
     try {
       if (enabled) await addPermissionToRole(group.id, perm.id);
       else await removePermissionFromRole(group.id, perm.id);
@@ -278,6 +293,44 @@ function GroupDetail({
               );
             })}
           </div>
+        </div>
+
+        {/* Inventory Audit permissions */}
+        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-slate-50 flex items-center gap-2">
+            <Lock className="h-3.5 w-3.5 text-slate-500" />
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Inventory Audit Permissions</span>
+          </div>
+          <div className="divide-y">
+            {INVENTORY_AUDIT_ACTION_PERMS.map(p => {
+              const perm = permMap.get(`${p.module}:${p.action}`);
+              const busyId = `inv-audit-${p.action}`;
+              const isBusy = busyPerm === busyId;
+              const enabled = perm ? group.permissions.some(gp => gp.id === perm.id) : false;
+              return (
+                <div key={p.action} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex-1 min-w-0 pr-4">
+                    <p className="text-sm text-slate-700">{p.label}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">{p.description}</p>
+                  </div>
+                  {perm === undefined ? (
+                    <span className="text-[10px] text-slate-400 italic shrink-0">N/A</span>
+                  ) : isBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" />
+                  ) : (
+                    <Switch
+                      checked={enabled}
+                      onCheckedChange={v => handleToggleActionPerm(p.module, p.action, busyId, v)}
+                      data-testid={`toggle-group-inv-audit-${p.action}-${group.id}`}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="px-4 py-2 text-[11px] text-slate-400 border-t bg-slate-50">
+            "Inventory › Audit Queue" module access controls who can <em>view</em> the queue. This controls who can <em>submit</em> audits.
+          </p>
         </div>
 
         {/* Members */}
