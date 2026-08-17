@@ -224,7 +224,9 @@ export default function AdminSkuvaultPage() {
               onChange={(e) => setWarehouseLocation(e.target.value)}
             />
             <p className="text-xs text-slate-400">
-              The location code within the warehouse used for inventory adjustments. Default: GENERAL.
+              Fallback location code used when a SKU has no recorded location in SKUVault. The system
+              always tries to use the SKU's actual bin location first (e.g. <span className="font-medium text-slate-500">END CAP-9</span>).
+              Only used if the lookup fails or the item is brand new.
             </p>
           </div>
 

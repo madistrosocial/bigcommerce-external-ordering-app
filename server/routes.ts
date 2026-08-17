@@ -7191,8 +7191,14 @@ export async function registerRoutes(
       let qtyWarning: string | null = null;
       try {
         const svGet = await getSkuVaultInventory({ tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseId: svCfg.warehouseId ?? 0, warehouseLocation: svCfg.warehouseLocation }, [task.sku]);
-        const svItem = (svGet.Items ?? []).find((i: any) => i.Sku === task.sku);
-        freshSystemQty = svItem?.QuantityAvailable ?? svItem?.QuantityOnHand ?? freshSystemQty;
+        // Items is a SKU-keyed dictionary: { [sku]: SvLocationEntry[] }
+        const skuEntries = svGet.Items?.[task.sku];
+        if (Array.isArray(skuEntries) && skuEntries.length > 0) {
+          // Sum across all bins for an accurate total-stock warning
+          freshSystemQty = skuEntries.reduce(
+            (sum, e) => sum + (e.QuantityAvailable ?? e.QuantityOnHand ?? e.Quantity ?? 0), 0
+          );
+        }
         if (freshSystemQty !== (task.system_qty ?? 0)) {
           qtyWarning = `SKUVault quantity changed since task creation (was ${task.system_qty}, now ${freshSystemQty}).`;
         }
