@@ -136,7 +136,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
 
   // CRM children
   const crmChildren: NavLeaf[] = [
-    ...(hasPermission("crm_customers") ? [{ label: "Customers", path: "/crm/customers" }] : []),
+    ...(hasPermission("crm_customers") ? [{ label: "CRM", path: "/crm/customers" }] : []),
     ...(hasPermission("customers_create") ? [{ label: "Create BC Customer", path: "/customers/create" }] : []),
     ...(hasPermission("crm_customers") ? [{ label: "To Do", path: "/crm/todos" }] : []),
     ...(hasPermission("crm_reactivation") ? [{ label: "Reactivation", path: "/crm/reactivation" }] : []),
@@ -154,12 +154,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const navItems: NavGroup[] = [
     ...(hasPermission("dashboard") ? [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" }] : []),
     ...(hasPermission("pos") ? [{ id: "pos", label: "POS", icon: Monitor, path: "/pos" }] : []),
+    ...(crmChildren.length > 0 ? [{ id: "crm", label: "Customers", icon: ContactRound, children: crmChildren }] : []),
     ...(ordersChildren.length > 0 ? [{ id: "orders", label: "Orders", icon: ShoppingBag, children: ordersChildren }] : []),
     ...(inventoryChildren.length > 0 ? [{ id: "inventory", label: "Inventory", icon: Package, children: inventoryChildren }] : []),
     ...(hasPermission("catalog") ? [{ id: "catalog", label: "Catalog", icon: BookOpen, path: "/catalog" }] : []),
     ...(hasPermission("cart") ? [{ id: "cart", label: "Cart", icon: ShoppingCart, path: "/cart" }] : []),
     ...(toolsChildren.length > 0 ? [{ id: "tools", label: "Tools", icon: Wrench, children: toolsChildren }] : []),
-    ...(crmChildren.length > 0 ? [{ id: "crm", label: "CRM", icon: ContactRound, children: crmChildren }] : []),
     ...(reportingChildren.length > 0 ? [{ id: "reporting", label: "Reporting", icon: FileBarChart, children: reportingChildren }] : []),
   ];
 
