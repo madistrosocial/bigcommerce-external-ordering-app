@@ -20,15 +20,12 @@ export default function InventoryPushLogs() {
   const [, navigate] = useLocation();
   const fmt = useTimeService();
 
-  // Filter state
   const [search, setSearch] = useState("");
   const [username, setUsername] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
-
-  // Applied filters (committed on Enter / blur for search, immediate for others)
   const [appliedSearch, setAppliedSearch] = useState("");
 
   const applySearch = useCallback(() => {
@@ -56,7 +53,6 @@ export default function InventoryPushLogs() {
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
       });
-
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -70,13 +66,11 @@ export default function InventoryPushLogs() {
     }
   }, [appliedSearch, username, dateFrom, dateTo]);
 
-  // Usernames for dropdown
   const { data: usernames = [] } = useQuery<string[]>({
     queryKey: ["inventory-push-log-usernames"],
     queryFn: api.getInventoryPushLogUsernames,
   });
 
-  // Log data
   const { data, isLoading } = useQuery<{ rows: api.InventoryPushLog[]; total: number }>({
     queryKey: ["inventory-push-logs", page, appliedSearch, username, dateFrom, dateTo],
     queryFn: () =>
@@ -100,112 +94,109 @@ export default function InventoryPushLogs() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Header */}
-      <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0">
+      <header className="bg-white border-b px-3 py-2.5 flex items-center gap-2 shrink-0">
         <Button
           variant="ghost"
           size="sm"
+          className="h-8 px-2 text-xs shrink-0"
           onClick={() => navigate("/pos")}
           data-testid="button-back-pos"
         >
-          <ArrowLeft className="h-4 w-4 mr-1" />
-          Back to POS
+          <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+          Back
         </Button>
-        <div className="flex items-center gap-2">
-          <Package className="h-5 w-5 text-slate-600" />
-          <h1 className="text-base font-bold text-slate-800">Manual Inventory Push Logs</h1>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Package className="h-4 w-4 text-slate-600 shrink-0" />
+          <h1 className="text-sm font-bold text-slate-800 truncate">Inventory Push Logs</h1>
         </div>
-        <span className="ml-auto text-xs text-slate-400">
-          {isLoading ? "Loading…" : `${total.toLocaleString()} record${total !== 1 ? "s" : ""}`}
+        <span className="ml-auto text-xs text-slate-400 shrink-0">
+          {isLoading ? "Loading…" : `${total.toLocaleString()} rec${total !== 1 ? "s" : ""}`}
         </span>
       </header>
 
       {/* Filter bar */}
-      <div className="bg-white border-b px-4 py-3 flex flex-wrap items-center gap-2 shrink-0">
-        {/* Product / SKU search */}
-        <div className="relative flex-1 min-w-[180px] max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-          <Input
-            className="pl-7 h-8 text-sm"
-            placeholder="Product name or SKU…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && applySearch()}
-            onBlur={applySearch}
-          />
-        </div>
-
-        {/* Date from */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-slate-500 whitespace-nowrap">From</span>
-          <Input
-            type="date"
-            className="h-8 text-sm w-36"
-            value={dateFrom}
-            onChange={(e) => { setDateFrom(e.target.value); setPage(0); }}
-          />
-        </div>
-
-        {/* Date to */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-slate-500 whitespace-nowrap">To</span>
-          <Input
-            type="date"
-            className="h-8 text-sm w-36"
-            value={dateTo}
-            onChange={(e) => { setDateTo(e.target.value); setPage(0); }}
-          />
-        </div>
-
-        {/* User dropdown */}
-        {usernames.length > 0 && (
-          <Select
-            value={username || "all"}
-            onValueChange={(v) => { setUsername(v === "all" ? "" : v); setPage(0); }}
+      <div className="bg-white border-b px-3 py-2.5 flex flex-col gap-2 shrink-0">
+        {/* Row 1: search + export */}
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+            <Input
+              className="pl-7 h-8 text-sm"
+              placeholder="Product name or SKU…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && applySearch()}
+              onBlur={applySearch}
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs shrink-0"
+            disabled={isLoading || isExporting}
+            onClick={exportCSV}
+            data-testid="button-export-csv"
           >
-            <SelectTrigger className="h-8 text-sm w-40">
-              <SelectValue placeholder="All users" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All users</SelectItem>
-              {usernames.map((u) => (
-                <SelectItem key={u} value={u}>{u}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-
-        {/* Clear filters */}
-        {hasFilters && (
-          <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-500" onClick={clearFilters}>
-            <X className="h-3.5 w-3.5 mr-1" />
-            Clear
+            {isExporting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+            <span className="hidden sm:inline ml-1">{isExporting ? "Exporting…" : "Export CSV"}</span>
           </Button>
-        )}
+        </div>
 
-        {/* Export CSV */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 text-xs ml-auto"
-          disabled={isLoading || isExporting}
-          onClick={exportCSV}
-          data-testid="button-export-csv"
-        >
-          {isExporting ? (
-            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-          ) : (
-            <Download className="h-3.5 w-3.5 mr-1" />
+        {/* Row 2: date range + user + clear */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-slate-500 whitespace-nowrap">From</span>
+            <Input
+              type="date"
+              className="h-8 text-xs w-32"
+              value={dateFrom}
+              onChange={(e) => { setDateFrom(e.target.value); setPage(0); }}
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-slate-500 whitespace-nowrap">To</span>
+            <Input
+              type="date"
+              className="h-8 text-xs w-32"
+              value={dateTo}
+              onChange={(e) => { setDateTo(e.target.value); setPage(0); }}
+            />
+          </div>
+          {usernames.length > 0 && (
+            <Select
+              value={username || "all"}
+              onValueChange={(v) => { setUsername(v === "all" ? "" : v); setPage(0); }}
+            >
+              <SelectTrigger className="h-8 text-xs w-36">
+                <SelectValue placeholder="All users" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All users</SelectItem>
+                {usernames.map((u) => (
+                  <SelectItem key={u} value={u}>{u}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
-          {isExporting ? "Exporting…" : "Export CSV"}
-        </Button>
+          {hasFilters && (
+            <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-500 px-2" onClick={clearFilters}>
+              <X className="h-3.5 w-3.5 mr-1" />
+              Clear
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto px-4 py-4 flex flex-col gap-3">
+      <div className="flex-1 overflow-auto px-3 py-3 flex flex-col gap-3">
         {isLoading && !data ? (
           <div className="flex items-center justify-center py-20 text-slate-400">
             <Loader2 className="h-6 w-6 animate-spin mr-2" />
-            Loading logs…
+            <span className="text-sm">Loading logs…</span>
           </div>
         ) : logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400">
@@ -213,86 +204,145 @@ export default function InventoryPushLogs() {
             <p className="text-sm">{hasFilters ? "No logs match the current filters." : "No inventory pushes recorded yet."}</p>
           </div>
         ) : (
-          <div className={`bg-white rounded-lg border shadow-sm overflow-hidden transition-opacity ${isLoading ? "opacity-60" : ""}`}>
-            <table className="w-full text-sm" data-testid="table-push-logs">
-              <thead className="bg-slate-50 border-b">
-                <tr>
-                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Date</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">User</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Product</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Variant</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">SKU</th>
-                  <th className="text-right px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Before</th>
-                  <th className="text-right px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Added</th>
-                  <th className="text-right px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">After</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Reason</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-50" data-testid={`log-row-${log.id}`}>
-                    <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap text-xs">
-                      {fmt.dateTime(log.created_at)}
-                    </td>
-                    <td className="px-4 py-2.5 font-medium text-slate-700">
-                      {log.username || `User #${log.user_id}`}
-                    </td>
-                    <td className="px-4 py-2.5 text-slate-700 max-w-[200px] truncate">
-                      {log.product_name || `Product #${log.product_id}`}
-                    </td>
-                    <td className="px-4 py-2.5 text-slate-500 text-xs">
-                      {log.variant_name || `Variant #${log.variant_id}`}
-                    </td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-slate-500">
-                      {log.sku}
-                    </td>
-                    <td className="px-4 py-2.5 text-right text-slate-600">
-                      {log.previous_inventory}
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-bold text-green-600">
-                      +{log.quantity_added}
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
-                      {log.new_inventory}
-                    </td>
-                    <td className="px-4 py-2.5 text-slate-400 text-xs italic max-w-[160px] truncate">
-                      {log.reason || "—"}
-                    </td>
+          <>
+            {/* Desktop table — hidden on small screens */}
+            <div className={`hidden md:block bg-white rounded-lg border shadow-sm overflow-hidden transition-opacity ${isLoading ? "opacity-60" : ""}`}>
+              <table className="w-full" data-testid="table-push-logs">
+                <thead className="bg-slate-50 border-b">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide whitespace-nowrap">Date</th>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">User</th>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Product</th>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Variant</th>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">SKU</th>
+                    <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Before</th>
+                    <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Added</th>
+                    <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">After</th>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Reason</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y">
+                  {logs.map((log) => (
+                    <tr key={log.id} className="hover:bg-slate-50" data-testid={`log-row-${log.id}`}>
+                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap text-xs">
+                        {fmt.dateTime(log.created_at)}
+                      </td>
+                      <td className="px-3 py-2 text-xs font-medium text-slate-700">
+                        {log.username || `User #${log.user_id}`}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-700 max-w-[180px] truncate">
+                        {log.product_name || `Product #${log.product_id}`}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-500 max-w-[120px] truncate">
+                        {log.variant_name || `Variant #${log.variant_id}`}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs text-slate-500">
+                        {log.sku}
+                      </td>
+                      <td className="px-3 py-2 text-right text-xs text-slate-600">
+                        {log.previous_inventory}
+                      </td>
+                      <td className="px-3 py-2 text-right text-xs font-bold text-green-600">
+                        +{log.quantity_added}
+                      </td>
+                      <td className="px-3 py-2 text-right text-xs font-semibold text-slate-800">
+                        {log.new_inventory}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-400 italic max-w-[140px] truncate">
+                        {log.reason || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards — shown only on small screens */}
+            <div className={`flex md:hidden flex-col gap-2 transition-opacity ${isLoading ? "opacity-60" : ""}`}>
+              {logs.map((log) => (
+                <div
+                  key={log.id}
+                  className="bg-white rounded-lg border shadow-sm px-4 py-3"
+                  data-testid={`log-card-${log.id}`}
+                >
+                  {/* Top row: product name + qty change */}
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <p className="text-sm font-semibold text-slate-800 leading-snug flex-1 min-w-0 truncate">
+                      {log.product_name || `Product #${log.product_id}`}
+                    </p>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-xs text-slate-500">{log.previous_inventory}</span>
+                      <span className="text-xs text-slate-400">→</span>
+                      <span className="text-sm font-bold text-slate-800">{log.new_inventory}</span>
+                      <span className="text-xs font-semibold text-green-600 bg-green-50 rounded px-1.5 py-0.5 ml-0.5">
+                        +{log.quantity_added}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Variant + SKU row */}
+                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    {log.variant_name && (
+                      <span className="text-xs text-slate-500 truncate max-w-[160px]">
+                        {log.variant_name}
+                      </span>
+                    )}
+                    <span className="font-mono text-xs text-slate-400 bg-slate-50 rounded px-1.5 py-0.5">
+                      {log.sku}
+                    </span>
+                  </div>
+
+                  {/* Bottom row: date + user + reason */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-slate-400">{fmt.dateTime(log.created_at)}</span>
+                    <span className="text-xs text-slate-400">·</span>
+                    <span className="text-xs font-medium text-slate-600">
+                      {log.username || `User #${log.user_id}`}
+                    </span>
+                    {log.reason && (
+                      <>
+                        <span className="text-xs text-slate-400">·</span>
+                        <span className="text-xs text-slate-400 italic truncate max-w-[160px]">{log.reason}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
 
         {/* Pagination */}
         {total > 0 && (
-          <div className="flex items-center justify-between px-1">
+          <div className="flex items-center justify-between px-1 py-1">
             <p className="text-xs text-slate-500">
-              Showing {rangeStart.toLocaleString()}–{rangeEnd.toLocaleString()} of {total.toLocaleString()} result{total !== 1 ? "s" : ""}
+              <span className="hidden sm:inline">Showing </span>
+              {rangeStart.toLocaleString()}–{rangeEnd.toLocaleString()}
+              <span className="hidden sm:inline"> of {total.toLocaleString()} result{total !== 1 ? "s" : ""}</span>
+              <span className="sm:hidden"> / {total.toLocaleString()}</span>
             </p>
             <div className="flex items-center gap-1">
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 px-2"
+                className="h-8 px-2.5"
                 disabled={page === 0 || isLoading}
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
-                <span className="ml-1 text-xs">Previous</span>
+                <span className="hidden sm:inline ml-1 text-xs">Previous</span>
               </Button>
               <span className="text-xs text-slate-500 px-2">
-                Page {page + 1} of {Math.max(1, totalPages)}
+                {page + 1} / {Math.max(1, totalPages)}
               </span>
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 px-2"
+                className="h-8 px-2.5"
                 disabled={page >= totalPages - 1 || isLoading}
                 onClick={() => setPage((p) => p + 1)}
               >
-                <span className="mr-1 text-xs">Next</span>
+                <span className="hidden sm:inline mr-1 text-xs">Next</span>
                 <ChevronRight className="h-3.5 w-3.5" />
               </Button>
             </div>
