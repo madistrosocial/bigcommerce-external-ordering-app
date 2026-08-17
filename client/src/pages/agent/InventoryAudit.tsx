@@ -46,7 +46,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
-function KpiCard({ label, value, sub, icon: Icon, iconBg }: { label: string; value: string; sub?: string; icon: React.ElementType; iconBg: string }) {
+function KpiCard({ label, value, sub, icon: Icon, iconBg, smallValue = false }: { label: string; value: string; sub?: string; icon: React.ElementType; iconBg: string; smallValue?: boolean }) {
   return (
     <Card className="shadow-sm">
       <CardContent className="p-3 sm:p-4 flex items-start gap-3">
@@ -55,7 +55,7 @@ function KpiCard({ label, value, sub, icon: Icon, iconBg }: { label: string; val
         </div>
         <div className="min-w-0">
           <p className="text-[10px] sm:text-xs text-slate-500 uppercase tracking-wide font-medium leading-tight">{label}</p>
-          <p className="text-base sm:text-2xl font-bold text-slate-900 leading-tight">{value}</p>
+          <p className={`font-bold text-slate-900 leading-tight ${smallValue ? "text-xs sm:text-sm" : "text-base sm:text-2xl"}`}>{value}</p>
           {sub && <p className="text-[10px] text-slate-400 leading-tight">{sub}</p>}
         </div>
       </CardContent>
@@ -594,6 +594,7 @@ export default function InventoryAuditPage() {
             sub={kpis?.lastAuditBy ? `By ${kpis.lastAuditBy}` : undefined}
             icon={CheckCircle2}
             iconBg="bg-green-100 text-green-600"
+            smallValue
           />
         </div>
       </div>
