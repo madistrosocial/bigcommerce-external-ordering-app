@@ -6,6 +6,7 @@ import { alias } from "drizzle-orm/pg-core";
 export interface IStorage {
   // User operations
   getUser(id: number): Promise<User | undefined>;
+  getUsersByIds(ids: number[]): Promise<Pick<User, 'id' | 'name'>[]>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   getAllAgents(): Promise<User[]>;
@@ -194,6 +195,11 @@ export class DatabaseStorage implements IStorage {
   async getUser(id: number): Promise<User | undefined> {
     const result = await db.select().from(users).where(eq(users.id, id));
     return result[0];
+  }
+
+  async getUsersByIds(ids: number[]): Promise<Pick<User, 'id' | 'name'>[]> {
+    if (ids.length === 0) return [];
+    return db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids));
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {

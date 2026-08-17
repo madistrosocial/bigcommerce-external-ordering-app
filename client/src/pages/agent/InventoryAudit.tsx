@@ -365,6 +365,9 @@ function ProductGroupRow({ group, statusFilter, svReasons = [] }: { group: api.A
                         <p className="text-sm font-medium text-slate-800 truncate">{task.variant_name || task.product_name}</p>
                         <p className="text-xs font-mono text-slate-400">{task.sku}</p>
                         <p className="text-xs text-slate-500">System Qty: {task.system_qty ?? "?"}</p>
+                        {task.completed_by_name && (
+                          <p className="text-xs text-slate-500 mt-0.5">Completed by: <span className="font-medium text-slate-700">{task.completed_by_name}</span></p>
+                        )}
                       </div>
                       <Button size="sm" variant="outline" className="h-8 text-xs shrink-0"
                         onClick={() => { setSelectedIds(new Set([task.id])); setAuditOpen(true); }}>
@@ -403,6 +406,7 @@ function ProductGroupRow({ group, statusFilter, svReasons = [] }: { group: api.A
         </td>
         <td className="px-4 py-3 text-sm text-slate-500">{group.source === "manual_push" ? "Manual Push" : group.source}</td>
         <td className="px-4 py-3"><StatusBadge status={group.status} /></td>
+        <td className="px-4 py-3 text-xs text-slate-400">—</td>
         <td className="px-4 py-3">
           <div className="flex items-center gap-1.5">
             <Button size="sm" variant="outline" className="h-7 text-xs"
@@ -420,7 +424,7 @@ function ProductGroupRow({ group, statusFilter, svReasons = [] }: { group: api.A
       {expanded && !tasksLoading && tasks.length > 0 && (
         <>
           <tr className="hidden sm:table-row bg-slate-50 border-b">
-            <td colSpan={7} className="px-6 py-2">
+            <td colSpan={8} className="px-6 py-2">
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" className="h-7 text-xs"
                   onClick={selectedIds.size === tasks.length ? clearAll : selectAll}>
@@ -464,6 +468,9 @@ function ProductGroupRow({ group, statusFilter, svReasons = [] }: { group: api.A
                 )}
               </td>
               <td className="px-4 py-2.5"><StatusBadge status={task.status} /></td>
+              <td className="px-4 py-2.5 text-xs text-slate-600 whitespace-nowrap">
+                {task.completed_by_name ?? <span className="text-slate-300">—</span>}
+              </td>
               <td className="px-4 py-2.5">
                 <Button size="sm" variant="outline" className="h-7 text-xs"
                   onClick={() => { setSelectedIds(new Set([task.id])); setAuditOpen(true); }}>
@@ -476,7 +483,7 @@ function ProductGroupRow({ group, statusFilter, svReasons = [] }: { group: api.A
       )}
       {expanded && tasksLoading && (
         <tr className="hidden sm:table-row">
-          <td colSpan={7} className="px-4 py-3 text-sm text-slate-400 text-center">
+          <td colSpan={8} className="px-4 py-3 text-sm text-slate-400 text-center">
             <Loader2 className="h-4 w-4 animate-spin inline mr-1" />Loading SKUs…
           </td>
         </tr>
@@ -714,6 +721,7 @@ export default function InventoryAuditPage() {
                     <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Last Push</th>
                     <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Source</th>
                     <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Status</th>
+                    <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Completed By</th>
                     <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Actions</th>
                   </tr>
                 </thead>

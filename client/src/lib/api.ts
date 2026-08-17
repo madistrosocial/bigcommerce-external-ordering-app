@@ -778,6 +778,7 @@ export interface InventoryAuditTask {
   completed_at: string | null;
   created_by: number | null;
   completed_by: number | null;
+  completed_by_name: string | null;
 }
 
 export interface AuditProductGroup {

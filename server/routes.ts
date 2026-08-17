@@ -7192,7 +7192,18 @@ export async function registerRoutes(
       const productId = parseInt(req.params.productId);
       const status = (req.query.status as string) || undefined;
       const tasks = await storage.getAuditTasksForProduct(productId, status);
-      res.json(tasks);
+      // Enrich with completed_by_name
+      const completedByIds = [...new Set(tasks.map((t) => t.completed_by).filter(Boolean))] as number[];
+      let nameMap: Record<number, string> = {};
+      if (completedByIds.length > 0) {
+        const userRows = await storage.getUsersByIds(completedByIds);
+        for (const u of userRows) nameMap[u.id] = u.name;
+      }
+      const enriched = tasks.map((t) => ({
+        ...t,
+        completed_by_name: t.completed_by ? (nameMap[t.completed_by] ?? null) : null,
+      }));
+      res.json(enriched);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
