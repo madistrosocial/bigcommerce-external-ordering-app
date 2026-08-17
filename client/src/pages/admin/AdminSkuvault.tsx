@@ -47,13 +47,13 @@ export default function AdminSkuvaultPage() {
   }, []);
 
   const handleSave = async () => {
-    if (!tenantToken && !userToken && !warehouseLocation && !warehouseId) {
-      toast({ title: "Nothing to save", description: "Enter credentials to update them." });
+    const reasons = reasonsText.split("\n").map((r) => r.trim()).filter(Boolean);
+    if (!tenantToken && !userToken && !warehouseLocation && !warehouseId && reasons.length === 0) {
+      toast({ title: "Nothing to save", description: "Enter credentials or reason codes to update." });
       return;
     }
     setSaving(true);
     try {
-      const reasons = reasonsText.split("\n").map((r) => r.trim()).filter(Boolean);
       await api.saveSkuVaultSettings({
         tenantToken,
         userToken,
@@ -245,9 +245,10 @@ export default function AdminSkuvaultPage() {
               className="font-mono text-sm"
             />
             <p className="text-xs text-slate-400">
-              These reasons appear in the Inventory Push and Audit dropdowns. They must <strong>exactly match</strong> the reason codes
-              configured in SKUVault under <span className="font-medium text-slate-500">Settings → Inventory → Reasons</span>.
-              The first entry will be the default.
+              These reasons appear in the Inventory Push and Audit dropdowns. Each line must be the <strong>exact text</strong> shown
+              in SKUVault's "Reason to Add" dropdown (e.g. <span className="font-mono text-slate-500">Add</span>,{" "}
+              <span className="font-mono text-slate-500">Add for Hike Order</span>). Partial matches cause a ReasonNotFound error.
+              The first entry will be the default selection.
             </p>
           </div>
 

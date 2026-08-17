@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useStore } from "@/lib/store";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
 import * as api from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -44,19 +45,20 @@ export default function InventoryPushPage() {
   const [pushToSkuvault, setPushToSkuvault] = useState(true);
   const [svLocation, setSvLocation] = useState<{ locationCode: string | null; currentQty: number | null; source: string; error?: string } | null>(null);
   const [svLocationLoading, setSvLocationLoading] = useState(false);
-  const [svReasons, setSvReasons] = useState<string[]>([]);
+  // Load configured SKUVault reasons — React Query caches & refetches on window focus
+  const { data: svSettings } = useQuery({
+    queryKey: ["skuvault-settings"],
+    queryFn: api.getSkuVaultSettings,
+    staleTime: 30_000,
+  });
+  const svReasons: string[] = svSettings?.reasons ?? [];
 
-  // Load configured reasons from SKUVault settings
+  // When svReasons first loads (async), reset reason to first configured reason
+  const svReasonsLoaded = svReasons.length > 0;
   useEffect(() => {
-    api.getSkuVaultSettings()
-      .then((s) => {
-        if (s.reasons?.length) {
-          setSvReasons(s.reasons);
-          setReason(s.reasons[0]);
-        }
-      })
-      .catch(() => {});
-  }, []);
+    if (svReasonsLoaded) setReason(svReasons[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [svReasonsLoaded]);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
