@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, CheckCircle2, XCircle, Plug, RefreshCw, Save, Eye, EyeOff } from "lucide-react";
 
@@ -19,6 +20,7 @@ export default function AdminSkuvaultPage() {
   const [lastTestOk, setLastTestOk] = useState<boolean | null>(null);
   const [warehouseId, setWarehouseId] = useState<string>("");
   const [warehouseLocation, setWarehouseLocation] = useState("GENERAL");
+  const [reasonsText, setReasonsText] = useState("");
 
   const [tenantToken, setTenantToken] = useState("");
   const [userToken, setUserToken] = useState("");
@@ -33,6 +35,7 @@ export default function AdminSkuvaultPage() {
         setHasCredentials(data.hasCredentials ?? false);
         setWarehouseId(data.warehouseId != null ? String(data.warehouseId) : "");
         setWarehouseLocation(data.warehouseLocation || "GENERAL");
+        setReasonsText((data.reasons ?? []).join("\n"));
         setLastTestedAt(data.lastTestedAt ?? null);
         setLastTestOk(data.lastTestOk ?? null);
       } catch {
@@ -50,11 +53,13 @@ export default function AdminSkuvaultPage() {
     }
     setSaving(true);
     try {
+      const reasons = reasonsText.split("\n").map((r) => r.trim()).filter(Boolean);
       await api.saveSkuVaultSettings({
         tenantToken,
         userToken,
         warehouseId: warehouseId ? Number(warehouseId) : undefined,
         warehouseLocation,
+        reasons,
       });
       toast({ title: "SKUVault settings saved" });
       setTenantToken("");
@@ -227,6 +232,22 @@ export default function AdminSkuvaultPage() {
               Fallback location code used when a SKU has no recorded location in SKUVault. The system
               always tries to use the SKU's actual bin location first (e.g. <span className="font-medium text-slate-500">END CAP-9</span>).
               Only used if the lookup fails or the item is brand new.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold uppercase text-slate-600">Valid Transaction Reasons</Label>
+            <Textarea
+              placeholder={"Enter each reason on a new line, exactly as it appears in SKUVault.\nExample:\nReceived\nAdjustment\nReturn\nTransfer"}
+              value={reasonsText}
+              onChange={(e) => setReasonsText(e.target.value)}
+              rows={5}
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-slate-400">
+              These reasons appear in the Inventory Push and Audit dropdowns. They must <strong>exactly match</strong> the reason codes
+              configured in SKUVault under <span className="font-medium text-slate-500">Settings → Inventory → Reasons</span>.
+              The first entry will be the default.
             </p>
           </div>
 

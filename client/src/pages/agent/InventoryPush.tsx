@@ -5,6 +5,7 @@ import * as api from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Package, Search, X, Plus, Minus, Loader2, CheckSquare, Square } from "lucide-react";
 
 // ─── Helpers (same as POS.tsx) ────────────────────────────────────────────────
@@ -43,6 +44,19 @@ export default function InventoryPushPage() {
   const [pushToSkuvault, setPushToSkuvault] = useState(true);
   const [svLocation, setSvLocation] = useState<{ locationCode: string | null; currentQty: number | null; source: string; error?: string } | null>(null);
   const [svLocationLoading, setSvLocationLoading] = useState(false);
+  const [svReasons, setSvReasons] = useState<string[]>([]);
+
+  // Load configured reasons from SKUVault settings
+  useEffect(() => {
+    api.getSkuVaultSettings()
+      .then((s) => {
+        if (s.reasons?.length) {
+          setSvReasons(s.reasons);
+          setReason(s.reasons[0]);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -311,14 +325,37 @@ export default function InventoryPushPage() {
 
                   <div>
                     <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">
-                      Reason (Optional)
+                      Reason {svReasons.length > 0 ? "(required)" : "(optional)"}
                     </label>
-                    <Input
-                      placeholder="e.g. Received shipment, Stock correction…"
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      data-testid="input-push-inv-reason"
-                    />
+                    {svReasons.length > 0 ? (
+                      <div className="space-y-2">
+                        <Select value={reason === "Other" || !svReasons.includes(reason) ? (svReasons.includes(reason) ? reason : "Other") : reason}
+                          onValueChange={(v) => { if (v !== "Other") setReason(v); else setReason("Other"); }}>
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {svReasons.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                            <SelectItem value="Other">Other (custom)…</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {(reason === "Other" || (!svReasons.includes(reason) && reason !== "")) && (
+                          <Input
+                            placeholder="Enter custom reason…"
+                            value={reason === "Other" ? "" : reason}
+                            onChange={(e) => setReason(e.target.value)}
+                            data-testid="input-push-inv-reason"
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      <Input
+                        placeholder="e.g. Received shipment, Stock correction…"
+                        value={reason}
+                        onChange={(e) => setReason(e.target.value)}
+                        data-testid="input-push-inv-reason"
+                      />
+                    )}
                   </div>
 
                   {/* Destination selection */}

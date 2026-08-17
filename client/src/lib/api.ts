@@ -846,13 +846,13 @@ export async function batchCompleteAuditTasks(items: { id: number; physical_qty:
   return res.json();
 }
 
-export async function getSkuVaultSettings(): Promise<{ tenantToken: string; userToken: string; warehouseId: number | null; warehouseLocation: string; hasCredentials: boolean; lastTestedAt?: string; lastTestOk?: boolean }> {
+export async function getSkuVaultSettings(): Promise<{ tenantToken: string; userToken: string; warehouseId: number | null; warehouseLocation: string; reasons: string[]; hasCredentials: boolean; lastTestedAt?: string; lastTestOk?: boolean }> {
   const res = await fetch(`${API_BASE}/settings/skuvault`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch SKUVault settings');
   return res.json();
 }
 
-export async function saveSkuVaultSettings(data: { tenantToken: string; userToken: string; warehouseId?: number | null; warehouseLocation?: string }): Promise<void> {
+export async function saveSkuVaultSettings(data: { tenantToken: string; userToken: string; warehouseId?: number | null; warehouseLocation?: string; reasons?: string[] }): Promise<void> {
   const res = await fetch(`${API_BASE}/settings/skuvault`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(data),

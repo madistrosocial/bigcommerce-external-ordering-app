@@ -7114,6 +7114,7 @@ export async function registerRoutes(
         userToken: cfg.userToken ? "••••••••" : "",
         warehouseId: cfg.warehouseId ?? null,
         warehouseLocation: cfg.warehouseLocation || "GENERAL",
+        reasons: Array.isArray(cfg.reasons) ? cfg.reasons : [],
         hasCredentials: !!(cfg.tenantToken && cfg.userToken),
         lastTestedAt: cfg.lastTestedAt || null,
         lastTestOk: cfg.lastTestOk ?? null,
@@ -7123,7 +7124,7 @@ export async function registerRoutes(
 
   app.post("/api/settings/skuvault", requireAuth, async (req, res) => {
     try {
-      const { tenantToken, userToken, warehouseId, warehouseLocation } = req.body as { tenantToken?: string; userToken?: string; warehouseId?: number; warehouseLocation?: string };
+      const { tenantToken, userToken, warehouseId, warehouseLocation, reasons } = req.body as { tenantToken?: string; userToken?: string; warehouseId?: number; warehouseLocation?: string; reasons?: string[] };
       const existing = await storage.getSetting("skuvault_config");
       const current = existing?.value ? (typeof existing.value === "string" ? JSON.parse(existing.value) : existing.value) : {};
       const updated: Record<string, any> = { ...current };
@@ -7132,6 +7133,7 @@ export async function registerRoutes(
       if (userToken && userToken !== "••••••••") updated.userToken = userToken;
       if (warehouseId !== undefined && warehouseId !== null) updated.warehouseId = Number(warehouseId);
       if (warehouseLocation !== undefined) updated.warehouseLocation = warehouseLocation || "GENERAL";
+      if (reasons !== undefined) updated.reasons = Array.isArray(reasons) ? reasons.filter((r) => r.trim()) : [];
       await storage.setSetting("skuvault_config", updated);
       res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }

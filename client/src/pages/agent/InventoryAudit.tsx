@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as api from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -74,18 +74,21 @@ interface AuditItem {
 }
 
 function AuditPanel({
-  open, onClose, tasks, title,
+  open, onClose, tasks, title, svReasons = [],
 }: {
   open: boolean;
   onClose: () => void;
   tasks: api.InventoryAuditTask[];
   title: string;
+  svReasons?: string[];
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  const reasonList = svReasons.length > 0 ? [...svReasons, "Other"] : AUDIT_REASONS;
+
   const [items, setItems] = useState<AuditItem[]>([]);
-  const [reason, setReason] = useState(AUDIT_REASONS[0]);
+  const [reason, setReason] = useState(reasonList[0]);
   const [customReason, setCustomReason] = useState("");
   const [notes, setNotes] = useState("");
   const [results, setResults] = useState<{ id: number; sku: string; success: boolean; error?: string }[] | null>(null);
@@ -100,7 +103,7 @@ function AuditPanel({
       system_qty: t.system_qty,
       physical_qty_input: String(t.system_qty ?? ""),
     })));
-    setReason(AUDIT_REASONS[0]);
+    setReason(reasonList[0]);
     setCustomReason("");
     setNotes("");
     setResults(null);
@@ -211,7 +214,7 @@ function AuditPanel({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {AUDIT_REASONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+            {reasonList.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
           </SelectContent>
         </Select>
         {reason === "Other" && (
@@ -288,7 +291,7 @@ function AuditPanel({
 }
 
 // ─── Product Group Row (expandable) ──────────────────────────────────────────
-function ProductGroupRow({ group, statusFilter }: { group: api.AuditProductGroup; statusFilter: string }) {
+function ProductGroupRow({ group, statusFilter, svReasons = [] }: { group: api.AuditProductGroup; statusFilter: string; svReasons?: string[] }) {
   const [expanded, setExpanded] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -486,6 +489,7 @@ function ProductGroupRow({ group, statusFilter }: { group: api.AuditProductGroup
           onClose={() => { setAuditOpen(false); setSelectedIds(new Set()); }}
           tasks={selectedTasks}
           title={auditTitle}
+          svReasons={svReasons}
         />
       )}
     </>
@@ -505,7 +509,15 @@ export default function InventoryAuditPage() {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
+  const [svReasons, setSvReasons] = useState<string[]>([]);
   const LIMIT = 10;
+
+  // Load configured SKUVault reasons once
+  useEffect(() => {
+    api.getSkuVaultSettings()
+      .then((s) => { if (s.reasons?.length) setSvReasons(s.reasons); })
+      .catch(() => {});
+  }, []);
 
   const applySearch = useCallback(() => { setAppliedSearch(search); setPage(0); }, [search]);
 
@@ -683,7 +695,7 @@ export default function InventoryAuditPage() {
             {/* Mobile: stacked cards */}
             <div className="sm:hidden">
               {groups.map((group) => (
-                <ProductGroupRow key={group.product_id} group={group} statusFilter={statusFilter || "pending"} />
+                <ProductGroupRow key={group.product_id} group={group} statusFilter={statusFilter || "pending"} svReasons={svReasons} />
               ))}
             </div>
 
@@ -706,7 +718,7 @@ export default function InventoryAuditPage() {
                 </thead>
                 <tbody>
                   {groups.map((group) => (
-                    <ProductGroupRow key={group.product_id} group={group} statusFilter={statusFilter || "pending"} />
+                    <ProductGroupRow key={group.product_id} group={group} statusFilter={statusFilter || "pending"} svReasons={svReasons} />
                   ))}
                 </tbody>
               </table>
