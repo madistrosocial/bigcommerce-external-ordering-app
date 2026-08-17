@@ -31,7 +31,6 @@ import OrdersList from "@/pages/orders/OrdersList";
 import OrderDetail from "@/pages/orders/OrderDetail";
 import BcOrderDetail from "@/pages/orders/BcOrderDetail";
 import CreateCustomer from "@/pages/agent/CreateCustomer";
-import AllCustomers from "@/pages/agent/AllCustomers";
 import BCOrders from "@/pages/agent/BCOrders";
 import AdminGroups from "@/pages/admin/AdminGroups";
 import BCProductLink from "@/pages/tools/BCProductLink";
@@ -151,9 +150,6 @@ function Router() {
       {/* ── Customer routes ── */}
       <Route path="/customers/create">
         {() => <ProtectedRoute component={CreateCustomer} />}
-      </Route>
-      <Route path="/customers/all">
-        {() => <ProtectedRoute component={AllCustomers} />}
       </Route>
 
       {/* ── Admin routes ── */}

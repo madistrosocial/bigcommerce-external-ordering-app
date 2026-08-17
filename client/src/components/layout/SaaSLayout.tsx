@@ -120,12 +120,6 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("orders_all") ? [{ label: "Sales History", path: "/orders/list" }] : []),
   ];
 
-  // Customers children
-  const customersChildren: NavLeaf[] = [
-    ...(hasPermission("customers_create") ? [{ label: "Create BC Customer", path: "/customers/create" }] : []),
-    ...(hasPermission("customers_all") ? [{ label: "All Customers", path: "/customers/all" }] : []),
-  ];
-
   // Inventory children
   const inventoryChildren: NavLeaf[] = [
     ...(hasPermission("inventory_push") ? [{ label: "Push Inventory", path: "/inventory/push" }] : []),
@@ -143,6 +137,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   // CRM children
   const crmChildren: NavLeaf[] = [
     ...(hasPermission("crm_customers") ? [{ label: "Customers", path: "/crm/customers" }] : []),
+    ...(hasPermission("customers_create") ? [{ label: "Create BC Customer", path: "/customers/create" }] : []),
     ...(hasPermission("crm_customers") ? [{ label: "To Do", path: "/crm/todos" }] : []),
     ...(hasPermission("crm_reactivation") ? [{ label: "Reactivation", path: "/crm/reactivation" }] : []),
     ...(hasPermission("crm_notes") ? [{ label: "Notes", path: "/crm/notes" }] : []),
@@ -159,7 +154,6 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const navItems: NavGroup[] = [
     ...(hasPermission("dashboard") ? [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" }] : []),
     ...(hasPermission("pos") ? [{ id: "pos", label: "POS", icon: Monitor, path: "/pos" }] : []),
-    ...(customersChildren.length > 0 ? [{ id: "customers", label: "Customers", icon: Users, children: customersChildren }] : []),
     ...(ordersChildren.length > 0 ? [{ id: "orders", label: "Orders", icon: ShoppingBag, children: ordersChildren }] : []),
     ...(inventoryChildren.length > 0 ? [{ id: "inventory", label: "Inventory", icon: Package, children: inventoryChildren }] : []),
     ...(hasPermission("catalog") ? [{ id: "catalog", label: "Catalog", icon: BookOpen, path: "/catalog" }] : []),
