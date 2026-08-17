@@ -717,6 +717,19 @@ export interface InventoryPushLog {
   created_at: string;
 }
 
+export async function resolveSkuVaultLocation(sku: string): Promise<{
+  sku: string;
+  locationCode: string | null;
+  currentQty: number | null;
+  source: "primary" | "fallback_api" | "fallback_config" | "not_found" | "not_configured" | "error";
+  error?: string;
+}> {
+  const res = await fetch(`${API_BASE}/inventory/resolve-location?sku=${encodeURIComponent(sku)}`, {
+    headers: getAuthHeaders(),
+  });
+  return res.json();
+}
+
 export async function pushInventory(data: {
   product_id: number;
   variant_id: number;

@@ -190,7 +190,9 @@ async function resolveLocations(
 
   try {
     const getResult = await getSkuVaultInventory(cfg, skus);
+    console.log(`[SKUVault] getInventoryByLocation raw response for SKUs [${skus.join(", ")}]:`, JSON.stringify(getResult).slice(0, 2000));
     primaryBins = extractPrimaryBinBySku(getResult);
+    console.log(`[SKUVault] extractPrimaryBinBySku result:`, JSON.stringify(primaryBins));
     for (const [sku, bin] of Object.entries(primaryBins)) {
       locationBySku[sku] = bin.locationCode;
     }
@@ -201,7 +203,9 @@ async function resolveLocations(
   // For SKUs with no location yet (zero-stock), try getAvailableQuantities
   const missing = skus.filter((s) => !locationBySku[s]);
   if (missing.length > 0) {
+    console.log(`[SKUVault] No location from getInventoryByLocation for: [${missing.join(", ")}] — trying getAvailableQuantities`);
     const fallbackLocations = await getLocationFromAvailableQuantities(cfg, missing);
+    console.log(`[SKUVault] getAvailableQuantities fallback result:`, JSON.stringify(fallbackLocations));
     for (const [sku, loc] of Object.entries(fallbackLocations)) {
       locationBySku[sku] = loc;
       // Zero-stock: currentQty = 0
@@ -209,6 +213,7 @@ async function resolveLocations(
     }
   }
 
+  console.log(`[SKUVault] Final locationBySku:`, JSON.stringify(locationBySku));
   return { locationBySku, primaryBins };
 }
 
@@ -251,15 +256,16 @@ export async function addSkuVaultInventory(
   }
 
   // Use addItemBulk — sends the DELTA directly, SKUVault handles the addition
+  // NOTE: Reason must be per-item (inside Items), NOT at the top level
   const addResult = await svPost<SvSetQuantityResult>("/inventory/addItemBulk", {
     TenantToken: cfg.tenantToken,
     UserToken: cfg.userToken,
-    Reason: reason,
     Items: toPush.map((p) => ({
       Sku: p.sku,
       WarehouseId: cfg.warehouseId,
       LocationCode: p.locationCode,
       Quantity: p.quantityToAdd,
+      Reason: reason,
     })),
   });
 
@@ -296,10 +302,10 @@ export async function setSkuVaultInventory(
 
   const resolvedLocations: Record<string, string> = {};
 
+  // NOTE: Reason must be per-item (inside Items), NOT at the top level
   const svResult = await svPost<SvSetQuantityResult>("/inventory/setItemQuantities", {
     TenantToken: cfg.tenantToken,
     UserToken: cfg.userToken,
-    Reason: reason,
     Items: items.map((i) => {
       const loc = locationBySku[i.sku] ?? fallbackLocation;
       resolvedLocations[i.sku] = loc;
@@ -311,11 +317,37 @@ export async function setSkuVaultInventory(
         WarehouseId: cfg.warehouseId,
         LocationCode: loc,
         Quantity: i.quantity,
+        Reason: reason,
       };
     }),
   });
 
   return { ...svResult, ResolvedLocations: resolvedLocations };
+}
+
+/**
+ * Resolve which bin a SKU lives in — without performing any push.
+ * Returns locationCode (the resolved bin), currentQty, and whether a configured fallback was used.
+ * Used by the /api/inventory/resolve-location endpoint so the UI can preview the bin.
+ */
+export async function resolveSkuLocation(
+  cfg: SkuVaultConfig,
+  sku: string
+): Promise<{ sku: string; locationCode: string | null; currentQty: number | null; source: "primary" | "fallback_api" | "fallback_config" | "not_found" }> {
+  const { locationBySku, primaryBins } = await resolveLocations(cfg, [sku]);
+  const loc = locationBySku[sku] ?? null;
+  const bin = primaryBins[sku] ?? null;
+
+  if (loc && bin) {
+    return { sku, locationCode: loc, currentQty: bin.currentQty, source: "primary" };
+  }
+  if (loc) {
+    return { sku, locationCode: loc, currentQty: 0, source: "fallback_api" };
+  }
+  if (cfg.warehouseLocation) {
+    return { sku, locationCode: cfg.warehouseLocation, currentQty: null, source: "fallback_config" };
+  }
+  return { sku, locationCode: null, currentQty: null, source: "not_found" };
 }
 
 /**

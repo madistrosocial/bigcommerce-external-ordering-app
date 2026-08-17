@@ -41,6 +41,8 @@ export default function InventoryPushPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pushToBigcommerce, setPushToBigcommerce] = useState(true);
   const [pushToSkuvault, setPushToSkuvault] = useState(true);
+  const [svLocation, setSvLocation] = useState<{ locationCode: string | null; currentQty: number | null; source: string; error?: string } | null>(null);
+  const [svLocationLoading, setSvLocationLoading] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -48,6 +50,19 @@ export default function InventoryPushPage() {
   useEffect(() => {
     setTimeout(() => searchRef.current?.focus(), 80);
   }, []);
+
+  // Fetch resolved SKUVault bin whenever the selected variant or skuvault toggle changes
+  useEffect(() => {
+    setSvLocation(null);
+    if (!pushToSkuvault || !selectedVariant) return;
+    const sku = selectedVariant.sku || selectedProduct?.sku;
+    if (!sku) return;
+    setSvLocationLoading(true);
+    api.resolveSkuVaultLocation(sku)
+      .then((r) => setSvLocation(r))
+      .catch((e) => setSvLocation({ locationCode: null, currentQty: null, source: "error", error: e.message }))
+      .finally(() => setSvLocationLoading(false));
+  }, [selectedVariant, pushToSkuvault, selectedProduct?.sku]);
 
   const selectProduct = useCallback((p: api.Product, autoVariant?: any) => {
     setSelectedProduct(p);
@@ -108,7 +123,8 @@ export default function InventoryPushPage() {
       setSelectedProduct(null);
       setSelectedVariant(null);
       setQuantityInput("1");
-      setReason("");
+      setReason("Manual Inventory Push - SalesApp");
+      setSvLocation(null);
       setShowConfirm(false);
       setTimeout(() => searchRef.current?.focus(), 80);
     } catch (e: any) {
@@ -357,11 +373,34 @@ export default function InventoryPushPage() {
                           {reason && (<><br />Reason: <em>{reason}</em></>)}
                           {pushToSkuvault && <><br /><span className="text-amber-600 font-medium">An audit task will be created for warehouse verification.</span></>}
                         </p>
+                        {/* SKUVault bin preview */}
+                        {pushToSkuvault && (
+                          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
+                            <span className="font-semibold text-slate-600 uppercase tracking-wide">SKUVault Bin: </span>
+                            {svLocationLoading ? (
+                              <span className="text-slate-400 flex items-center gap-1 inline-flex"><Loader2 className="h-3 w-3 animate-spin" /> Looking up bin…</span>
+                            ) : svLocation?.locationCode ? (
+                              <>
+                                <span className="font-mono text-purple-700 font-semibold">{svLocation.locationCode}</span>
+                                {svLocation.currentQty !== null && (
+                                  <span className="text-slate-400 ml-2">(current: {svLocation.currentQty})</span>
+                                )}
+                                {svLocation.source === "fallback_config" && (
+                                  <span className="text-amber-600 ml-2">(fallback from settings)</span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-red-600 font-medium">
+                                {svLocation?.error ?? "No bin found — item may not exist in SKUVault yet"}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <div className="flex gap-2">
                           <Button variant="outline" onClick={() => setShowConfirm(false)} data-testid="button-push-inv-cancel">
                             Cancel
                           </Button>
-                          <Button disabled={isSubmitting} onClick={handleSubmit} data-testid="button-push-inv-submit">
+                          <Button disabled={isSubmitting || (pushToSkuvault && svLocationLoading)} onClick={handleSubmit} data-testid="button-push-inv-submit">
                             {isSubmitting ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Pushing…</> : "Confirm Push"}
                           </Button>
                         </div>

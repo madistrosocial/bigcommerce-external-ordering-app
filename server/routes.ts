@@ -19,7 +19,7 @@ import SftpClient from "ssh2-sftp-client";
 import { Readable } from "stream";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, testSkuVaultConnection, type SkuVaultConfig } from "./skuvault";
+import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, type SkuVaultConfig } from "./skuvault";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
 const DEFAULT_INVOICE_TEMPLATE = `<!DOCTYPE html>
@@ -2747,6 +2747,24 @@ export async function registerRoutes(
     CREATE UNIQUE INDEX IF NOT EXISTS uq_audit_tasks_sku_pending
     ON inventory_audit_tasks (sku) WHERE status = 'pending'
   `)).catch(() => {}); // Ignore if table not yet created; will succeed after db:push
+
+  // Preview which SKUVault bin would be used for a given SKU — no push performed
+  app.get("/api/inventory/resolve-location", requireAuth, async (req, res) => {
+    try {
+      const { sku } = req.query as { sku: string };
+      if (!sku) return res.status(400).json({ error: "sku is required" });
+      const svSetting = await storage.getSetting("skuvault_config");
+      const svCfg = svSetting?.value ? (typeof svSetting.value === "string" ? JSON.parse(svSetting.value) : svSetting.value) : null;
+      if (!svCfg?.tenantToken || !svCfg?.userToken) {
+        return res.json({ sku, locationCode: null, source: "not_configured", error: "SKUVault not configured" });
+      }
+      const cfg: SkuVaultConfig = { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseId: svCfg.warehouseId ?? 0, warehouseLocation: svCfg.warehouseLocation };
+      const result = await resolveSkuLocation(cfg, sku);
+      return res.json(result);
+    } catch (e: any) {
+      res.json({ sku: req.query.sku, locationCode: null, source: "error", error: e.message });
+    }
+  });
 
   app.post("/api/inventory/push", requireAuth, async (req, res) => {
     try {
