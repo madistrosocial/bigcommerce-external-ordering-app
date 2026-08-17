@@ -17,6 +17,7 @@ export default function AdminSkuvaultPage() {
   const [hasCredentials, setHasCredentials] = useState(false);
   const [lastTestedAt, setLastTestedAt] = useState<string | null>(null);
   const [lastTestOk, setLastTestOk] = useState<boolean | null>(null);
+  const [warehouseId, setWarehouseId] = useState<string>("");
   const [warehouseLocation, setWarehouseLocation] = useState("GENERAL");
 
   const [tenantToken, setTenantToken] = useState("");
@@ -30,6 +31,7 @@ export default function AdminSkuvaultPage() {
       try {
         const data = await api.getSkuVaultSettings();
         setHasCredentials(data.hasCredentials ?? false);
+        setWarehouseId(data.warehouseId != null ? String(data.warehouseId) : "");
         setWarehouseLocation(data.warehouseLocation || "GENERAL");
         setLastTestedAt(data.lastTestedAt ?? null);
         setLastTestOk(data.lastTestOk ?? null);
@@ -42,13 +44,18 @@ export default function AdminSkuvaultPage() {
   }, []);
 
   const handleSave = async () => {
-    if (!tenantToken && !userToken && !warehouseLocation) {
+    if (!tenantToken && !userToken && !warehouseLocation && !warehouseId) {
       toast({ title: "Nothing to save", description: "Enter credentials to update them." });
       return;
     }
     setSaving(true);
     try {
-      await api.saveSkuVaultSettings({ tenantToken, userToken, warehouseLocation });
+      await api.saveSkuVaultSettings({
+        tenantToken,
+        userToken,
+        warehouseId: warehouseId ? Number(warehouseId) : undefined,
+        warehouseLocation,
+      });
       toast({ title: "SKUVault settings saved" });
       setTenantToken("");
       setUserToken("");
@@ -195,6 +202,21 @@ export default function AdminSkuvaultPage() {
           </div>
 
           <div className="space-y-1.5">
+            <Label className="text-xs font-semibold uppercase text-slate-600">Warehouse ID</Label>
+            <Input
+              type="number"
+              placeholder="e.g. 12345"
+              value={warehouseId}
+              onChange={(e) => setWarehouseId(e.target.value)}
+              min={1}
+            />
+            <p className="text-xs text-slate-400">
+              The numeric Warehouse ID required by SKUVault's inventory API. Find it in SKUVault under{" "}
+              <span className="font-medium text-slate-500">Admin → Warehouses / Locations</span> — look for the ID column.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
             <Label className="text-xs font-semibold uppercase text-slate-600">Warehouse Location Code</Label>
             <Input
               placeholder="GENERAL"
@@ -202,7 +224,7 @@ export default function AdminSkuvaultPage() {
               onChange={(e) => setWarehouseLocation(e.target.value)}
             />
             <p className="text-xs text-slate-400">
-              The SKUVault location code used for inventory adjustments. Default: GENERAL.
+              The location code within the warehouse used for inventory adjustments. Default: GENERAL.
             </p>
           </div>
 

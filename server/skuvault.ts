@@ -9,7 +9,8 @@ const SV_BASE = "https://app.skuvault.com/api";
 export interface SkuVaultConfig {
   tenantToken: string;
   userToken: string;
-  warehouseLocation?: string; // default "all"
+  warehouseId: number;         // required by setItemQuantities / setItemQuantity
+  warehouseLocation?: string;  // location code within the warehouse, default "GENERAL"
 }
 
 export interface SvInventoryItem {
@@ -55,6 +56,7 @@ export async function setSkuVaultInventory(
     UserToken: cfg.userToken,
     Items: items.map((i) => ({
       Sku: i.sku,
+      WarehouseId: cfg.warehouseId,
       LocationCode: location,
       Quantity: i.quantity,
     })),

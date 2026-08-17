@@ -2810,7 +2810,7 @@ export async function registerRoutes(
         if (!svCfg?.tenantToken || !svCfg?.userToken) {
           return res.status(400).json({ error: "SKUVault credentials not configured. Please set them in Settings > SKUVault." });
         }
-        const svCfgTyped: SkuVaultConfig = { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseLocation: svCfg.warehouseLocation };
+        const svCfgTyped: SkuVaultConfig = { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseId: svCfg.warehouseId ?? 0, warehouseLocation: svCfg.warehouseLocation };
         const svPushResult = await addSkuVaultInventory(svCfgTyped, [{ sku, quantityToAdd: quantity_added }]);
         const svItem = svPushResult.results[0];
         if (svItem?.error) throw new Error(`SKUVault push failed for ${sku}: ${svItem.error}`);
@@ -7089,6 +7089,7 @@ export async function registerRoutes(
       res.json({
         tenantToken: cfg.tenantToken ? "••••••••" : "",
         userToken: cfg.userToken ? "••••••••" : "",
+        warehouseId: cfg.warehouseId ?? null,
         warehouseLocation: cfg.warehouseLocation || "GENERAL",
         hasCredentials: !!(cfg.tenantToken && cfg.userToken),
         lastTestedAt: cfg.lastTestedAt || null,
@@ -7099,13 +7100,14 @@ export async function registerRoutes(
 
   app.post("/api/settings/skuvault", requireAuth, async (req, res) => {
     try {
-      const { tenantToken, userToken, warehouseLocation } = req.body as { tenantToken?: string; userToken?: string; warehouseLocation?: string };
+      const { tenantToken, userToken, warehouseId, warehouseLocation } = req.body as { tenantToken?: string; userToken?: string; warehouseId?: number; warehouseLocation?: string };
       const existing = await storage.getSetting("skuvault_config");
       const current = existing?.value ? (typeof existing.value === "string" ? JSON.parse(existing.value) : existing.value) : {};
       const updated: Record<string, any> = { ...current };
       // Only update if the incoming value is not the masked placeholder
       if (tenantToken && tenantToken !== "••••••••") updated.tenantToken = tenantToken;
       if (userToken && userToken !== "••••••••") updated.userToken = userToken;
+      if (warehouseId !== undefined && warehouseId !== null) updated.warehouseId = Number(warehouseId);
       if (warehouseLocation !== undefined) updated.warehouseLocation = warehouseLocation || "GENERAL";
       await storage.setSetting("skuvault_config", updated);
       res.json({ ok: true });
@@ -7117,7 +7119,7 @@ export async function registerRoutes(
       const setting = await storage.getSetting("skuvault_config");
       const cfg = setting?.value ? (typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value) : {};
       if (!cfg.tenantToken || !cfg.userToken) return res.status(400).json({ ok: false, message: "SKUVault credentials not configured." });
-      const result = await testSkuVaultConnection({ tenantToken: cfg.tenantToken, userToken: cfg.userToken, warehouseLocation: cfg.warehouseLocation });
+      const result = await testSkuVaultConnection({ tenantToken: cfg.tenantToken, userToken: cfg.userToken, warehouseId: cfg.warehouseId ?? 0, warehouseLocation: cfg.warehouseLocation });
       // Persist test result
       await storage.setSetting("skuvault_config", { ...cfg, lastTestedAt: new Date().toISOString(), lastTestOk: result.ok });
       res.json(result);
@@ -7188,7 +7190,7 @@ export async function registerRoutes(
       let freshSystemQty = task.system_qty ?? 0;
       let qtyWarning: string | null = null;
       try {
-        const svGet = await getSkuVaultInventory({ tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseLocation: svCfg.warehouseLocation }, [task.sku]);
+        const svGet = await getSkuVaultInventory({ tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseId: svCfg.warehouseId ?? 0, warehouseLocation: svCfg.warehouseLocation }, [task.sku]);
         const svItem = (svGet.Items ?? []).find((i: any) => i.Sku === task.sku);
         freshSystemQty = svItem?.QuantityAvailable ?? svItem?.QuantityOnHand ?? freshSystemQty;
         if (freshSystemQty !== (task.system_qty ?? 0)) {
@@ -7198,7 +7200,7 @@ export async function registerRoutes(
 
       // Set inventory in SKUVault to the physical count
       const svSet = await setSkuVaultInventory(
-        { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseLocation: svCfg.warehouseLocation || "GENERAL" },
+        { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseId: svCfg.warehouseId ?? 0, warehouseLocation: svCfg.warehouseLocation || "GENERAL" },
         [{ sku: task.sku, quantity: physical_qty }]
       );
 
@@ -7238,7 +7240,7 @@ export async function registerRoutes(
       const svItems = items.map((item, idx) => ({ sku: tasks[idx]?.sku ?? "", quantity: item.physical_qty }))
         .filter((i) => i.sku);
       const svSet = await setSkuVaultInventory(
-        { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseLocation: svCfg.warehouseLocation || "GENERAL" },
+        { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseId: svCfg.warehouseId ?? 0, warehouseLocation: svCfg.warehouseLocation || "GENERAL" },
         svItems
       );
       const svErrorsBySku: Record<string, string> = {};
