@@ -2811,7 +2811,7 @@ export async function registerRoutes(
           return res.status(400).json({ error: "SKUVault credentials not configured. Please set them in Settings > SKUVault." });
         }
         const svCfgTyped: SkuVaultConfig = { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseId: svCfg.warehouseId ?? 0, warehouseLocation: svCfg.warehouseLocation };
-        const svPushResult = await addSkuVaultInventory(svCfgTyped, [{ sku, quantityToAdd: quantity_added }]);
+        const svPushResult = await addSkuVaultInventory(svCfgTyped, [{ sku, quantityToAdd: quantity_added }], reason || "Manual Inventory Push - SalesApp");
         const svItem = svPushResult.results[0];
         if (svItem?.error) throw new Error(`SKUVault push failed for ${sku}: ${svItem.error}`);
         if (!push_to_bigcommerce) {
@@ -7212,7 +7212,8 @@ export async function registerRoutes(
       // Set inventory in SKUVault to the physical count
       const svSet = await setSkuVaultInventory(
         { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseId: svCfg.warehouseId ?? 0, warehouseLocation: svCfg.warehouseLocation || "GENERAL" },
-        [{ sku: task.sku, quantity: physical_qty }]
+        [{ sku: task.sku, quantity: physical_qty }],
+        reason || "Inventory Audit - SalesApp"
       );
 
       const svErrors = (svSet.Errors ?? []).filter((e: any) => e.Sku === task.sku);
@@ -7255,7 +7256,8 @@ export async function registerRoutes(
         .filter((i) => i.sku);
       const svSet = await setSkuVaultInventory(
         { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseId: svCfg.warehouseId ?? 0, warehouseLocation: svCfg.warehouseLocation || "GENERAL" },
-        svItems
+        svItems,
+        reason || "Inventory Audit - SalesApp"
       );
       const svErrorsBySku: Record<string, string> = {};
       for (const e of svSet.Errors ?? []) {

@@ -220,7 +220,8 @@ async function resolveLocations(
  */
 export async function addSkuVaultInventory(
   cfg: SkuVaultConfig,
-  items: { sku: string; quantityToAdd: number }[]
+  items: { sku: string; quantityToAdd: number }[],
+  reason = "Manual Inventory Push - SalesApp"
 ): Promise<{ results: { sku: string; newQty: number | null; locationCode: string; error?: string }[] }> {
   const skus = items.map((i) => i.sku);
   const { primaryBins, locationBySku } = await resolveLocations(cfg, skus);
@@ -253,6 +254,7 @@ export async function addSkuVaultInventory(
   const addResult = await svPost<SvSetQuantityResult>("/inventory/addItemBulk", {
     TenantToken: cfg.tenantToken,
     UserToken: cfg.userToken,
+    Reason: reason,
     Items: toPush.map((p) => ({
       Sku: p.sku,
       WarehouseId: cfg.warehouseId,
@@ -286,7 +288,8 @@ export async function addSkuVaultInventory(
  */
 export async function setSkuVaultInventory(
   cfg: SkuVaultConfig,
-  items: { sku: string; quantity: number }[]
+  items: { sku: string; quantity: number }[],
+  reason = "Inventory Audit - SalesApp"
 ): Promise<SvSetInventoryResult> {
   const fallbackLocation = cfg.warehouseLocation || "GENERAL";
   const { locationBySku } = await resolveLocations(cfg, items.map((i) => i.sku));
@@ -296,6 +299,7 @@ export async function setSkuVaultInventory(
   const svResult = await svPost<SvSetQuantityResult>("/inventory/setItemQuantities", {
     TenantToken: cfg.tenantToken,
     UserToken: cfg.userToken,
+    Reason: reason,
     Items: items.map((i) => {
       const loc = locationBySku[i.sku] ?? fallbackLocation;
       resolvedLocations[i.sku] = loc;

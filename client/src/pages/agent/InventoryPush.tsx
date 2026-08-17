@@ -36,7 +36,7 @@ export default function InventoryPushPage() {
   const [selectedProduct, setSelectedProduct] = useState<api.Product | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<any | null>(null);
   const [quantityInput, setQuantityInput] = useState("1");
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState("Manual Inventory Push - SalesApp");
   const [showConfirm, setShowConfirm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pushToBigcommerce, setPushToBigcommerce] = useState(true);

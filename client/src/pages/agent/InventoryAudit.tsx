@@ -23,6 +23,7 @@ import { useTimeService } from "@/hooks/useTimeService";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const AUDIT_REASONS = [
+  "Inventory Audit - SalesApp",
   "Stock reconciliation - manual inventory push",
   "Physical count correction",
   "Damaged inventory",
