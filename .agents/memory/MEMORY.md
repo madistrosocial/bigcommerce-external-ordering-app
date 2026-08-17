@@ -9,3 +9,4 @@
 - [CustomerOrdersPanel reuse](customer-orders-panel.md) — CRM CustomerProfile uses CustomerOrdersPanel with customerInfo prop; panel uses BcOrderExpandedRow + BcOrderActionsMenu; order # links to /orders/bc/:id.
 - [BC line items uniqueness](bc-line-items-uniqueness.md) — UNIQUE functional index on (order_id, product_id, COALESCE(variant_id,0)); no query-time dedup; full sync truncates line items only (not customers/orders).
 - [Inventory Audit + SKUVault module](inventory-audit-module.md) — Full build: schema, skuvault.ts client, storage methods, routes, all frontend pages; partial-unique-index seeded at startup.
+- [SKUVault location lookup & push strategy](skuvault-location-lookup.md) — addItemBulk for push; getInventoryByLocation (ProductSKUs, dict response) + getAvailableQuantities fallback for zero-stock; location stored in push log + audit task.

@@ -713,6 +713,7 @@ export interface InventoryPushLog {
   new_inventory: number;
   quantity_added: number;
   reason: string | null;
+  skuvault_location: string | null;
   created_at: string;
 }
 
@@ -759,6 +760,7 @@ export interface InventoryAuditTask {
   reason: string | null;
   notes: string | null;
   skuvault_result: any;
+  skuvault_location: string | null;
   created_at: string;
   completed_at: string | null;
   created_by: number | null;

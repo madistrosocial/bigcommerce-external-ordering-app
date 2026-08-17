@@ -127,6 +127,7 @@ export const inventoryPushLogs = pgTable("inventory_push_logs", {
   reason: text("reason"),
   push_to_bigcommerce: boolean("push_to_bigcommerce").notNull().default(true),
   push_to_skuvault: boolean("push_to_skuvault").notNull().default(false),
+  skuvault_location: text("skuvault_location"),  // resolved bin location used for the SKUVault push
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -451,6 +452,7 @@ export const inventoryAuditTasks = pgTable("inventory_audit_tasks", {
   reason: text("reason"),
   notes: text("notes"),
   skuvault_result: jsonb("skuvault_result"),
+  skuvault_location: text("skuvault_location"),  // resolved bin location used for the SKUVault update
   created_at: timestamp("created_at").notNull().defaultNow(),
   completed_at: timestamp("completed_at"),
   created_by: integer("created_by").references(() => users.id),

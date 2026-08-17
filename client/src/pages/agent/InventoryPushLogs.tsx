@@ -218,6 +218,7 @@ export default function InventoryPushLogs() {
                     <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Before</th>
                     <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Added</th>
                     <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">After</th>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">SV Location</th>
                     <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Reason</th>
                   </tr>
                 </thead>
@@ -247,6 +248,11 @@ export default function InventoryPushLogs() {
                       </td>
                       <td className="px-3 py-2 text-right text-xs font-semibold text-slate-800">
                         {log.new_inventory}
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        {log.skuvault_location
+                          ? <span className="font-mono bg-purple-50 text-purple-700 rounded px-1.5 py-0.5 text-xs">{log.skuvault_location}</span>
+                          : <span className="text-slate-300">—</span>}
                       </td>
                       <td className="px-3 py-2 text-xs text-slate-400 italic max-w-[140px] truncate">
                         {log.reason || "—"}
@@ -291,6 +297,14 @@ export default function InventoryPushLogs() {
                       {log.sku}
                     </span>
                   </div>
+
+                  {/* SKUVault location */}
+                  {log.skuvault_location && (
+                    <div className="mb-1.5">
+                      <span className="text-xs text-slate-400">SV bin: </span>
+                      <span className="font-mono text-xs bg-purple-50 text-purple-700 rounded px-1.5 py-0.5">{log.skuvault_location}</span>
+                    </div>
+                  )}
 
                   {/* Bottom row: date + user + reason */}
                   <div className="flex items-center gap-2 flex-wrap">

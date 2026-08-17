@@ -451,7 +451,14 @@ function ProductGroupRow({ group, statusFilter }: { group: api.AuditProductGroup
               <td className="px-4 py-2.5 text-xs text-slate-500 whitespace-nowrap">
                 {task.last_push_at ? fmt.dateTime(task.last_push_at) : "—"}
               </td>
-              <td className="px-4 py-2.5 text-xs text-slate-500">Sys: {task.system_qty ?? "?"}</td>
+              <td className="px-4 py-2.5 text-xs text-slate-500">
+                <div>Sys: {task.system_qty ?? "?"}</div>
+                {task.skuvault_location && (
+                  <div className="mt-0.5">
+                    <span className="font-mono text-xs bg-purple-50 text-purple-700 rounded px-1 py-0.5">{task.skuvault_location}</span>
+                  </div>
+                )}
+              </td>
               <td className="px-4 py-2.5"><StatusBadge status={task.status} /></td>
               <td className="px-4 py-2.5">
                 <Button size="sm" variant="outline" className="h-7 text-xs"

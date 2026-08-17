@@ -4,17 +4,20 @@
  * Auth: TenantToken + UserToken in every request body.
  *
  * Key API notes:
- *  - getInventoryByLocation: request uses `ProductSKUs` (not `Skus`);
- *    response `Items` is a SKU-keyed dictionary: { [sku]: SvLocationEntry[] }
- *  - setItemQuantities: requires WarehouseId (int) + LocationCode per item.
- *    LocationCode must already exist in the warehouse.
+ *  - getInventoryByLocation: request uses `ProductSKUs`; response `Items` is
+ *    a SKU-keyed dictionary: { [sku]: SvLocationEntry[] }
+ *  - addItemBulk: adds a DELTA quantity to a bin (not absolute). Used for push.
+ *  - setItemQuantities: sets ABSOLUTE quantity at a bin. Used for audit completion.
+ *    Both require the LocationCode to already exist in the warehouse.
+ *
+ * Location lookup strategy:
+ *  1. getInventoryByLocation  → primary bin (in-stock items)
+ *  2. getAvailableQuantities  → fallback for zero-stock (returns items even at qty 0)
+ *  If neither returns a location, returns null and the caller surfaces a clear error.
  *
  * Multi-location policy:
- *  For both push (add) and audit (set), we pick the single "primary" bin —
- *  the location entry with the highest QuantityAvailable for that SKU.
- *  Push: new qty = primary_bin_qty + delta, written to primary_bin only.
- *  Audit: physical_count written to primary_bin only (other bins untouched).
- *  Rationale: WH2 stores each SKU in one bin; multi-bin is uncommon here.
+ *  Pick the single "primary" bin — the location entry with the highest
+ *  QuantityAvailable for that SKU. Push and audit both write to that bin only.
  */
 
 const SV_BASE = "https://app.skuvault.com/api";
@@ -22,19 +25,18 @@ const SV_BASE = "https://app.skuvault.com/api";
 export interface SkuVaultConfig {
   tenantToken: string;
   userToken: string;
-  warehouseId: number;         // required by setItemQuantities / setItemQuantity
-  warehouseLocation?: string;  // fallback location code when item has no recorded bin
-}
-
-export interface SvInventoryItem {
-  Sku: string;
-  Quantity: number;
-  LocationCode?: string;
+  warehouseId: number;         // required by set/addItem endpoints
+  warehouseLocation?: string;  // fallback location code when no bin found
 }
 
 export interface SvSetQuantityResult {
   Status: string;
   Errors: { Sku: string; ErrorMessages: string[] }[];
+}
+
+/** Extended result from setSkuVaultInventory, includes the resolved bin per SKU */
+export interface SvSetInventoryResult extends SvSetQuantityResult {
+  ResolvedLocations: Record<string, string>;   // sku → locationCode used
 }
 
 /** One location entry inside the Items dictionary returned by getInventoryByLocation */
@@ -54,7 +56,7 @@ export interface SvGetInventoryResult {
   Status: string;
 }
 
-/** The selected primary bin for a SKU (location + qty from that same bin). */
+/** The selected primary bin for a SKU (location + qty from the same bin). */
 interface PrimaryBin {
   locationCode: string;
   currentQty: number;
@@ -84,16 +86,55 @@ export async function getSkuVaultInventory(
   return svPost<SvGetInventoryResult>("/inventory/getInventoryByLocation", {
     TenantToken: cfg.tenantToken,
     UserToken: cfg.userToken,
-    ProductSKUs: skus,           // correct field name per SKUVault docs
+    ProductSKUs: skus,
     PageNumber: 0,
     PageSize: skus.length + 10,
   });
 }
 
 /**
+ * Fallback location lookup via getAvailableQuantities.
+ * This endpoint returns items even when QuantityAvailable = 0, so it can
+ * surface the last-recorded location for zero-stock SKUs.
+ * Returns a map of sku → locationCode for any SKU where a location is found.
+ */
+async function getLocationFromAvailableQuantities(
+  cfg: SkuVaultConfig,
+  skus: string[]
+): Promise<Record<string, string>> {
+  try {
+    const res = await svPost<any>("/inventory/getAvailableQuantities", {
+      TenantToken: cfg.tenantToken,
+      UserToken: cfg.userToken,
+      ProductSKUs: skus,
+      PageNumber: 0,
+      PageSize: skus.length + 10,
+    });
+    const locationBySku: Record<string, string> = {};
+    const items = res?.Items;
+    if (!items) return locationBySku;
+
+    if (Array.isArray(items)) {
+      // Array format: [{ Sku, LocationCode, ... }]
+      for (const item of items) {
+        if (item?.Sku && item?.LocationCode) locationBySku[item.Sku] = item.LocationCode;
+      }
+    } else if (typeof items === "object") {
+      // Dictionary format: { [sku]: { LocationCode, ... } | [{ LocationCode, ... }] }
+      for (const [sku, val] of Object.entries(items)) {
+        const entry = Array.isArray(val) ? val[0] : val;
+        if ((entry as any)?.LocationCode) locationBySku[sku] = (entry as any).LocationCode;
+      }
+    }
+    return locationBySku;
+  } catch {
+    return {};
+  }
+}
+
+/**
  * For each SKU, pick the single primary bin (highest QuantityAvailable).
  * Returns location and that bin's qty together so they stay consistent.
- * SKUs with no returned entries are absent from the result.
  */
 function extractPrimaryBinBySku(
   result: SvGetInventoryResult
@@ -104,7 +145,6 @@ function extractPrimaryBinBySku(
 
   for (const [sku, entries] of Object.entries(items)) {
     if (!Array.isArray(entries) || entries.length === 0) continue;
-    // Pick the entry with the most available quantity
     const best = entries.reduce((a, b) =>
       (b.QuantityAvailable ?? b.Quantity ?? 0) > (a.QuantityAvailable ?? a.Quantity ?? 0) ? b : a
     );
@@ -120,51 +160,147 @@ function extractPrimaryBinBySku(
 
 /**
  * Sum available quantity across ALL bins for each SKU.
- * Used for informational display (e.g. fresh qty warning in audit UI).
+ * Used for the informational fresh-qty warning during audit completion.
  */
 export function sumQtyBySku(result: SvGetInventoryResult): Record<string, number> {
   const qtyBySku: Record<string, number> = {};
   const items = result?.Items;
   if (!items || typeof items !== "object") return qtyBySku;
-
   for (const [sku, entries] of Object.entries(items)) {
     if (!Array.isArray(entries)) continue;
     qtyBySku[sku] = entries.reduce(
-      (sum, e) => sum + (e.QuantityAvailable ?? e.QuantityOnHand ?? e.Quantity ?? 0),
-      0
+      (sum, e) => sum + (e.QuantityAvailable ?? e.QuantityOnHand ?? e.Quantity ?? 0), 0
     );
   }
   return qtyBySku;
 }
 
 /**
- * Set absolute inventory quantities for a list of SKUs.
- * Looks up each SKU's primary bin first and writes the quantity to that bin only.
- * Falls back to cfg.warehouseLocation when a SKU has no recorded location.
- * Used during audit completion to set the physical count.
+ * Two-step location lookup for a list of SKUs:
+ *   1. getInventoryByLocation  (in-stock items have location entries)
+ *   2. getAvailableQuantities  (zero-stock items may still surface a location)
+ * Returns { locationBySku, primaryBins } for use in push/audit calls.
+ */
+async function resolveLocations(
+  cfg: SkuVaultConfig,
+  skus: string[]
+): Promise<{ locationBySku: Record<string, string>; primaryBins: Record<string, PrimaryBin> }> {
+  let primaryBins: Record<string, PrimaryBin> = {};
+  let locationBySku: Record<string, string> = {};
+
+  try {
+    const getResult = await getSkuVaultInventory(cfg, skus);
+    primaryBins = extractPrimaryBinBySku(getResult);
+    for (const [sku, bin] of Object.entries(primaryBins)) {
+      locationBySku[sku] = bin.locationCode;
+    }
+  } catch (err) {
+    console.warn("[SKUVault] getInventoryByLocation failed:", err);
+  }
+
+  // For SKUs with no location yet (zero-stock), try getAvailableQuantities
+  const missing = skus.filter((s) => !locationBySku[s]);
+  if (missing.length > 0) {
+    const fallbackLocations = await getLocationFromAvailableQuantities(cfg, missing);
+    for (const [sku, loc] of Object.entries(fallbackLocations)) {
+      locationBySku[sku] = loc;
+      // Zero-stock: currentQty = 0
+      primaryBins[sku] = { locationCode: loc, currentQty: 0 };
+    }
+  }
+
+  return { locationBySku, primaryBins };
+}
+
+/**
+ * Add quantity to a list of SKUs using addItemBulk (DELTA, not absolute).
+ * Used during inventory push. Looks up each SKU's bin first via two-step lookup.
+ * Returns locationCode used per SKU so it can be stored in the push log.
+ * Throws if no location can be resolved and no fallback is configured.
+ */
+export async function addSkuVaultInventory(
+  cfg: SkuVaultConfig,
+  items: { sku: string; quantityToAdd: number }[]
+): Promise<{ results: { sku: string; newQty: number | null; locationCode: string; error?: string }[] }> {
+  const skus = items.map((i) => i.sku);
+  const { primaryBins, locationBySku } = await resolveLocations(cfg, skus);
+  const fallbackLocation = cfg.warehouseLocation || null;
+
+  // Build per-SKU payloads
+  const payloads = items.map((i) => {
+    const bin = primaryBins[i.sku];
+    const loc = locationBySku[i.sku] ?? fallbackLocation;
+    if (!loc) {
+      return { sku: i.sku, quantityToAdd: i.quantityToAdd, locationCode: "", error: `No location found for SKU ${i.sku} in SKUVault. Receive the item in SKUVault first, or configure a fallback Warehouse Location Code in Admin → SKUVault settings.` };
+    }
+    if (!locationBySku[i.sku] && fallbackLocation) {
+      console.warn(`[SKUVault] No location found for SKU ${i.sku}, using configured fallback: ${fallbackLocation}`);
+    }
+    return { sku: i.sku, quantityToAdd: i.quantityToAdd, locationCode: loc, error: undefined };
+  });
+
+  // Split items with errors vs items to push
+  const toPush = payloads.filter((p) => !p.error);
+  const errorResults = payloads.filter((p) => !!p.error).map((p) => ({
+    sku: p.sku, newQty: null, locationCode: p.locationCode, error: p.error,
+  }));
+
+  if (toPush.length === 0) {
+    return { results: errorResults };
+  }
+
+  // Use addItemBulk — sends the DELTA directly, SKUVault handles the addition
+  const addResult = await svPost<SvSetQuantityResult>("/inventory/addItemBulk", {
+    TenantToken: cfg.tenantToken,
+    UserToken: cfg.userToken,
+    Items: toPush.map((p) => ({
+      Sku: p.sku,
+      WarehouseId: cfg.warehouseId,
+      LocationCode: p.locationCode,
+      Quantity: p.quantityToAdd,
+    })),
+  });
+
+  const errorsBySku: Record<string, string> = {};
+  for (const e of addResult.Errors ?? []) {
+    errorsBySku[e.Sku] = e.ErrorMessages?.join("; ") || "Unknown error";
+  }
+
+  const pushResults = toPush.map((p) => {
+    const bin = primaryBins[p.sku];
+    return {
+      sku: p.sku,
+      locationCode: p.locationCode,
+      newQty: errorsBySku[p.sku] ? null : (bin?.currentQty ?? 0) + p.quantityToAdd,
+      error: errorsBySku[p.sku],
+    };
+  });
+
+  return { results: [...pushResults, ...errorResults] };
+}
+
+/**
+ * Set absolute inventory quantities for a list of SKUs using setItemQuantities.
+ * Used during audit completion. Looks up each SKU's bin via two-step lookup.
+ * Returns resolved locations so they can be stored in the audit task.
  */
 export async function setSkuVaultInventory(
   cfg: SkuVaultConfig,
   items: { sku: string; quantity: number }[]
-): Promise<SvSetQuantityResult> {
+): Promise<SvSetInventoryResult> {
   const fallbackLocation = cfg.warehouseLocation || "GENERAL";
+  const { locationBySku } = await resolveLocations(cfg, items.map((i) => i.sku));
 
-  let primaryBins: Record<string, PrimaryBin> = {};
-  try {
-    const getResult = await getSkuVaultInventory(cfg, items.map((i) => i.sku));
-    primaryBins = extractPrimaryBinBySku(getResult);
-  } catch (err) {
-    console.warn("[SKUVault] Location lookup failed, using fallback for all items:", err);
-  }
+  const resolvedLocations: Record<string, string> = {};
 
-  return svPost<SvSetQuantityResult>("/inventory/setItemQuantities", {
+  const svResult = await svPost<SvSetQuantityResult>("/inventory/setItemQuantities", {
     TenantToken: cfg.tenantToken,
     UserToken: cfg.userToken,
     Items: items.map((i) => {
-      const bin = primaryBins[i.sku];
-      const loc = bin?.locationCode ?? fallbackLocation;
-      if (!bin) {
-        console.warn(`[SKUVault] No bin found for SKU ${i.sku}, using fallback: ${fallbackLocation}`);
+      const loc = locationBySku[i.sku] ?? fallbackLocation;
+      resolvedLocations[i.sku] = loc;
+      if (!locationBySku[i.sku]) {
+        console.warn(`[SKUVault] No location found for SKU ${i.sku}, using fallback: ${fallbackLocation}`);
       }
       return {
         Sku: i.sku,
@@ -174,67 +310,8 @@ export async function setSkuVaultInventory(
       };
     }),
   });
-}
 
-/**
- * Add quantity to a list of SKUs (used during inventory push).
- * Picks each SKU's primary bin, uses THAT bin's current qty as the base,
- * then sets primary_bin_qty + delta. Other bins are not touched.
- * Falls back to cfg.warehouseLocation when a SKU has no recorded location.
- */
-export async function addSkuVaultInventory(
-  cfg: SkuVaultConfig,
-  items: { sku: string; quantityToAdd: number }[]
-): Promise<{ results: { sku: string; newQty: number | null; error?: string }[] }> {
-  const skus = items.map((i) => i.sku);
-  const fallbackLocation = cfg.warehouseLocation || "GENERAL";
-
-  let primaryBins: Record<string, PrimaryBin> = {};
-  try {
-    const getResult = await getSkuVaultInventory(cfg, skus);
-    primaryBins = extractPrimaryBinBySku(getResult);
-  } catch (err) {
-    console.warn("[SKUVault] Inventory lookup failed, starting from qty 0 with fallback location:", err);
-  }
-
-  // Build payload: new qty = primary_bin_qty + delta, written to that same bin
-  const setPayload = items.map((i) => {
-    const bin = primaryBins[i.sku];
-    const loc = bin?.locationCode ?? fallbackLocation;
-    const basedQty = bin?.currentQty ?? 0;
-    if (!bin) {
-      console.warn(`[SKUVault] No bin found for SKU ${i.sku}, using fallback: ${fallbackLocation}`);
-    }
-    return {
-      sku: i.sku,
-      newQty: basedQty + i.quantityToAdd,
-      locationCode: loc,
-    };
-  });
-
-  const setResult = await svPost<SvSetQuantityResult>("/inventory/setItemQuantities", {
-    TenantToken: cfg.tenantToken,
-    UserToken: cfg.userToken,
-    Items: setPayload.map((p) => ({
-      Sku: p.sku,
-      WarehouseId: cfg.warehouseId,
-      LocationCode: p.locationCode,
-      Quantity: p.newQty,
-    })),
-  });
-
-  const errorsBySku: Record<string, string> = {};
-  for (const e of setResult.Errors ?? []) {
-    errorsBySku[e.Sku] = e.ErrorMessages?.join("; ") || "Unknown error";
-  }
-
-  return {
-    results: setPayload.map((p) => ({
-      sku: p.sku,
-      newQty: errorsBySku[p.sku] ? null : p.newQty,
-      error: errorsBySku[p.sku],
-    })),
-  };
+  return { ...svResult, ResolvedLocations: resolvedLocations };
 }
 
 /**

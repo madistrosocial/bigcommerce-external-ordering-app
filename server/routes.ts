@@ -2820,6 +2820,8 @@ export async function registerRoutes(
         }
         svResult = svPushResult;
 
+        const resolvedSvLocation = svItem?.locationCode || null;
+
         // Create or update audit task for SKUVault push
         try {
           await storage.createOrUpdateAuditTask({
@@ -2830,6 +2832,7 @@ export async function registerRoutes(
             system_qty: svItem?.newQty ?? (previous_inventory + quantity_added),
             created_by: authUser.id,
             source: "manual_push",
+            skuvault_location: resolvedSvLocation,
           });
         } catch (auditErr: any) {
           console.warn("[audit] Failed to create/update audit task:", auditErr.message);
@@ -2837,6 +2840,7 @@ export async function registerRoutes(
       }
 
       // ── Log the push ────────────────────────────────────────────────────────
+      const svLocationForLog = svResult ? (svResult as any).results?.[0]?.locationCode || null : null;
       const logEntry: InsertInventoryPushLog = {
         user_id: authUser.id,
         username: authUser.username || "",
@@ -2847,6 +2851,7 @@ export async function registerRoutes(
         reason: reason || null,
         push_to_bigcommerce: !!push_to_bigcommerce,
         push_to_skuvault: !!push_to_skuvault,
+        skuvault_location: svLocationForLog,
       };
       const log = await storage.createInventoryPushLog(logEntry);
 
@@ -7215,10 +7220,13 @@ export async function registerRoutes(
         return res.status(502).json({ error: `SKUVault rejected the adjustment: ${svErrors[0].ErrorMessages?.join("; ")}` });
       }
 
+      const resolvedAuditLocation = svSet.ResolvedLocations?.[task.sku] || null;
+
       const completed = await storage.completeAuditTask(id, {
         physical_qty, variance, reason, notes,
         completed_by: authUser.id,
         skuvault_result: svSet,
+        skuvault_location: resolvedAuditLocation,
       });
       res.json({ ...completed, warning: qtyWarning });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -7269,6 +7277,7 @@ export async function registerRoutes(
             reason, notes,
             completed_by: authUser.id,
             skuvault_result: svSet,
+            skuvault_location: svSet.ResolvedLocations?.[sku] || null,
           });
           results.push({ id: item.id, sku, success: true });
         }

@@ -640,8 +640,8 @@ export class DatabaseStorage implements IStorage {
 
   // ── Inventory audit task methods ──────────────────────────────────────────
 
-  async createOrUpdateAuditTask(opts: { sku: string; product_id: number; variant_id: number; product_name: string; variant_name: string; quantity_added: number; system_qty: number; created_by: number; source?: string }): Promise<InventoryAuditTask> {
-    const { sku, product_id, variant_id, product_name, variant_name, quantity_added, system_qty, created_by, source = "manual_push" } = opts;
+  async createOrUpdateAuditTask(opts: { sku: string; product_id: number; variant_id: number; product_name: string; variant_name: string; quantity_added: number; system_qty: number; created_by: number; source?: string; skuvault_location?: string | null }): Promise<InventoryAuditTask> {
+    const { sku, product_id, variant_id, product_name, variant_name, quantity_added, system_qty, created_by, source = "manual_push", skuvault_location } = opts;
     const now = new Date();
     // Try to find an existing pending task for this SKU
     const existing = await db.select().from(inventoryAuditTasks)
@@ -658,6 +658,7 @@ export class DatabaseStorage implements IStorage {
           system_qty,
           product_name: product_name || task.product_name,
           variant_name: variant_name || task.variant_name,
+          ...(skuvault_location ? { skuvault_location } : {}),
         })
         .where(eq(inventoryAuditTasks.id, task.id))
         .returning();
@@ -670,6 +671,7 @@ export class DatabaseStorage implements IStorage {
       total_push_qty: quantity_added, push_count: 1,
       last_push_at: now, system_qty,
       created_by,
+      skuvault_location: skuvault_location ?? null,
     }).returning();
     return created[0];
   }
@@ -766,7 +768,7 @@ export class DatabaseStorage implements IStorage {
     return result[0] as InventoryAuditTask | undefined;
   }
 
-  async completeAuditTask(id: number, data: { physical_qty: number; variance: number; reason: string; notes?: string; completed_by: number; skuvault_result?: any }): Promise<InventoryAuditTask> {
+  async completeAuditTask(id: number, data: { physical_qty: number; variance: number; reason: string; notes?: string; completed_by: number; skuvault_result?: any; skuvault_location?: string | null }): Promise<InventoryAuditTask> {
     const result = await db.update(inventoryAuditTasks).set({
       status: "completed",
       physical_qty: data.physical_qty,
@@ -776,6 +778,7 @@ export class DatabaseStorage implements IStorage {
       completed_by: data.completed_by,
       completed_at: new Date(),
       skuvault_result: data.skuvault_result ?? null,
+      ...(data.skuvault_location != null ? { skuvault_location: data.skuvault_location } : {}),
     }).where(eq(inventoryAuditTasks.id, id)).returning();
     return result[0] as InventoryAuditTask;
   }
