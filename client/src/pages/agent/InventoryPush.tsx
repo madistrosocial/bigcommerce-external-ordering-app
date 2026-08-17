@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useStore } from "@/lib/store";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery } from "@tanstack/react-query";
 import * as api from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -45,20 +44,23 @@ export default function InventoryPushPage() {
   const [pushToSkuvault, setPushToSkuvault] = useState(true);
   const [svLocation, setSvLocation] = useState<{ locationCode: string | null; currentQty: number | null; source: string; error?: string } | null>(null);
   const [svLocationLoading, setSvLocationLoading] = useState(false);
-  // Load configured SKUVault reasons — React Query caches & refetches on window focus
-  const { data: svSettings } = useQuery({
-    queryKey: ["skuvault-settings"],
-    queryFn: api.getSkuVaultSettings,
-    staleTime: 30_000,
-  });
-  const svReasons: string[] = svSettings?.reasons ?? [];
+  const [svReasons, setSvReasons] = useState<string[]>([]);
 
-  // When svReasons first loads (async), reset reason to first configured reason
-  const svReasonsLoaded = svReasons.length > 0;
+  // Load configured SKUVault reasons fresh on every mount (bypass React Query cache)
   useEffect(() => {
-    if (svReasonsLoaded) setReason(svReasons[0]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [svReasonsLoaded]);
+    let cancelled = false;
+    api.getSkuVaultSettings()
+      .then((s) => {
+        if (cancelled) return;
+        const reasons = s.reasons ?? [];
+        if (reasons.length > 0) {
+          setSvReasons(reasons);
+          setReason((cur) => (cur === "Manual Inventory Push - SalesApp" ? reasons[0] : cur));
+        }
+      })
+      .catch((err) => console.error("[InventoryPush] Failed to load SKUVault reasons:", err));
+    return () => { cancelled = true; };
+  }, []);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -139,7 +141,7 @@ export default function InventoryPushPage() {
       setSelectedProduct(null);
       setSelectedVariant(null);
       setQuantityInput("1");
-      setReason("Manual Inventory Push - SalesApp");
+      setReason(svReasons.length > 0 ? svReasons[0] : "Manual Inventory Push - SalesApp");
       setSvLocation(null);
       setShowConfirm(false);
       setTimeout(() => searchRef.current?.focus(), 80);

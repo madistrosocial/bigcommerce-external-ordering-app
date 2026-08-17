@@ -2829,7 +2829,20 @@ export async function registerRoutes(
           return res.status(400).json({ error: "SKUVault credentials not configured. Please set them in Settings > SKUVault." });
         }
         const svCfgTyped: SkuVaultConfig = { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseId: svCfg.warehouseId ?? 0, warehouseLocation: svCfg.warehouseLocation };
-        const svPushResult = await addSkuVaultInventory(svCfgTyped, [{ sku, quantityToAdd: quantity_added }], reason || "Manual Inventory Push - SalesApp");
+        // Use first configured reason when client sends an invalid/default reason
+        const configuredReasons: string[] = Array.isArray(svCfg.reasons) ? svCfg.reasons : [];
+        const LEGACY_DEFAULTS = ["Manual Inventory Push - SalesApp", "Inventory Audit - SalesApp"];
+        const effectiveReason = (() => {
+          if (!reason || LEGACY_DEFAULTS.includes(reason)) {
+            return configuredReasons[0] ?? reason ?? "Manual Inventory Push - SalesApp";
+          }
+          if (configuredReasons.length > 0 && !configuredReasons.includes(reason)) {
+            console.warn(`[SKUVault] Client sent reason "${reason}" not in configured list; substituting "${configuredReasons[0]}"`);
+            return configuredReasons[0];
+          }
+          return reason;
+        })();
+        const svPushResult = await addSkuVaultInventory(svCfgTyped, [{ sku, quantityToAdd: quantity_added }], effectiveReason);
         const svItem = svPushResult.results[0];
         if (svItem?.error) throw new Error(`SKUVault push failed for ${sku}: ${svItem.error}`);
         if (!push_to_bigcommerce) {
