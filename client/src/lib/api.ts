@@ -838,6 +838,16 @@ export async function completeAuditTask(id: number, data: { physical_qty: number
   return res.json();
 }
 
+export async function getSkuVaultLiveQty(skus: string[]): Promise<Record<string, { onHand: number; pending: number }>> {
+  const res = await fetch(`${API_BASE}/inventory/skuvault-live-qty`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ skus }),
+  });
+  if (!res.ok) throw new Error('Failed to fetch live SKUVault quantities');
+  return res.json();
+}
+
 export async function batchCompleteAuditTasks(items: { id: number; physical_qty: number; variance: number }[], reason: string, notes?: string): Promise<{ results: { id: number; sku: string; success: boolean; error?: string }[] }> {
   const res = await fetch(`${API_BASE}/inventory/audit/tasks/batch-complete`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },

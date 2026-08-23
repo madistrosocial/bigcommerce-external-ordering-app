@@ -19,7 +19,7 @@ import SftpClient from "ssh2-sftp-client";
 import { Readable } from "stream";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, type SkuVaultConfig } from "./skuvault";
+import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
 const DEFAULT_INVOICE_TEMPLATE = `<!DOCTYPE html>
@@ -7184,6 +7184,20 @@ export async function registerRoutes(
       const dateTo = (req.query.dateTo as string) || undefined;
       const result = await storage.getAuditQueue({ page, limit, search, status, source, dateFrom, dateTo });
       res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Live SKUVault on-hand + pending quantities for a list of SKUs
+  app.post("/api/inventory/skuvault-live-qty", requireAuth, async (req, res) => {
+    try {
+      const { skus } = req.body as { skus?: string[] };
+      if (!Array.isArray(skus) || skus.length === 0) return res.json({});
+      const svSetting = await storage.getSetting("skuvault_config");
+      const svCfg = svSetting?.value ? (typeof svSetting.value === "string" ? JSON.parse(svSetting.value) : svSetting.value) : null;
+      if (!svCfg?.tenantToken || !svCfg?.userToken) return res.status(503).json({ error: "SKUVault not configured" });
+      const cfg: SkuVaultConfig = { tenantToken: svCfg.tenantToken, userToken: svCfg.userToken, warehouseId: svCfg.warehouseId ?? 0, warehouseLocation: svCfg.warehouseLocation };
+      const qty = await getLiveSkuQuantities(cfg, skus);
+      res.json(qty);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

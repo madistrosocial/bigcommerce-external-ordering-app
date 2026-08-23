@@ -69,7 +69,9 @@ interface AuditItem {
   sku: string;
   product_name: string;
   variant_name: string;
-  system_qty: number | null;
+  system_qty: number | null;      // snapshot from push time (fallback)
+  on_hand: number | null;         // live SKUVault on-hand (null = loading)
+  pending: number | null;         // live SKUVault pending (null = loading)
   physical_qty_input: string;
 }
 
@@ -88,12 +90,13 @@ function AuditPanel({
   const reasonList = svReasons.length > 0 ? [...svReasons, "Other"] : AUDIT_REASONS;
 
   const [items, setItems] = useState<AuditItem[]>([]);
+  const [liveLoading, setLiveLoading] = useState(false);
   const [reason, setReason] = useState(reasonList[0]);
   const [customReason, setCustomReason] = useState("");
   const [notes, setNotes] = useState("");
   const [results, setResults] = useState<{ id: number; sku: string; success: boolean; error?: string }[] | null>(null);
 
-  // Reset when opened
+  // Reset when opened — initialise with snapshot qty, live qty loads separately
   const handleOpen = () => {
     setItems(tasks.map((t) => ({
       id: t.id,
@@ -101,6 +104,8 @@ function AuditPanel({
       product_name: t.product_name,
       variant_name: t.variant_name,
       system_qty: t.system_qty,
+      on_hand: null,
+      pending: null,
       physical_qty_input: String(t.system_qty ?? ""),
     })));
     setReason(reasonList[0]);
@@ -112,14 +117,38 @@ function AuditPanel({
   // Keep items in sync with tasks when dialog opens
   useState(() => { if (open && tasks.length > 0) handleOpen(); });
 
+  // Fetch live SKUVault on-hand + pending whenever the dialog opens
+  useEffect(() => {
+    if (!open || tasks.length === 0) return;
+    const skus = tasks.map((t) => t.sku);
+    setLiveLoading(true);
+    api.getSkuVaultLiveQty(skus)
+      .then((liveMap) => {
+        setItems((prev) => prev.map((item) => {
+          const live = liveMap[item.sku];
+          if (!live) return item;
+          return {
+            ...item,
+            on_hand: live.onHand,
+            pending: live.pending,
+            // Pre-fill physical count with live on-hand (auditor adjusts from real value)
+            physical_qty_input: String(live.onHand),
+          };
+        }));
+      })
+      .catch(() => { /* non-fatal — fall back to snapshot qty */ })
+      .finally(() => setLiveLoading(false));
+  }, [open, tasks]);
+
   const mutation = useMutation({
     mutationFn: async () => {
       const finalReason = reason === "Other" ? (customReason.trim() || "Other") : reason;
-      const payload = items.map((item) => ({
-        id: item.id,
-        physical_qty: Math.max(0, parseInt(item.physical_qty_input) || 0),
-        variance: (parseInt(item.physical_qty_input) || 0) - (item.system_qty ?? 0),
-      }));
+      const payload = items.map((item) => {
+        const physical = Math.max(0, parseInt(item.physical_qty_input) || 0);
+        // Variance vs live on-hand; fall back to snapshot system_qty if live unavailable
+        const base = item.on_hand ?? item.system_qty ?? 0;
+        return { id: item.id, physical_qty: physical, variance: physical - base };
+      });
       const res = await api.batchCompleteAuditTasks(payload, finalReason, notes || undefined);
       return res;
     },
@@ -160,34 +189,50 @@ function AuditPanel({
         <AlertCircle className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
         <p className="text-xs text-blue-700">
           Enter the actual physical count for each SKU. This will set SKUVault inventory to the audited quantity.
+          {liveLoading && <span className="ml-1 italic">Fetching live SKUVault quantities…</span>}
         </p>
       </div>
 
       {/* SKU table */}
       <div className="border rounded-lg overflow-hidden">
         {/* Header — desktop only */}
-        <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px] gap-2 px-3 py-2 bg-slate-50 border-b text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <div className="hidden sm:grid grid-cols-[1fr_72px_72px_80px_72px] gap-2 px-3 py-2 bg-slate-50 border-b text-[10px] font-semibold uppercase tracking-wide text-slate-500">
           <span>SKU / Variant</span>
-          <span className="text-center">System Qty</span>
+          <span className="text-center">On Hand</span>
+          <span className="text-center">Pending</span>
           <span className="text-center">Physical Count</span>
           <span className="text-center">Variance</span>
         </div>
         <div className="divide-y">
           {items.map((item) => {
             const physical = parseInt(item.physical_qty_input) || 0;
-            const variance = physical - (item.system_qty ?? 0);
+            const base = item.on_hand ?? item.system_qty ?? 0;
+            const variance = physical - base;
+            const qtyDisplay = (val: number | null) =>
+              liveLoading ? <Loader2 className="h-3 w-3 animate-spin inline text-slate-400" /> : (val !== null ? val : "—");
             return (
-              <div key={item.id} className="px-3 py-2.5 sm:grid sm:grid-cols-[1fr_80px_80px_80px] sm:gap-2 sm:items-center space-y-1.5 sm:space-y-0">
+              <div key={item.id} className="px-3 py-2.5 sm:grid sm:grid-cols-[1fr_72px_72px_80px_72px] sm:gap-2 sm:items-center space-y-1.5 sm:space-y-0">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-slate-800 truncate">{item.variant_name || item.product_name}</p>
                   <p className="text-xs font-mono text-slate-400">{item.sku}</p>
                 </div>
+                {/* On Hand */}
                 <div className="flex sm:flex-col items-center justify-between sm:justify-center gap-2 sm:gap-0">
-                  <span className="text-xs text-slate-500 sm:hidden">System:</span>
-                  <span className="text-sm font-medium text-slate-700 sm:text-center">{item.system_qty ?? "—"}</span>
+                  <span className="text-xs text-slate-500 sm:hidden">On Hand:</span>
+                  <span className="text-sm font-medium text-slate-700 sm:text-center">
+                    {qtyDisplay(item.on_hand)}
+                  </span>
                 </div>
+                {/* Pending */}
+                <div className="flex sm:flex-col items-center justify-between sm:justify-center gap-2 sm:gap-0">
+                  <span className="text-xs text-slate-500 sm:hidden">Pending:</span>
+                  <span className={`text-sm font-medium sm:text-center ${item.pending && item.pending > 0 ? "text-amber-600" : "text-slate-400"}`}>
+                    {qtyDisplay(item.pending)}
+                  </span>
+                </div>
+                {/* Physical Count */}
                 <div className="flex sm:flex-col items-center justify-between sm:justify-center gap-2">
-                  <span className="text-xs text-slate-500 sm:hidden">Physical:</span>
+                  <span className="text-xs text-slate-500 sm:hidden">Physical Count:</span>
                   <Input
                     type="number"
                     min="0"
@@ -196,6 +241,7 @@ function AuditPanel({
                     className="w-20 h-8 text-center text-sm font-bold"
                   />
                 </div>
+                {/* Variance */}
                 <div className="flex sm:flex-col items-center justify-between sm:justify-center gap-2">
                   <span className="text-xs text-slate-500 sm:hidden">Variance:</span>
                   <VarianceBadge v={variance} />

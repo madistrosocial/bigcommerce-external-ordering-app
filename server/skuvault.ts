@@ -350,6 +350,62 @@ export async function resolveSkuLocation(
   return { sku, locationCode: null, currentQty: null, source: "not_found" };
 }
 
+/** Live on-hand and pending quantities for a single SKU (summed across all bins). */
+export interface SvLiveQty {
+  onHand: number;
+  pending: number;
+}
+
+/**
+ * Fetch live on-hand and pending quantities for a list of SKUs.
+ * Uses getAvailableQuantities which returns QuantityOnHand and QuantityPending
+ * per bin; this function sums across all bins per SKU so the caller gets a
+ * single warehouse-wide total (matching what SKUVault's UI shows).
+ */
+export async function getLiveSkuQuantities(
+  cfg: SkuVaultConfig,
+  skus: string[]
+): Promise<Record<string, SvLiveQty>> {
+  if (skus.length === 0) return {};
+  const result: Record<string, SvLiveQty> = {};
+  try {
+    const res = await svPost<any>("/inventory/getAvailableQuantities", {
+      TenantToken: cfg.tenantToken,
+      UserToken: cfg.userToken,
+      ProductSKUs: skus,
+      PageNumber: 0,
+      PageSize: skus.length + 10,
+    });
+    const items = res?.Items;
+    if (!items) return result;
+
+    if (Array.isArray(items)) {
+      // Array format: [{ Sku, QuantityOnHand, QuantityPending, ... }]
+      for (const item of items) {
+        if (!item?.Sku) continue;
+        const sku = item.Sku as string;
+        if (!result[sku]) result[sku] = { onHand: 0, pending: 0 };
+        result[sku].onHand  += (item.QuantityOnHand  ?? item.Quantity ?? 0) as number;
+        result[sku].pending += (item.QuantityPending ?? 0) as number;
+      }
+    } else if (typeof items === "object") {
+      // Dictionary format: { [sku]: entry | entry[] }
+      for (const [sku, val] of Object.entries(items)) {
+        const entries: any[] = Array.isArray(val) ? val : [val];
+        let onHand = 0, pending = 0;
+        for (const e of entries) {
+          onHand  += (e?.QuantityOnHand  ?? e?.Quantity ?? 0) as number;
+          pending += (e?.QuantityPending ?? 0) as number;
+        }
+        result[sku] = { onHand, pending };
+      }
+    }
+  } catch (e) {
+    console.warn("[SKUVault] getLiveSkuQuantities failed:", e);
+  }
+  return result;
+}
+
 /**
  * Test the SKUVault connection by calling getInventoryByLocation with an empty list.
  */
