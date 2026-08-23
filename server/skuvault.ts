@@ -358,9 +358,13 @@ export interface SvLiveQty {
 
 /**
  * Fetch live on-hand and pending quantities for a list of SKUs.
- * Uses getAvailableQuantities which returns QuantityOnHand and QuantityPending
- * per bin; this function sums across all bins per SKU so the caller gets a
- * single warehouse-wide total (matching what SKUVault's UI shows).
+ *
+ * Primary source: getInventoryByLocation (the same endpoint used for pushes —
+ * confirmed working). It returns `Quantity` per bin which is the on-hand count.
+ * `pending` is derived as `Quantity - QuantityAvailable` when QuantityAvailable
+ * is present in the response; otherwise falls back to 0.
+ *
+ * Quantities are summed across all bins so the caller gets a warehouse-wide total.
  */
 export async function getLiveSkuQuantities(
   cfg: SkuVaultConfig,
@@ -369,37 +373,29 @@ export async function getLiveSkuQuantities(
   if (skus.length === 0) return {};
   const result: Record<string, SvLiveQty> = {};
   try {
-    const res = await svPost<any>("/inventory/getAvailableQuantities", {
+    const res = await svPost<SvGetInventoryResult>("/inventory/getInventoryByLocation", {
       TenantToken: cfg.tenantToken,
       UserToken: cfg.userToken,
       ProductSKUs: skus,
       PageNumber: 0,
       PageSize: skus.length + 10,
     });
+    console.log("[SKUVault] getLiveSkuQuantities raw response:", JSON.stringify(res).slice(0, 1000));
     const items = res?.Items;
-    if (!items) return result;
-
-    if (Array.isArray(items)) {
-      // Array format: [{ Sku, QuantityOnHand, QuantityPending, ... }]
-      for (const item of items) {
-        if (!item?.Sku) continue;
-        const sku = item.Sku as string;
-        if (!result[sku]) result[sku] = { onHand: 0, pending: 0 };
-        result[sku].onHand  += (item.QuantityOnHand  ?? item.Quantity ?? 0) as number;
-        result[sku].pending += (item.QuantityPending ?? 0) as number;
-      }
-    } else if (typeof items === "object") {
-      // Dictionary format: { [sku]: entry | entry[] }
-      for (const [sku, val] of Object.entries(items)) {
-        const entries: any[] = Array.isArray(val) ? val : [val];
+    if (items && typeof items === "object") {
+      for (const [sku, entries] of Object.entries(items)) {
+        if (!Array.isArray(entries)) continue;
         let onHand = 0, pending = 0;
         for (const e of entries) {
-          onHand  += (e?.QuantityOnHand  ?? e?.Quantity ?? 0) as number;
-          pending += (e?.QuantityPending ?? 0) as number;
+          const qty        = (e.QuantityOnHand ?? e.Quantity ?? 0) as number;
+          const available  = (e.QuantityAvailable ?? qty) as number;   // available ≤ onHand
+          onHand  += qty;
+          pending += Math.max(0, qty - available);
         }
         result[sku] = { onHand, pending };
       }
     }
+    console.log("[SKUVault] getLiveSkuQuantities result:", JSON.stringify(result));
   } catch (e) {
     console.warn("[SKUVault] getLiveSkuQuantities failed:", e);
   }
