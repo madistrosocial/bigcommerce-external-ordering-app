@@ -70,8 +70,9 @@ interface AuditItem {
   product_name: string;
   variant_name: string;
   system_qty: number | null;      // snapshot from push time (fallback)
-  on_hand: number | null;         // live SKUVault on-hand (null = loading)
-  pending: number | null;         // live SKUVault pending (null = loading)
+  on_hand: number | null;         // live SKUVault QuantityOnHand (null = loading)
+  pending: number | null;         // live SKUVault QuantityPending (null = loading)
+  available: number | null;       // live SKUVault QuantityAvailable (null = loading)
   physical_qty_input: string;
 }
 
@@ -106,6 +107,7 @@ function AuditPanel({
       system_qty: t.system_qty,
       on_hand: null,
       pending: null,
+      available: null,
       physical_qty_input: String(t.system_qty ?? ""),
     })));
     setReason(reasonList[0]);
@@ -129,8 +131,9 @@ function AuditPanel({
           if (!live) return item;
           return {
             ...item,
-            on_hand: live.onHand,
-            pending: live.pending,
+            on_hand:   live.onHand,
+            pending:   live.pending,
+            available: live.available,
             // Pre-fill physical count with live on-hand (auditor adjusts from real value)
             physical_qty_input: String(live.onHand),
           };
@@ -196,10 +199,11 @@ function AuditPanel({
       {/* SKU table */}
       <div className="border rounded-lg overflow-hidden">
         {/* Header — desktop only */}
-        <div className="hidden sm:grid grid-cols-[1fr_72px_72px_80px_72px] gap-2 px-3 py-2 bg-slate-50 border-b text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <div className="hidden sm:grid grid-cols-[1fr_72px_72px_72px_80px_72px] gap-2 px-3 py-2 bg-slate-50 border-b text-[10px] font-semibold uppercase tracking-wide text-slate-500">
           <span>SKU / Variant</span>
           <span className="text-center">On Hand</span>
           <span className="text-center">Pending</span>
+          <span className="text-center">Available</span>
           <span className="text-center">Physical Count</span>
           <span className="text-center">Variance</span>
         </div>
@@ -211,7 +215,7 @@ function AuditPanel({
             const qtyDisplay = (val: number | null) =>
               liveLoading ? <Loader2 className="h-3 w-3 animate-spin inline text-slate-400" /> : (val !== null ? val : "—");
             return (
-              <div key={item.id} className="px-3 py-2.5 sm:grid sm:grid-cols-[1fr_72px_72px_80px_72px] sm:gap-2 sm:items-center space-y-1.5 sm:space-y-0">
+              <div key={item.id} className="px-3 py-2.5 sm:grid sm:grid-cols-[1fr_72px_72px_72px_80px_72px] sm:gap-2 sm:items-center space-y-1.5 sm:space-y-0">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-slate-800 truncate">{item.variant_name || item.product_name}</p>
                   <p className="text-xs font-mono text-slate-400">{item.sku}</p>
@@ -228,6 +232,13 @@ function AuditPanel({
                   <span className="text-xs text-slate-500 sm:hidden">Pending:</span>
                   <span className={`text-sm font-medium sm:text-center ${item.pending && item.pending > 0 ? "text-amber-600" : "text-slate-400"}`}>
                     {qtyDisplay(item.pending)}
+                  </span>
+                </div>
+                {/* Available */}
+                <div className="flex sm:flex-col items-center justify-between sm:justify-center gap-2 sm:gap-0">
+                  <span className="text-xs text-slate-500 sm:hidden">Available:</span>
+                  <span className={`text-sm font-medium sm:text-center ${item.available !== null && item.available === 0 ? "text-red-500" : item.available !== null && item.available > 0 ? "text-green-600" : "text-slate-400"}`}>
+                    {qtyDisplay(item.available)}
                   </span>
                 </div>
                 {/* Physical Count */}

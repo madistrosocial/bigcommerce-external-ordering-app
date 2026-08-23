@@ -30,9 +30,21 @@ Pick the single "primary" bin (highest QuantityAvailable). For push: base qty = 
 - `inventory_audit_tasks.skuvault_location` — set on create/update (push) and on complete (audit)
 - Visible in: Push Logs table (SV Location column, purple badge) and Audit expanded task rows
 
+## Live audit quantities (getProducts)
+
+Use `/products/getProducts` with `ProductSKUs` param for the audit dialog's On Hand / Pending / Available display.
+- `QuantityOnHand`    → On Hand    (total physical; matches SKUVault UI)
+- `QuantityPending`   → Pending    (committed across ALL connected sales channels — SKUVault native)
+- `QuantityAvailable` → Available  (what's left to sell)
+
+**Why NOT getInventoryByLocation for live display:** sums ALL physical bins including virtual channel-allocation bins, over-counting vs what SKUVault's UI shows.
+**Why NOT getAvailableQuantities:** ignores the SKU filter — dumps every product, not the requested set.
+**Why NOT `Skus` param for getProducts:** SKUVault ignores the filter; use `ProductSKUs` (same rule as getInventoryByLocation).
+
 ## Key mistakes to avoid
 
-- Do NOT use `Skus` in getInventoryByLocation request — must be `ProductSKUs`
+- Do NOT use `Skus` in getInventoryByLocation or getProducts — must be `ProductSKUs`
 - Do NOT iterate `Items` as an array — it's `Record<sku, SvLocationEntry[]>`
 - Do NOT sum all bins for addItemBulk base qty — use the selected primary bin's qty only
 - Do NOT call setSkuVaultInventory from addSkuVaultInventory — addSkuVaultInventory builds its own payload to avoid a double location lookup
+- Do NOT use getInventoryByLocation for live display quantities — over-counts due to virtual channel bins

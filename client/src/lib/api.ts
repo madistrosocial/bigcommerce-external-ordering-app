@@ -838,7 +838,7 @@ export async function completeAuditTask(id: number, data: { physical_qty: number
   return res.json();
 }
 
-export async function getSkuVaultLiveQty(skus: string[]): Promise<Record<string, { onHand: number; pending: number }>> {
+export async function getSkuVaultLiveQty(skus: string[]): Promise<Record<string, { onHand: number; pending: number; available: number }>> {
   const res = await fetch(`${API_BASE}/inventory/skuvault-live-qty`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },

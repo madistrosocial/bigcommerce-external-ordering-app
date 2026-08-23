@@ -350,23 +350,25 @@ export async function resolveSkuLocation(
   return { sku, locationCode: null, currentQty: null, source: "not_found" };
 }
 
-/** Live on-hand and pending quantities for a single SKU (summed across all bins). */
+/** Live quantities for a single SKU from SKUVault's getProducts endpoint. */
 export interface SvLiveQty {
-  onHand: number;
-  pending: number;
+  onHand: number;    // QuantityOnHand   — total physical stock
+  pending: number;   // QuantityPending  — committed to orders across all channels
+  available: number; // QuantityAvailable — what's left to sell
 }
 
 /**
- * Fetch live on-hand and pending quantities for a list of SKUs.
+ * Fetch live quantities for a list of SKUs using /products/getProducts.
  *
- * Source: /products/getProducts — returns QuantityOnHand (total physical, exactly
- * what SKUVault's own UI shows) and QuantityAvailable (available to sell after
- * all channel allocations). Using per-bin sums from getInventoryByLocation was
- * over-counting because SKUVault virtual/channel bins are included in the bin list
- * but excluded from the UI's On Hand figure.
+ * This is the authoritative source — it returns the same figures SKUVault's
+ * own UI displays, computed across all connected sales channels:
  *
- *   onHand  = product.QuantityOnHand
- *   pending = onHand - QuantityAvailable  (clamped to 0)
+ *   onHand    = QuantityOnHand    — total physical stock in warehouse
+ *   pending   = QuantityPending   — committed to orders across all channels
+ *   available = QuantityAvailable — what remains available to sell
+ *
+ * Key: the correct request parameter is ProductSKUs (not Skus).
+ * Using Skus causes SKUVault to ignore the filter and return unrelated products.
  */
 export async function getLiveSkuQuantities(
   cfg: SkuVaultConfig,
@@ -380,19 +382,20 @@ export async function getLiveSkuQuantities(
       {
         TenantToken: cfg.tenantToken,
         UserToken: cfg.userToken,
-        Skus: skus,
+        ProductSKUs: skus,          // must be ProductSKUs — Skus is ignored by the API
         PageNumber: 0,
         PageSize: skus.length + 10,
       }
     );
     console.log("[SKUVault] getLiveSkuQuantities (getProducts) raw response:", JSON.stringify(res).slice(0, 1000));
     for (const product of res?.Products ?? []) {
-      const sku       = product.Sku as string;
+      const sku = product.Sku as string;
       if (!sku) continue;
-      const onHand    = (product.QuantityOnHand ?? 0) as number;
-      const available = (product.QuantityAvailable ?? onHand) as number;
-      const pending   = Math.max(0, onHand - available);
-      result[sku] = { onHand, pending };
+      result[sku] = {
+        onHand:    (product.QuantityOnHand    ?? 0) as number,
+        pending:   (product.QuantityPending   ?? 0) as number,
+        available: (product.QuantityAvailable ?? 0) as number,
+      };
     }
     console.log("[SKUVault] getLiveSkuQuantities result:", JSON.stringify(result));
   } catch (e) {
