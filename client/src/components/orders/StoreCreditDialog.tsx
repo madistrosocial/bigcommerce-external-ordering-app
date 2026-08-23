@@ -80,7 +80,10 @@ export default function StoreCreditDialog({ open, order, onClose, onIssued }: Pr
     const idx = items.indexOf(item);
     const missingQty = selected[idx]?.missing_qty ?? 0;
     const unitPrice = parseFloat(item.price_ex_tax ?? item.price_inc_tax ?? "0");
-    const unitTax = parseFloat(item.total_tax ?? "0") / Math.max(1, Number(item.quantity ?? 1));
+    // Derive per-unit tax directly from the two unit prices BC always provides.
+    // Using total_tax / quantity is unreliable — BC v2 can accumulate taxes from
+    // multiple tax classes on the line, causing total_tax to be 2× the real amount.
+    const unitTax = Math.max(0, parseFloat(item.price_inc_tax ?? "0") - parseFloat(item.price_ex_tax ?? "0"));
     const lineTax = unitTax * missingQty;
     const lineTotal = unitPrice * missingQty;
     return { item, idx, missingQty, unitPrice, unitTax, lineTax, lineTotal };
@@ -190,7 +193,7 @@ export default function StoreCreditDialog({ open, order, onClose, onIssued }: Pr
                       const maxQty = Number(item.quantity ?? 0);
                       const missingQty = sel?.missing_qty ?? 0;
                       const unitPrice = parseFloat(item.price_ex_tax ?? item.price_inc_tax ?? "0");
-                      const unitTax = parseFloat(item.total_tax ?? "0") / Math.max(1, maxQty);
+                      const unitTax = Math.max(0, parseFloat(item.price_inc_tax ?? "0") - parseFloat(item.price_ex_tax ?? "0"));
                       const lineTotal = unitPrice * missingQty + unitTax * missingQty;
                       return (
                         <tr key={i} className="border-b last:border-0 hover:bg-slate-50">
