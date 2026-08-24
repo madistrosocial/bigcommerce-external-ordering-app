@@ -553,6 +553,25 @@ export async function getCustomerByBcId(bcId: number): Promise<BigCommerceCustom
   return res.json();
 }
 
+export interface CrmMetrics {
+  total: number;
+  healthy: number;
+  watch: number;
+  at_risk: number;
+  lost: number;
+  needs_follow_up: number;
+  inactive: number;
+  by_account_type: Record<string, number>;
+}
+
+export async function getCrmMetrics(): Promise<CrmMetrics> {
+  const res = await fetch(`${API_BASE}/crm/metrics`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch CRM metrics");
+  return res.json();
+}
+
 // ── BigCommerce Categories ────────────────────────────────────────────────────
 
 export interface BcCategory {
