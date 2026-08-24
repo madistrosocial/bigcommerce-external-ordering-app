@@ -151,10 +151,10 @@ export default function MyOrders() {
   const { currentUser } = useStore();
 
   const { data: bcConfig } = useQuery({
-    queryKey: ["setting", "bigcommerce_config"],
-    queryFn: () => api.getSetting("bigcommerce_config"),
+    queryKey: ["bigcommerce", "public-config"],
+    queryFn: api.getBigCommercePublicConfig,
   });
-  const storeHash: string = bcConfig?.value?.storeHash ?? "";
+  const storeHash: string = bcConfig?.storeHash ?? "";
 
   const { data: allOrders = [], isLoading } = useQuery({
     queryKey: ["orders", currentUser?.id],

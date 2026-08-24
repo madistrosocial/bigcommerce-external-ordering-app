@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks } from "@shared/schema";
 import { eq, desc, and, inArray, gt, gte, lt, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
@@ -143,6 +143,12 @@ export interface IStorage {
   deleteCrmTodo(id: number): Promise<void>;
   // CRM Users list
   getCrmUsers(): Promise<{ id: number; name: string }[]>;
+  createCustomerSignup(entry: InsertCustomerSignup): Promise<CustomerSignup>;
+  getCustomerSignups(opts: { userId?: number; limit?: number; offset?: number }): Promise<{ rows: (CustomerSignup & { primary_rep_name?: string | null })[]; total: number }>;
+  getCustomerSignupAttempt(key: string): Promise<CustomerSignupAttempt | undefined>;
+  createCustomerSignupAttempt(key: string, createdByUserId: number, requestData: unknown): Promise<boolean>;
+  setCustomerSignupAttemptCustomerId(key: string, customerId: number): Promise<void>;
+  completeCustomerSignupAttempt(key: string, result: unknown): Promise<void>;
   // CRM Order Notes (mirror update)
   updateCrmOrderNotes(bcOrderId: number, data: { staff_notes?: string; customer_order_notes?: string }): Promise<void>;
   // CRM Audit Log
@@ -222,6 +228,79 @@ export class DatabaseStorage implements IStorage {
 
   async getAllUsers(): Promise<User[]> {
     return db.select().from(users);
+  }
+
+  async getCustomerSignupAttempt(key: string): Promise<CustomerSignupAttempt | undefined> {
+    const [attempt] = await db.select().from(customerSignupAttempts).where(eq(customerSignupAttempts.idempotency_key, key));
+    return attempt;
+  }
+
+  async createCustomerSignupAttempt(key: string, createdByUserId: number, requestData: unknown): Promise<boolean> {
+    const result = await db.insert(customerSignupAttempts).values({
+      idempotency_key: key,
+      created_by_user_id: createdByUserId,
+      request_data: requestData,
+    }).onConflictDoNothing().returning({ key: customerSignupAttempts.idempotency_key });
+    return result.length === 1;
+  }
+
+  async setCustomerSignupAttemptCustomerId(key: string, customerId: number): Promise<void> {
+    await db.update(customerSignupAttempts).set({
+      bigcommerce_customer_id: customerId,
+      status: "tracking",
+      updated_at: new Date(),
+    }).where(eq(customerSignupAttempts.idempotency_key, key));
+  }
+
+  async completeCustomerSignupAttempt(key: string, result: unknown): Promise<void> {
+    await db.update(customerSignupAttempts).set({
+      status: "completed",
+      result,
+      updated_at: new Date(),
+    }).where(eq(customerSignupAttempts.idempotency_key, key));
+  }
+
+  async createCustomerSignup(entry: InsertCustomerSignup): Promise<CustomerSignup> {
+    const result = await db.insert(customerSignups).values(entry).onConflictDoUpdate({
+      target: customerSignups.bigcommerce_customer_id,
+      set: {
+        first_name: entry.first_name,
+        last_name: entry.last_name,
+        email: entry.email,
+        company: entry.company,
+        customer_group_id: entry.customer_group_id,
+        customer_group_name: entry.customer_group_name,
+        attribution: entry.attribution,
+        shipping_address: entry.shipping_address,
+        signed_up_by_user_id: entry.signed_up_by_user_id,
+        signed_up_by_name: entry.signed_up_by_name,
+        primary_rep_id: entry.primary_rep_id,
+      },
+    }).returning();
+    return result[0];
+  }
+
+  async getCustomerSignups(opts: { userId?: number; limit?: number; offset?: number }): Promise<{ rows: (CustomerSignup & { primary_rep_name?: string | null })[]; total: number }> {
+    const { userId, limit = 50, offset = 0 } = opts;
+    const where = userId !== undefined ? eq(customerSignups.signed_up_by_user_id, userId) : undefined;
+    const primaryRepUser = alias(users, "signup_primary_rep_user");
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(customerSignups).where(where),
+      db.select({
+        signup: customerSignups,
+        primary_rep_name: primaryRepUser.name,
+      })
+        .from(customerSignups)
+        .leftJoin(primaryRepUser, eq(primaryRepUser.id, customerSignups.primary_rep_id))
+        .where(where)
+        .orderBy(desc(customerSignups.created_at))
+        .limit(limit)
+        .offset(offset),
+    ]);
+    return {
+      rows: rows.map((row) => ({ ...row.signup, primary_rep_name: row.primary_rep_name ?? null })),
+      total: countRows[0]?.count ?? 0,
+    };
   }
 
   async updateUserStatus(id: number, is_enabled: boolean): Promise<void> {

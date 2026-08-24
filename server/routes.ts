@@ -17,6 +17,7 @@ import cron from "node-cron";
 import * as FtpClientLib from "basic-ftp";
 import SftpClient from "ssh2-sftp-client";
 import { Readable } from "stream";
+import { createHmac, timingSafeEqual } from "crypto";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
@@ -350,25 +351,78 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express,
 ): Promise<Server> {
+  // Keep the customer-signup audit table available on every environment before
+  // requests are accepted. Older deployments predate this table and do not run
+  // a separate migration command during boot.
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS customer_signups (
+      id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      bigcommerce_customer_id integer NOT NULL UNIQUE,
+      first_name text NOT NULL DEFAULT '',
+      last_name text NOT NULL DEFAULT '',
+      email text NOT NULL DEFAULT '',
+      company text,
+      customer_group_id integer,
+      customer_group_name text,
+      attribution text NOT NULL DEFAULT '',
+      shipping_address jsonb,
+      signed_up_by_user_id integer NOT NULL REFERENCES users(id),
+      signed_up_by_name text NOT NULL DEFAULT '',
+      primary_rep_id integer REFERENCES users(id),
+      created_at timestamp NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_customer_signups_created_at ON customer_signups (created_at);
+    CREATE INDEX IF NOT EXISTS idx_customer_signups_signed_up_by ON customer_signups (signed_up_by_user_id);
+    CREATE TABLE IF NOT EXISTS customer_signup_attempts (
+      idempotency_key text PRIMARY KEY,
+      created_by_user_id integer NOT NULL REFERENCES users(id),
+      request_data jsonb NOT NULL,
+      bigcommerce_customer_id integer,
+      status text NOT NULL DEFAULT 'pending',
+      result jsonb,
+      created_at timestamp NOT NULL DEFAULT now(),
+      updated_at timestamp NOT NULL DEFAULT now()
+    );
+  `));
+
   // ===== AUTH MIDDLEWARE =====
+  const sessionSecret = process.env.SESSION_SECRET;
+  if (!sessionSecret) throw new Error("SESSION_SECRET must be configured");
+  const sessionLifetimeMs = 1000 * 60 * 60 * 12;
+
+  const issueSessionToken = (userId: number) => {
+    const expiresAt = Date.now() + sessionLifetimeMs;
+    const payload = `${userId}.${expiresAt}`;
+    const signature = createHmac("sha256", sessionSecret).update(payload).digest("base64url");
+    return `${payload}.${signature}`;
+  };
+
+  const getAuthenticatedUser = async (req: Request) => {
+    const header = req.headers.authorization;
+    const token = Array.isArray(header) ? header[0] : header;
+    const match = token?.match(/^Bearer\s+(\d+)\.(\d+)\.([A-Za-z0-9_-]+)$/i);
+    if (!match) return null;
+    const [, rawUserId, rawExpiresAt, suppliedSignature] = match;
+    const expiresAt = Number(rawExpiresAt);
+    if (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) return null;
+    const payload = `${rawUserId}.${rawExpiresAt}`;
+    const expectedSignature = createHmac("sha256", sessionSecret).update(payload).digest("base64url");
+    if (suppliedSignature.length !== expectedSignature.length) return null;
+    if (!timingSafeEqual(Buffer.from(suppliedSignature), Buffer.from(expectedSignature))) return null;
+    const user = await storage.getUser(Number(rawUserId)).catch(() => null);
+    return user?.is_enabled ? user : null;
+  };
 
   /**
-   * Reads x-user-id from the request header, looks up the user in the DB,
-   * and verifies the account is active. Attaches the user to req as (req as any).authUser.
+   * Verifies the signed session token and attaches the enabled DB user to req.
    */
   const requireAuth = async (
     req: Request,
     res: Response,
     next: NextFunction,
   ) => {
-    const userId = req.headers["x-user-id"];
-    if (!userId)
-      return res.status(401).json({ error: "Authentication required" });
-
-    const user = await storage
-      .getUser(parseInt(userId as string))
-      .catch(() => null);
-    if (!user || !user.is_enabled) {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
       return res.status(401).json({ error: "Authentication required" });
     }
 
@@ -384,14 +438,8 @@ export async function registerRoutes(
     res: Response,
     next: NextFunction,
   ) => {
-    const userId = req.headers["x-user-id"];
-    if (!userId)
-      return res.status(401).json({ error: "Authentication required" });
-
-    const user = await storage
-      .getUser(parseInt(userId as string))
-      .catch(() => null);
-    if (!user || !user.is_enabled) {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
       return res.status(401).json({ error: "Authentication required" });
     }
     if (user.role !== "admin") {
@@ -408,20 +456,8 @@ export async function registerRoutes(
    */
   const requirePermission = (module: string, action = "view") =>
     async (req: Request, res: Response, next: NextFunction) => {
-      const rawId = req.headers["x-user-id"];
-      const rawRole = req.headers["x-user-role"];
-      if (!rawId) return res.status(401).json({ error: "Authentication required" });
-      const userId = parseInt(rawId as string);
-      if (isNaN(userId)) return res.status(401).json({ error: "Authentication required" });
-      // Fast-path: trust the role header for admins to skip DB lookup
-      if (rawRole === "admin") {
-        const user = await storage.getUser(userId).catch(() => null);
-        if (!user || !user.is_enabled) return res.status(401).json({ error: "Authentication required" });
-        (req as any).authUser = user;
-        return next();
-      }
-      const user = await storage.getUser(userId).catch(() => null);
-      if (!user || !user.is_enabled) return res.status(401).json({ error: "Authentication required" });
+      const user = await getAuthenticatedUser(req);
+      if (!user) return res.status(401).json({ error: "Authentication required" });
       if (user.role === "admin") { (req as any).authUser = user; return next(); }
       const perms = await storage.getUserPermissionStrings(user.id);
       if (!perms.includes(`${module}:${action}`)) return res.status(403).json({ error: "Forbidden" });
@@ -905,7 +941,7 @@ export async function registerRoutes(
       });
 
       const { password: _, ...safeUser } = user;
-      res.json(safeUser);
+      res.json({ ...safeUser, auth_token: issueSessionToken(user.id) });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -2603,8 +2639,43 @@ export async function registerRoutes(
   // ===== SETTINGS ROUTES =====
   app.get("/api/settings/:key", requireAuth, async (req, res) => {
     try {
+      const sensitiveSettingKeys = new Set(["bigcommerce_config", "skuvault_config", "google_sheets_webhook"]);
+      const authUser = (req as any).authUser;
+      if (sensitiveSettingKeys.has(req.params.key) && authUser?.role !== "admin") {
+        return res.status(403).json({ error: "Only administrators can access this setting" });
+      }
       const setting = await storage.getSetting(req.params.key);
       res.json(setting || { key: req.params.key, value: null });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Safe public configuration for authenticated workflows that need only the
+  // store identifier; tokens and client secrets never leave the server.
+  app.get("/api/bigcommerce/public-config", requireAuth, async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("bigcommerce_config");
+      const config = setting?.value
+        ? (typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value)
+        : {};
+      res.json({ storeHash: config?.storeHash || "" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Safe display data for the customer creation page. Deliberately excludes all
+  // BigCommerce credentials and integration configuration.
+  app.get("/api/customer-signups/config", requireAuth, async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("bigcommerce_config");
+      const config = setting?.value
+        ? (typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value)
+        : {};
+      const groupId = Number(config?.customerGroupId ?? config?.customer_group_id ?? 8) || 8;
+      const groupName = String(config?.customerGroupName ?? config?.customer_group_name ?? "Verification Pending").trim() || "Verification Pending";
+      res.json({ groupId, groupName });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -3503,6 +3574,7 @@ export async function registerRoutes(
           id: u.id,
           name: u.name,
           role: u.role,
+          is_enabled: u.is_enabled,
           group_name: u.role_id ? (roleMap.get(u.role_id) ?? null) : null,
         })),
       );
@@ -4023,9 +4095,13 @@ export async function registerRoutes(
     }
   });
 
-  // Create a new BC customer and assign to group 8 (Verification Pending)
-  app.post("/api/bigcommerce/customers/create", requireAuth, async (req, res) => {
+  app.post("/api/bigcommerce/customer-groups/test", requireAdmin, async (req, res) => {
     try {
+      const groupId = Number(req.body?.id);
+      const expectedName = String(req.body?.name ?? "").trim();
+      if (!Number.isInteger(groupId) || groupId <= 0) {
+        return res.status(400).json({ error: "A valid customer group ID is required" });
+      }
       const setting = await storage.getSetting("bigcommerce_config");
       let storeHash = process.env.BC_STORE_HASH || "";
       let token = process.env.BC_TOKEN || "";
@@ -4035,51 +4111,196 @@ export async function registerRoutes(
         token = cfg.token || token;
       }
       if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      const groupRes = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v2/customer_groups/${groupId}`,
+        { headers: { "X-Auth-Token": token, Accept: "application/json" } },
+      );
+      const group = await groupRes.json().catch(() => null);
+      if (!groupRes.ok) {
+        return res.status(groupRes.status === 404 ? 404 : 502).json({ error: group?.title || `Customer group ${groupId} was not found` });
+      }
+      if (expectedName && String(group.name).trim().toLowerCase() !== expectedName.toLowerCase()) {
+        return res.status(400).json({ error: `Group ID ${groupId} is "${group.name}", not "${expectedName}"` });
+      }
+      res.json({ id: group.id, name: group.name, verified: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
-      const { first_name, last_name, email, phone, company, address1, address2, city, state_or_province, postal_code, country_code } = req.body;
+  // Create a new BC customer and assign to the configured signup group.
+  app.post("/api/bigcommerce/customers/create", requirePermission("customers_create"), async (req, res) => {
+    try {
+      const authUser = (req as any).authUser;
+      const setting = await storage.getSetting("bigcommerce_config");
+      let storeHash = process.env.BC_STORE_HASH || "";
+      let token = process.env.BC_TOKEN || "";
+      let configuredGroupId = 8;
+      let configuredGroupName = "Verification Pending";
+      if (setting?.value) {
+        const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+        storeHash = cfg.storeHash || storeHash;
+        token = cfg.token || token;
+        configuredGroupId = Number(cfg.customerGroupId ?? cfg.customer_group_id ?? configuredGroupId) || configuredGroupId;
+        configuredGroupName = String(cfg.customerGroupName ?? cfg.customer_group_name ?? configuredGroupName).trim() || configuredGroupName;
+      }
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+
+      const {
+        first_name, last_name, email, phone, company,
+        address1, address2, city, state_or_province, postal_code, country_code,
+        shipping_address: submittedShippingAddress,
+        signed_up_by_user_id,
+        idempotency_key,
+      } = req.body;
       if (!first_name || !last_name || !email) return res.status(400).json({ error: "first_name, last_name, and email are required" });
+      const signupAttemptKey = String(idempotency_key || "").trim();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(signupAttemptKey)) {
+        return res.status(400).json({ error: "A valid signup idempotency key is required" });
+      }
 
+      const selectedUserId = signed_up_by_user_id == null ? authUser.id : Number(signed_up_by_user_id);
+      if (!Number.isInteger(selectedUserId)) return res.status(400).json({ error: "Signed up by user is invalid" });
+      if (authUser.role !== "admin" && selectedUserId !== authUser.id) {
+        return res.status(403).json({ error: "You can only create customer signups under your own name" });
+      }
+      const selectedUser = await storage.getUser(selectedUserId);
+      if (!selectedUser || !selectedUser.is_enabled) return res.status(400).json({ error: "Signed up by user must be an active app user" });
+      const attribution = selectedUser.name;
+      const shippingAddress = submittedShippingAddress && typeof submittedShippingAddress === "object"
+        ? submittedShippingAddress
+        : address1
+          ? { first_name, last_name, company: company || "", address1, address2: address2 || "", city: city || "", state_or_province: state_or_province || "", postal_code: postal_code || "", country_code: country_code || "US", phone: phone || "", address_type: "residential" }
+          : null;
       const payload: any = [{
         first_name,
         last_name,
         email,
         phone: phone || "",
         company: company || "",
-        customer_group_id: 8,
+        customer_group_id: configuredGroupId,
+        form_fields: [{
+          name: "What brought you to our site? (This will help us connect you to the correct sales team member)",
+          value: attribution,
+        }],
       }];
 
-      if (address1) {
+      if (shippingAddress?.address1) {
         payload[0].addresses = [{
-          first_name,
-          last_name,
-          company: company || "",
-          address1,
-          address2: address2 || "",
-          city: city || "",
-          state_or_province: state_or_province || "",
-          postal_code: postal_code || "",
-          country_code: country_code || "US",
-          phone: phone || "",
+          first_name: shippingAddress.first_name || first_name,
+          last_name: shippingAddress.last_name || last_name,
+          company: shippingAddress.company || "",
+          address1: shippingAddress.address1,
+          address2: shippingAddress.address2 || "",
+          city: shippingAddress.city || "",
+          state_or_province: shippingAddress.state_or_province || "",
+          postal_code: shippingAddress.postal_code || "",
+          country_code: shippingAddress.country_code || "US",
+          phone: shippingAddress.phone || phone || "",
           address_type: "residential",
         }];
       }
 
-      const r = await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v3/customers`,
-        {
-          method: "POST",
-          headers: { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify(payload),
-        }
-      );
-
-      const data = await r.json();
-      if (!r.ok) {
-        const msg = data?.errors ? JSON.stringify(data.errors) : data?.title || r.statusText;
-        return res.status(r.status).json({ error: msg });
+      let attempt = await storage.getCustomerSignupAttempt(signupAttemptKey);
+      if (attempt && attempt.created_by_user_id !== authUser.id) {
+        return res.status(403).json({ error: "This signup request belongs to another user" });
+      }
+      if (!attempt) {
+        const inserted = await storage.createCustomerSignupAttempt(signupAttemptKey, authUser.id, {
+          first_name, last_name, email, phone, company, shipping_address: shippingAddress,
+          signed_up_by_user_id: selectedUserId, customer_group_id: configuredGroupId,
+          customer_group_name: configuredGroupName, attribution,
+        });
+        if (!inserted) attempt = await storage.getCustomerSignupAttempt(signupAttemptKey);
+      }
+      if (attempt?.status === "completed" && attempt.result) {
+        return res.json(attempt.result);
       }
 
-      res.json(data.data?.[0] ?? data);
+      let created: any;
+      let bcCustomerId: number;
+      if (attempt?.bigcommerce_customer_id) {
+        bcCustomerId = attempt.bigcommerce_customer_id;
+        created = { id: bcCustomerId };
+      } else {
+        const r = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/customers`,
+          {
+            method: "POST",
+            headers: { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify(payload),
+          }
+        );
+        const data = await r.json();
+        if (!r.ok) {
+          const msg = data?.errors ? JSON.stringify(data.errors) : data?.title || r.statusText;
+          return res.status(r.status).json({ error: msg });
+        }
+        created = data.data?.[0] ?? data;
+        bcCustomerId = Number(created?.id);
+        if (!Number.isInteger(bcCustomerId)) return res.status(502).json({ error: "BigCommerce created the customer but did not return a customer ID" });
+        await storage.setCustomerSignupAttemptCustomerId(signupAttemptKey, bcCustomerId);
+      }
+
+      try {
+        const crmCustomer = await storage.upsertCrmCustomer({
+          bigcommerce_customer_id: bcCustomerId,
+          company: company || null,
+          first_name,
+          last_name,
+          email,
+          phone: phone || null,
+          customer_group_id: configuredGroupId,
+          customer_group_name: configuredGroupName,
+          billing_address: null,
+          shipping_address: shippingAddress,
+          created_date: new Date(),
+          is_active: true,
+          store_credit_balance: "0",
+          primary_rep_id: selectedUserId,
+        });
+        await storage.updateCrmCustomerMasterFields(crmCustomer.id, { primary_rep_id: selectedUserId });
+        await storage.setCrmSalesRep({ customer_id: crmCustomer.id, assigned_user_id: selectedUserId, assigned_by: authUser.id });
+        const signup = await storage.createCustomerSignup({
+          bigcommerce_customer_id: bcCustomerId,
+          first_name,
+          last_name,
+          email,
+          company: company || null,
+          customer_group_id: configuredGroupId,
+          customer_group_name: configuredGroupName,
+          attribution,
+          shipping_address: shippingAddress,
+          signed_up_by_user_id: selectedUserId,
+          signed_up_by_name: attribution,
+          primary_rep_id: selectedUserId,
+        });
+        const result = { ...created, signup_id: signup.id, customer_group_name: configuredGroupName, signed_up_by_name: attribution };
+        await storage.completeCustomerSignupAttempt(signupAttemptKey, result);
+        res.json(result);
+      } catch (trackingError: any) {
+        console.error("[customer-signup] BigCommerce customer created but internal tracking failed:", trackingError);
+        res.status(502).json({ error: "Customer was created in BigCommerce, but internal tracking failed. Retry the same submission to reconcile it." });
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/customer-signups", requirePermission("customer_signups"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const userId = user.id as number;
+      const perms = user.role === "admin" ? [] : await storage.getUserPermissionStrings(userId);
+      const canViewAll = user.role === "admin" || perms.includes("customer_signups:view_all");
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+      const result = await storage.getCustomerSignups({
+        userId: canViewAll ? undefined : userId,
+        limit,
+        offset: (page - 1) * limit,
+      });
+      res.json({ ...result, page, limit, can_view_all: canViewAll });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -5750,6 +5971,24 @@ export async function registerRoutes(
     } catch (_) { /* non-fatal */ }
   })();
 
+  // ── Customer signup permission auto-seed ──────────────────────────────────────
+  await (async () => {
+    const SIGNUP_PERMS: Array<{ module: string; action: string; description: string }> = [
+      { module: "customers_submit_docs", action: "view", description: "Customers: access the Submit Docs form" },
+      { module: "customer_signups", action: "view", description: "Customers: view own customer signups" },
+      { module: "customer_signups", action: "view_all", description: "Customers: view all customer signups" },
+    ];
+    try {
+      const existing = await storage.getAllPermissions();
+      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+      for (const p of SIGNUP_PERMS) {
+        if (!existingSet.has(`${p.module}:${p.action}`)) {
+          await storage.createPermission({ module: p.module, action: p.action, description: p.description });
+        }
+      }
+    } catch (_) { /* non-fatal */ }
+  })();
+
   // ── Reports permission auto-seed ──────────────────────────────────────────────
   await (async () => {
     const REPORT_PERMS: Array<{ module: string; action: string; description: string }> = [
@@ -6488,9 +6727,9 @@ export async function registerRoutes(
   // GET /api/crm/customers/:id/bc-notes — read BigCommerce customer notes field
   app.get("/api/crm/customers/:id/bc-notes", requireAuth, async (req, res) => {
     try {
-      const userId = parseInt(req.headers["x-user-id"] as string);
       const user = (req as any).authUser;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const userId = user.id;
       const customerId = parseInt(req.params.id);
       if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
       const customer = await storage.getCrmCustomerById(customerId);
@@ -6509,9 +6748,9 @@ export async function registerRoutes(
   // PUT /api/crm/customers/:id/bc-notes — write General Notes block (preserves CRM HISTORY)
   app.put("/api/crm/customers/:id/bc-notes", requireAuth, async (req, res) => {
     try {
-      const userId = parseInt(req.headers["x-user-id"] as string);
       const user = (req as any).authUser;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const userId = user.id;
       const customerId = parseInt(req.params.id);
       if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
       const customer = await storage.getCrmCustomerById(customerId);

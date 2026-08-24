@@ -15,14 +15,11 @@ import {
 import {
   Ship, Wifi, WifiOff, Play, Download, RefreshCw, Clock, CheckCircle, XCircle,
 } from "lucide-react";
+import { getAuthHeaders } from "@/lib/api";
 
 const API = (path: string) => `/api/shipstation${path}`;
 const authHeaders = () => {
-  try {
-    const u = JSON.parse(localStorage.getItem("vansales_user") || "{}");
-    if (u?.id) return { "Content-Type": "application/json", "x-user-id": String(u.id) };
-  } catch {}
-  return { "Content-Type": "application/json" };
+  return { "Content-Type": "application/json", ...getAuthHeaders() };
 };
 
 async function apiFetch(path: string, opts: RequestInit = {}) {

@@ -447,8 +447,8 @@ export default function DashboardPage() {
           <StatCard title="Sync Issues" value={isLoading ? "—" : failed} icon={AlertCircle} iconClass="text-red-600" iconBackground="bg-red-50" trend={<Trend current={failed} previous={0} invert />} trendTone="negative" testId="stat-sync-issues" />
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-[0.96fr_1.04fr]">
-          <Card className="rounded-2xl border-slate-200 bg-white p-3 shadow-none sm:p-4">
+        <section className="grid w-full min-w-0 gap-4 lg:grid-cols-[0.96fr_1.04fr]">
+          <Card className="w-full min-w-0 rounded-2xl border-slate-200 bg-white p-3 shadow-none sm:p-4">
             <div className="mb-3 flex items-center gap-2 px-1">
               <AlertCircle className="h-4 w-4 text-amber-500" />
               <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Needs Attention</h3>
@@ -458,7 +458,7 @@ export default function DashboardPage() {
             </div>
           </Card>
 
-          <Card className="rounded-2xl border-slate-200 bg-white p-3 shadow-none sm:p-4">
+          <Card className="w-full min-w-0 rounded-2xl border-slate-200 bg-white p-3 shadow-none sm:p-4">
             <div className="mb-2 flex items-center justify-between px-1">
               <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Sales Overview</h3>
               <DropdownMenu>
@@ -504,7 +504,7 @@ export default function DashboardPage() {
           <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-none">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Recent Orders</h3>
-              <button type="button" onClick={() => setLocation("/orders")} className="flex items-center gap-1 text-[11px] font-medium text-blue-600" data-testid="link-recent-orders">
+              <button type="button" onClick={() => setLocation("/orders/list")} className="flex items-center gap-1 text-[11px] font-medium text-blue-600" data-testid="link-recent-orders">
                 View Sales History <ArrowUpRight className="h-3.5 w-3.5" />
               </button>
             </div>

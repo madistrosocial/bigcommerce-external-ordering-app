@@ -38,6 +38,8 @@ export const MODULES = [
   { key: "orders_drafts",      label: "Orders › Drafts" },
   { key: "orders_all",         label: "Orders › Sales History" },
   { key: "customers_create",   label: "CRM › Create BC Customer" },
+  { key: "customers_submit_docs", label: "Customers › Submit Docs" },
+  { key: "customer_signups",   label: "Customers › Signup List" },
   { key: "inventory_push",     label: "Inventory › Push Inventory" },
   { key: "inventory_audit",    label: "Inventory › Audit Queue" },
   { key: "inventory_logs",     label: "Inventory › Push Logs" },
@@ -66,6 +68,7 @@ export const CRM_ACTION_PERMS = [
   { module: "crm", action: "manage_todos",        label: "Manage To Dos",               description: "Can create, edit, and delete To Dos for any customer." },
   { module: "crm", action: "manage_account_classification", label: "Manage Account Classification", description: "Can set the ERP account type (Customer / Vendor / Internal)." },
   { module: "crm", action: "manage_inactive_accounts", label: "Manage Inactive Accounts",   description: "Can mark customers as inactive and restore them." },
+  { module: "customer_signups", action: "view_all", label: "View All Signup Records", description: "Can see customer signups created by every app user. Without this, only their own signups are visible." },
 ];
 
 export const ORDERS_ACTION_PERMS = [
@@ -393,8 +396,8 @@ function UserDetail({
                     <Switch
                       checked={effectiveEnabled}
                       disabled={fromGroup}
-                      onCheckedChange={v => onToggleModule(user.id, `crm-${p.action}`, v, permId)}
-                      data-testid={`toggle-crm-${p.action}-${user.id}`}
+                      onCheckedChange={v => onToggleModule(user.id, `${p.module}-${p.action}`, v, permId)}
+                      data-testid={`toggle-${p.module}-${p.action}-${user.id}`}
                     />
                   )}
                 </div>

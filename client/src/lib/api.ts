@@ -24,6 +24,7 @@ export interface User {
   is_enabled: boolean;
   allow_bigcommerce_search: boolean;
   default_landing_page?: string;
+  auth_token?: string;
 }
 
 export interface OrderItem {
@@ -67,10 +68,9 @@ export function getAuthHeaders(): Record<string, string> {
     const raw = localStorage.getItem('vansales_user');
     if (!raw) return {};
     const user = JSON.parse(raw);
-    if (!user?.id) return {};
+    if (!user?.auth_token) return {};
     return {
-      'x-user-id': String(user.id),
-      'x-user-role': user.role ?? ''
+      Authorization: `Bearer ${user.auth_token}`,
     };
   } catch {
     return {};
@@ -410,6 +410,68 @@ export interface BigCommerceAddress {
   country: string;
   country_iso2: string;
   phone: string;
+}
+
+export interface BigCommerceCustomerGroup {
+  id: number;
+  name: string;
+}
+
+export interface CustomerSignup {
+  id: number;
+  bigcommerce_customer_id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  company?: string | null;
+  customer_group_id?: number | null;
+  customer_group_name?: string | null;
+  attribution: string;
+  shipping_address?: any;
+  signed_up_by_user_id: number;
+  signed_up_by_name: string;
+  primary_rep_id?: number | null;
+  primary_rep_name?: string | null;
+  created_at: string;
+}
+
+export async function getBigCommerceCustomerGroups(): Promise<BigCommerceCustomerGroup[]> {
+  const res = await fetch(`${API_BASE}/bigcommerce/customer-groups`, { headers: getAuthHeaders() });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to fetch customer groups' }));
+    throw new Error(error.error || 'Failed to fetch customer groups');
+  }
+  return res.json();
+}
+
+export async function testBigCommerceCustomerGroup(id: number, name: string): Promise<BigCommerceCustomerGroup> {
+  const res = await fetch(`${API_BASE}/bigcommerce/customer-groups/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ id, name }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Customer group validation failed');
+  return data;
+}
+
+export async function getBigCommercePublicConfig(): Promise<{ storeHash: string }> {
+  const res = await fetch(`${API_BASE}/bigcommerce/public-config`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error("Failed to fetch store configuration");
+  return res.json();
+}
+
+export async function getCustomerSignupConfig(): Promise<{ groupId: number; groupName: string }> {
+  const res = await fetch(`${API_BASE}/customer-signups/config`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error("Failed to fetch customer signup configuration");
+  return res.json();
+}
+
+export async function getCustomerSignups(page = 1, limit = 50): Promise<{ rows: CustomerSignup[]; total: number; page: number; limit: number; can_view_all: boolean }> {
+  const res = await fetch(`${API_BASE}/customer-signups?page=${page}&limit=${limit}`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch customer signups');
+  return data;
 }
 
 export async function searchBigCommerceCustomers(query: string): Promise<BigCommerceCustomer[]> {
@@ -981,6 +1043,7 @@ export interface UserSummary {
   id: number;
   name: string;
   role: string;
+  is_enabled: boolean;
   group_name: string | null;
 }
 

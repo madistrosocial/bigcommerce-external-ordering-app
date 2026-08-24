@@ -16,13 +16,10 @@ import {
   Tag, Plus, RefreshCw, Search, Pencil, Trash2, Package, AlertTriangle,
   CheckCircle, XCircle, Filter,
 } from "lucide-react";
+import { getAuthHeaders } from "@/lib/api";
 
 const authHeaders = () => {
-  try {
-    const u = JSON.parse(localStorage.getItem("vansales_user") || "{}");
-    if (u?.id) return { "Content-Type": "application/json", "x-user-id": String(u.id) };
-  } catch {}
-  return { "Content-Type": "application/json" };
+  return { "Content-Type": "application/json", ...getAuthHeaders() };
 };
 
 async function apiFetch(path: string, opts: RequestInit = {}) {

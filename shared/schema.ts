@@ -216,6 +216,37 @@ export const customerSalesRep = pgTable("customer_sales_rep", {
   assigned_by: integer("assigned_by"),
 });
 
+export const customerSignups = pgTable("customer_signups", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  bigcommerce_customer_id: integer("bigcommerce_customer_id").notNull().unique(),
+  first_name: text("first_name").notNull().default(""),
+  last_name: text("last_name").notNull().default(""),
+  email: text("email").notNull().default(""),
+  company: text("company"),
+  customer_group_id: integer("customer_group_id"),
+  customer_group_name: text("customer_group_name"),
+  attribution: text("attribution").notNull().default(""),
+  shipping_address: jsonb("shipping_address"),
+  signed_up_by_user_id: integer("signed_up_by_user_id").notNull().references(() => users.id),
+  signed_up_by_name: text("signed_up_by_name").notNull().default(""),
+  primary_rep_id: integer("primary_rep_id").references(() => users.id),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  createdAtIdx: index("idx_customer_signups_created_at").on(t.created_at),
+  signedUpByIdx: index("idx_customer_signups_signed_up_by").on(t.signed_up_by_user_id),
+}));
+
+export const customerSignupAttempts = pgTable("customer_signup_attempts", {
+  idempotency_key: text("idempotency_key").primaryKey(),
+  created_by_user_id: integer("created_by_user_id").notNull().references(() => users.id),
+  request_data: jsonb("request_data").notNull(),
+  bigcommerce_customer_id: integer("bigcommerce_customer_id"),
+  status: text("status").notNull().default("pending"),
+  result: jsonb("result"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const crmCustomerNotes = pgTable("crm_customer_notes", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   customer_id: integer("customer_id").references(() => customersMirror.id, { onDelete: "cascade" }),
@@ -390,6 +421,10 @@ export type InsertCrmOrder = z.infer<typeof insertCrmOrderSchema>;
 export type CrmOrder = typeof customerOrdersMirror.$inferSelect;
 export type InsertCrmSalesRep = z.infer<typeof insertCrmSalesRepSchema>;
 export type CrmSalesRep = typeof customerSalesRep.$inferSelect;
+
+export type InsertCustomerSignup = Omit<typeof customerSignups.$inferInsert, "id" | "created_at">;
+export type CustomerSignup = typeof customerSignups.$inferSelect;
+export type CustomerSignupAttempt = typeof customerSignupAttempts.$inferSelect;
 export type InsertCrmNote = z.infer<typeof insertCrmNoteSchema>;
 export type CrmNote = typeof crmCustomerNotes.$inferSelect;
 export type InsertCrmAuditLog = z.infer<typeof insertCrmAuditLogSchema>;

@@ -138,10 +138,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const crmChildren: NavLeaf[] = [
     ...(hasPermission("crm_customers") ? [{ label: "CRM", path: "/crm/customers" }] : []),
     ...(hasPermission("customers_create") ? [{ label: "Create BC Customer", path: "/customers/create" }] : []),
+    ...(hasPermission("customers_submit_docs") ? [{ label: "Submit Docs", path: "/customers/submit-docs" }] : []),
     ...(hasPermission("crm_customers") ? [{ label: "To Do", path: "/crm/todos" }] : []),
     ...(hasPermission("crm_reactivation") ? [{ label: "Reactivation", path: "/crm/reactivation" }] : []),
     ...(hasPermission("crm_notes") ? [{ label: "Notes", path: "/crm/notes" }] : []),
     ...(hasPermission("crm_customers") ? [{ label: "Store Credit", path: "/crm/store-credit" }] : []),
+    ...(hasPermission("customer_signups") ? [{ label: "Signup List", path: "/customers/signup-list" }] : []),
   ];
 
   // Reporting children

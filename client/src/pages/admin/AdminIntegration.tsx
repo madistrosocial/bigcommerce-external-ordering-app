@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { getSetting, saveSetting } from "@/lib/api";
+import { getAuthHeaders, getSetting, saveSetting, testBigCommerceCustomerGroup } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,9 @@ export default function AdminIntegrationPage() {
   const [storefrontUrl, setStorefrontUrl] = useState("");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
+  const [customerGroupId, setCustomerGroupId] = useState("8");
+  const [customerGroupName, setCustomerGroupName] = useState("Verification Pending");
+  const [testingCustomerGroup, setTestingCustomerGroup] = useState(false);
   const [cutoffDate, setCutoffDate] = useState("");
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<string | null>(null);
@@ -33,7 +36,7 @@ export default function AdminIntegrationPage() {
       getSetting("bigcommerce_config").catch(() => null),
       getSetting("bc_scan_cutoff_date").catch(() => null),
       getSetting("business_logo").catch(() => null),
-      fetch("/api/settings/company-timezone", { headers: { "Authorization": `Bearer ${localStorage.getItem("user") ? JSON.parse(localStorage.getItem("user")!).token : ""}` } }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch("/api/settings/company-timezone", { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : null).catch(() => null),
     ]).then(([cfg, cutoff, logo, tzData]) => {
       if (cfg?.value) {
         setStoreHash(cfg.value.storeHash ?? "");
@@ -42,6 +45,8 @@ export default function AdminIntegrationPage() {
         setStorefrontUrl(cfg.value.storefrontUrl ?? "");
         setClientId(cfg.value.clientId ?? "");
         setClientSecret(cfg.value.clientSecret ?? "");
+        setCustomerGroupId(String(cfg.value.customerGroupId ?? cfg.value.customer_group_id ?? 8));
+        setCustomerGroupName(cfg.value.customerGroupName ?? cfg.value.customer_group_name ?? "Verification Pending");
       }
       if (cutoff?.value) {
         setCutoffDate(cutoff.value);
@@ -114,12 +119,32 @@ export default function AdminIntegrationPage() {
         storefrontUrl: storefrontUrl.trim().replace(/\/$/, ""),
         clientId: clientId.trim() || undefined,
         clientSecret: clientSecret.trim() || undefined,
+        customerGroupId: customerGroupId ? parseInt(customerGroupId) : 8,
+        customerGroupName: customerGroupName.trim() || "Verification Pending",
       });
       toast({ title: "Settings saved", description: "BigCommerce integration updated successfully." });
     } catch (err: any) {
       toast({ title: "Save failed", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestCustomerGroup = async () => {
+    const id = Number(customerGroupId);
+    if (!Number.isInteger(id) || id <= 0 || !customerGroupName.trim()) {
+      toast({ title: "Group ID and name are required", description: "Enter the BigCommerce customer group ID and exact name first.", variant: "destructive" });
+      return;
+    }
+    setTestingCustomerGroup(true);
+    try {
+      const group = await testBigCommerceCustomerGroup(id, customerGroupName.trim());
+      setCustomerGroupName(group.name);
+      toast({ title: "Customer group verified", description: `BigCommerce group ${group.id}: ${group.name}` });
+    } catch (err: any) {
+      toast({ title: "Group verification failed", description: err.message, variant: "destructive" });
+    } finally {
+      setTestingCustomerGroup(false);
     }
   };
 
@@ -328,6 +353,44 @@ export default function AdminIntegrationPage() {
               </div>
               <div className="border-t pt-4 space-y-3">
                 <div>
+                  <p className="text-xs font-medium text-slate-700 mb-0.5">New Customer Signup Group</p>
+                  <p className="text-[11px] text-slate-400">New customers created from the Sales app are added to this BigCommerce group.</p>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[150px_1fr]">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="customer_group_id">Customer Group ID</Label>
+                    <Input
+                      id="customer_group_id"
+                      inputMode="numeric"
+                      value={customerGroupId}
+                      onChange={(e) => setCustomerGroupId(e.target.value)}
+                      data-testid="input-customer-group-id"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="customer_group_name">Customer Group Name</Label>
+                    <Input
+                      id="customer_group_name"
+                      value={customerGroupName}
+                      onChange={(e) => setCustomerGroupName(e.target.value)}
+                      data-testid="input-customer-group-name"
+                    />
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestCustomerGroup}
+                  disabled={testingCustomerGroup || !isConnected}
+                  data-testid="btn-test-customer-group"
+                >
+                  {testingCustomerGroup ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />}
+                  Test Customer Group
+                </Button>
+              </div>
+              <div className="border-t pt-4 space-y-3">
+                <div>
                   <p className="text-xs font-medium text-slate-700 mb-0.5">Native Store Credit (OAuth)</p>
                   <p className="text-[11px] text-slate-400">
                     Required for native BC store credit in POS checkout. Create an OAuth app at{" "}
@@ -495,12 +558,12 @@ export default function AdminIntegrationPage() {
                 onClick={async () => {
                   setSavingTimezone(true);
                   try {
-                    const user = localStorage.getItem("user") ? JSON.parse(localStorage.getItem("user")!) : null;
-                    await fetch("/api/settings/company-timezone", {
+                    const response = await fetch("/api/settings/company-timezone", {
                       method: "PUT",
-                      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${user?.token ?? ""}` },
+                      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
                       body: JSON.stringify({ timezone }),
                     });
+                    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Could not save timezone");
                     toast({ title: "Timezone saved", description: `All timestamps will now display in ${timezone}.` });
                   } catch (err: any) {
                     toast({ title: "Save failed", description: err.message, variant: "destructive" });

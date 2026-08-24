@@ -31,6 +31,8 @@ import OrdersList from "@/pages/orders/OrdersList";
 import OrderDetail from "@/pages/orders/OrderDetail";
 import BcOrderDetail from "@/pages/orders/BcOrderDetail";
 import CreateCustomer from "@/pages/agent/CreateCustomer";
+import SubmitDocs from "@/pages/agent/SubmitDocs";
+import SignupList from "@/pages/agent/SignupList";
 import BCOrders from "@/pages/agent/BCOrders";
 import AdminGroups from "@/pages/admin/AdminGroups";
 import BCProductLink from "@/pages/tools/BCProductLink";
@@ -61,7 +63,7 @@ function ProtectedRoute({
   role?: "admin" | "agent";
 }) {
   const { currentUser } = useStore();
-  if (!currentUser || !currentUser.is_enabled) return <Redirect to="/" />;
+  if (!currentUser || !currentUser.is_enabled || !currentUser.auth_token) return <Redirect to="/" />;
   if (role && currentUser.role !== role && currentUser.role !== "admin") {
     return <Redirect to="/dashboard" />;
   }
@@ -75,10 +77,27 @@ function AdminRoute({
 }) {
   const { currentUser } = useStore();
   const { hasPermission, isLoading } = usePermissions();
-  if (!currentUser || !currentUser.is_enabled) return <Redirect to="/" />;
+  if (!currentUser || !currentUser.is_enabled || !currentUser.auth_token) return <Redirect to="/" />;
   if (currentUser.role !== "admin") return <Redirect to="/dashboard" />;
   if (isLoading) return null;
   if (!hasPermission("admin", "view")) return <Redirect to="/dashboard" />;
+  return <Component />;
+}
+
+function PermissionRoute({
+  component: Component,
+  module,
+  action = "view",
+}: {
+  component: React.ComponentType;
+  module: string;
+  action?: string;
+}) {
+  const { currentUser } = useStore();
+  const { hasPermission, isLoading } = usePermissions();
+  if (!currentUser || !currentUser.is_enabled) return <Redirect to="/" />;
+  if (isLoading) return null;
+  if (!hasPermission(module, action)) return <Redirect to="/dashboard" />;
   return <Component />;
 }
 
@@ -150,6 +169,12 @@ function Router() {
       {/* ── Customer routes ── */}
       <Route path="/customers/create">
         {() => <ProtectedRoute component={CreateCustomer} />}
+      </Route>
+      <Route path="/customers/submit-docs">
+        {() => <PermissionRoute component={SubmitDocs} module="customers_submit_docs" />}
+      </Route>
+      <Route path="/customers/signup-list">
+        {() => <PermissionRoute component={SignupList} module="customer_signups" />}
       </Route>
 
       {/* ── Admin routes ── */}

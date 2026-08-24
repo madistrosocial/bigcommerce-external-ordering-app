@@ -70,7 +70,7 @@ export default function Login() {
   // Handles the "already logged in" case (e.g. page refresh with active session).
   // Skipped when a fresh login is in progress — doRedirect owns the redirect then.
   useEffect(() => {
-    if (currentUser && !redirectingRef.current) {
+    if (currentUser?.auth_token && !redirectingRef.current) {
       setLocation(currentUser.default_landing_page || "/dashboard");
     }
   }, [currentUser, setLocation]);
