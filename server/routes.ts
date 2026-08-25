@@ -4226,15 +4226,32 @@ export async function registerRoutes(
         bcCustomerId = attempt.bigcommerce_customer_id;
         created = { id: bcCustomerId };
       } else {
-        const r = await fetch(
-          `https://api.bigcommerce.com/stores/${storeHash}/v3/customers`,
-          {
+        const customerUrl = `https://api.bigcommerce.com/stores/${storeHash}/v3/customers`;
+        const customerHeaders = { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" };
+        let r = await fetch(customerUrl, {
+          method: "POST",
+          headers: customerHeaders,
+          body: JSON.stringify(payload),
+        });
+        let data = await r.json();
+        // BigCommerce validates custom customer form fields by their configured
+        // display name. Some stores preserve a trailing colon in that name,
+        // while the API error omits it. Retry only this specific mismatch.
+        const errorText = data?.errors ? JSON.stringify(data.errors) : "";
+        if (!r.ok && r.status === 422 && /Missing form-field name Business Tax ID/i.test(errorText)) {
+          const retryPayload = [{
+            ...payload[0],
+            form_fields: payload[0].form_fields.map((field: any) =>
+              field.name === "Business Tax ID" ? { ...field, name: "Business Tax ID:" } : field,
+            ),
+          }];
+          r = await fetch(customerUrl, {
             method: "POST",
-            headers: { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" },
-            body: JSON.stringify(payload),
-          }
-        );
-        const data = await r.json();
+            headers: customerHeaders,
+            body: JSON.stringify(retryPayload),
+          });
+          data = await r.json();
+        }
         if (!r.ok) {
           const msg = data?.errors ? JSON.stringify(data.errors) : data?.title || r.statusText;
           return res.status(r.status).json({ error: msg });
