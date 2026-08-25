@@ -432,6 +432,7 @@ export interface CustomerSignup {
   signed_up_by_name: string;
   primary_rep_id?: number | null;
   primary_rep_name?: string | null;
+  crm_customer_id?: number | null;
   created_at: string;
 }
 
@@ -467,8 +468,12 @@ export async function getCustomerSignupConfig(): Promise<{ groupId: number; grou
   return res.json();
 }
 
-export async function getCustomerSignups(page = 1, limit = 50): Promise<{ rows: CustomerSignup[]; total: number; page: number; limit: number; can_view_all: boolean }> {
-  const res = await fetch(`${API_BASE}/customer-signups?page=${page}&limit=${limit}`, { headers: getAuthHeaders() });
+export async function getCustomerSignups(page = 1, limit = 50, filters?: { dateFrom?: string; dateTo?: string; signedUpBy?: number }): Promise<{ rows: CustomerSignup[]; total: number; page: number; limit: number; can_view_all: boolean }> {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (filters?.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters?.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters?.signedUpBy) params.set("signedUpBy", String(filters.signedUpBy));
+  const res = await fetch(`${API_BASE}/customer-signups?${params}`, { headers: getAuthHeaders() });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Failed to fetch customer signups');
   return data;

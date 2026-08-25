@@ -144,7 +144,7 @@ export interface IStorage {
   // CRM Users list
   getCrmUsers(): Promise<{ id: number; name: string }[]>;
   createCustomerSignup(entry: InsertCustomerSignup): Promise<CustomerSignup>;
-  getCustomerSignups(opts: { userId?: number; limit?: number; offset?: number }): Promise<{ rows: (CustomerSignup & { primary_rep_name?: string | null })[]; total: number }>;
+  getCustomerSignups(opts: { userId?: number; signedUpByUserId?: number; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<{ rows: (CustomerSignup & { crm_customer_id?: number | null; primary_rep_name?: string | null })[]; total: number }>;
   getCustomerSignupAttempt(key: string): Promise<CustomerSignupAttempt | undefined>;
   createCustomerSignupAttempt(key: string, createdByUserId: number, requestData: unknown): Promise<boolean>;
   setCustomerSignupAttemptCustomerId(key: string, customerId: number): Promise<void>;
@@ -280,17 +280,28 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async getCustomerSignups(opts: { userId?: number; limit?: number; offset?: number }): Promise<{ rows: (CustomerSignup & { primary_rep_name?: string | null })[]; total: number }> {
-    const { userId, limit = 50, offset = 0 } = opts;
-    const where = userId !== undefined ? eq(customerSignups.signed_up_by_user_id, userId) : undefined;
+  async getCustomerSignups(opts: { userId?: number; signedUpByUserId?: number; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<{ rows: (CustomerSignup & { crm_customer_id?: number | null; primary_rep_name?: string | null })[]; total: number }> {
+    const { userId, signedUpByUserId, dateFrom, dateTo, limit = 50, offset = 0 } = opts;
+    const conditions = [];
+    if (userId !== undefined) conditions.push(eq(customerSignups.signed_up_by_user_id, userId));
+    if (signedUpByUserId !== undefined) conditions.push(eq(customerSignups.signed_up_by_user_id, signedUpByUserId));
+    if (dateFrom) conditions.push(gte(customerSignups.created_at, new Date(`${dateFrom}T00:00:00`)));
+    if (dateTo) {
+      const end = new Date(`${dateTo}T00:00:00`);
+      end.setDate(end.getDate() + 1);
+      conditions.push(lt(customerSignups.created_at, end));
+    }
+    const where = conditions.length ? and(...conditions) : undefined;
     const primaryRepUser = alias(users, "signup_primary_rep_user");
     const [countRows, rows] = await Promise.all([
       db.select({ count: sql<number>`count(*)::int` }).from(customerSignups).where(where),
       db.select({
         signup: customerSignups,
+        crm_customer_id: customersMirror.id,
         primary_rep_name: primaryRepUser.name,
       })
         .from(customerSignups)
+        .leftJoin(customersMirror, eq(customersMirror.bigcommerce_customer_id, customerSignups.bigcommerce_customer_id))
         .leftJoin(primaryRepUser, eq(primaryRepUser.id, customerSignups.primary_rep_id))
         .where(where)
         .orderBy(desc(customerSignups.created_at))
@@ -298,7 +309,7 @@ export class DatabaseStorage implements IStorage {
         .offset(offset),
     ]);
     return {
-      rows: rows.map((row) => ({ ...row.signup, primary_rep_name: row.primary_rep_name ?? null })),
+      rows: rows.map((row) => ({ ...row.signup, crm_customer_id: row.crm_customer_id ?? null, primary_rep_name: row.primary_rep_name ?? null })),
       total: countRows[0]?.count ?? 0,
     };
   }

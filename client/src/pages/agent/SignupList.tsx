@@ -1,19 +1,28 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, ClipboardList, Loader2, UsersRound } from "lucide-react";
-import { getCustomerSignups } from "@/lib/api";
+import { ChevronLeft, ChevronRight, ClipboardList, Loader2, UsersRound, RotateCcw } from "lucide-react";
+import { getCustomerSignups, getUsersSummary } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useTimeService } from "@/hooks/useTimeService";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useLocation } from "wouter";
 
 const PAGE_SIZE = 50;
 
 export default function SignupList() {
   const [page, setPage] = useState(1);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [signedUpBy, setSignedUpBy] = useState("all");
+  const [, setLocation] = useLocation();
   const fmt = useTimeService();
+  const { data: users = [] } = useQuery({ queryKey: ["users", "summary"], queryFn: getUsersSummary, staleTime: 300_000 });
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["customer-signups", page],
-    queryFn: () => getCustomerSignups(page, PAGE_SIZE),
+    queryKey: ["customer-signups", page, dateFrom, dateTo, signedUpBy],
+    queryFn: () => getCustomerSignups(page, PAGE_SIZE, { dateFrom, dateTo, signedUpBy: signedUpBy === "all" ? undefined : Number(signedUpBy) }),
   });
   const signups = data?.rows ?? [];
   const total = data?.total ?? 0;
@@ -34,6 +43,34 @@ export default function SignupList() {
           </div>
           <Badge variant="secondary" className="w-fit">{total.toLocaleString()} signup{total === 1 ? "" : "s"}</Badge>
         </header>
+
+        <div className="flex flex-col gap-3 rounded-xl border bg-white p-4 shadow-sm sm:flex-row sm:items-end">
+          <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="signup-date-from" className="text-xs text-slate-600">From date</Label>
+              <Input id="signup-date-from" type="date" value={dateFrom} onChange={(e) => { setPage(1); setDateFrom(e.target.value); }} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="signup-date-to" className="text-xs text-slate-600">To date</Label>
+              <Input id="signup-date-to" type="date" value={dateTo} onChange={(e) => { setPage(1); setDateTo(e.target.value); }} />
+            </div>
+          </div>
+          <div className="w-full space-y-1 sm:w-56">
+            <Label className="text-xs text-slate-600">Signed up by</Label>
+            <Select value={signedUpBy} onValueChange={(value) => { setPage(1); setSignedUpBy(value); }}>
+              <SelectTrigger><SelectValue placeholder="All users" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All users</SelectItem>
+                {users.filter((user) => user.is_enabled && (data?.can_view_all || user.id === JSON.parse(localStorage.getItem("vansales_user") || "{}").id)).map((user) => <SelectItem key={user.id} value={String(user.id)}>{user.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          {(dateFrom || dateTo || signedUpBy !== "all") && (
+            <Button variant="ghost" size="sm" onClick={() => { setPage(1); setDateFrom(""); setDateTo(""); setSignedUpBy("all"); }}>
+              <RotateCcw className="mr-1.5 h-4 w-4" /> Clear
+            </Button>
+          )}
+        </div>
 
         <div className="overflow-hidden rounded-xl border bg-white shadow-sm">
           {isLoading ? (
@@ -62,7 +99,11 @@ export default function SignupList() {
                   {signups.map((signup) => (
                     <tr key={signup.id} className="text-sm text-slate-700">
                       <td className="px-4 py-3">
-                        <p className="font-semibold text-slate-800">{signup.first_name} {signup.last_name}</p>
+                        {signup.crm_customer_id ? (
+                          <button type="button" className="font-semibold text-left text-indigo-600 hover:text-indigo-800 hover:underline" onClick={() => setLocation(`/crm/customers/${signup.crm_customer_id}`)}>{signup.first_name} {signup.last_name}</button>
+                        ) : (
+                          <p className="font-semibold text-slate-800">{signup.first_name} {signup.last_name}</p>
+                        )}
                         <p className="text-xs text-slate-400">{signup.company || `BC #${signup.bigcommerce_customer_id}`}</p>
                       </td>
                       <td className="px-4 py-3 text-xs">{signup.email}</td>

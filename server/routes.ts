@@ -4315,8 +4315,17 @@ export async function registerRoutes(
       const canViewAll = user.role === "admin" || perms.includes("customer_signups:view_all");
       const page = Math.max(1, Number(req.query.page) || 1);
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+      const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined;
+      const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo : undefined;
+      const requestedSignedUpBy = Number(req.query.signedUpBy);
+      const signedUpByUserId = canViewAll && Number.isInteger(requestedSignedUpBy) && requestedSignedUpBy > 0
+        ? requestedSignedUpBy
+        : undefined;
       const result = await storage.getCustomerSignups({
         userId: canViewAll ? undefined : userId,
+        signedUpByUserId,
+        dateFrom,
+        dateTo,
         limit,
         offset: (page - 1) * limit,
       });
