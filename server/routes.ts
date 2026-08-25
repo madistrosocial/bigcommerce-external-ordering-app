@@ -4147,13 +4147,13 @@ export async function registerRoutes(
       if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
 
       const {
-        first_name, last_name, email, phone, company,
+        first_name, last_name, email, phone, company, business_tax_id,
         address1, address2, city, state_or_province, postal_code, country_code,
         shipping_address: submittedShippingAddress,
         signed_up_by_user_id,
         idempotency_key,
       } = req.body;
-      if (!first_name || !last_name || !email) return res.status(400).json({ error: "first_name, last_name, and email are required" });
+      if (!first_name || !last_name || !email || !business_tax_id) return res.status(400).json({ error: "first_name, last_name, email, and business_tax_id are required" });
       const signupAttemptKey = String(idempotency_key || "").trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(signupAttemptKey)) {
         return res.status(400).json({ error: "A valid signup idempotency key is required" });
@@ -4182,6 +4182,9 @@ export async function registerRoutes(
         form_fields: [{
           name: "What brought you to our site? (This will help us connect you to the correct sales team member)",
           value: attribution,
+         }, {
+           name: "Business Tax ID",
+           value: String(business_tax_id).trim(),
         }],
       }];
 
@@ -4207,7 +4210,7 @@ export async function registerRoutes(
       }
       if (!attempt) {
         const inserted = await storage.createCustomerSignupAttempt(signupAttemptKey, authUser.id, {
-          first_name, last_name, email, phone, company, shipping_address: shippingAddress,
+          first_name, last_name, email, phone, company, business_tax_id: String(business_tax_id).trim(), shipping_address: shippingAddress,
           signed_up_by_user_id: selectedUserId, customer_group_id: configuredGroupId,
           customer_group_name: configuredGroupName, attribution,
         });

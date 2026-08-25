@@ -29,6 +29,7 @@ interface CreateCustomerPayload {
   email: string;
   phone?: string;
   company?: string;
+  business_tax_id: string;
   address1?: string;
   address2?: string;
   city?: string;
@@ -78,7 +79,7 @@ function Field({
 }
 
 const EMPTY = {
-  first_name: "", last_name: "", email: "", phone: "", company: "",
+  first_name: "", last_name: "", email: "", phone: "", company: "", business_tax_id: "",
   address1: "", address2: "", city: "", state_or_province: "", postal_code: "", country_code: "US",
 };
 const EMPTY_ADDRESS: Address = {
@@ -147,8 +148,8 @@ export default function CreateCustomer() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.first_name || !form.last_name || !form.email || !signedUpByUserId) {
-      toast({ title: "Missing Fields", description: "First name, last name, email, and Signed up by are required.", variant: "destructive" });
+    if (!form.first_name || !form.last_name || !form.email || !form.business_tax_id || !signedUpByUserId) {
+      toast({ title: "Missing Fields", description: "First name, last name, business tax ID, email, and Signed up by are required.", variant: "destructive" });
       return;
     }
     if (!effectiveShipping.address1 || !effectiveShipping.city || !effectiveShipping.state_or_province || !effectiveShipping.postal_code) {
@@ -162,6 +163,7 @@ export default function CreateCustomer() {
       email: form.email.trim(),
       phone: form.phone.trim() || undefined,
       company: form.company.trim() || undefined,
+      business_tax_id: form.business_tax_id.trim(),
       signed_up_by_user_id: Number(signedUpByUserId),
       shipping_address: Object.fromEntries(Object.entries(effectiveShipping).map(([key, value]) => [key, value.trim()])) as Address,
       idempotency_key: idempotencyKey,
@@ -191,6 +193,7 @@ export default function CreateCustomer() {
               <Field label="Phone Number" id="phone" type="tel" value={form.phone} onChange={set("phone")} placeholder="+1 555 000 0000" />
               <Field label="Company" id="company" value={form.company} onChange={set("company")} placeholder="Acme Corp" />
             </div>
+            <Field label="Business Tax ID" id="business_tax_id" required value={form.business_tax_id} onChange={set("business_tax_id")} placeholder="Enter business tax ID" />
             <div className="space-y-1">
               <Label className="text-xs font-medium text-slate-700">Signed up by<span className="ml-0.5 text-red-500">*</span></Label>
               <Select value={signedUpByUserId} onValueChange={setSignedUpByUserId}>
