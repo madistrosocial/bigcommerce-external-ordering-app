@@ -4329,7 +4329,14 @@ export async function registerRoutes(
         limit,
         offset: (page - 1) * limit,
       });
-      res.json({ ...result, page, limit, can_view_all: canViewAll });
+      // Keep the link target explicit even for older signup records or rows
+      // created before the CRM mirror was populated.
+      const rows = await Promise.all(result.rows.map(async (row) => {
+        if (row.crm_customer_id) return row;
+        const crmCustomer = await storage.getCrmCustomerByBcId(row.bigcommerce_customer_id);
+        return { ...row, crm_customer_id: crmCustomer?.id ?? null };
+      }));
+      res.json({ ...result, rows, page, limit, can_view_all: canViewAll, filters: { dateFrom, dateTo, signedUpBy: signedUpByUserId ?? null } });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
