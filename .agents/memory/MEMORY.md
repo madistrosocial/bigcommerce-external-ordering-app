@@ -11,3 +11,4 @@
 - [Inventory Audit + SKUVault module](inventory-audit-module.md) — Full build: schema, skuvault.ts client, storage methods, routes, all frontend pages; partial-unique-index seeded at startup.
 - [SKUVault location lookup & push strategy](skuvault-location-lookup.md) — addItemBulk for push; getInventoryByLocation (ProductSKUs, dict response) + getAvailableQuantities fallback for zero-stock; location stored in push log + audit task.
 - [SKUVault Reason field & React Query cache trap](skuvault-reason-field.md) — Reason must be exact account-configured text string; QueryClient staleTime:Infinity traps stale empty results; use useEffect not useQuery for per-mount settings; server-side reason substitution guards all push routes.
+- [Render secret boundary](render-secret-boundary.md) — Render does not inherit Replit Secrets; production auth needs a Render-managed generated SESSION_SECRET.
