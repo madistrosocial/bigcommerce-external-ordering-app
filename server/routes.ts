@@ -1025,7 +1025,7 @@ export async function registerRoutes(
 
       // Don't send password to frontend
       const { password: _, ...safeUser } = user;
-      res.json(safeUser);
+      res.json({ ...safeUser, auth_token: issueSessionToken(user.id) });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
