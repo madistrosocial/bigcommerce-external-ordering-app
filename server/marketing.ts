@@ -78,24 +78,28 @@ function publicMarketingUrl(path: string): string {
   return domains ? `https://${domains}${path}` : path;
 }
 
-function signUnsubscribeToken(campaignId: number, customerId: number): string {
-  const payload = `${campaignId}.${customerId}`;
+function signUnsubscribeToken(campaignId: number, entityId: number, entityType: "customer" | "contact" = "customer"): string {
+  const payload = entityType === "contact" ? `${campaignId}.contact.${entityId}` : `${campaignId}.${entityId}`;
   const secret = String(process.env.SESSION_SECRET ?? "");
   const signature = createHmac("sha256", secret).update(payload).digest("base64url");
   return Buffer.from(`${payload}.${signature}`).toString("base64url");
 }
 
-export function verifyMarketingUnsubscribeToken(token: string): { campaignId: number; customerId: number } | null {
+export function verifyMarketingUnsubscribeToken(token: string): { campaignId: number; customerId?: number; contactId?: number; entityType: "customer" | "contact" } | null {
   try {
     const decoded = Buffer.from(token, "base64url").toString("utf8");
-    const [rawCampaignId, rawCustomerId, supplied] = decoded.split(".");
+    const parts = decoded.split(".");
+    const isContact = parts[1] === "contact";
+    const rawCampaignId = parts[0];
+    const rawEntityId = isContact ? parts[2] : parts[1];
+    const supplied = isContact ? parts[3] : parts[2];
     const campaignId = Number(rawCampaignId);
-    const customerId = Number(rawCustomerId);
-    if (!Number.isInteger(campaignId) || !Number.isInteger(customerId) || !supplied) return null;
-    const payload = `${campaignId}.${customerId}`;
+    const entityId = Number(rawEntityId);
+    if (!Number.isInteger(campaignId) || !Number.isInteger(entityId) || !supplied) return null;
+    const payload = isContact ? `${campaignId}.contact.${entityId}` : `${campaignId}.${entityId}`;
     const expected = createHmac("sha256", String(process.env.SESSION_SECRET ?? "")).update(payload).digest("base64url");
     if (supplied.length !== expected.length || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) return null;
-    return { campaignId, customerId };
+    return isContact ? { campaignId, contactId: entityId, entityType: "contact" } : { campaignId, customerId: entityId, entityType: "customer" };
   } catch {
     return null;
   }
@@ -143,12 +147,13 @@ export async function processMarketingCampaign(campaignId: number): Promise<void
         const recipient = await storage.claimMarketingRecipient(row.id);
         if (!recipient) continue;
         const customer = row.customer as MarketingCustomer;
-        const customerId = Number(customer.id ?? row.customer_id);
-        if (!customerId) {
-          await storage.markMarketingRecipientFailed(row.id, "Recipient is missing a CRM customer id.", false);
+        const imported = row.source === "imported" || Number.isInteger(Number(row.marketing_contact_id));
+        const entityId = imported ? Number(row.marketing_contact_id) : Number(customer.id ?? row.customer_id);
+        if (!entityId) {
+          await storage.markMarketingRecipientFailed(row.id, "Recipient is missing a contact id.", false);
           continue;
         }
-        const token = signUnsubscribeToken(campaignId, customerId);
+        const token = signUnsubscribeToken(campaignId, entityId, imported ? "contact" : "customer");
         const unsubscribeUrl = publicMarketingUrl(`/api/marketing/unsubscribe/${token}`);
         const subject = renderTemplate(campaign.subject_line || campaign.name, customer);
         const body = renderTemplate(campaign.message_content || "<p></p>", customer);

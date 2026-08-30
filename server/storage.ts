@@ -1,5 +1,5 @@
 import { db } from "../db";
- import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, marketingCampaigns, marketingAudiences, marketingAudienceMembers, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
+ import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
 import { eq, desc, and, inArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
@@ -214,10 +214,14 @@ export interface IStorage {
   updateMarketingAutomationExecution(id: number, data: Record<string, unknown>): Promise<void>;
   getMarketingAudiences(opts?: { search?: string; type?: string }): Promise<any[]>;
   getMarketingAudience(id: number): Promise<any | undefined>;
-  createMarketingAudience(data: { name: string; description?: string; audience_type: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; created_by: number }): Promise<any>;
-  updateMarketingAudience(id: number, data: { name?: string; description?: string; audience_type?: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[] }, userId: number): Promise<any | undefined>;
+  createMarketingAudience(data: { name: string; description?: string; audience_type: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; contact_ids?: number[]; created_by: number }): Promise<any>;
+  updateMarketingAudience(id: number, data: { name?: string; description?: string; audience_type?: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; contact_ids?: number[] }, userId: number): Promise<any | undefined>;
   deleteMarketingAudience(id: number, userId: number): Promise<void>;
-  getMarketingAudienceCustomers(opts?: { search?: string; limit?: number }): Promise<any[]>;
+  getMarketingAudienceCustomers(opts?: { search?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number; limit: number; offset: number }>;
+  getMarketingContacts(opts?: { search?: string; type?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number; limit: number; offset: number }>;
+  importMarketingContacts(records: Array<{ email: string; first_name?: string; last_name?: string; company?: string; phone?: string; contact_type: string }>, userId: number): Promise<{ imported: number; duplicates: number }>;
+  deactivateMarketingContact(id: number): Promise<void>;
+  getMarketingAudienceMembers(audienceId: number, opts?: { search?: string; source?: string; status?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
 
   // Reports — legacy (orders table)
   getSalesReport(opts: { view: string; dateFrom?: string; dateTo?: string; search?: string; status?: string; page?: number; limit?: number; sortBy?: string; sortDir?: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
@@ -2370,36 +2374,55 @@ export class DatabaseStorage implements IStorage {
       .where(eq(marketingAudiences.id, id)).limit(1);
     if (!rows[0]) return undefined;
     const count = await this.getMarketingAudienceCount(id);
-    const members = await db.select({
-      id: customersMirror.id, company: customersMirror.company, first_name: customersMirror.first_name,
-      last_name: customersMirror.last_name, email: customersMirror.email,
-    }).from(marketingAudienceMembers).innerJoin(customersMirror, eq(customersMirror.id, marketingAudienceMembers.customer_id))
-      .where(eq(marketingAudienceMembers.audience_id, id)).limit(200);
-    return { ...rows[0].a, creator_name: rows[0].creator_name, member_count: count, members };
+    const [members, memberIds] = await Promise.all([
+      this.getMarketingAudienceMembers(id, { limit: 200 }),
+      db.select({ customer_id: marketingAudienceMembers.customer_id, contact_id: marketingAudienceMembers.marketing_contact_id })
+        .from(marketingAudienceMembers).where(eq(marketingAudienceMembers.audience_id, id)),
+    ]);
+    return {
+      ...rows[0].a,
+      creator_name: rows[0].creator_name,
+      member_count: count,
+      members: members.rows,
+      member_customer_ids: memberIds.flatMap(member => member.customer_id ? [member.customer_id] : []),
+      member_contact_ids: memberIds.flatMap(member => member.contact_id ? [member.contact_id] : []),
+    };
   }
 
-  async createMarketingAudience(data: { name: string; description?: string; audience_type: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; created_by: number }): Promise<any> {
+  async createMarketingAudience(data: { name: string; description?: string; audience_type: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; contact_ids?: number[]; created_by: number }): Promise<any> {
     const audience = await db.transaction(async tx => {
       const [created] = await tx.insert(marketingAudiences).values({
         name: data.name.trim(), description: data.description ?? "", audience_type: data.audience_type,
         dynamic_filters: data.dynamic_filters ?? {}, created_by: data.created_by,
       }).returning();
-      if (data.customer_ids?.length) {
-        await tx.insert(marketingAudienceMembers).values(data.customer_ids.map(customer_id => ({ audience_id: created.id, customer_id })));
+      const customerIds = Array.from(new Set((data.customer_ids ?? []).filter(Number.isInteger)));
+      const contactIds = Array.from(new Set((data.contact_ids ?? []).filter(Number.isInteger)));
+      if (customerIds.length || contactIds.length) {
+        await tx.insert(marketingAudienceMembers).values([
+          ...customerIds.map(customer_id => ({ audience_id: created.id, customer_id })),
+          ...contactIds.map(marketing_contact_id => ({ audience_id: created.id, marketing_contact_id })),
+        ]);
       }
       return created;
     });
     return this.getMarketingAudience(audience.id);
   }
 
-  async updateMarketingAudience(id: number, data: { name?: string; description?: string; audience_type?: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[] }, userId: number): Promise<any | undefined> {
+  async updateMarketingAudience(id: number, data: { name?: string; description?: string; audience_type?: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; contact_ids?: number[] }, userId: number): Promise<any | undefined> {
     const update: Record<string, unknown> = { updated_at: new Date() };
     for (const key of ["name", "description", "audience_type", "dynamic_filters"] as const) if (data[key] !== undefined) update[key] = data[key];
     const [updated] = await db.update(marketingAudiences).set(update as any).where(eq(marketingAudiences.id, id)).returning();
     if (!updated) return undefined;
-    if (data.customer_ids) {
+    if (data.customer_ids || data.contact_ids) {
       await db.delete(marketingAudienceMembers).where(eq(marketingAudienceMembers.audience_id, id));
-      if (data.customer_ids.length) await db.insert(marketingAudienceMembers).values(data.customer_ids.map(customer_id => ({ audience_id: id, customer_id })));
+      const customerIds = Array.from(new Set((data.customer_ids ?? []).filter(Number.isInteger)));
+      const contactIds = Array.from(new Set((data.contact_ids ?? []).filter(Number.isInteger)));
+      if (customerIds.length || contactIds.length) {
+        await db.insert(marketingAudienceMembers).values([
+          ...customerIds.map(customer_id => ({ audience_id: id, customer_id })),
+          ...contactIds.map(marketing_contact_id => ({ audience_id: id, marketing_contact_id })),
+        ]);
+      }
     }
     return this.getMarketingAudience(id);
   }
@@ -2408,16 +2431,108 @@ export class DatabaseStorage implements IStorage {
     await db.delete(marketingAudiences).where(eq(marketingAudiences.id, id));
   }
 
-  async getMarketingAudienceCustomers(opts: { search?: string; limit?: number } = {}): Promise<any[]> {
+  async getMarketingAudienceCustomers(opts: { search?: string; limit?: number; offset?: number } = {}): Promise<{ rows: any[]; total: number; limit: number; offset: number }> {
+    const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
+    const offset = Math.max(opts.offset ?? 0, 0);
     const conditions: any[] = [eq(customersMirror.is_active, true), eq(customersMirror.account_type, "customer")];
     if (opts.search?.trim()) {
       const term = `%${opts.search.trim()}%`;
       conditions.push(or(ilike(customersMirror.company, term), ilike(customersMirror.first_name, term), ilike(customersMirror.last_name, term), ilike(customersMirror.email, term)));
     }
-    return db.select({
+    const where = and(...conditions);
+    const [rows, countRows] = await Promise.all([db.select({
       id: customersMirror.id, company: customersMirror.company, first_name: customersMirror.first_name,
       last_name: customersMirror.last_name, email: customersMirror.email, customer_group_name: customersMirror.customer_group_name,
-    }).from(customersMirror).where(and(...conditions)).orderBy(asc(customersMirror.company), asc(customersMirror.last_name)).limit(opts.limit ?? 100);
+    }).from(customersMirror).where(where).orderBy(asc(customersMirror.company), asc(customersMirror.last_name)).limit(limit).offset(offset),
+    db.select({ count: sql<number>`count(*)::int` }).from(customersMirror).where(where)]);
+    return { rows, total: countRows[0]?.count ?? 0, limit, offset };
+  }
+
+  async getMarketingContacts(opts: { search?: string; type?: string; limit?: number; offset?: number } = {}): Promise<{ rows: any[]; total: number; limit: number; offset: number }> {
+    const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
+    const offset = Math.max(opts.offset ?? 0, 0);
+    const conditions: any[] = [eq(marketingContacts.is_active, true)];
+    if (opts.type && opts.type !== "all") conditions.push(eq(marketingContacts.contact_type, opts.type));
+    if (opts.search?.trim()) {
+      const term = `%${opts.search.trim()}%`;
+      conditions.push(or(ilike(marketingContacts.email, term), ilike(marketingContacts.company, term), ilike(marketingContacts.first_name, term), ilike(marketingContacts.last_name, term)));
+    }
+    const where = and(...conditions);
+    const [rows, countRows] = await Promise.all([
+      db.select().from(marketingContacts).where(where).orderBy(asc(marketingContacts.company), asc(marketingContacts.last_name), asc(marketingContacts.email)).limit(limit).offset(offset),
+      db.select({ count: sql<number>`count(*)::int` }).from(marketingContacts).where(where),
+    ]);
+    return { rows, total: countRows[0]?.count ?? 0, limit, offset };
+  }
+
+  async importMarketingContacts(records: Array<{ email: string; first_name?: string; last_name?: string; company?: string; phone?: string; contact_type: string }>, userId: number): Promise<{ imported: number; duplicates: number }> {
+    let imported = 0;
+    for (const record of records) {
+      const [row] = await db.insert(marketingContacts).values({
+        email: record.email.trim().toLowerCase(),
+        first_name: String(record.first_name ?? "").trim(),
+        last_name: String(record.last_name ?? "").trim(),
+        company: String(record.company ?? "").trim() || null,
+        phone: String(record.phone ?? "").trim() || null,
+        contact_type: record.contact_type,
+        created_by: userId,
+      }).onConflictDoNothing({ target: marketingContacts.email }).returning({ id: marketingContacts.id });
+      if (row) imported++;
+    }
+    return { imported, duplicates: records.length - imported };
+  }
+
+  async deactivateMarketingContact(id: number): Promise<void> {
+    await db.update(marketingContacts).set({ is_active: false, updated_at: new Date() }).where(eq(marketingContacts.id, id));
+  }
+
+  async getMarketingAudienceMembers(audienceId: number, opts: { search?: string; source?: string; status?: string; limit?: number; offset?: number } = {}): Promise<{ rows: any[]; total: number }> {
+    const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
+    const offset = Math.max(opts.offset ?? 0, 0);
+    const sourceExpr = sql<string>`case when ${marketingAudienceMembers.marketing_contact_id} is not null then 'imported' else 'crm' end`;
+    const statusExpr = sql<string>`case
+      when ${marketingAudienceMembers.marketing_contact_id} is not null and ${marketingContacts.is_active} = false then 'inactive'
+      when ${marketingAudienceMembers.customer_id} is not null and (
+        coalesce(${marketingCustomerPreferences.email_subscribed}, true) = false
+        or exists (select 1 from marketing_suppressions ms where ms.customer_id = ${marketingAudienceMembers.customer_id} and ms.revoked_at is null)
+      ) then 'suppressed'
+      else 'eligible' end`;
+    const conditions: any[] = [eq(marketingAudienceMembers.audience_id, audienceId)];
+    if (opts.source && opts.source !== "all") conditions.push(sql`${sourceExpr} = ${opts.source}`);
+    if (opts.status && opts.status !== "all") conditions.push(sql`${statusExpr} = ${opts.status}`);
+    if (opts.search?.trim()) {
+      const term = `%${opts.search.trim()}%`;
+      conditions.push(or(
+        ilike(customersMirror.company, term), ilike(customersMirror.first_name, term), ilike(customersMirror.last_name, term), ilike(customersMirror.email, term),
+        ilike(marketingContacts.company, term), ilike(marketingContacts.first_name, term), ilike(marketingContacts.last_name, term), ilike(marketingContacts.email, term),
+      ));
+    }
+    const where = and(...conditions);
+    const selectShape = {
+      member_id: marketingAudienceMembers.id,
+      customer_id: marketingAudienceMembers.customer_id,
+      contact_id: marketingAudienceMembers.marketing_contact_id,
+      company: sql<string>`coalesce(${customersMirror.company}, ${marketingContacts.company})`,
+      first_name: sql<string>`coalesce(${customersMirror.first_name}, ${marketingContacts.first_name})`,
+      last_name: sql<string>`coalesce(${customersMirror.last_name}, ${marketingContacts.last_name})`,
+      email: sql<string>`coalesce(${customersMirror.email}, ${marketingContacts.email})`,
+      source: sourceExpr,
+      status: statusExpr,
+      contact_type: marketingContacts.contact_type,
+    };
+    const [rows, countRows] = await Promise.all([
+      db.select(selectShape).from(marketingAudienceMembers)
+        .leftJoin(customersMirror, eq(customersMirror.id, marketingAudienceMembers.customer_id))
+        .leftJoin(marketingContacts, eq(marketingContacts.id, marketingAudienceMembers.marketing_contact_id))
+        .leftJoin(marketingCustomerPreferences, eq(marketingCustomerPreferences.customer_id, marketingAudienceMembers.customer_id))
+        .where(where).orderBy(asc(sql`coalesce(${customersMirror.company}, ${marketingContacts.company})`), asc(sql`coalesce(${customersMirror.email}, ${marketingContacts.email})`)).limit(limit).offset(offset),
+      db.select({ count: sql<number>`count(*)::int` }).from(marketingAudienceMembers)
+        .leftJoin(customersMirror, eq(customersMirror.id, marketingAudienceMembers.customer_id))
+        .leftJoin(marketingContacts, eq(marketingContacts.id, marketingAudienceMembers.marketing_contact_id))
+        .leftJoin(marketingCustomerPreferences, eq(marketingCustomerPreferences.customer_id, marketingAudienceMembers.customer_id))
+        .where(where),
+    ]);
+    return { rows, total: countRows[0]?.count ?? 0 };
   }
 
   async getMarketingTemplates(opts: { search?: string; category?: string; includeArchived?: boolean } = {}): Promise<EmailTemplate[]> {
@@ -2447,6 +2562,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   private async getMarketingCandidateCustomers(filters: Record<string, unknown> = {}, limit = 100000): Promise<any[]> {
+    const normalized = { ...filters };
+    if (normalized.lastOrderBefore && !normalized.lastOrderTo) normalized.lastOrderTo = normalized.lastOrderBefore;
+    if (normalized.lastOrderAfter && !normalized.lastOrderFrom) normalized.lastOrderFrom = normalized.lastOrderAfter;
+    if (typeof normalized.isActive === "string") normalized.isActive = normalized.isActive === "true" || normalized.isActive === "active";
+    if (normalized.accountStatus && normalized.isActive === undefined) normalized.isActive = normalized.accountStatus === "active";
+    filters = normalized;
     const conditions: any[] = [eq(customersMirror.account_type, "customer")];
     if (typeof filters.isActive === "boolean") conditions.push(eq(customersMirror.is_active, filters.isActive));
     else conditions.push(eq(customersMirror.is_active, true));
@@ -2521,10 +2642,18 @@ export class DatabaseStorage implements IStorage {
       const [audience] = await db.select().from(marketingAudiences).where(eq(marketingAudiences.id, campaign.audience_id)).limit(1);
       if (!audience) return [];
       if (audience.audience_type === "manual") {
-        return db.select({ customer: customersMirror }).from(marketingAudienceMembers)
-          .innerJoin(customersMirror, eq(customersMirror.id, marketingAudienceMembers.customer_id))
-          .where(eq(marketingAudienceMembers.audience_id, campaign.audience_id))
-          .then(rows => rows.map(row => row.customer));
+        const [customerRows, contactRows] = await Promise.all([
+          db.select({ customer: customersMirror }).from(marketingAudienceMembers)
+            .innerJoin(customersMirror, eq(customersMirror.id, marketingAudienceMembers.customer_id))
+            .where(eq(marketingAudienceMembers.audience_id, campaign.audience_id)),
+          db.select({ contact: marketingContacts }).from(marketingAudienceMembers)
+            .innerJoin(marketingContacts, eq(marketingContacts.id, marketingAudienceMembers.marketing_contact_id))
+            .where(and(eq(marketingAudienceMembers.audience_id, campaign.audience_id), eq(marketingContacts.is_active, true))),
+        ]);
+        return [
+          ...customerRows.map(row => row.customer),
+          ...contactRows.map(row => ({ ...row.contact, marketing_contact_id: row.contact.id, id: undefined })),
+        ];
       }
       return this.getMarketingCandidateCustomers((audience.dynamic_filters ?? {}) as Record<string, unknown>);
     }
@@ -2553,23 +2682,39 @@ export class DatabaseStorage implements IStorage {
     const [campaign] = await db.select().from(marketingCampaigns).where(eq(marketingCampaigns.id, campaignId)).limit(1);
     if (!campaign) throw new Error("Campaign not found");
     const candidates = await this.resolveMarketingCampaignCustomers(campaign);
-    const ids = [...new Set(candidates.map(c => Number(c.id)).filter(Number.isInteger))];
-    const suppressedIds = await this.getMarketingCustomerSuppressionIds(ids);
-    const existing = await db.select({ customer_id: marketingCampaignRecipients.customer_id, status: marketingCampaignRecipients.status })
+    const customerIds = Array.from(new Set(candidates.map(c => Number(c.id)).filter(Number.isInteger)));
+    const contactIds = Array.from(new Set(candidates.map(c => Number(c.marketing_contact_id)).filter(Number.isInteger)));
+    const suppressedIds = await this.getMarketingCustomerSuppressionIds(customerIds);
+    const existing = await db.select({ customer_id: marketingCampaignRecipients.customer_id, marketing_contact_id: marketingCampaignRecipients.marketing_contact_id, status: marketingCampaignRecipients.status })
       .from(marketingCampaignRecipients).where(eq(marketingCampaignRecipients.campaign_id, campaignId));
-    const existingByCustomer = new Map(existing.map(row => [row.customer_id, row.status]));
+    const existingByKey = new Map(existing.map(row => [row.customer_id ? `customer:${row.customer_id}` : `contact:${row.marketing_contact_id}`, row.status]));
     for (const customer of candidates) {
-      const status = suppressedIds.has(customer.id)
+      const isImported = Number.isInteger(Number(customer.marketing_contact_id));
+      const entityId = isImported ? Number(customer.marketing_contact_id) : Number(customer.id);
+      const existingStatus = existingByKey.get(isImported ? `contact:${entityId}` : `customer:${entityId}`);
+      const status = !isImported && suppressedIds.has(customer.id)
         ? (await this.getMarketingCustomerPreference(customer.id))?.email_subscribed === false ? "unsubscribed" : "suppressed"
-        : (existingByCustomer.get(customer.id) === "sent" ? "sent" : "eligible");
-      await db.insert(marketingCampaignRecipients).values({
-        campaign_id: campaignId, customer_id: customer.id, email: String(customer.email ?? "").trim(), status,
-      }).onConflictDoUpdate({
-        target: [marketingCampaignRecipients.campaign_id, marketingCampaignRecipients.customer_id],
-        set: { email: String(customer.email ?? "").trim(), status: status === "sent" ? "sent" : status },
-      });
+        : (existingStatus === "sent" ? "sent" : "eligible");
+      const values = {
+        campaign_id: campaignId,
+        customer_id: isImported ? null : entityId,
+        marketing_contact_id: isImported ? entityId : null,
+        email: String(customer.email ?? "").trim(),
+        status,
+      };
+      if (isImported) {
+        await db.insert(marketingCampaignRecipients).values(values).onConflictDoUpdate({
+          target: [marketingCampaignRecipients.campaign_id, marketingCampaignRecipients.marketing_contact_id],
+          set: { email: values.email, status: status === "sent" ? "sent" : status },
+        });
+      } else {
+        await db.insert(marketingCampaignRecipients).values(values).onConflictDoUpdate({
+          target: [marketingCampaignRecipients.campaign_id, marketingCampaignRecipients.customer_id],
+          set: { email: values.email, status: status === "sent" ? "sent" : status },
+        });
+      }
       if (status === "suppressed" || status === "unsubscribed") {
-        await this.recordMarketingEvent({ campaign_id: campaignId, event_type: status, detail: { customer_id: customer.id } });
+        await this.recordMarketingEvent({ campaign_id: campaignId, event_type: status, detail: { customer_id: isImported ? null : entityId, marketing_contact_id: isImported ? entityId : null } });
       }
     }
     const [counts] = await db.select({
@@ -2578,7 +2723,7 @@ export class DatabaseStorage implements IStorage {
       unsubscribed: sql<number>`count(*) filter (where ${marketingCampaignRecipients.status} = 'unsubscribed')::int`,
     }).from(marketingCampaignRecipients).where(eq(marketingCampaignRecipients.campaign_id, campaignId));
     await db.update(marketingCampaigns).set({
-      recipient_count: ids.length, suppressed_count: counts?.suppressed ?? 0, unsubscribed_count: counts?.unsubscribed ?? 0, updated_at: new Date(),
+      recipient_count: customerIds.length + contactIds.length, suppressed_count: counts?.suppressed ?? 0, unsubscribed_count: counts?.unsubscribed ?? 0, updated_at: new Date(),
     }).where(eq(marketingCampaigns.id, campaignId));
     return { eligible: counts?.eligible ?? 0, suppressed: counts?.suppressed ?? 0, unsubscribed: counts?.unsubscribed ?? 0 };
   }
@@ -2629,12 +2774,14 @@ export class DatabaseStorage implements IStorage {
     if (opts.status && opts.status !== "all") conditions.push(eq(marketingCampaignRecipients.status, opts.status));
     const where = and(...conditions);
     const [rows, countRows] = await Promise.all([
-      db.select({ recipient: marketingCampaignRecipients, customer: customersMirror }).from(marketingCampaignRecipients)
-        .innerJoin(customersMirror, eq(customersMirror.id, marketingCampaignRecipients.customer_id)).where(where)
+      db.select({ recipient: marketingCampaignRecipients, customer: customersMirror, contact: marketingContacts }).from(marketingCampaignRecipients)
+        .leftJoin(customersMirror, eq(customersMirror.id, marketingCampaignRecipients.customer_id))
+        .leftJoin(marketingContacts, eq(marketingContacts.id, marketingCampaignRecipients.marketing_contact_id))
+        .where(where)
         .orderBy(desc(marketingCampaignRecipients.created_at)).limit(opts.limit ?? 100).offset(opts.offset ?? 0),
       db.select({ count: sql<number>`count(*)::int` }).from(marketingCampaignRecipients).where(where),
     ]);
-    return { rows: rows.map(row => ({ ...row.recipient, customer: row.customer })), total: countRows[0]?.count ?? 0 };
+    return { rows: rows.map(row => ({ ...row.recipient, customer: row.customer ?? row.contact, source: row.contact ? "imported" : "crm" })), total: countRows[0]?.count ?? 0 };
   }
 
   async getMarketingAnalytics(opts: { campaignId?: number; dateFrom?: string; dateTo?: string } = {}): Promise<any> {

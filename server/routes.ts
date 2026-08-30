@@ -118,6 +118,33 @@ table.totals td:last-child { text-align: right; }
 </div>
 </body></html>`;
 
+function parseMarketingCsv(input: string): { headers: string[]; rows: string[][] } {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i];
+    if (char === '"') {
+      if (quoted && input[i + 1] === '"') { field += '"'; i++; }
+      else quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      row.push(field.trim()); field = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && input[i + 1] === "\n") i++;
+      row.push(field.trim()); field = "";
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+    } else field += char;
+  }
+  if (field || row.length) {
+    row.push(field.trim());
+    if (row.some(Boolean)) rows.push(row);
+  }
+  const headers = (rows.shift() ?? []).map(h => h.trim().toLowerCase().replace(/[\s-]+/g, "_"));
+  return { headers, rows };
+}
+
 // ─── BC pre-flight stock validator ────────────────────────────────────────────
 // BigCommerce v2 order creation is NOT atomic: it deducts inventory per line
 // item sequentially and, if it hits an out-of-stock variant, it returns 409
@@ -7868,6 +7895,7 @@ export async function registerRoutes(
         name: String(body.name), description: String(body.description ?? ""), audience_type: type,
         dynamic_filters: body.dynamic_filters ?? {},
         customer_ids: Array.isArray(body.customer_ids) ? body.customer_ids.map(Number).filter(Number.isInteger) : [],
+        contact_ids: Array.isArray(body.contact_ids) ? body.contact_ids.map(Number).filter(Number.isInteger) : [],
         created_by: getMarketingUserId(req),
       });
       res.status(201).json(audience);
@@ -7894,8 +7922,49 @@ export async function registerRoutes(
   });
 
   app.get("/api/marketing/audience-customers", requirePermission("marketing"), async (req, res) => {
-    try { res.json(await storage.getMarketingAudienceCustomers({ search: String(req.query.search ?? ""), limit: Math.min(Number(req.query.limit ?? 100), 200) })); }
+    try { res.json(await storage.getMarketingAudienceCustomers({ search: String(req.query.search ?? ""), limit: Math.min(Number(req.query.limit ?? 25), 100), offset: Math.max(Number(req.query.offset ?? 0), 0) })); }
     catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/contacts", requirePermission("marketing"), async (req, res) => {
+    try { res.json(await storage.getMarketingContacts({ search: String(req.query.search ?? ""), type: String(req.query.type ?? "all"), limit: Math.min(Number(req.query.limit ?? 25), 100), offset: Math.max(Number(req.query.offset ?? 0), 0) })); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/contacts/import", requirePermission("marketing", "manage_audiences"), async (req, res) => {
+    try {
+      const type = String(req.body?.contact_type ?? "lead").toLowerCase();
+      if (!["lead", "prospect"].includes(type)) return res.status(400).json({ error: "Contact type must be lead or prospect" });
+      const csv = String(req.body?.csv ?? "");
+      if (!csv.trim()) return res.status(400).json({ error: "Choose a CSV file to import" });
+      const parsed = parseMarketingCsv(csv);
+      const emailIndex = parsed.headers.indexOf("email");
+      if (emailIndex < 0) return res.status(400).json({ error: "CSV must include an email column" });
+      const seen = new Set<string>();
+      const records: Array<{ email: string; first_name?: string; last_name?: string; company?: string; phone?: string; contact_type: string }> = [];
+      let invalid = 0;
+      for (const row of parsed.rows) {
+        const value = (row[emailIndex] ?? "").trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) || seen.has(value)) { invalid++; continue; }
+        seen.add(value);
+        const valueFor = (names: string[]) => {
+          const index = names.map(name => parsed.headers.indexOf(name)).find(index => index >= 0);
+          return index === undefined ? "" : (row[index] ?? "").trim();
+        };
+        records.push({ email: value, first_name: valueFor(["first_name", "firstname", "given_name"]), last_name: valueFor(["last_name", "lastname", "surname"]), company: valueFor(["company", "organization", "business"]), phone: valueFor(["phone", "phone_number"]), contact_type: type });
+      }
+      const result = await storage.importMarketingContacts(records, getMarketingUserId(req));
+      res.status(201).json({ ...result, invalid, total_rows: parsed.rows.length });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/audiences/:id/members", requirePermission("marketing"), async (req, res) => {
+    try {
+      res.json(await storage.getMarketingAudienceMembers(Number(req.params.id), {
+        search: String(req.query.search ?? ""), source: String(req.query.source ?? "all"), status: String(req.query.status ?? "all"),
+        limit: Math.min(Number(req.query.limit ?? 25), 100), offset: Math.max(Number(req.query.offset ?? 0), 0),
+      }));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   app.post("/api/marketing/audience-preview", requirePermission("marketing"), async (req, res) => {
@@ -8002,9 +8071,14 @@ export async function registerRoutes(
     try {
       const decoded = verifyMarketingUnsubscribeToken(String(req.params.token));
       if (!decoded) return res.status(400).send("<h1>Invalid unsubscribe link</h1>");
-      await storage.upsertMarketingCustomerPreference(decoded.customerId, { email_subscribed: false });
-      await storage.createMarketingSuppression({ customerId: decoded.customerId, reason: "Unsubscribed from marketing email", source: "unsubscribe" });
-      await storage.recordMarketingEvent({ campaign_id: decoded.campaignId, event_type: "unsubscribed", detail: { customer_id: decoded.customerId } });
+      if (decoded.entityType === "contact" && decoded.contactId) {
+        await storage.deactivateMarketingContact(decoded.contactId);
+        await storage.recordMarketingEvent({ campaign_id: decoded.campaignId, event_type: "unsubscribed", detail: { marketing_contact_id: decoded.contactId } });
+      } else if (decoded.customerId) {
+        await storage.upsertMarketingCustomerPreference(decoded.customerId, { email_subscribed: false });
+        await storage.createMarketingSuppression({ customerId: decoded.customerId, reason: "Unsubscribed from marketing email", source: "unsubscribe" });
+        await storage.recordMarketingEvent({ campaign_id: decoded.campaignId, event_type: "unsubscribed", detail: { customer_id: decoded.customerId } });
+      }
       res.status(200).send("<!doctype html><html><body style=\"font-family:Arial;padding:48px;text-align:center\"><h1>You’re unsubscribed</h1><p>You will no longer receive marketing emails from Mid Atlantic Distribution.</p></body></html>");
     } catch (e: any) { res.status(500).send("Unable to process unsubscribe"); }
   });

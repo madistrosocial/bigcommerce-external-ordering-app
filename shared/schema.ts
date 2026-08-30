@@ -417,17 +417,41 @@ export const marketingAudiences = pgTable("marketing_audiences", {
   updated_at: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Imported leads/prospects intentionally live outside customersMirror. They
+// can be used for marketing audiences without becoming CRM customer records.
+export const marketingContacts = pgTable("marketing_contacts", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  email: text("email").notNull().unique(),
+  first_name: text("first_name").notNull().default(""),
+  last_name: text("last_name").notNull().default(""),
+  company: text("company"),
+  phone: text("phone"),
+  contact_type: text("contact_type").notNull().default("lead"), // lead | prospect
+  source: text("source").notNull().default("csv"),
+  is_active: boolean("is_active").notNull().default(true),
+  created_by: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  activeTypeIdx: index("marketing_contacts_type_active_idx").on(t.contact_type, t.is_active),
+}));
+
 export const marketingAudienceMembers = pgTable("marketing_audience_members", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   audience_id: integer("audience_id").notNull().references(() => marketingAudiences.id, { onDelete: "cascade" }),
-  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  customer_id: integer("customer_id").references(() => customersMirror.id, { onDelete: "cascade" }),
+  marketing_contact_id: integer("marketing_contact_id").references(() => marketingContacts.id, { onDelete: "cascade" }),
   created_at: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => ({
+  customerMemberIdx: uniqueIndex("marketing_audience_customer_member_idx").on(t.audience_id, t.customer_id),
+  contactMemberIdx: uniqueIndex("marketing_audience_contact_member_idx").on(t.audience_id, t.marketing_contact_id),
+}));
 
 export const marketingCampaignRecipients = pgTable("marketing_campaign_recipients", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   campaign_id: integer("campaign_id").notNull().references(() => marketingCampaigns.id, { onDelete: "cascade" }),
-  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  customer_id: integer("customer_id").references(() => customersMirror.id, { onDelete: "cascade" }),
+  marketing_contact_id: integer("marketing_contact_id").references(() => marketingContacts.id, { onDelete: "cascade" }),
   email: text("email").notNull().default(""),
   status: text("status").notNull().default("eligible"), // eligible | suppressed | queued | sending | sent | failed | unsubscribed
   is_test: boolean("is_test").notNull().default(false),
@@ -440,6 +464,7 @@ export const marketingCampaignRecipients = pgTable("marketing_campaign_recipient
   created_at: timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({
   campaignCustomerUnique: uniqueIndex("marketing_campaign_recipients_campaign_customer_idx").on(t.campaign_id, t.customer_id),
+  campaignContactUnique: uniqueIndex("marketing_campaign_recipients_campaign_contact_idx").on(t.campaign_id, t.marketing_contact_id),
   campaignStatusIdx: index("marketing_campaign_recipients_status_idx").on(t.campaign_id, t.status),
 }));
 

@@ -119,8 +119,14 @@ export const getMarketingAudience = (id: number) => marketingRequest(`/marketing
 export const createMarketingAudience = (data: any) => marketingRequest("/marketing/audiences", { method: "POST", body: JSON.stringify(data) });
 export const updateMarketingAudience = (id: number, data: any) => marketingRequest(`/marketing/audiences/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 export const deleteMarketingAudience = (id: number) => marketingRequest(`/marketing/audiences/${id}`, { method: "DELETE" });
-export const getMarketingAudienceCustomers = (search = "") =>
-  marketingRequest(`/marketing/audience-customers?search=${encodeURIComponent(search)}`);
+export const getMarketingAudienceCustomers = (params: { search?: string; limit?: number; offset?: number } = {}) =>
+  marketingRequest(`/marketing/audience-customers?search=${encodeURIComponent(params.search || "")}&limit=${params.limit || 25}&offset=${params.offset || 0}`);
+export const getMarketingContacts = (params: { search?: string; type?: string; limit?: number; offset?: number } = {}) =>
+  marketingRequest(`/marketing/contacts?search=${encodeURIComponent(params.search || "")}&type=${encodeURIComponent(params.type || "all")}&limit=${params.limit || 25}&offset=${params.offset || 0}`);
+export const importMarketingContacts = (csv: string, contact_type: "lead" | "prospect") =>
+  marketingRequest("/marketing/contacts/import", { method: "POST", body: JSON.stringify({ csv, contact_type }) });
+export const getMarketingAudienceMembers = (id: number, params: { search?: string; source?: string; status?: string; limit?: number; offset?: number } = {}) =>
+  marketingRequest(`/marketing/audiences/${id}/members?search=${encodeURIComponent(params.search || "")}&source=${encodeURIComponent(params.source || "all")}&status=${encodeURIComponent(params.status || "all")}&limit=${params.limit || 25}&offset=${params.offset || 0}`);
 export const getMarketingAudiencePreview = (filters: any) =>
   marketingRequest("/marketing/audience-preview", { method: "POST", body: JSON.stringify({ filters, limit: 25 }) });
 export const getMarketingTemplates = () => marketingRequest("/marketing/templates");
