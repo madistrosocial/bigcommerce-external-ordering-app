@@ -77,6 +77,37 @@ export function getAuthHeaders(): Record<string, string> {
   }
 }
 
+// ─── Marketing ────────────────────────────────────────────────────────────────
+
+async function marketingRequest(path: string, init: RequestInit = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...getAuthHeaders(), ...(init.headers || {}) },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Marketing request failed");
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+export const getMarketingDashboard = () => marketingRequest("/marketing/dashboard");
+export const getMarketingCampaigns = (params: { search?: string; status?: string } = {}) =>
+  marketingRequest(`/marketing/campaigns?search=${encodeURIComponent(params.search || "")}&status=${encodeURIComponent(params.status || "all")}`);
+export const getMarketingCampaign = (id: number) => marketingRequest(`/marketing/campaigns/${id}`);
+export const createMarketingCampaign = (data: any) => marketingRequest("/marketing/campaigns", { method: "POST", body: JSON.stringify(data) });
+export const updateMarketingCampaign = (id: number, data: any) => marketingRequest(`/marketing/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+export const deleteMarketingCampaign = (id: number) => marketingRequest(`/marketing/campaigns/${id}`, { method: "DELETE" });
+export const updateMarketingCampaignStatus = (id: number, status: string) =>
+  marketingRequest(`/marketing/campaigns/${id}/status`, { method: "POST", body: JSON.stringify({ status }) });
+export const getMarketingAudiences = () => marketingRequest("/marketing/audiences");
+export const getMarketingAudience = (id: number) => marketingRequest(`/marketing/audiences/${id}`);
+export const createMarketingAudience = (data: any) => marketingRequest("/marketing/audiences", { method: "POST", body: JSON.stringify(data) });
+export const updateMarketingAudience = (id: number, data: any) => marketingRequest(`/marketing/audiences/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+export const deleteMarketingAudience = (id: number) => marketingRequest(`/marketing/audiences/${id}`, { method: "DELETE" });
+export const getMarketingAudienceCustomers = (search = "") =>
+  marketingRequest(`/marketing/audience-customers?search=${encodeURIComponent(search)}`);
+
 // ─── Products ────────────────────────────────────────────────────────────────
 
 export async function getAllProducts(): Promise<Product[]> {

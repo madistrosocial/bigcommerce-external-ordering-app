@@ -51,6 +51,7 @@ import StoreCreditLedger from "@/pages/crm/StoreCreditLedger";
 import PriceOverrideAuditPage from "@/pages/admin/reports/PriceOverrideAudit";
 import StoreCreditUsageReportPage from "@/pages/admin/reports/StoreCreditUsageReport";
 import SalesReportPage from "@/pages/admin/reports/SalesReport";
+import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, MarketingAudiences } from "@/pages/marketing/Marketing";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -150,6 +151,26 @@ function Router() {
       </Route>
       <Route path="/inventory/logs">
         {() => <Redirect to="/inventory-push-logs" />}
+      </Route>
+
+      {/* ── Marketing routes ── */}
+      <Route path="/marketing">
+        {() => <PermissionRoute component={MarketingDashboard} module="marketing" />}
+      </Route>
+      <Route path="/marketing/campaigns">
+        {() => <PermissionRoute component={MarketingCampaigns} module="marketing" />}
+      </Route>
+      <Route path="/marketing/campaigns/new">
+        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" />}
+      </Route>
+      <Route path="/marketing/campaigns/:id/edit">
+        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" />}
+      </Route>
+      <Route path="/marketing/campaigns/:id">
+        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" />}
+      </Route>
+      <Route path="/marketing/audiences">
+        {() => <PermissionRoute component={MarketingAudiences} module="marketing" />}
       </Route>
 
       {/* ── BC Orders ── */}

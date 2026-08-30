@@ -6043,6 +6043,27 @@ export async function registerRoutes(
     } catch (_) { /* non-fatal */ }
   })();
 
+  // ── Marketing permission auto-seed ────────────────────────────────────────────
+  await (async () => {
+    const MARKETING_PERMS: Array<{ module: string; action: string; description: string }> = [
+      { module: "marketing", action: "view", description: "Marketing: view dashboard, campaigns, and audiences" },
+      { module: "marketing", action: "create", description: "Marketing: create campaigns and audiences" },
+      { module: "marketing", action: "edit", description: "Marketing: edit campaigns and audiences" },
+      { module: "marketing", action: "delete", description: "Marketing: delete campaigns and audiences" },
+      { module: "marketing", action: "send", description: "Marketing: schedule, pause, and send campaigns" },
+      { module: "marketing", action: "view_analytics", description: "Marketing: view campaign analytics" },
+    ];
+    try {
+      const existing = await storage.getAllPermissions();
+      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+      for (const p of MARKETING_PERMS) {
+        if (!existingSet.has(`${p.module}:${p.action}`)) {
+          await storage.createPermission({ module: p.module, action: p.action, description: p.description });
+        }
+      }
+    } catch (_) { /* non-fatal */ }
+  })();
+
   // ── CRM visibility scope helper ───────────────────────────────────────────────
   // Non-admin users without an explicit visibility permission default to ASSIGNED_ONLY
   // (least-privilege). Admins always get ALL_CUSTOMERS.
@@ -7647,6 +7668,156 @@ export async function registerRoutes(
       });
       res.status(201).json({ ok: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Marketing Module ─────────────────────────────────────────────────────────
+  const marketingStatuses = new Set(["draft", "ready", "scheduled", "sending", "sent", "paused", "failed"]);
+  const allowedMarketingTransitions: Record<string, string[]> = {
+    draft: ["ready", "paused"],
+    ready: ["draft", "scheduled", "paused"],
+    scheduled: ["ready", "sending", "paused"],
+    sending: ["sent", "failed", "paused"],
+    paused: ["draft", "ready", "scheduled"],
+    failed: ["draft"],
+    sent: [],
+  };
+  const getMarketingUserId = (req: Request) => Number((req as any).authUser?.id);
+
+  app.get("/api/marketing/dashboard", requirePermission("marketing"), async (_req, res) => {
+    try { res.json(await storage.getMarketingDashboard()); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/campaigns", requirePermission("marketing"), async (req, res) => {
+    try {
+      const result = await storage.getMarketingCampaigns({
+        search: String(req.query.search ?? ""),
+        status: String(req.query.status ?? "all"),
+        limit: Math.min(Number(req.query.limit ?? 50), 100),
+        offset: Math.max(Number(req.query.offset ?? 0), 0),
+      });
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/campaigns/:id", requirePermission("marketing"), async (req, res) => {
+    try {
+      const campaign = await storage.getMarketingCampaign(Number(req.params.id));
+      if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+      res.json(campaign);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/campaigns", requirePermission("marketing", "create"), async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      if (!String(body.name ?? "").trim()) return res.status(400).json({ error: "Campaign name is required" });
+      if (!marketingStatuses.has(String(body.status ?? "draft"))) return res.status(400).json({ error: "Invalid campaign status" });
+      const audienceType = String(body.audience_type ?? "all_eligible");
+      const validAudienceTypes = new Set(["all_eligible", "customer_group", "selected_customers", "saved_audience"]);
+      if (!validAudienceTypes.has(audienceType)) return res.status(400).json({ error: "Invalid audience type" });
+      if (audienceType === "saved_audience" && !Number(body.audience_id)) return res.status(400).json({ error: "A saved audience is required" });
+      const campaign = await storage.createMarketingCampaign({
+        name: String(body.name),
+        internal_description: String(body.internal_description ?? ""),
+        campaign_type: String(body.campaign_type ?? "email"),
+        subject_line: String(body.subject_line ?? ""),
+        preview_text: String(body.preview_text ?? ""),
+        message_content: String(body.message_content ?? ""),
+        audience_type: audienceType,
+        audience_id: body.audience_id ? Number(body.audience_id) : null,
+        audience_config: body.audience_config ?? {},
+        scheduled_at: body.scheduled_at ? new Date(body.scheduled_at) : null,
+        created_by: getMarketingUserId(req),
+        customer_ids: Array.isArray(body.customer_ids) ? body.customer_ids.map(Number).filter(Number.isInteger) : [],
+      });
+      res.status(201).json(campaign);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/marketing/campaigns/:id", requirePermission("marketing", "edit"), async (req, res) => {
+    try {
+      const campaign = await storage.updateMarketingCampaign(Number(req.params.id), req.body ?? {}, getMarketingUserId(req));
+      if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+      res.json(campaign);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/marketing/campaigns/:id", requirePermission("marketing", "delete"), async (req, res) => {
+    try {
+      const campaign = await storage.getMarketingCampaign(Number(req.params.id));
+      if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+      if (campaign.status === "sent" || campaign.status === "sending") return res.status(409).json({ error: "Sent or sending campaigns cannot be deleted" });
+      await storage.deleteMarketingCampaign(Number(req.params.id), getMarketingUserId(req));
+      res.status(204).end();
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/campaigns/:id/status", requirePermission("marketing", "send"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const current = await storage.getMarketingCampaign(id);
+      const next = String(req.body?.status ?? "");
+      if (!current) return res.status(404).json({ error: "Campaign not found" });
+      if (!marketingStatuses.has(next) || !allowedMarketingTransitions[current.status]?.includes(next)) {
+        return res.status(409).json({ error: `Cannot move campaign from ${current.status} to ${next}` });
+      }
+      const campaign = await storage.updateMarketingCampaignStatus(id, next, getMarketingUserId(req));
+      res.json(campaign);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/audiences", requirePermission("marketing"), async (req, res) => {
+    try { res.json(await storage.getMarketingAudiences({ search: String(req.query.search ?? ""), type: String(req.query.type ?? "all") })); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/audiences/:id", requirePermission("marketing"), async (req, res) => {
+    try {
+      const audience = await storage.getMarketingAudience(Number(req.params.id));
+      if (!audience) return res.status(404).json({ error: "Audience not found" });
+      res.json(audience);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/audiences", requirePermission("marketing", "create"), async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      if (!String(body.name ?? "").trim()) return res.status(400).json({ error: "Audience name is required" });
+      const type = String(body.audience_type ?? "manual");
+      if (!["manual", "dynamic"].includes(type)) return res.status(400).json({ error: "Invalid audience type" });
+      const audience = await storage.createMarketingAudience({
+        name: String(body.name), description: String(body.description ?? ""), audience_type: type,
+        dynamic_filters: body.dynamic_filters ?? {},
+        customer_ids: Array.isArray(body.customer_ids) ? body.customer_ids.map(Number).filter(Number.isInteger) : [],
+        created_by: getMarketingUserId(req),
+      });
+      res.status(201).json(audience);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/marketing/audiences/:id", requirePermission("marketing", "edit"), async (req, res) => {
+    try {
+      const audience = await storage.updateMarketingAudience(Number(req.params.id), req.body ?? {}, getMarketingUserId(req));
+      if (!audience) return res.status(404).json({ error: "Audience not found" });
+      res.json(audience);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/marketing/audiences/:id", requirePermission("marketing", "delete"), async (req, res) => {
+    try {
+      const campaignUse = await storage.getMarketingCampaigns({ limit: 1000 });
+      if (campaignUse.campaigns.some(c => c.audience_id === Number(req.params.id))) {
+        return res.status(409).json({ error: "This audience is used by a campaign and cannot be deleted" });
+      }
+      await storage.deleteMarketingAudience(Number(req.params.id), getMarketingUserId(req));
+      res.status(204).end();
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/audience-customers", requirePermission("marketing"), async (req, res) => {
+    try { res.json(await storage.getMarketingAudienceCustomers({ search: String(req.query.search ?? ""), limit: Math.min(Number(req.query.limit ?? 100), 200) })); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   return httpServer;

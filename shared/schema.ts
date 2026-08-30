@@ -364,6 +364,67 @@ export const emailTemplates = pgTable("email_templates", {
   updated_by: integer("updated_by").references(() => users.id),
 });
 
+// ─── Marketing ────────────────────────────────────────────────────────────────
+// Marketing records reference the existing CRM mirror and users table. They do
+// not copy customer identity data into a second marketing-specific table.
+export const marketingCampaigns = pgTable("marketing_campaigns", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  internal_description: text("internal_description").notNull().default(""),
+  campaign_type: text("campaign_type").notNull().default("email"), // 'email' | 'announcement'
+  subject_line: text("subject_line").notNull().default(""),
+  preview_text: text("preview_text").notNull().default(""),
+  message_content: text("message_content").notNull().default(""),
+  audience_type: text("audience_type").notNull().default("all_eligible"),
+  audience_id: integer("audience_id"),
+  audience_config: jsonb("audience_config").notNull().default({}),
+  status: text("status").notNull().default("draft"),
+  scheduled_at: timestamp("scheduled_at"),
+  sent_at: timestamp("sent_at"),
+  recipient_count: integer("recipient_count").notNull().default(0),
+  sent_count: integer("sent_count").notNull().default(0),
+  delivered_count: integer("delivered_count").notNull().default(0),
+  opened_count: integer("opened_count").notNull().default(0),
+  clicked_count: integer("clicked_count").notNull().default(0),
+  created_by: integer("created_by").notNull().references(() => users.id),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const marketingAudiences = pgTable("marketing_audiences", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  audience_type: text("audience_type").notNull().default("manual"), // 'manual' | 'dynamic'
+  dynamic_filters: jsonb("dynamic_filters").notNull().default({}),
+  created_by: integer("created_by").notNull().references(() => users.id),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const marketingAudienceMembers = pgTable("marketing_audience_members", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  audience_id: integer("audience_id").notNull().references(() => marketingAudiences.id, { onDelete: "cascade" }),
+  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const marketingCampaignRecipients = pgTable("marketing_campaign_recipients", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  campaign_id: integer("campaign_id").notNull().references(() => marketingCampaigns.id, { onDelete: "cascade" }),
+  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const marketingCampaignActivity = pgTable("marketing_campaign_activity", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  campaign_id: integer("campaign_id").notNull().references(() => marketingCampaigns.id, { onDelete: "cascade" }),
+  user_id: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  action: text("action").notNull(),
+  detail: jsonb("detail").notNull().default({}),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Insert schemas — POS Enhancements
 export const insertPosPriceOverrideAuditSchema = createInsertSchema(posPriceOverrideAudit).omit({ id: true, created_at: true });
 export const insertPosStoreCreditUsageSchema = createInsertSchema(posStoreCreditUsage).omit({ id: true, created_at: true });
@@ -413,6 +474,11 @@ export type InsertStoreCreditLedger = z.infer<typeof insertStoreCreditLedgerSche
 export type StoreCreditLedgerEntry = typeof storeCreditLedger.$inferSelect;
 export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
+export type MarketingCampaign = typeof marketingCampaigns.$inferSelect;
+export type MarketingAudience = typeof marketingAudiences.$inferSelect;
+export type MarketingAudienceMember = typeof marketingAudienceMembers.$inferSelect;
+export type MarketingCampaignRecipient = typeof marketingCampaignRecipients.$inferSelect;
+export type MarketingCampaignActivity = typeof marketingCampaignActivity.$inferSelect;
 
 // CRM types
 export type InsertCrmCustomer = z.infer<typeof insertCrmCustomerSchema>;

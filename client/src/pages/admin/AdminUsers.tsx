@@ -43,6 +43,7 @@ export const MODULES = [
   { key: "inventory_push",     label: "Inventory › Push Inventory" },
   { key: "inventory_audit",    label: "Inventory › Audit Queue" },
   { key: "inventory_logs",     label: "Inventory › Push Logs" },
+  { key: "marketing",          label: "Marketing" },
   { key: "pricing",            label: "Price Tiers" },
   { key: "reports",            label: "Reports" },
   { key: "reporting_price_override_audit", label: "Reporting › Price Override Audit" },
@@ -78,6 +79,14 @@ export const ORDERS_ACTION_PERMS = [
 
 export const INVENTORY_AUDIT_ACTION_PERMS = [
   { module: "inventory_audit", action: "audit", label: "Complete Audits",  description: "Can enter physical counts, submit audit results, and adjust SKUVault inventory. Requires Audit Queue access above." },
+];
+
+export const MARKETING_ACTION_PERMS = [
+  { module: "marketing", action: "create", label: "Create Marketing Items", description: "Can create campaigns and audiences." },
+  { module: "marketing", action: "edit", label: "Edit Marketing Items", description: "Can edit campaigns and audiences." },
+  { module: "marketing", action: "delete", label: "Delete Marketing Items", description: "Can delete campaigns and audiences." },
+  { module: "marketing", action: "send", label: "Schedule and Send Campaigns", description: "Can move campaigns through the scheduling and sending workflow." },
+  { module: "marketing", action: "view_analytics", label: "View Marketing Analytics", description: "Can view campaign performance metrics." },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -574,6 +583,15 @@ export default function AdminUsersPage() {
   useEffect(() => {
     if (permsLoading) return;
     const missing = INVENTORY_AUDIT_ACTION_PERMS.filter(p => !permMap.has(`${p.module}:${p.action}`));
+    if (!missing.length) return;
+    Promise.all(
+      missing.map(p => createPermission({ module: p.module, action: p.action, description: p.description }).catch(() => {})),
+    ).then(() => queryClient.invalidateQueries({ queryKey: ["permissions"] }));
+  }, [permsLoading, permissions.length]);
+
+  useEffect(() => {
+    if (permsLoading) return;
+    const missing = MARKETING_ACTION_PERMS.filter(p => !permMap.has(`${p.module}:${p.action}`));
     if (!missing.length) return;
     Promise.all(
       missing.map(p => createPermission({ module: p.module, action: p.action, description: p.description }).catch(() => {})),

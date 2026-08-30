@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Monitor, ShoppingBag, Package, BookOpen,
   ShoppingCart, Settings, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, LogOut, Truck, Wifi, WifiOff, Menu, X,
-  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart, Mail,
+  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart, Mail, Megaphone,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -127,6 +127,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("inventory_logs") ? [{ label: "Push Logs", path: "/inventory-push-logs" }] : []),
   ];
 
+  const marketingChildren: NavLeaf[] = [
+    ...(hasPermission("marketing") ? [{ label: "Overview", path: "/marketing" }] : []),
+    ...(hasPermission("marketing") ? [{ label: "Campaigns", path: "/marketing/campaigns" }] : []),
+    ...(hasPermission("marketing") ? [{ label: "Audiences", path: "/marketing/audiences" }] : []),
+  ];
+
   // Tools children — permission-gated
   const toolsChildren: NavLeaf[] = [
     ...(hasPermission("tools_bc_link") ? [{ label: "BC Product Link", path: "/tools/bc-product-link" }] : []),
@@ -159,6 +165,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(crmChildren.length > 0 ? [{ id: "crm", label: "Customers", icon: ContactRound, children: crmChildren }] : []),
     ...(ordersChildren.length > 0 ? [{ id: "orders", label: "Orders", icon: ShoppingBag, children: ordersChildren }] : []),
     ...(inventoryChildren.length > 0 ? [{ id: "inventory", label: "Inventory", icon: Package, children: inventoryChildren }] : []),
+    ...(marketingChildren.length > 0 ? [{ id: "marketing", label: "Marketing", icon: Megaphone, children: marketingChildren }] : []),
     ...(hasPermission("catalog") ? [{ id: "catalog", label: "Catalog", icon: BookOpen, path: "/catalog" }] : []),
     ...(hasPermission("cart") ? [{ id: "cart", label: "Cart", icon: ShoppingCart, path: "/cart" }] : []),
     ...(toolsChildren.length > 0 ? [{ id: "tools", label: "Tools", icon: Wrench, children: toolsChildren }] : []),
