@@ -21,6 +21,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
+import { processMarketingCampaign, processMarketingQueue, sendMarketingTestEmail, verifyMarketingUnsubscribeToken } from "./marketing";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
 const DEFAULT_INVOICE_TEMPLATE = `<!DOCTYPE html>
@@ -6052,6 +6053,9 @@ export async function registerRoutes(
       { module: "marketing", action: "delete", description: "Marketing: delete campaigns and audiences" },
       { module: "marketing", action: "send", description: "Marketing: schedule, pause, and send campaigns" },
       { module: "marketing", action: "view_analytics", description: "Marketing: view campaign analytics" },
+      { module: "marketing", action: "manage_templates", description: "Marketing: create, edit, archive, and reuse templates" },
+      { module: "marketing", action: "manage_automations", description: "Marketing: create and manage automations" },
+      { module: "marketing", action: "manage_suppressions", description: "Marketing: manage customer preferences and suppressions" },
     ];
     try {
       const existing = await storage.getAllPermissions();
@@ -7671,14 +7675,16 @@ export async function registerRoutes(
   });
 
   // ── Marketing Module ─────────────────────────────────────────────────────────
-  const marketingStatuses = new Set(["draft", "ready", "scheduled", "sending", "sent", "paused", "failed"]);
+  const marketingStatuses = new Set(["draft", "ready", "queued", "scheduled", "sending", "sent", "paused", "failed", "cancelled"]);
   const allowedMarketingTransitions: Record<string, string[]> = {
     draft: ["ready", "paused"],
-    ready: ["draft", "scheduled", "paused"],
-    scheduled: ["ready", "sending", "paused"],
+    ready: ["draft", "scheduled", "queued", "paused"],
+    scheduled: ["ready", "queued", "paused", "cancelled"],
+    queued: ["paused", "cancelled"],
     sending: ["sent", "failed", "paused"],
     paused: ["draft", "ready", "scheduled"],
-    failed: ["draft"],
+    failed: ["draft", "queued"],
+    cancelled: ["draft"],
     sent: [],
   };
   const getMarketingUserId = (req: Request) => Number((req as any).authUser?.id);
@@ -7728,6 +7734,8 @@ export async function registerRoutes(
         audience_id: body.audience_id ? Number(body.audience_id) : null,
         audience_config: body.audience_config ?? {},
         scheduled_at: body.scheduled_at ? new Date(body.scheduled_at) : null,
+         template_id: body.template_id ? Number(body.template_id) : null,
+         timezone: String(body.timezone ?? "UTC"),
         created_by: getMarketingUserId(req),
         customer_ids: Array.isArray(body.customer_ids) ? body.customer_ids.map(Number).filter(Number.isInteger) : [],
       });
@@ -7765,6 +7773,76 @@ export async function registerRoutes(
       const campaign = await storage.updateMarketingCampaignStatus(id, next, getMarketingUserId(req));
       res.json(campaign);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/campaigns/:id/test-send", requirePermission("marketing", "send"), async (req, res) => {
+    try {
+      const email = String(req.body?.email ?? "").trim();
+      if (!email) return res.status(400).json({ error: "A test email address is required" });
+      const result = await sendMarketingTestEmail(Number(req.params.id), email);
+      res.json({ ok: true, ...result });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/campaigns/:id/send", requirePermission("marketing", "send"), async (req, res) => {
+    try {
+      if (req.body?.confirm !== true) return res.status(400).json({ error: "Explicit confirmation is required before sending" });
+      const id = Number(req.params.id);
+      const campaign = await storage.getMarketingCampaign(id);
+      if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+      if (!["ready", "failed", "paused"].includes(campaign.status)) return res.status(409).json({ error: `Campaign cannot be sent from ${campaign.status}` });
+      const queued = await storage.updateMarketingCampaignStatus(id, "queued", getMarketingUserId(req));
+      void processMarketingCampaign(id);
+      res.json(queued);
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/campaigns/:id/schedule", requirePermission("marketing", "send"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const when = new Date(String(req.body?.scheduled_at ?? ""));
+      if (Number.isNaN(when.getTime()) || when.getTime() <= Date.now()) return res.status(400).json({ error: "Choose a future schedule time" });
+      const campaign = await storage.getMarketingCampaign(id);
+      if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+      if (!["draft", "ready", "paused"].includes(campaign.status)) return res.status(409).json({ error: `Campaign cannot be scheduled from ${campaign.status}` });
+      const updated = await storage.updateMarketingCampaign(id, { scheduled_at: when, timezone: String(req.body?.timezone ?? "UTC") }, getMarketingUserId(req));
+      const scheduled = await storage.updateMarketingCampaignStatus(id, "scheduled", getMarketingUserId(req));
+      res.json(scheduled ?? updated);
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/campaigns/:id/pause", requirePermission("marketing", "send"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const campaign = await storage.getMarketingCampaign(id);
+      if (!campaign || !["scheduled", "queued", "sending"].includes(campaign.status)) return res.status(409).json({ error: "Only scheduled or active campaigns can be paused" });
+      res.json(await storage.updateMarketingCampaignStatus(id, "paused", getMarketingUserId(req)));
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/campaigns/:id/duplicate", requirePermission("marketing", "create"), async (req, res) => {
+    try {
+      const original = await storage.getMarketingCampaign(Number(req.params.id));
+      if (!original) return res.status(404).json({ error: "Campaign not found" });
+      const copy = await storage.createMarketingCampaign({
+        name: `${original.name} (Copy)`, internal_description: original.internal_description, campaign_type: original.campaign_type,
+        subject_line: original.subject_line, preview_text: original.preview_text, message_content: original.message_content,
+        audience_type: original.audience_type, audience_id: original.audience_id, audience_config: original.audience_config,
+        template_id: original.template_id, timezone: original.timezone, created_by: getMarketingUserId(req),
+        customer_ids: (original.recipients ?? []).map((r: any) => Number(r.id)).filter(Number.isInteger),
+      });
+      res.status(201).json(copy);
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/campaigns/:id/recipients", requirePermission("marketing"), async (req, res) => {
+    try { res.json(await storage.getMarketingRecipients(Number(req.params.id), { status: String(req.query.status ?? "all"), limit: Math.min(Number(req.query.limit ?? 100), 200), offset: Math.max(Number(req.query.offset ?? 0), 0) })); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/analytics", requirePermission("marketing", "view_analytics"), async (req, res) => {
+    try { res.json(await storage.getMarketingAnalytics({ campaignId: req.query.campaignId ? Number(req.query.campaignId) : undefined, dateFrom: String(req.query.dateFrom ?? ""), dateTo: String(req.query.dateTo ?? "") })); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   app.get("/api/marketing/audiences", requirePermission("marketing"), async (req, res) => {
@@ -7819,6 +7897,123 @@ export async function registerRoutes(
     try { res.json(await storage.getMarketingAudienceCustomers({ search: String(req.query.search ?? ""), limit: Math.min(Number(req.query.limit ?? 100), 200) })); }
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
+
+  app.post("/api/marketing/audience-preview", requirePermission("marketing"), async (req, res) => {
+    try { res.json(await storage.getMarketingAudiencePreview(req.body?.filters ?? {}, Math.min(Number(req.body?.limit ?? 25), 100))); }
+    catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/templates", requirePermission("marketing"), async (req, res) => {
+    try { res.json(await storage.getMarketingTemplates({ search: String(req.query.search ?? ""), category: String(req.query.category ?? "all"), includeArchived: req.query.includeArchived === "true" })); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/templates", requirePermission("marketing", "create"), async (req, res) => {
+    try {
+      const key = `marketing_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const template = await storage.upsertEmailTemplate(key, { name: String(req.body?.name ?? "").trim(), subject_template: String(req.body?.subject_template ?? ""), body: String(req.body?.body ?? ""), template_type: "marketing", category: String(req.body?.category ?? "general"), updated_by: getMarketingUserId(req) });
+      res.status(201).json(template);
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.patch("/api/marketing/templates/:id", requirePermission("marketing", "edit"), async (req, res) => {
+    try {
+      const current = await storage.getMarketingTemplateById(Number(req.params.id));
+      if (!current) return res.status(404).json({ error: "Template not found" });
+      const template = await storage.upsertEmailTemplate(current.key, { name: String(req.body?.name ?? current.name), subject_template: String(req.body?.subject_template ?? current.subject_template), body: String(req.body?.body ?? current.body), template_type: "marketing", category: String(req.body?.category ?? current.category), is_active: req.body?.is_active ?? current.is_active, updated_by: getMarketingUserId(req) });
+      res.json(template);
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/templates/:id/archive", requirePermission("marketing", "manage_templates"), async (req, res) => {
+    try { res.json(await storage.archiveMarketingTemplate(Number(req.params.id), getMarketingUserId(req), req.body?.archived !== false)); }
+    catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/automations", requirePermission("marketing"), async (req, res) => {
+    try { res.json(await storage.getMarketingAutomations({ status: String(req.query.status ?? "all"), search: String(req.query.search ?? "") })); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/automations/:id", requirePermission("marketing"), async (req, res) => {
+    try {
+      const automation = await storage.getMarketingAutomation(Number(req.params.id));
+      if (!automation) return res.status(404).json({ error: "Automation not found" });
+      res.json({ ...automation, executions: await storage.getMarketingAutomationExecutions(automation.id) });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/automations", requirePermission("marketing", "manage_automations"), async (req, res) => {
+    try {
+      const allowedTriggers = new Set(["customer_created", "customer_signup_completed", "audience_membership"]);
+      if (!allowedTriggers.has(String(req.body?.trigger_type))) return res.status(400).json({ error: "Unsupported automation trigger" });
+      const steps = Array.isArray(req.body?.steps) ? req.body.steps : [];
+      if (!steps.length) return res.status(400).json({ error: "At least one automation step is required" });
+      res.status(201).json(await storage.createMarketingAutomation({ name: String(req.body?.name ?? "").trim(), description: String(req.body?.description ?? ""), trigger_type: String(req.body.trigger_type), trigger_config: req.body?.trigger_config ?? {}, frequency_days: Math.max(0, Number(req.body?.frequency_days ?? 0)), created_by: getMarketingUserId(req), steps }));
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.patch("/api/marketing/automations/:id", requirePermission("marketing", "manage_automations"), async (req, res) => {
+    try { res.json(await storage.updateMarketingAutomation(Number(req.params.id), req.body ?? {}, getMarketingUserId(req))); }
+    catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/automations/:id/status", requirePermission("marketing", "manage_automations"), async (req, res) => {
+    try {
+      const status = String(req.body?.status ?? "");
+      if (!["draft", "active", "paused", "archived"].includes(status)) return res.status(400).json({ error: "Invalid automation status" });
+      res.json(await storage.updateMarketingAutomationStatus(Number(req.params.id), status, getMarketingUserId(req)));
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/customers/:id/preference", requirePermission("marketing"), async (req, res) => {
+    try { res.json(await storage.getMarketingCustomerPreference(Number(req.params.id))); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/marketing/customers/:id/preference", requirePermission("marketing", "manage_suppressions"), async (req, res) => {
+    try {
+      const subscribed = Boolean(req.body?.email_subscribed);
+      const preference = await storage.upsertMarketingCustomerPreference(Number(req.params.id), { email_subscribed: subscribed, userId: getMarketingUserId(req) });
+      if (!subscribed) await storage.createMarketingSuppression({ customerId: Number(req.params.id), reason: String(req.body?.reason ?? "Unsubscribed by staff"), source: "manual", createdBy: getMarketingUserId(req) });
+      res.json(preference);
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/suppressions", requirePermission("marketing", "manage_suppressions"), async (req, res) => {
+    try { res.json(await storage.getMarketingSuppressions(req.query.customerId ? Number(req.query.customerId) : undefined)); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/marketing/suppressions", requirePermission("marketing", "manage_suppressions"), async (req, res) => {
+    try {
+      if (!String(req.body?.reason ?? "").trim()) return res.status(400).json({ error: "A suppression reason is required" });
+      res.status(201).json(await storage.createMarketingSuppression({ customerId: Number(req.body?.customer_id), email: String(req.body?.email ?? ""), reason: String(req.body.reason), source: "manual", createdBy: getMarketingUserId(req) }));
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.delete("/api/marketing/suppressions/:id", requirePermission("marketing", "manage_suppressions"), async (req, res) => {
+    try { res.json(await storage.revokeMarketingSuppression(Number(req.params.id), getMarketingUserId(req), String(req.body?.detail ?? "Re-enabled by staff"))); }
+    catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  // Public, signed unsubscribe endpoint. It intentionally does not expose customer data.
+  app.get("/api/marketing/unsubscribe/:token", async (req, res) => {
+    try {
+      const decoded = verifyMarketingUnsubscribeToken(String(req.params.token));
+      if (!decoded) return res.status(400).send("<h1>Invalid unsubscribe link</h1>");
+      await storage.upsertMarketingCustomerPreference(decoded.customerId, { email_subscribed: false });
+      await storage.createMarketingSuppression({ customerId: decoded.customerId, reason: "Unsubscribed from marketing email", source: "unsubscribe" });
+      await storage.recordMarketingEvent({ campaign_id: decoded.campaignId, event_type: "unsubscribed", detail: { customer_id: decoded.customerId } });
+      res.status(200).send("<!doctype html><html><body style=\"font-family:Arial;padding:48px;text-align:center\"><h1>You’re unsubscribed</h1><p>You will no longer receive marketing emails from Mid Atlantic Distribution.</p></body></html>");
+    } catch (e: any) { res.status(500).send("Unable to process unsubscribe"); }
+  });
+
+  // The app already runs cron-based background work in this process. Keep a
+  // small, idempotent marketing poller compatible with the single Render web service.
+  const marketingQueueTimer = setInterval(() => void processMarketingQueue(), 30_000);
+  marketingQueueTimer.unref?.();
+  void processMarketingQueue();
 
   return httpServer;
 }

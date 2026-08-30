@@ -52,6 +52,7 @@ import PriceOverrideAuditPage from "@/pages/admin/reports/PriceOverrideAudit";
 import StoreCreditUsageReportPage from "@/pages/admin/reports/StoreCreditUsageReport";
 import SalesReportPage from "@/pages/admin/reports/SalesReport";
 import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, MarketingAudiences } from "@/pages/marketing/Marketing";
+import { MarketingAnalytics, MarketingTemplates, MarketingAutomations } from "@/pages/marketing/MarketingPhase2";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -171,6 +172,15 @@ function Router() {
       </Route>
       <Route path="/marketing/audiences">
         {() => <PermissionRoute component={MarketingAudiences} module="marketing" />}
+      </Route>
+      <Route path="/marketing/templates">
+        {() => <PermissionRoute component={MarketingTemplates} module="marketing" />}
+      </Route>
+      <Route path="/marketing/automations">
+        {() => <PermissionRoute component={MarketingAutomations} module="marketing" />}
+      </Route>
+      <Route path="/marketing/analytics">
+        {() => <PermissionRoute component={MarketingAnalytics} module="marketing" />}
       </Route>
 
       {/* ── BC Orders ── */}

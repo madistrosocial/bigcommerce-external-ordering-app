@@ -100,6 +100,20 @@ export const updateMarketingCampaign = (id: number, data: any) => marketingReque
 export const deleteMarketingCampaign = (id: number) => marketingRequest(`/marketing/campaigns/${id}`, { method: "DELETE" });
 export const updateMarketingCampaignStatus = (id: number, status: string) =>
   marketingRequest(`/marketing/campaigns/${id}/status`, { method: "POST", body: JSON.stringify({ status }) });
+export const sendMarketingTest = (id: number, email: string) =>
+  marketingRequest(`/marketing/campaigns/${id}/test-send`, { method: "POST", body: JSON.stringify({ email }) });
+export const sendMarketingCampaign = (id: number) =>
+  marketingRequest(`/marketing/campaigns/${id}/send`, { method: "POST", body: JSON.stringify({ confirm: true }) });
+export const scheduleMarketingCampaign = (id: number, scheduled_at: string, timezone = "UTC") =>
+  marketingRequest(`/marketing/campaigns/${id}/schedule`, { method: "POST", body: JSON.stringify({ scheduled_at, timezone }) });
+export const pauseMarketingCampaign = (id: number) =>
+  marketingRequest(`/marketing/campaigns/${id}/pause`, { method: "POST" });
+export const duplicateMarketingCampaign = (id: number) =>
+  marketingRequest(`/marketing/campaigns/${id}/duplicate`, { method: "POST" });
+export const getMarketingRecipients = (id: number, status = "all") =>
+  marketingRequest(`/marketing/campaigns/${id}/recipients?status=${encodeURIComponent(status)}`);
+export const getMarketingAnalytics = (params: { campaignId?: number; dateFrom?: string; dateTo?: string } = {}) =>
+  marketingRequest(`/marketing/analytics?${new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== "") as string[][]).toString()}`);
 export const getMarketingAudiences = () => marketingRequest("/marketing/audiences");
 export const getMarketingAudience = (id: number) => marketingRequest(`/marketing/audiences/${id}`);
 export const createMarketingAudience = (data: any) => marketingRequest("/marketing/audiences", { method: "POST", body: JSON.stringify(data) });
@@ -107,6 +121,19 @@ export const updateMarketingAudience = (id: number, data: any) => marketingReque
 export const deleteMarketingAudience = (id: number) => marketingRequest(`/marketing/audiences/${id}`, { method: "DELETE" });
 export const getMarketingAudienceCustomers = (search = "") =>
   marketingRequest(`/marketing/audience-customers?search=${encodeURIComponent(search)}`);
+export const getMarketingAudiencePreview = (filters: any) =>
+  marketingRequest("/marketing/audience-preview", { method: "POST", body: JSON.stringify({ filters, limit: 25 }) });
+export const getMarketingTemplates = () => marketingRequest("/marketing/templates");
+export const createMarketingTemplate = (data: any) => marketingRequest("/marketing/templates", { method: "POST", body: JSON.stringify(data) });
+export const updateMarketingTemplate = (id: number, data: any) => marketingRequest(`/marketing/templates/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+export const archiveMarketingTemplate = (id: number, archived = true) => marketingRequest(`/marketing/templates/${id}/archive`, { method: "POST", body: JSON.stringify({ archived }) });
+export const getMarketingAutomations = () => marketingRequest("/marketing/automations");
+export const getMarketingAutomation = (id: number) => marketingRequest(`/marketing/automations/${id}`);
+export const createMarketingAutomation = (data: any) => marketingRequest("/marketing/automations", { method: "POST", body: JSON.stringify(data) });
+export const updateMarketingAutomation = (id: number, data: any) => marketingRequest(`/marketing/automations/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+export const updateMarketingAutomationStatus = (id: number, status: string) => marketingRequest(`/marketing/automations/${id}/status`, { method: "POST", body: JSON.stringify({ status }) });
+export const getMarketingPreference = (id: number) => marketingRequest(`/marketing/customers/${id}/preference`);
+export const updateMarketingPreference = (id: number, email_subscribed: boolean, reason?: string) => marketingRequest(`/marketing/customers/${id}/preference`, { method: "PATCH", body: JSON.stringify({ email_subscribed, reason }) });
 
 // ─── Products ────────────────────────────────────────────────────────────────
 

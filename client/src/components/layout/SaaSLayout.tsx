@@ -131,6 +131,9 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("marketing") ? [{ label: "Overview", path: "/marketing" }] : []),
     ...(hasPermission("marketing") ? [{ label: "Campaigns", path: "/marketing/campaigns" }] : []),
     ...(hasPermission("marketing") ? [{ label: "Audiences", path: "/marketing/audiences" }] : []),
+    ...(hasPermission("marketing") ? [{ label: "Templates", path: "/marketing/templates" }] : []),
+    ...(hasPermission("marketing") ? [{ label: "Automations", path: "/marketing/automations" }] : []),
+    ...(hasPermission("marketing") ? [{ label: "Analytics", path: "/marketing/analytics" }] : []),
   ];
 
   // Tools children — permission-gated

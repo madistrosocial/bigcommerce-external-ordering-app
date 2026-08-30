@@ -1,6 +1,6 @@
 import { db } from "../db";
-import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, marketingCampaigns, marketingAudiences, marketingAudienceMembers, marketingCampaignRecipients, marketingCampaignActivity } from "@shared/schema";
-import { eq, desc, and, inArray, gt, gte, lt, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
+ import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, marketingCampaigns, marketingAudiences, marketingAudienceMembers, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
+import { eq, desc, and, inArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 export interface IStorage {
@@ -174,16 +174,44 @@ export interface IStorage {
 
   // Email Templates
   getEmailTemplate(key: string): Promise<EmailTemplate | undefined>;
-  upsertEmailTemplate(key: string, data: { name: string; subject_template: string; body: string; updated_by?: number }): Promise<EmailTemplate>;
+  upsertEmailTemplate(key: string, data: { name: string; subject_template: string; body: string; template_type?: string; category?: string; is_active?: boolean; updated_by?: number }): Promise<EmailTemplate>;
+  getMarketingTemplates(opts?: { search?: string; category?: string; includeArchived?: boolean }): Promise<EmailTemplate[]>;
+  getMarketingTemplateById(id: number): Promise<EmailTemplate | undefined>;
+  archiveMarketingTemplate(id: number, userId: number, archived: boolean): Promise<EmailTemplate | undefined>;
 
   // Marketing
   getMarketingDashboard(): Promise<any>;
   getMarketingCampaigns(opts?: { search?: string; status?: string; limit?: number; offset?: number }): Promise<{ campaigns: any[]; total: number }>;
   getMarketingCampaign(id: number): Promise<any | undefined>;
-  createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; scheduled_at?: Date | null; created_by: number; customer_ids?: number[] }): Promise<any>;
+  createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any>;
   updateMarketingCampaign(id: number, data: Record<string, unknown> & { customer_ids?: number[] }, userId: number): Promise<any | undefined>;
   deleteMarketingCampaign(id: number, userId: number): Promise<void>;
   updateMarketingCampaignStatus(id: number, status: string, userId: number): Promise<any | undefined>;
+  claimMarketingCampaign(id: number): Promise<any | undefined>;
+  getMarketingQueueCampaigns(): Promise<any[]>;
+  prepareMarketingRecipients(campaignId: number): Promise<{ eligible: number; suppressed: number; unsubscribed: number }>;
+  claimMarketingRecipient(id: number): Promise<any | undefined>;
+  markMarketingRecipientSent(id: number, providerMessageId?: string | null): Promise<void>;
+  markMarketingRecipientFailed(id: number, reason: string): Promise<void>;
+  recordMarketingEvent(data: { campaign_id: number; recipient_id?: number | null; event_type: string; detail?: Record<string, unknown>; provider_event_id?: string | null }): Promise<void>;
+  completeMarketingCampaign(id: number): Promise<any | undefined>;
+  getMarketingRecipients(campaignId: number, opts?: { status?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+  getMarketingAnalytics(opts?: { campaignId?: number; dateFrom?: string; dateTo?: string }): Promise<any>;
+  markMarketingTestSent(campaignId: number): Promise<void>;
+  getMarketingCustomerPreference(customerId: number): Promise<any>;
+  upsertMarketingCustomerPreference(customerId: number, data: { email_subscribed: boolean; userId?: number }): Promise<any>;
+  getMarketingSuppressions(customerId?: number): Promise<any[]>;
+  createMarketingSuppression(data: { customerId: number; email?: string; reason: string; source?: string; createdBy?: number }): Promise<any>;
+  revokeMarketingSuppression(id: number, userId: number, detail?: string): Promise<any | undefined>;
+  getMarketingAudiencePreview(filters: Record<string, unknown>, limit?: number): Promise<{ customers: any[]; total: number; suppressed: number }>;
+  getMarketingAutomations(opts?: { status?: string; search?: string }): Promise<any[]>;
+  getMarketingAutomation(id: number): Promise<any | undefined>;
+  createMarketingAutomation(data: { name: string; description?: string; trigger_type: string; trigger_config?: Record<string, unknown>; frequency_days?: number; created_by: number; steps: Array<{ action_type: string; action_config?: Record<string, unknown> }> }): Promise<any>;
+  updateMarketingAutomation(id: number, data: Record<string, unknown>, userId: number): Promise<any | undefined>;
+  updateMarketingAutomationStatus(id: number, status: string, userId: number): Promise<any | undefined>;
+  getMarketingAutomationExecutions(id: number, limit?: number): Promise<any[]>;
+  createMarketingAutomationExecution(data: { automationId: number; customerId: number; triggerEvent: string; dedupeKey: string }): Promise<any | undefined>;
+  updateMarketingAutomationExecution(id: number, data: Record<string, unknown>): Promise<void>;
   getMarketingAudiences(opts?: { search?: string; type?: string }): Promise<any[]>;
   getMarketingAudience(id: number): Promise<any | undefined>;
   createMarketingAudience(data: { name: string; description?: string; audience_type: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; created_by: number }): Promise<any>;
@@ -2114,7 +2142,7 @@ export class DatabaseStorage implements IStorage {
     return rows[0];
   }
 
-  async upsertEmailTemplate(key: string, data: { name: string; subject_template: string; body: string; updated_by?: number }): Promise<EmailTemplate> {
+  async upsertEmailTemplate(key: string, data: { name: string; subject_template: string; body: string; template_type?: string; category?: string; is_active?: boolean; updated_by?: number }): Promise<EmailTemplate> {
     const existing = await this.getEmailTemplate(key);
     if (existing) {
       const rows = await db.update(emailTemplates)
@@ -2141,28 +2169,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   private async getMarketingDynamicCustomerCount(filters: Record<string, unknown>): Promise<number> {
-    const conditions: any[] = [eq(customersMirror.is_active, true), eq(customersMirror.account_type, "customer")];
-    if (typeof filters.customerGroup === "string" && filters.customerGroup) {
-      conditions.push(eq(customersMirror.customer_group_name, filters.customerGroup));
-    }
-    if (typeof filters.accountHealth === "string" && filters.accountHealth) {
-      conditions.push(eq(customersMirror.account_health, filters.accountHealth));
-    }
-    if (typeof filters.customerType === "string" && filters.customerType) {
-      conditions.push(eq(customersMirror.customer_type, filters.customerType));
-    }
-    if (typeof filters.repId === "number" && filters.repId > 0) {
-      conditions.push(eq(customersMirror.primary_rep_id, filters.repId));
-    }
-    if (typeof filters.createdFrom === "string" && filters.createdFrom) {
-      conditions.push(sql`${customersMirror.created_date} >= ${filters.createdFrom}::timestamptz`);
-    }
-    if (typeof filters.createdTo === "string" && filters.createdTo) {
-      conditions.push(sql`${customersMirror.created_date} <= ${filters.createdTo}::timestamptz + interval '1 day'`);
-    }
-    const rows = await db.select({ count: sql<number>`count(*)::int` })
-      .from(customersMirror).where(and(...conditions));
-    return rows[0]?.count ?? 0;
+    const preview = await this.getMarketingAudiencePreview(filters, 0);
+    return preview.total;
   }
 
   async getMarketingDashboard(): Promise<any> {
@@ -2264,7 +2272,7 @@ export class DatabaseStorage implements IStorage {
     return { ...campaign, audience_count: audienceCount, recipients, activity: activity.map(row => ({ ...row.a, user_name: row.user_name })) };
   }
 
-  async createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; scheduled_at?: Date | null; created_by: number; customer_ids?: number[] }): Promise<any> {
+  async createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any> {
     const customerIds = [...new Set((data.customer_ids ?? []).filter(Number.isInteger))];
     const recipientCount = data.audience_type === "selected_customers"
       ? customerIds.length
@@ -2282,7 +2290,9 @@ export class DatabaseStorage implements IStorage {
         audience_type: data.audience_type,
         audience_id: data.audience_id ?? null,
         audience_config: data.audience_config ?? {},
+         template_id: data.template_id ?? null,
         scheduled_at: data.scheduled_at ?? null,
+         timezone: data.timezone ?? "UTC",
         created_by: data.created_by,
         recipient_count: recipientCount,
       }).returning();
@@ -2298,7 +2308,7 @@ export class DatabaseStorage implements IStorage {
   async updateMarketingCampaign(id: number, data: Record<string, unknown> & { customer_ids?: number[] }, userId: number): Promise<any | undefined> {
     const [current] = await db.select().from(marketingCampaigns).where(eq(marketingCampaigns.id, id)).limit(1);
     if (!current) return undefined;
-    const allowed = ["name", "internal_description", "campaign_type", "subject_line", "preview_text", "message_content", "audience_type", "audience_id", "audience_config", "scheduled_at"] as const;
+    const allowed = ["name", "internal_description", "campaign_type", "subject_line", "preview_text", "message_content", "audience_type", "audience_id", "audience_config", "template_id", "scheduled_at", "timezone"] as const;
     const update: Record<string, unknown> = {};
     for (const key of allowed) if (key in data) update[key] = data[key];
     const audienceType = String(data.audience_type ?? current.audience_type);
@@ -2336,6 +2346,7 @@ export class DatabaseStorage implements IStorage {
   async updateMarketingCampaignStatus(id: number, status: string, userId: number): Promise<any | undefined> {
     const result = await db.update(marketingCampaigns).set({
       status, updated_at: new Date(),
+      ...(status === "queued" ? { queued_at: new Date(), last_error: null } : {}),
       ...(status === "sent" ? { sent_at: new Date() } : {}),
     }).where(eq(marketingCampaigns.id, id)).returning();
     if (!result[0]) return undefined;
@@ -2407,6 +2418,347 @@ export class DatabaseStorage implements IStorage {
       id: customersMirror.id, company: customersMirror.company, first_name: customersMirror.first_name,
       last_name: customersMirror.last_name, email: customersMirror.email, customer_group_name: customersMirror.customer_group_name,
     }).from(customersMirror).where(and(...conditions)).orderBy(asc(customersMirror.company), asc(customersMirror.last_name)).limit(opts.limit ?? 100);
+  }
+
+  async getMarketingTemplates(opts: { search?: string; category?: string; includeArchived?: boolean } = {}): Promise<EmailTemplate[]> {
+    const conditions: any[] = [eq(emailTemplates.template_type, "marketing")];
+    if (!opts.includeArchived) conditions.push(isNull(emailTemplates.archived_at));
+    if (opts.category && opts.category !== "all") conditions.push(eq(emailTemplates.category, opts.category));
+    if (opts.search?.trim()) {
+      const term = `%${opts.search.trim()}%`;
+      conditions.push(or(ilike(emailTemplates.name, term), ilike(emailTemplates.key, term)));
+    }
+    return db.select().from(emailTemplates).where(and(...conditions)).orderBy(desc(emailTemplates.updated_at));
+  }
+
+  async getMarketingTemplateById(id: number): Promise<EmailTemplate | undefined> {
+    const [template] = await db.select().from(emailTemplates).where(and(eq(emailTemplates.id, id), eq(emailTemplates.template_type, "marketing"))).limit(1);
+    return template;
+  }
+
+  async archiveMarketingTemplate(id: number, userId: number, archived: boolean): Promise<EmailTemplate | undefined> {
+    const [template] = await db.update(emailTemplates).set({
+      archived_at: archived ? new Date() : null,
+      is_active: !archived,
+      updated_by: userId,
+      updated_at: new Date(),
+    }).where(and(eq(emailTemplates.id, id), eq(emailTemplates.template_type, "marketing"))).returning();
+    return template;
+  }
+
+  private async getMarketingCandidateCustomers(filters: Record<string, unknown> = {}, limit = 100000): Promise<any[]> {
+    const conditions: any[] = [eq(customersMirror.account_type, "customer")];
+    if (typeof filters.isActive === "boolean") conditions.push(eq(customersMirror.is_active, filters.isActive));
+    else conditions.push(eq(customersMirror.is_active, true));
+    const addText = (column: any, key: string) => {
+      if (typeof filters[key] === "string" && String(filters[key]).trim()) conditions.push(eq(column, String(filters[key]).trim()));
+    };
+    addText(customersMirror.customer_group_name, "customerGroup");
+    addText(customersMirror.customer_type, "customerType");
+    addText(customersMirror.account_type, "accountType");
+    addText(customersMirror.account_health, "accountHealth");
+    if (typeof filters.primaryRepId === "number" && filters.primaryRepId > 0) conditions.push(eq(customersMirror.primary_rep_id, filters.primaryRepId));
+    if (typeof filters.secondaryRepId === "number" && filters.secondaryRepId > 0) conditions.push(eq(customersMirror.secondary_rep_id, filters.secondaryRepId));
+    if (typeof filters.repId === "number" && filters.repId > 0) conditions.push(eq(customersMirror.primary_rep_id, filters.repId));
+    const dateRange = (column: any, fromKey: string, toKey: string) => {
+      if (typeof filters[fromKey] === "string" && filters[fromKey]) conditions.push(sql`${column} >= ${filters[fromKey]}::timestamptz`);
+      if (typeof filters[toKey] === "string" && filters[toKey]) conditions.push(sql`${column} < ${filters[toKey]}::timestamptz + interval '1 day'`);
+    };
+    dateRange(customersMirror.created_date, "createdFrom", "createdTo");
+    dateRange(customersMirror.last_order_date, "lastOrderFrom", "lastOrderTo");
+    if (typeof filters.minOrders === "number") conditions.push(gte(customersMirror.lifetime_orders, filters.minOrders));
+    if (typeof filters.maxOrders === "number") conditions.push(sql`${customersMirror.lifetime_orders} <= ${filters.maxOrders}`);
+    if (typeof filters.minRevenue === "number") conditions.push(sql`${customersMirror.lifetime_revenue} >= ${filters.minRevenue}`);
+    if (typeof filters.maxRevenue === "number") conditions.push(sql`${customersMirror.lifetime_revenue} <= ${filters.maxRevenue}`);
+    if (typeof filters.minStoreCredit === "number") conditions.push(sql`${customersMirror.store_credit_balance} >= ${filters.minStoreCredit}`);
+    if (typeof filters.maxStoreCredit === "number") conditions.push(sql`${customersMirror.store_credit_balance} <= ${filters.maxStoreCredit}`);
+    if (typeof filters.state === "string" && filters.state.trim()) {
+      conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state_or_province', ${customersMirror.billing_address}->>'state_or_province', ${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${filters.state.trim()}`);
+    }
+    if (typeof filters.country === "string" && filters.country.trim()) {
+      conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'country_code', ${customersMirror.billing_address}->>'country_code', ${customersMirror.shipping_address}->>'country') = ${filters.country.trim()}`);
+    }
+    if (typeof filters.search === "string" && filters.search.trim()) {
+      const term = `%${filters.search.trim()}%`;
+      conditions.push(or(ilike(customersMirror.company, term), ilike(customersMirror.first_name, term), ilike(customersMirror.last_name, term), ilike(customersMirror.email, term)));
+    }
+    return db.select().from(customersMirror).where(and(...conditions)).orderBy(asc(customersMirror.company), asc(customersMirror.last_name)).limit(limit);
+  }
+
+  private async getMarketingCustomerSuppressionIds(customerIds: number[]): Promise<Set<number>> {
+    if (!customerIds.length) return new Set();
+    const rows = await db.select({ id: customersMirror.id })
+      .from(customersMirror)
+      .leftJoin(marketingCustomerPreferences, eq(marketingCustomerPreferences.customer_id, customersMirror.id))
+      .where(and(
+        inArray(customersMirror.id, customerIds),
+        or(
+          eq(marketingCustomerPreferences.email_subscribed, false),
+          sql`EXISTS (SELECT 1 FROM marketing_suppressions ms WHERE ms.customer_id = ${customersMirror.id} AND ms.revoked_at IS NULL)`,
+        ),
+      ));
+    return new Set(rows.map(row => row.id));
+  }
+
+  async getMarketingAudiencePreview(filters: Record<string, unknown>, limit = 25): Promise<{ customers: any[]; total: number; suppressed: number }> {
+    const candidates = await this.getMarketingCandidateCustomers(filters, 100000);
+    const suppressedIds = await this.getMarketingCustomerSuppressionIds(candidates.map(c => c.id));
+    return {
+      customers: candidates.slice(0, Math.max(0, limit)).map(c => ({ ...c, marketing_suppressed: suppressedIds.has(c.id) })),
+      total: candidates.length,
+      suppressed: suppressedIds.size,
+    };
+  }
+
+  private async resolveMarketingCampaignCustomers(campaign: any): Promise<any[]> {
+    if (campaign.audience_type === "selected_customers") {
+      return db.select({ customer: customersMirror }).from(marketingCampaignRecipients)
+        .innerJoin(customersMirror, eq(customersMirror.id, marketingCampaignRecipients.customer_id))
+        .where(eq(marketingCampaignRecipients.campaign_id, campaign.id))
+        .then(rows => rows.map(row => row.customer));
+    }
+    if (campaign.audience_type === "saved_audience" && campaign.audience_id) {
+      const [audience] = await db.select().from(marketingAudiences).where(eq(marketingAudiences.id, campaign.audience_id)).limit(1);
+      if (!audience) return [];
+      if (audience.audience_type === "manual") {
+        return db.select({ customer: customersMirror }).from(marketingAudienceMembers)
+          .innerJoin(customersMirror, eq(customersMirror.id, marketingAudienceMembers.customer_id))
+          .where(eq(marketingAudienceMembers.audience_id, campaign.audience_id))
+          .then(rows => rows.map(row => row.customer));
+      }
+      return this.getMarketingCandidateCustomers((audience.dynamic_filters ?? {}) as Record<string, unknown>);
+    }
+    return this.getMarketingCandidateCustomers(campaign.audience_type === "customer_group" ? (campaign.audience_config ?? {}) : {});
+  }
+
+  async claimMarketingCampaign(id: number): Promise<any | undefined> {
+    const [campaign] = await db.update(marketingCampaigns).set({
+      status: "sending",
+      started_at: new Date(),
+      send_attempts: sql`${marketingCampaigns.send_attempts} + 1`,
+      updated_at: new Date(),
+      last_error: null,
+    }).where(and(eq(marketingCampaigns.id, id), or(eq(marketingCampaigns.status, "queued"), eq(marketingCampaigns.status, "scheduled")))).returning();
+    return campaign;
+  }
+
+  async getMarketingQueueCampaigns(): Promise<any[]> {
+    return db.select().from(marketingCampaigns).where(or(
+      eq(marketingCampaigns.status, "queued"),
+      and(eq(marketingCampaigns.status, "scheduled"), lte(marketingCampaigns.scheduled_at, new Date())),
+    )).orderBy(asc(marketingCampaigns.scheduled_at)).limit(10);
+  }
+
+  async prepareMarketingRecipients(campaignId: number): Promise<{ eligible: number; suppressed: number; unsubscribed: number }> {
+    const [campaign] = await db.select().from(marketingCampaigns).where(eq(marketingCampaigns.id, campaignId)).limit(1);
+    if (!campaign) throw new Error("Campaign not found");
+    const candidates = await this.resolveMarketingCampaignCustomers(campaign);
+    const ids = [...new Set(candidates.map(c => Number(c.id)).filter(Number.isInteger))];
+    const suppressedIds = await this.getMarketingCustomerSuppressionIds(ids);
+    const existing = await db.select({ customer_id: marketingCampaignRecipients.customer_id, status: marketingCampaignRecipients.status })
+      .from(marketingCampaignRecipients).where(eq(marketingCampaignRecipients.campaign_id, campaignId));
+    const existingByCustomer = new Map(existing.map(row => [row.customer_id, row.status]));
+    for (const customer of candidates) {
+      const status = suppressedIds.has(customer.id)
+        ? (await this.getMarketingCustomerPreference(customer.id))?.email_subscribed === false ? "unsubscribed" : "suppressed"
+        : (existingByCustomer.get(customer.id) === "sent" ? "sent" : "eligible");
+      await db.insert(marketingCampaignRecipients).values({
+        campaign_id: campaignId, customer_id: customer.id, email: String(customer.email ?? "").trim(), status,
+      }).onConflictDoUpdate({
+        target: [marketingCampaignRecipients.campaign_id, marketingCampaignRecipients.customer_id],
+        set: { email: String(customer.email ?? "").trim(), status: status === "sent" ? "sent" : status },
+      });
+      if (status === "suppressed" || status === "unsubscribed") {
+        await this.recordMarketingEvent({ campaign_id: campaignId, event_type: status, detail: { customer_id: customer.id } });
+      }
+    }
+    const [counts] = await db.select({
+      eligible: sql<number>`count(*) filter (where ${marketingCampaignRecipients.status} in ('eligible','queued','sending','failed'))::int`,
+      suppressed: sql<number>`count(*) filter (where ${marketingCampaignRecipients.status} = 'suppressed')::int`,
+      unsubscribed: sql<number>`count(*) filter (where ${marketingCampaignRecipients.status} = 'unsubscribed')::int`,
+    }).from(marketingCampaignRecipients).where(eq(marketingCampaignRecipients.campaign_id, campaignId));
+    await db.update(marketingCampaigns).set({
+      recipient_count: ids.length, suppressed_count: counts?.suppressed ?? 0, unsubscribed_count: counts?.unsubscribed ?? 0, updated_at: new Date(),
+    }).where(eq(marketingCampaigns.id, campaignId));
+    return { eligible: counts?.eligible ?? 0, suppressed: counts?.suppressed ?? 0, unsubscribed: counts?.unsubscribed ?? 0 };
+  }
+
+  async claimMarketingRecipient(id: number): Promise<any | undefined> {
+    const [recipient] = await db.update(marketingCampaignRecipients).set({
+      status: "sending", attempt_count: sql`${marketingCampaignRecipients.attempt_count} + 1`, last_attempt_at: new Date(),
+    }).where(and(eq(marketingCampaignRecipients.id, id), or(eq(marketingCampaignRecipients.status, "eligible"), and(eq(marketingCampaignRecipients.status, "failed"), sql`${marketingCampaignRecipients.attempt_count} < 3`)))).returning();
+    return recipient;
+  }
+
+  async markMarketingRecipientSent(id: number, providerMessageId?: string | null): Promise<void> {
+    const [recipient] = await db.update(marketingCampaignRecipients).set({ status: "sent", sent_at: new Date(), provider_message_id: providerMessageId ?? null }).where(eq(marketingCampaignRecipients.id, id)).returning();
+    if (recipient) await this.recordMarketingEvent({ campaign_id: recipient.campaign_id, recipient_id: id, event_type: "sent", detail: { provider_message_id: providerMessageId ?? null } });
+  }
+
+  async markMarketingRecipientFailed(id: number, reason: string): Promise<void> {
+    const [recipient] = await db.update(marketingCampaignRecipients).set({ status: "failed", failure_reason: reason.slice(0, 1000) }).where(eq(marketingCampaignRecipients.id, id)).returning();
+    if (recipient) await this.recordMarketingEvent({ campaign_id: recipient.campaign_id, recipient_id: id, event_type: "failed", detail: { reason: reason.slice(0, 500) } });
+  }
+
+  async recordMarketingEvent(data: { campaign_id: number; recipient_id?: number | null; event_type: string; detail?: Record<string, unknown>; provider_event_id?: string | null }): Promise<void> {
+    await db.insert(marketingCampaignEvents).values({
+      campaign_id: data.campaign_id, recipient_id: data.recipient_id ?? null, event_type: data.event_type,
+      detail: data.detail ?? {}, provider_event_id: data.provider_event_id ?? null,
+    });
+  }
+
+  async completeMarketingCampaign(id: number): Promise<any | undefined> {
+    const [counts] = await db.select({
+      sent: sql<number>`count(*) filter (where ${marketingCampaignRecipients.status} = 'sent')::int`,
+      failed: sql<number>`count(*) filter (where ${marketingCampaignRecipients.status} = 'failed')::int`,
+    }).from(marketingCampaignRecipients).where(eq(marketingCampaignRecipients.campaign_id, id));
+    const status = (counts?.failed ?? 0) > 0 && (counts?.sent ?? 0) === 0 ? "failed" : "sent";
+    const [campaign] = await db.update(marketingCampaigns).set({
+      status, sent_count: counts?.sent ?? 0, failed_count: counts?.failed ?? 0, completed_at: new Date(), sent_at: status === "sent" ? new Date() : null, updated_at: new Date(),
+    }).where(eq(marketingCampaigns.id, id)).returning();
+    if (campaign) await this.recordMarketingEvent({ campaign_id: id, event_type: status, detail: { sent: counts?.sent ?? 0, failed: counts?.failed ?? 0 } });
+    return campaign ? this.getMarketingCampaign(id) : undefined;
+  }
+
+  async getMarketingRecipients(campaignId: number, opts: { status?: string; limit?: number; offset?: number } = {}): Promise<{ rows: any[]; total: number }> {
+    const conditions: any[] = [eq(marketingCampaignRecipients.campaign_id, campaignId)];
+    if (opts.status && opts.status !== "all") conditions.push(eq(marketingCampaignRecipients.status, opts.status));
+    const where = and(...conditions);
+    const [rows, countRows] = await Promise.all([
+      db.select({ recipient: marketingCampaignRecipients, customer: customersMirror }).from(marketingCampaignRecipients)
+        .innerJoin(customersMirror, eq(customersMirror.id, marketingCampaignRecipients.customer_id)).where(where)
+        .orderBy(desc(marketingCampaignRecipients.created_at)).limit(opts.limit ?? 100).offset(opts.offset ?? 0),
+      db.select({ count: sql<number>`count(*)::int` }).from(marketingCampaignRecipients).where(where),
+    ]);
+    return { rows: rows.map(row => ({ ...row.recipient, customer: row.customer })), total: countRows[0]?.count ?? 0 };
+  }
+
+  async getMarketingAnalytics(opts: { campaignId?: number; dateFrom?: string; dateTo?: string } = {}): Promise<any> {
+    const conditions: any[] = [];
+    if (opts.campaignId) conditions.push(eq(marketingCampaignEvents.campaign_id, opts.campaignId));
+    if (opts.dateFrom) conditions.push(gte(marketingCampaignEvents.occurred_at, new Date(`${opts.dateFrom}T00:00:00`)));
+    if (opts.dateTo) {
+      const end = new Date(`${opts.dateTo}T00:00:00`); end.setDate(end.getDate() + 1);
+      conditions.push(lt(marketingCampaignEvents.occurred_at, end));
+    }
+    const rows = await db.select({ event_type: marketingCampaignEvents.event_type, count: sql<number>`count(*)::int` })
+      .from(marketingCampaignEvents).where(conditions.length ? and(...conditions) : undefined).groupBy(marketingCampaignEvents.event_type);
+    const result: Record<string, number> = {};
+    rows.forEach(row => { result[row.event_type] = row.count; });
+    return {
+      sent: result.sent ?? 0, failed: result.failed ?? 0, suppressed: result.suppressed ?? 0, unsubscribed: result.unsubscribed ?? 0,
+      delivered: null, opened: null, clicked: null, deliveryAvailable: false,
+    };
+  }
+
+  async markMarketingTestSent(campaignId: number): Promise<void> {
+    await db.update(marketingCampaigns).set({ test_sent_at: new Date(), updated_at: new Date() }).where(eq(marketingCampaigns.id, campaignId));
+  }
+
+  async getMarketingCustomerPreference(customerId: number): Promise<any> {
+    const [row] = await db.select().from(marketingCustomerPreferences).where(eq(marketingCustomerPreferences.customer_id, customerId)).limit(1);
+    return row ?? { customer_id: customerId, email_subscribed: true, unsubscribed_at: null };
+  }
+
+  async upsertMarketingCustomerPreference(customerId: number, data: { email_subscribed: boolean; userId?: number }): Promise<any> {
+    const [row] = await db.insert(marketingCustomerPreferences).values({
+      customer_id: customerId, email_subscribed: data.email_subscribed, unsubscribed_at: data.email_subscribed ? null : new Date(), updated_by: data.userId ?? null,
+    }).onConflictDoUpdate({
+      target: marketingCustomerPreferences.customer_id,
+      set: { email_subscribed: data.email_subscribed, unsubscribed_at: data.email_subscribed ? null : new Date(), updated_by: data.userId ?? null, updated_at: new Date() },
+    }).returning();
+    return row;
+  }
+
+  async getMarketingSuppressions(customerId?: number): Promise<any[]> {
+    return db.select().from(marketingSuppressions).where(and(
+      customerId ? eq(marketingSuppressions.customer_id, customerId) : sql`true`,
+      isNull(marketingSuppressions.revoked_at),
+    )).orderBy(desc(marketingSuppressions.created_at));
+  }
+
+  async createMarketingSuppression(data: { customerId: number; email?: string; reason: string; source?: string; createdBy?: number }): Promise<any> {
+    const customer = await this.getCrmCustomerById(data.customerId);
+    const [row] = await db.insert(marketingSuppressions).values({
+      customer_id: data.customerId, email: data.email ?? customer?.email ?? "", reason: data.reason.trim(), source: data.source ?? "manual", created_by: data.createdBy ?? null,
+    }).returning();
+    await this.upsertMarketingCustomerPreference(data.customerId, { email_subscribed: false, userId: data.createdBy });
+    return row;
+  }
+
+  async revokeMarketingSuppression(id: number, userId: number, detail?: string): Promise<any | undefined> {
+    const [row] = await db.update(marketingSuppressions).set({ revoked_at: new Date(), revoked_by: userId, revoked_at_detail: detail ?? null }).where(and(eq(marketingSuppressions.id, id), isNull(marketingSuppressions.revoked_at))).returning();
+    return row;
+  }
+
+  async getMarketingAutomations(opts: { status?: string; search?: string } = {}): Promise<any[]> {
+    const conditions: any[] = [];
+    if (opts.status && opts.status !== "all") conditions.push(eq(marketingAutomations.status, opts.status));
+    if (opts.search?.trim()) conditions.push(ilike(marketingAutomations.name, `%${opts.search.trim()}%`));
+    const rows = await db.select({ automation: marketingAutomations, creator_name: users.name }).from(marketingAutomations)
+      .leftJoin(users, eq(users.id, marketingAutomations.created_by)).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(marketingAutomations.updated_at));
+    return Promise.all(rows.map(async row => ({ ...row.automation, creator_name: row.creator_name, step_count: (await db.select({ count: sql<number>`count(*)::int` }).from(marketingAutomationSteps).where(eq(marketingAutomationSteps.automation_id, row.automation.id)))[0]?.count ?? 0 })));
+  }
+
+  async getMarketingAutomation(id: number): Promise<any | undefined> {
+    const [row] = await db.select({ automation: marketingAutomations, creator_name: users.name }).from(marketingAutomations)
+      .leftJoin(users, eq(users.id, marketingAutomations.created_by)).where(eq(marketingAutomations.id, id)).limit(1);
+    if (!row) return undefined;
+    const steps = await db.select().from(marketingAutomationSteps).where(eq(marketingAutomationSteps.automation_id, id)).orderBy(asc(marketingAutomationSteps.step_order));
+    return { ...row.automation, creator_name: row.creator_name, steps };
+  }
+
+  async createMarketingAutomation(data: { name: string; description?: string; trigger_type: string; trigger_config?: Record<string, unknown>; frequency_days?: number; created_by: number; steps: Array<{ action_type: string; action_config?: Record<string, unknown> }> }): Promise<any> {
+    const result = await db.transaction(async tx => {
+      const [automation] = await tx.insert(marketingAutomations).values({
+        name: data.name.trim(), description: data.description ?? "", trigger_type: data.trigger_type, trigger_config: data.trigger_config ?? {}, frequency_days: data.frequency_days ?? 0, created_by: data.created_by,
+      }).returning();
+      if (data.steps.length) await tx.insert(marketingAutomationSteps).values(data.steps.map((step, index) => ({ automation_id: automation.id, step_order: index, action_type: step.action_type, action_config: step.action_config ?? {} })));
+      return automation;
+    });
+    return this.getMarketingAutomation(result.id);
+  }
+
+  async updateMarketingAutomation(id: number, data: Record<string, unknown>, userId: number): Promise<any | undefined> {
+    const allowed = ["name", "description", "trigger_type", "trigger_config", "frequency_days"] as const;
+    const update: Record<string, unknown> = { updated_at: new Date() };
+    for (const key of allowed) if (key in data) update[key] = data[key];
+    const result = await db.transaction(async tx => {
+      const [updated] = await tx.update(marketingAutomations).set(update as any).where(eq(marketingAutomations.id, id)).returning();
+      if (!updated) return undefined;
+      if (Array.isArray(data.steps)) {
+        await tx.delete(marketingAutomationSteps).where(eq(marketingAutomationSteps.automation_id, id));
+        if (data.steps.length) await tx.insert(marketingAutomationSteps).values((data.steps as any[]).map((step, index) => ({ automation_id: id, step_order: index, action_type: String(step.action_type), action_config: step.action_config ?? {} })));
+      }
+      return updated;
+    });
+    if (result) await this.createCrmAuditLog({ user_id: userId, action: "marketing_automation_edited", detail: { automation_id: id } });
+    return result ? this.getMarketingAutomation(id) : undefined;
+  }
+
+  async updateMarketingAutomationStatus(id: number, status: string, userId: number): Promise<any | undefined> {
+    const [updated] = await db.update(marketingAutomations).set({ status, updated_at: new Date() }).where(eq(marketingAutomations.id, id)).returning();
+    if (!updated) return undefined;
+    await this.createCrmAuditLog({ user_id: userId, action: `marketing_automation_${status}`, detail: { automation_id: id } });
+    return this.getMarketingAutomation(id);
+  }
+
+  async getMarketingAutomationExecutions(id: number, limit = 50): Promise<any[]> {
+    return db.select({ execution: marketingAutomationExecutions, customer: customersMirror }).from(marketingAutomationExecutions)
+      .innerJoin(customersMirror, eq(customersMirror.id, marketingAutomationExecutions.customer_id))
+      .where(eq(marketingAutomationExecutions.automation_id, id)).orderBy(desc(marketingAutomationExecutions.created_at)).limit(limit)
+      .then(rows => rows.map(row => ({ ...row.execution, customer: row.customer })));
+  }
+
+  async createMarketingAutomationExecution(data: { automationId: number; customerId: number; triggerEvent: string; dedupeKey: string }): Promise<any | undefined> {
+    const [execution] = await db.insert(marketingAutomationExecutions).values({
+      automation_id: data.automationId, customer_id: data.customerId, trigger_event: data.triggerEvent, dedupe_key: data.dedupeKey,
+    }).onConflictDoNothing({ target: marketingAutomationExecutions.dedupe_key }).returning();
+    return execution;
+  }
+
+  async updateMarketingAutomationExecution(id: number, data: Record<string, unknown>): Promise<void> {
+    await db.update(marketingAutomationExecutions).set(data as any).where(eq(marketingAutomationExecutions.id, id));
   }
 
   // ─── Reports ──────────────────────────────────────────────────────────────────

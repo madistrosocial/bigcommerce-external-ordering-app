@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useStore } from "@/lib/store";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { getAuthHeaders } from "@/lib/api";
+import { getAuthHeaders, getMarketingPreference, updateMarketingPreference } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -428,6 +428,16 @@ export default function CustomerProfile() {
       return r.json();
     },
     enabled: !!id,
+  });
+  const { data: marketingPreference } = useQuery<any>({
+    queryKey: ["marketing-preference", id],
+    queryFn: () => getMarketingPreference(id),
+    enabled: !!id && hasPermission("marketing"),
+  });
+  const marketingPreferenceMutation = useMutation({
+    mutationFn: (subscribed: boolean) => updateMarketingPreference(id, subscribed, subscribed ? "Re-enabled by staff" : "Opted out by staff"),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["marketing-preference", id] }); toast({ title: "Marketing preference updated" }); },
+    onError: (e: any) => toast({ title: "Unable to update preference", description: e.message, variant: "destructive" }),
   });
 
   const { data: addressBook = [], isLoading: loadingAddresses } = useQuery<any[]>({
@@ -1043,6 +1053,14 @@ export default function CustomerProfile() {
           {/* ── OVERVIEW TAB ──────────────────────────────────────────────── */}
           {activeTab === "overview" && (
             <div className="p-5 space-y-5">
+              {hasPermission("marketing") && (
+                <div className="flex flex-wrap items-center gap-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+                  <Mail className="h-5 w-5 text-blue-600" />
+                  <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-slate-800">Marketing email preference</p><p className="text-xs text-slate-500">Separate from transactional order and invoice email.</p></div>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${marketingPreference?.email_subscribed === false ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{marketingPreference?.email_subscribed === false ? "Unsubscribed" : "Subscribed"}</span>
+                  {hasPermission("marketing", "manage_suppressions") && <Button size="sm" variant="outline" onClick={() => marketingPreferenceMutation.mutate(marketingPreference?.email_subscribed === false)} disabled={marketingPreferenceMutation.isPending}>{marketingPreference?.email_subscribed === false ? "Re-enable" : "Unsubscribe"}</Button>}
+                </div>
+              )}
 
               {/* Recent Notes + Recent Activity columns */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">

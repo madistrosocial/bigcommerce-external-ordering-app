@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, decimal, timestamp, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, boolean, decimal, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -360,6 +360,10 @@ export const emailTemplates = pgTable("email_templates", {
   name: text("name").notNull(),
   subject_template: text("subject_template").notNull().default(""),
   body: text("body").notNull().default(""),
+  template_type: text("template_type").notNull().default("transactional"), // 'transactional' | 'marketing'
+  category: text("category").notNull().default("general"),
+  is_active: boolean("is_active").notNull().default(true),
+  archived_at: timestamp("archived_at"),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
   updated_by: integer("updated_by").references(() => users.id),
 });
@@ -378,14 +382,25 @@ export const marketingCampaigns = pgTable("marketing_campaigns", {
   audience_type: text("audience_type").notNull().default("all_eligible"),
   audience_id: integer("audience_id"),
   audience_config: jsonb("audience_config").notNull().default({}),
+  template_id: integer("template_id").references(() => emailTemplates.id, { onDelete: "set null" }),
   status: text("status").notNull().default("draft"),
   scheduled_at: timestamp("scheduled_at"),
+  timezone: text("timezone").notNull().default("UTC"),
+  queued_at: timestamp("queued_at"),
+  started_at: timestamp("started_at"),
   sent_at: timestamp("sent_at"),
+  completed_at: timestamp("completed_at"),
+  last_error: text("last_error"),
+  send_attempts: integer("send_attempts").notNull().default(0),
   recipient_count: integer("recipient_count").notNull().default(0),
   sent_count: integer("sent_count").notNull().default(0),
+  failed_count: integer("failed_count").notNull().default(0),
+  suppressed_count: integer("suppressed_count").notNull().default(0),
+  unsubscribed_count: integer("unsubscribed_count").notNull().default(0),
   delivered_count: integer("delivered_count").notNull().default(0),
   opened_count: integer("opened_count").notNull().default(0),
   clicked_count: integer("clicked_count").notNull().default(0),
+  test_sent_at: timestamp("test_sent_at"),
   created_by: integer("created_by").notNull().references(() => users.id),
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
@@ -413,8 +428,101 @@ export const marketingCampaignRecipients = pgTable("marketing_campaign_recipient
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   campaign_id: integer("campaign_id").notNull().references(() => marketingCampaigns.id, { onDelete: "cascade" }),
   customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  email: text("email").notNull().default(""),
+  status: text("status").notNull().default("eligible"), // eligible | suppressed | queued | sending | sent | failed | unsubscribed
+  is_test: boolean("is_test").notNull().default(false),
+  attempt_count: integer("attempt_count").notNull().default(0),
+  last_attempt_at: timestamp("last_attempt_at"),
+  sent_at: timestamp("sent_at"),
+  failure_reason: text("failure_reason"),
+  provider_message_id: text("provider_message_id"),
+  unsubscribed_at: timestamp("unsubscribed_at"),
   created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  campaignCustomerUnique: uniqueIndex("marketing_campaign_recipients_campaign_customer_idx").on(t.campaign_id, t.customer_id),
+  campaignStatusIdx: index("marketing_campaign_recipients_status_idx").on(t.campaign_id, t.status),
+}));
+
+export const marketingCampaignEvents = pgTable("marketing_campaign_events", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  campaign_id: integer("campaign_id").notNull().references(() => marketingCampaigns.id, { onDelete: "cascade" }),
+  recipient_id: integer("recipient_id").references(() => marketingCampaignRecipients.id, { onDelete: "cascade" }),
+  event_type: text("event_type").notNull(), // queued | sent | failed | suppressed | unsubscribed | delivered | opened | clicked
+  provider_event_id: text("provider_event_id"),
+  detail: jsonb("detail").notNull().default({}),
+  occurred_at: timestamp("occurred_at").notNull().defaultNow(),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  campaignEventIdx: index("marketing_campaign_events_campaign_idx").on(t.campaign_id, t.occurred_at),
+  recipientEventIdx: index("marketing_campaign_events_recipient_idx").on(t.recipient_id, t.occurred_at),
+}));
+
+export const marketingCustomerPreferences = pgTable("marketing_customer_preferences", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }).unique(),
+  email_subscribed: boolean("email_subscribed").notNull().default(true),
+  unsubscribed_at: timestamp("unsubscribed_at"),
+  updated_by: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
 });
+
+export const marketingSuppressions = pgTable("marketing_suppressions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  email: text("email").notNull().default(""),
+  reason: text("reason").notNull(),
+  source: text("source").notNull().default("manual"), // manual | unsubscribe | bounce | complaint
+  created_by: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  revoked_at: timestamp("revoked_at"),
+  revoked_by: integer("revoked_by").references(() => users.id, { onDelete: "set null" }),
+  revoked_at_detail: text("revoked_at_detail"),
+}, (t) => ({
+  activeCustomerSuppressionIdx: index("marketing_suppressions_active_customer_idx").on(t.customer_id, t.revoked_at),
+  activeEmailSuppressionIdx: index("marketing_suppressions_active_email_idx").on(t.email, t.revoked_at),
+}));
+
+export const marketingAutomations = pgTable("marketing_automations", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  trigger_type: text("trigger_type").notNull(), // customer_created | customer_signup_completed | audience_membership
+  trigger_config: jsonb("trigger_config").notNull().default({}),
+  status: text("status").notNull().default("draft"), // draft | active | paused | archived
+  frequency_days: integer("frequency_days").notNull().default(0),
+  created_by: integer("created_by").notNull().references(() => users.id),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const marketingAutomationSteps = pgTable("marketing_automation_steps", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  automation_id: integer("automation_id").notNull().references(() => marketingAutomations.id, { onDelete: "cascade" }),
+  step_order: integer("step_order").notNull(),
+  action_type: text("action_type").notNull(), // send_email | wait | create_note | notify_rep
+  action_config: jsonb("action_config").notNull().default({}),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  automationStepUnique: uniqueIndex("marketing_automation_steps_order_idx").on(t.automation_id, t.step_order),
+}));
+
+export const marketingAutomationExecutions = pgTable("marketing_automation_executions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  automation_id: integer("automation_id").notNull().references(() => marketingAutomations.id, { onDelete: "cascade" }),
+  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  trigger_event: text("trigger_event").notNull(),
+  dedupe_key: text("dedupe_key").notNull().unique(),
+  status: text("status").notNull().default("queued"), // queued | running | completed | failed | skipped
+  current_step: integer("current_step").notNull().default(0),
+  detail: jsonb("detail").notNull().default({}),
+  error_message: text("error_message"),
+  started_at: timestamp("started_at"),
+  completed_at: timestamp("completed_at"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  automationExecutionIdx: index("marketing_automation_executions_automation_idx").on(t.automation_id, t.created_at),
+  customerExecutionIdx: index("marketing_automation_executions_customer_idx").on(t.customer_id, t.created_at),
+}));
 
 export const marketingCampaignActivity = pgTable("marketing_campaign_activity", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -479,6 +587,12 @@ export type MarketingAudience = typeof marketingAudiences.$inferSelect;
 export type MarketingAudienceMember = typeof marketingAudienceMembers.$inferSelect;
 export type MarketingCampaignRecipient = typeof marketingCampaignRecipients.$inferSelect;
 export type MarketingCampaignActivity = typeof marketingCampaignActivity.$inferSelect;
+export type MarketingCampaignEvent = typeof marketingCampaignEvents.$inferSelect;
+export type MarketingCustomerPreference = typeof marketingCustomerPreferences.$inferSelect;
+export type MarketingSuppression = typeof marketingSuppressions.$inferSelect;
+export type MarketingAutomation = typeof marketingAutomations.$inferSelect;
+export type MarketingAutomationStep = typeof marketingAutomationSteps.$inferSelect;
+export type MarketingAutomationExecution = typeof marketingAutomationExecutions.$inferSelect;
 
 // CRM types
 export type InsertCrmCustomer = z.infer<typeof insertCrmCustomerSchema>;
