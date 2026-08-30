@@ -1,0 +1,1542 @@
+Build MARKETING MODULE – PHASE 2 for the MidAtlantic Distribution Sales application.
+
+IMPORTANT:
+Phase 1 Marketing functionality already exists or is being implemented.
+
+Before making any changes:
+
+1. Inspect the completed Marketing Phase 1 implementation.
+2. Inspect all existing Marketing database tables and migrations.
+3. Inspect the existing Email Templates module.
+4. Inspect the current authentication and permission system.
+5. Inspect existing activity/timeline logging.
+6. Inspect the existing email infrastructure and environment variables.
+7. Inspect existing customer, CRM, customer group, and sales rep relationships.
+
+DO NOT duplicate functionality that was already completed in Phase 1.
+
+DO NOT redesign or break existing modules.
+
+This is an ADDITIVE update.
+
+Do not automatically push to GitHub.
+
+==================================================
+PHASE 2 GOAL
+==================================================
+
+Phase 2 turns the Marketing module into a functional campaign execution and automation system.
+
+Build:
+
+1. Campaign email sending infrastructure
+2. Campaign scheduling
+3. Reusable campaign templates
+4. Advanced audience segmentation
+5. Marketing automations
+6. Campaign performance tracking
+7. Campaign recipient management
+8. Marketing suppression and opt-out handling
+9. Improved analytics
+10. Marketing activity and audit logging
+
+Phase 2 should build on Phase 1 without replacing its architecture.
+
+==================================================
+MODULE NAVIGATION
+==================================================
+
+Keep Marketing in the existing navigation location:
+
+Inventory
+Marketing
+Catalog
+
+Marketing must continue to behave as an expandable module.
+
+Expand the Marketing submenu to include:
+
+Marketing Dashboard
+Campaigns
+Audiences
+Automations
+Templates
+Analytics
+
+Suggested routes:
+
+/marketing
+/marketing/campaigns
+/marketing/audiences
+/marketing/automations
+/marketing/templates
+/marketing/analytics
+
+Do not break existing routes.
+
+Do not create a completely separate navigation system.
+
+Mobile navigation must continue using the existing expandable slide-out menu behavior.
+
+==================================================
+MODULE 1: CAMPAIGN EXECUTION
+==================================================
+
+Upgrade Campaigns from Phase 1 so campaigns can actually be prepared and sent through the application's approved email infrastructure.
+
+Before implementing sending:
+
+Inspect the existing email infrastructure.
+
+Check whether the application currently uses:
+
+- SMTP
+- Resend
+- SendGrid
+- AWS SES
+- another provider
+
+DO NOT introduce a second email provider if a working provider already exists.
+
+Reuse the existing email infrastructure whenever possible.
+
+==================================================
+CAMPAIGN SEND OPTIONS
+==================================================
+
+A campaign should support:
+
+Save as Draft
+
+Send Test Email
+
+Send Now
+
+Schedule Send
+
+Duplicate Campaign
+
+Pause Scheduled Campaign
+
+Cancel Scheduled Campaign
+
+==================================================
+SEND TEST EMAIL
+==================================================
+
+Add a Send Test Email action.
+
+Requirements:
+
+- Allow authorized users to enter one or more test email addresses.
+- Clearly label test sends.
+- Do not include test sends in production campaign recipient statistics.
+- Log test sends separately.
+- Validate email addresses.
+- Prevent unauthorized users from sending campaigns.
+
+==================================================
+SEND NOW
+==================================================
+
+Before sending a campaign:
+
+Display a final confirmation screen/modal.
+
+Show:
+
+Campaign Name
+
+Subject Line
+
+Audience
+
+Estimated Recipient Count
+
+Excluded / Suppressed Count
+
+Scheduled or Immediate Send
+
+Require explicit confirmation before the campaign is sent.
+
+Once confirmed:
+
+Create campaign recipient records.
+
+Queue the campaign for processing.
+
+Do not block the application UI while sending a large campaign.
+
+Campaign sending should happen through a safe background processing approach compatible with the current application architecture.
+
+Do not use an unsafe browser-side loop to send emails.
+
+==================================================
+CAMPAIGN SCHEDULING
+==================================================
+
+Allow campaigns to be scheduled.
+
+Fields:
+
+Send Date
+
+Send Time
+
+Timezone
+
+Requirements:
+
+- Store scheduled timestamps consistently.
+- Clearly display the selected timezone.
+- Prevent scheduling in the past.
+- Allow editing before the campaign begins sending.
+- Allow cancellation before sending begins.
+- Log scheduling changes.
+
+Campaign statuses should support:
+
+Draft
+
+Ready
+
+Scheduled
+
+Queued
+
+Sending
+
+Sent
+
+Paused
+
+Cancelled
+
+Failed
+
+Do not allow invalid transitions.
+
+==================================================
+SENDING SAFETY
+==================================================
+
+Campaign sending must be designed safely.
+
+Requirements:
+
+- Prevent accidental duplicate sends.
+- Prevent the same campaign from being started twice.
+- Track send attempts.
+- Track failures.
+- Support retry handling where safe.
+- Do not resend successfully delivered messages during retries.
+- Log meaningful errors without exposing sensitive credentials.
+
+Use idempotent processing where possible.
+
+==================================================
+MODULE 2: CAMPAIGN RECIPIENT MANAGEMENT
+==================================================
+
+Create recipient-level tracking.
+
+Each campaign should be able to display:
+
+Total Audience
+
+Eligible Recipients
+
+Suppressed Recipients
+
+Queued
+
+Sent
+
+Delivered
+
+Opened
+
+Clicked
+
+Failed
+
+Unsubscribed
+
+Do not fabricate delivery or engagement events.
+
+Only display metrics supported by the actual email provider/tracking implementation.
+
+==================================================
+CAMPAIGN RECIPIENT VIEW
+==================================================
+
+Inside Campaign Details, add a Recipients tab.
+
+Suggested tabs:
+
+Overview
+
+Content
+
+Recipients
+
+Activity
+
+Analytics
+
+Recipients table:
+
+Customer
+
+Email
+
+Status
+
+Sent At
+
+Delivered At
+
+Opened At
+
+Clicked At
+
+Failure Reason
+
+Mobile behavior:
+
+Convert wide recipient tables into compact cards or horizontally optimized responsive layouts.
+
+Do not make the page unusable on mobile.
+
+==================================================
+CUSTOMER IDENTIFICATION
+==================================================
+
+Continue using existing customer and CRM relationships.
+
+Do not duplicate customer records.
+
+Recipient records should reference existing customer identifiers where possible.
+
+If a customer has a CRM profile:
+
+Customer names should link to:
+
+/crm/customers/:id
+
+Follow the existing CRM linking behavior.
+
+==================================================
+MODULE 3: MARKETING TEMPLATES
+==================================================
+
+Build:
+
+/marketing/templates
+
+IMPORTANT:
+
+The application already has an Email Templates area.
+
+Before building this module:
+
+Inspect the existing Email Templates implementation.
+
+Do not duplicate or break existing templates.
+
+The Marketing Templates page should either:
+
+A. Reuse the existing template infrastructure
+
+OR
+
+B. Add marketing-specific metadata to the existing template system.
+
+Prefer reuse over duplication.
+
+==================================================
+TEMPLATE FEATURES
+==================================================
+
+Support:
+
+Create Template
+
+Edit Template
+
+Duplicate Template
+
+Preview Template
+
+Archive Template
+
+Use Template in Campaign
+
+Template fields:
+
+Template Name
+
+Subject Line
+
+Preview Text
+
+Email Content
+
+Category
+
+Status
+
+Categories may include:
+
+Promotional
+
+Product Launch
+
+Announcement
+
+Customer Follow-up
+
+Seasonal
+
+Other
+
+==================================================
+TEMPLATE EDITOR
+==================================================
+
+For Phase 2:
+
+Use a practical editor compatible with the existing application.
+
+Do not build an unnecessarily complex drag-and-drop editor if the current architecture does not support it safely.
+
+Support:
+
+Formatted content
+
+Links
+
+Images where existing infrastructure supports them
+
+Variables / merge fields
+
+Preview
+
+Desktop and mobile preview
+
+==================================================
+PERSONALIZATION VARIABLES
+==================================================
+
+Support a controlled set of merge variables based on actual available data.
+
+Examples, only if data exists:
+
+{{customer.first_name}}
+
+{{customer.last_name}}
+
+{{customer.company_name}}
+
+{{customer.email}}
+
+{{sales_rep.name}}
+
+Do not expose arbitrary database fields.
+
+If a value is unavailable:
+
+Use a safe fallback.
+
+Example:
+
+Hi {{customer.first_name}}
+
+should safely fall back to a generic greeting when first name is unavailable.
+
+Do not allow broken variables to silently produce malformed emails.
+
+==================================================
+MODULE 4: ADVANCED AUDIENCE SEGMENTATION
+==================================================
+
+Expand the Phase 1 Audiences module.
+
+Dynamic audiences should support combining filters.
+
+Before adding each filter:
+
+Confirm the required data exists.
+
+Possible segmentation filters:
+
+Customer Account Type
+
+Customer Type
+
+Customer Group
+
+Customer Status
+
+Sales Rep
+
+Primary Sales Rep
+
+Secondary Sales Rep
+
+Signup Date
+
+Customer Created Date
+
+Last Order Date
+
+Lifetime Order Count
+
+Lifetime Revenue
+
+Average Order Value
+
+Store Credit Status
+
+Geographic Location
+
+State
+
+Country
+
+Required Document Status
+
+==================================================
+FILTER LOGIC
+==================================================
+
+Support:
+
+AND conditions
+
+OR conditions where practical
+
+Examples:
+
+Customer Status = Active
+
+AND
+
+Lifetime Revenue > $500
+
+OR:
+
+Customer Group = Wholesale
+
+OR
+
+Customer Group = VIP
+
+The UI should remain simple.
+
+Do not expose a complicated technical query builder to normal users.
+
+==================================================
+AUDIENCE PREVIEW
+==================================================
+
+Before saving or using an audience:
+
+Show:
+
+Estimated Customer Count
+
+Sample Customers
+
+Excluded Customers
+
+Suppressed Customers
+
+The count should be based on actual data.
+
+Do not store a stale static count when a dynamic audience should be recalculated.
+
+==================================================
+SAVED AUDIENCES
+==================================================
+
+Allow users to:
+
+Create
+
+Edit
+
+Duplicate
+
+Archive
+
+Delete
+
+Saved Audiences.
+
+Deletion must require confirmation.
+
+Do not allow deleting an audience that is actively required by a campaign without warning the user.
+
+==================================================
+MODULE 5: MARKETING AUTOMATIONS
+==================================================
+
+Create:
+
+/marketing/automations
+
+Phase 2 automations should remain practical and limited.
+
+Do not build a massive visual workflow builder.
+
+Use a clean rule-based automation builder.
+
+==================================================
+AUTOMATION TYPES
+==================================================
+
+Support initial triggers based on actual application events.
+
+Potential triggers:
+
+Customer Created
+
+Customer Signup Completed
+
+Customer Approved
+
+Customer Added to Customer Group
+
+Required Documents Submitted
+
+Required Documents Approved
+
+Customer Inactive for X Days
+
+No Order for X Days
+
+Customer Birthday
+
+Only implement triggers backed by real application data.
+
+Do not create triggers that cannot actually execute.
+
+==================================================
+AUTOMATION ACTIONS
+==================================================
+
+Initial actions:
+
+Send Email
+
+Wait X Days
+
+Add Customer to Audience
+
+Remove Customer from Audience
+
+Create Internal Activity
+
+Notify Assigned Sales Rep
+
+Do not build SMS or push notifications yet unless existing infrastructure already supports them.
+
+==================================================
+AUTOMATION BUILDER
+==================================================
+
+Use a straightforward step-based interface.
+
+Example:
+
+WHEN
+
+Customer Approved
+
+THEN
+
+Wait 1 Day
+
+THEN
+
+Send Welcome Email
+
+Another example:
+
+WHEN
+
+Customer has no order for 30 days
+
+THEN
+
+Send Re-engagement Email
+
+The interface should clearly show:
+
+Trigger
+
+Conditions
+
+Actions
+
+Status
+
+==================================================
+AUTOMATION STATUS
+==================================================
+
+Support:
+
+Draft
+
+Active
+
+Paused
+
+Archived
+
+Only Active automations should execute.
+
+Users must be able to pause an automation immediately.
+
+==================================================
+AUTOMATION EXECUTION LOG
+==================================================
+
+Each automation should have an execution history.
+
+Display:
+
+Customer
+
+Trigger
+
+Action
+
+Status
+
+Executed At
+
+Failure Reason if applicable
+
+Do not fabricate execution history.
+
+==================================================
+AUTOMATION SAFETY
+==================================================
+
+Prevent:
+
+Duplicate automation execution
+
+Infinite loops
+
+The same customer receiving the same automation repeatedly without a defined reason
+
+Unsafe rapid repeat sends
+
+Support reasonable frequency controls.
+
+Example:
+
+Do not send the same automation email to the same customer more than once within a configured interval.
+
+The exact behavior should be configurable where practical.
+
+==================================================
+MODULE 6: CUSTOMER MARKETING STATUS
+==================================================
+
+Enhance the CRM Customer page with marketing-related information.
+
+Do not redesign the existing customer page.
+
+Add information in a way consistent with the current CRM UI.
+
+Potential Marketing section:
+
+Marketing Status
+
+Subscribed
+
+Unsubscribed
+
+Suppressed
+
+Last Marketing Email
+
+Last Campaign
+
+Marketing Activity
+
+==================================================
+CUSTOMER MARKETING PREFERENCES
+==================================================
+
+Authorized users should be able to view:
+
+Marketing Subscription Status
+
+Email Opt-Out Status
+
+Suppression Reason
+
+Last Updated
+
+Do not allow normal users to bypass customer opt-out preferences.
+
+==================================================
+MODULE 7: UNSUBSCRIBE AND SUPPRESSION
+==================================================
+
+Build proper marketing suppression handling.
+
+Requirements:
+
+Customers must be excluded from marketing campaigns when:
+
+They have unsubscribed
+
+They have been manually suppressed
+
+Their email is invalid or permanently failed
+
+Other legally or operationally required suppression conditions apply
+
+Do not automatically suppress transactional emails unless the application's existing rules require it.
+
+Marketing and transactional communications must remain logically separated.
+
+==================================================
+UNSUBSCRIBE FLOW
+==================================================
+
+Marketing emails should support an unsubscribe mechanism appropriate for the existing email infrastructure.
+
+When a customer unsubscribes:
+
+Update their marketing preference.
+
+Create an activity record.
+
+Exclude them from future marketing sends.
+
+Do not delete their customer account.
+
+Do not remove their CRM history.
+
+==================================================
+MANUAL SUPPRESSION
+==================================================
+
+Authorized users should be able to manually suppress a customer.
+
+Require:
+
+Reason
+
+User performing the action
+
+Timestamp
+
+Suppression should be auditable.
+
+==================================================
+MODULE 8: CAMPAIGN ANALYTICS
+==================================================
+
+Create:
+
+/marketing/analytics
+
+This page should provide a clearer performance overview.
+
+Date range selector:
+
+Today
+
+Last 7 Days
+
+Last 30 Days
+
+This Month
+
+Last Month
+
+Custom Range
+
+==================================================
+ANALYTICS KPIs
+==================================================
+
+Display actual available metrics:
+
+Campaigns Sent
+
+Total Recipients
+
+Delivered
+
+Delivery Rate
+
+Open Rate
+
+Click Rate
+
+Unsubscribe Rate
+
+Failed Sends
+
+Do not show metrics that the current infrastructure cannot track.
+
+If tracking is unavailable:
+
+Display:
+
+Not Available
+
+rather than fake percentages.
+
+==================================================
+CAMPAIGN PERFORMANCE CHART
+==================================================
+
+Include charts for:
+
+Messages Sent Over Time
+
+Open Rate Trend
+
+Click Rate Trend
+
+Use the existing dashboard chart style.
+
+Do not introduce an unrelated chart design system.
+
+==================================================
+TOP CAMPAIGNS
+==================================================
+
+Display:
+
+Top Performing Campaigns
+
+Columns:
+
+Campaign
+
+Audience
+
+Sent
+
+Open Rate
+
+Click Rate
+
+Unsubscribes
+
+==================================================
+MODULE 9: DASHBOARD UPDATES
+==================================================
+
+Upgrade the existing Marketing Dashboard.
+
+Recommended layout:
+
+HEADER
+
+Marketing
+
+Subtitle:
+Manage campaigns, audiences, automations, and customer engagement.
+
+Date Range Selector
+
+==================================================
+TOP KPI GRID
+==================================================
+
+Show:
+
+Active Campaigns
+
+Messages Sent
+
+Delivery Rate
+
+Open Rate
+
+Click Rate
+
+Active Automations
+
+Only show metrics supported by real data.
+
+==================================================
+PERFORMANCE SECTION
+==================================================
+
+Add:
+
+Campaign Performance Trend
+
+Recent Campaign Performance
+
+==================================================
+AUTOMATION SECTION
+==================================================
+
+Display:
+
+Active Automations
+
+Customers Entered
+
+Successful Actions
+
+Failed Actions
+
+Include:
+
+View Automations →
+
+==================================================
+RECENT ACTIVITY
+==================================================
+
+Display real marketing events.
+
+Examples:
+
+Campaign Created
+
+Campaign Scheduled
+
+Campaign Sent
+
+Campaign Failed
+
+Automation Activated
+
+Customer Unsubscribed
+
+Template Updated
+
+==================================================
+QUICK ACTIONS
+==================================================
+
+Include:
+
+Create Campaign
+
+Create Audience
+
+Create Automation
+
+Create Template
+
+==================================================
+MODULE 10: ACTIVITY AND AUDIT LOGGING
+==================================================
+
+All important Marketing actions should be logged.
+
+Log:
+
+Campaign Created
+
+Campaign Edited
+
+Campaign Duplicated
+
+Campaign Scheduled
+
+Campaign Cancelled
+
+Campaign Sent
+
+Campaign Failed
+
+Audience Created
+
+Audience Modified
+
+Audience Deleted
+
+Automation Created
+
+Automation Activated
+
+Automation Paused
+
+Template Created
+
+Template Updated
+
+Customer Unsubscribed
+
+Customer Suppressed
+
+==================================================
+ACTIVITY RECORD
+==================================================
+
+Each activity should include:
+
+User
+
+Action
+
+Related Entity
+
+Timestamp
+
+Relevant metadata where safe
+
+Do not store secrets or sensitive credentials in activity logs.
+
+Reuse the existing activity/timeline infrastructure where possible.
+
+Do not create duplicate logging systems unnecessarily.
+
+==================================================
+DATABASE
+==================================================
+
+Before creating any database tables:
+
+Inspect the existing Phase 1 schema.
+
+Inspect existing email-related tables.
+
+Inspect existing activity tables.
+
+Inspect existing customer preference data.
+
+Only add tables that are truly required.
+
+Possible additional Phase 2 tables may include:
+
+marketing_campaign_recipients
+
+marketing_campaign_events
+
+marketing_automations
+
+marketing_automation_steps
+
+marketing_automation_executions
+
+marketing_suppressions
+
+marketing_customer_preferences
+
+Do not blindly create all of these.
+
+Use existing tables if they already support the required functionality.
+
+==================================================
+DATABASE REQUIREMENTS
+==================================================
+
+Use:
+
+Primary keys
+
+Foreign keys where appropriate
+
+Indexes for frequently queried records
+
+created_at timestamps
+
+updated_at timestamps
+
+User relationships where relevant
+
+Avoid storing unnecessary duplicated customer data.
+
+Use existing customer IDs and CRM relationships.
+
+==================================================
+BACKGROUND PROCESSING
+==================================================
+
+Campaign sending and automation processing may require background execution.
+
+Before implementing:
+
+Inspect the existing hosting and deployment architecture.
+
+Current environments may include:
+
+Replit workspace
+
+GitHub
+
+Render production deployment
+
+Do not assume Replit background processes automatically exist in Render.
+
+The implementation must work safely in the production architecture.
+
+Do not rely on a local-only process that disappears after deployment.
+
+If a background job architecture is required:
+
+Implement the safest practical solution compatible with the current stack.
+
+Document any deployment configuration required.
+
+Do not expose secrets.
+
+==================================================
+ENVIRONMENT VARIABLES
+==================================================
+
+If new email or tracking configuration is required:
+
+Do not hardcode credentials.
+
+Use environment variables.
+
+Document:
+
+Variable Name
+
+Purpose
+
+Where it must be configured
+
+Do not display actual secret values.
+
+Consider the existing separation between:
+
+Replit Secrets
+
+Render Environment Variables
+
+Remember:
+
+Render does not automatically inherit Replit Secrets.
+
+==================================================
+PERMISSIONS / RBAC
+==================================================
+
+Extend the existing permission system.
+
+Suggested permissions:
+
+marketing:view
+
+marketing:create
+
+marketing:edit
+
+marketing:delete
+
+marketing:send
+
+marketing:schedule
+
+marketing:manage_audiences
+
+marketing:manage_automations
+
+marketing:manage_templates
+
+marketing:view_analytics
+
+marketing:manage_suppressions
+
+Use the existing RBAC architecture.
+
+Do not bypass permissions in the frontend.
+
+Server-side permission enforcement is required.
+
+==================================================
+UI / DESIGN REQUIREMENTS
+==================================================
+
+Continue using the MidAtlantic Distribution design system.
+
+Maintain:
+
+Existing typography
+
+Existing spacing
+
+Existing card design
+
+Existing buttons
+
+Existing badges
+
+Existing dropdowns
+
+Existing modal patterns
+
+Existing dashboard charts
+
+Existing sidebar behavior
+
+Do not redesign unrelated application pages.
+
+==================================================
+DESKTOP RESPONSIVENESS
+==================================================
+
+Desktop should support:
+
+Clean KPI grids
+
+Readable tables
+
+Campaign analytics
+
+Campaign details
+
+Audience management
+
+Automation management
+
+Avoid excessive empty space.
+
+Avoid unnecessarily tall cards.
+
+==================================================
+MOBILE RESPONSIVENESS
+==================================================
+
+Marketing must remain fully usable on mobile.
+
+Requirements:
+
+No horizontal page overflow.
+
+Wide tables must become mobile-friendly layouts.
+
+Campaign rows can become cards.
+
+Recipient tables should support compact detail views.
+
+Automation builder should stack vertically.
+
+Primary actions should remain touch-friendly.
+
+Filters should collapse cleanly.
+
+Marketing submenu must continue to expand/collapse in the mobile drawer.
+
+Do not simply shrink desktop layouts.
+
+==================================================
+DATA INTEGRITY
+==================================================
+
+Before sending any campaign:
+
+Validate recipient eligibility.
+
+Remove duplicates.
+
+Apply suppression rules.
+
+Validate email addresses where possible.
+
+Do not send multiple copies to the same email unless explicitly intended.
+
+Track failures safely.
+
+Do not corrupt customer records.
+
+==================================================
+TESTING
+==================================================
+
+Test the following:
+
+CAMPAIGNS
+
+Create Draft
+
+Edit Draft
+
+Duplicate Campaign
+
+Send Test Email
+
+Schedule Campaign
+
+Cancel Scheduled Campaign
+
+Send Campaign
+
+Campaign Failure Handling
+
+Duplicate Send Prevention
+
+==================================================
+AUDIENCES
+
+Create Manual Audience
+
+Create Dynamic Audience
+
+Edit Audience
+
+Preview Audience
+
+Verify Customer Counts
+
+Verify Suppression Exclusions
+
+==================================================
+AUTOMATIONS
+
+Create Automation
+
+Activate Automation
+
+Pause Automation
+
+Verify Trigger
+
+Verify Action
+
+Verify Duplicate Prevention
+
+Verify Execution Logging
+
+==================================================
+CUSTOMER PREFERENCES
+
+Unsubscribe Customer
+
+Manually Suppress Customer
+
+Verify Customer Exclusion
+
+Verify CRM Customer Page Status
+
+==================================================
+PERMISSIONS
+
+Verify unauthorized users cannot:
+
+Send campaigns
+
+Create automations
+
+Manage suppressions
+
+Access restricted analytics
+
+==================================================
+RESPONSIVE DESIGN
+
+Test:
+
+Desktop
+
+Tablet
+
+Mobile
+
+Ensure:
+
+No overflow
+
+No broken navigation
+
+No unusable tables
+
+Touch-friendly controls
+
+==================================================
+DO NOT BREAK
+==================================================
+
+Verify that all existing modules remain functional:
+
+Dashboard
+
+POS
+
+Customers
+
+CRM
+
+Orders
+
+Inventory
+
+Marketing Phase 1
+
+Catalog
+
+Cart
+
+Tools
+
+Reporting
+
+Email Templates
+
+User Management
+
+Permissions
+
+Authentication
+
+Existing navigation
+
+==================================================
+FINAL BUILD AND VERIFICATION
+==================================================
+
+After implementation:
+
+1. Run the application build.
+2. Fix all build errors.
+3. Test the application startup.
+4. Test Marketing routes.
+5. Test permissions.
+6. Test campaign creation.
+7. Test audience filtering.
+8. Test mobile responsiveness.
+9. Verify no existing modules were broken.
+
+Do not automatically push to GitHub.
+
+==================================================
+FINAL REPORT
+==================================================
+
+After completing the update, provide:
+
+1. Phase 2 features completed
+2. Files changed
+3. Database migrations created
+4. New database tables or fields
+5. New routes
+6. New API endpoints
+7. New permissions
+8. Email infrastructure used
+9. Background processing approach used
+10. Environment variables required
+11. Replit configuration required
+12. Render configuration required
+13. Features intentionally deferred to Phase 3
+14. Any issues requiring my decision
+
+IMPORTANT:
+
+Do not claim that email delivery, open tracking, click tracking, or automation execution works unless it was actually tested with the configured infrastructure.
+
+Use real data and real tracking events wherever supported.
+
+Do not fabricate campaign analytics.
