@@ -192,7 +192,7 @@ export interface IStorage {
   prepareMarketingRecipients(campaignId: number): Promise<{ eligible: number; suppressed: number; unsubscribed: number }>;
   claimMarketingRecipient(id: number): Promise<any | undefined>;
   markMarketingRecipientSent(id: number, providerMessageId?: string | null): Promise<void>;
-  markMarketingRecipientFailed(id: number, reason: string): Promise<void>;
+  markMarketingRecipientFailed(id: number, reason: string, retryable?: boolean): Promise<void>;
   recordMarketingEvent(data: { campaign_id: number; recipient_id?: number | null; event_type: string; detail?: Record<string, unknown>; provider_event_id?: string | null }): Promise<void>;
   completeMarketingCampaign(id: number): Promise<any | undefined>;
   getMarketingRecipients(campaignId: number, opts?: { status?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
@@ -2595,8 +2595,12 @@ export class DatabaseStorage implements IStorage {
     if (recipient) await this.recordMarketingEvent({ campaign_id: recipient.campaign_id, recipient_id: id, event_type: "sent", detail: { provider_message_id: providerMessageId ?? null } });
   }
 
-  async markMarketingRecipientFailed(id: number, reason: string): Promise<void> {
-    const [recipient] = await db.update(marketingCampaignRecipients).set({ status: "failed", failure_reason: reason.slice(0, 1000) }).where(eq(marketingCampaignRecipients.id, id)).returning();
+  async markMarketingRecipientFailed(id: number, reason: string, retryable = true): Promise<void> {
+    const [recipient] = await db.update(marketingCampaignRecipients).set({
+      status: "failed",
+      failure_reason: reason.slice(0, 1000),
+      ...(retryable ? {} : { attempt_count: 3 }),
+    }).where(eq(marketingCampaignRecipients.id, id)).returning();
     if (recipient) await this.recordMarketingEvent({ campaign_id: recipient.campaign_id, recipient_id: id, event_type: "failed", detail: { reason: reason.slice(0, 500) } });
   }
 

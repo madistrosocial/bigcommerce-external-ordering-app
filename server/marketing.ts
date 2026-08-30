@@ -33,6 +33,14 @@ function smtpTransport(settings: any) {
   });
 }
 
+function isSafeToRetrySmtpError(error: any): boolean {
+  const command = String(error?.command ?? "").toUpperCase();
+  const responseCode = Number(error?.responseCode);
+  if (!Number.isInteger(responseCode) || responseCode < 400 || responseCode >= 500) return false;
+  return ["CONN", "EHLO", "HELO", "AUTH", "MAIL", "RCPT"]
+    .some(prefix => command === prefix || command.startsWith(`${prefix} `));
+}
+
 function stripHtml(html: string): string {
   return html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n\n").replace(/<[^>]+>/g, "")
     .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
@@ -137,7 +145,7 @@ export async function processMarketingCampaign(campaignId: number): Promise<void
         const customer = row.customer as MarketingCustomer;
         const customerId = Number(customer.id ?? row.customer_id);
         if (!customerId) {
-          await storage.markMarketingRecipientFailed(row.id, "Recipient is missing a CRM customer id.");
+          await storage.markMarketingRecipientFailed(row.id, "Recipient is missing a CRM customer id.", false);
           continue;
         }
         const token = signUnsubscribeToken(campaignId, customerId);
@@ -146,14 +154,18 @@ export async function processMarketingCampaign(campaignId: number): Promise<void
         const body = renderTemplate(campaign.message_content || "<p></p>", customer);
         const html = `${body}<hr style="border:0;border-top:1px solid #e5e7eb;margin:32px 0 16px"><p style="font:12px Arial;color:#64748b">You are receiving this email from Mid Atlantic Distribution. <a href="${unsubscribeUrl}">Unsubscribe from marketing emails</a>.</p>`;
         if (!recipient.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient.email)) {
-          await storage.markMarketingRecipientFailed(row.id, "Customer does not have a valid email address.");
+          await storage.markMarketingRecipientFailed(row.id, "Customer does not have a valid email address.", false);
           continue;
         }
         try {
           const info = await transport.sendMail({ from, to: recipient.email, subject, html, text: stripHtml(html) });
           await storage.markMarketingRecipientSent(row.id, info.messageId ?? null);
         } catch (error: any) {
-          await storage.markMarketingRecipientFailed(row.id, String(error?.message ?? error));
+          await storage.markMarketingRecipientFailed(
+            row.id,
+            String(error?.message ?? error),
+            isSafeToRetrySmtpError(error),
+          );
         }
       }
     }
