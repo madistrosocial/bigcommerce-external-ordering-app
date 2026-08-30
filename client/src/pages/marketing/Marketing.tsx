@@ -173,8 +173,10 @@ function CampaignEditor({ id }: { id?: number }) {
 }
 
 export function MarketingCampaignRoute() {
+  const [newMatch] = useRoute("/marketing/campaigns/new");
   const [match, params] = useRoute("/marketing/campaigns/:id");
   const [editMatch, editParams] = useRoute("/marketing/campaigns/:id/edit");
+  if (newMatch) return <CampaignEditor />;
   if (editMatch && editParams?.id && editParams.id !== "new") return <CampaignEditor id={Number(editParams.id)} />;
   if (match && params?.id) return <CampaignDetail id={Number(params.id)} />;
   return <CampaignEditor />;
