@@ -147,7 +147,7 @@ export async function processMarketingCampaign(campaignId: number): Promise<void
         const recipient = await storage.claimMarketingRecipient(row.id);
         if (!recipient) continue;
         const customer = row.customer as MarketingCustomer;
-        const imported = row.source === "imported" || Number.isInteger(Number(row.marketing_contact_id));
+        const imported = row.source === "imported" || (row.marketing_contact_id != null && Number.isInteger(Number(row.marketing_contact_id)));
         const entityId = imported ? Number(row.marketing_contact_id) : Number(customer.id ?? row.customer_id);
         if (!entityId) {
           await storage.markMarketingRecipientFailed(row.id, "Recipient is missing a contact id.", false);
