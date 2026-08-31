@@ -2596,8 +2596,26 @@ export class DatabaseStorage implements IStorage {
     if (normalized.lastOrderAfter && !normalized.lastOrderFrom) normalized.lastOrderFrom = normalized.lastOrderAfter;
     if (typeof normalized.isActive === "string") normalized.isActive = normalized.isActive === "true" || normalized.isActive === "active";
     if (normalized.accountStatus && normalized.isActive === undefined) normalized.isActive = normalized.accountStatus === "active";
+    const rawAccountTypes = Array.isArray(normalized.accountTypes)
+      ? normalized.accountTypes
+      : typeof normalized.accountTypes === "string"
+        ? [normalized.accountTypes]
+        : normalized.accountType
+          ? [normalized.accountType]
+          : [];
+    normalized.accountTypes = Array.from(new Set(rawAccountTypes
+      .map(value => String(value).trim().toLowerCase())
+      .filter(value => ["customer", "vendor", "internal"].includes(value))));
+    const preference = typeof normalized.marketingPreference === "string"
+      ? normalized.marketingPreference.trim().toLowerCase()
+      : "";
     filters = normalized;
-    const conditions: any[] = [eq(customersMirror.account_type, "customer")];
+    const accountTypes = normalized.accountTypes as string[];
+    const conditions: any[] = [
+      accountTypes.length
+        ? inArray(customersMirror.account_type, accountTypes)
+        : eq(customersMirror.account_type, "customer"),
+    ];
     if (typeof filters.isActive === "boolean") conditions.push(eq(customersMirror.is_active, filters.isActive));
     else conditions.push(eq(customersMirror.is_active, true));
     const addText = (column: any, key: string) => {
@@ -2605,8 +2623,12 @@ export class DatabaseStorage implements IStorage {
     };
     addText(customersMirror.customer_group_name, "customerGroup");
     addText(customersMirror.customer_type, "customerType");
-    addText(customersMirror.account_type, "accountType");
     addText(customersMirror.account_health, "accountHealth");
+    if (preference === "subscribed") {
+      conditions.push(sql`coalesce((select mcp.email_subscribed from marketing_customer_preferences mcp where mcp.customer_id = ${customersMirror.id} limit 1), true) = true`);
+    } else if (preference === "unsubscribed") {
+      conditions.push(sql`coalesce((select mcp.email_subscribed from marketing_customer_preferences mcp where mcp.customer_id = ${customersMirror.id} limit 1), true) = false`);
+    }
     if (typeof filters.primaryRepId === "number" && filters.primaryRepId > 0) conditions.push(eq(customersMirror.primary_rep_id, filters.primaryRepId));
     if (typeof filters.secondaryRepId === "number" && filters.secondaryRepId > 0) conditions.push(eq(customersMirror.secondary_rep_id, filters.secondaryRepId));
     if (typeof filters.repId === "number" && filters.repId > 0) conditions.push(eq(customersMirror.primary_rep_id, filters.repId));
