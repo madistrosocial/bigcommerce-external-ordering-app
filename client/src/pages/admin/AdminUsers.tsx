@@ -82,11 +82,15 @@ export const INVENTORY_AUDIT_ACTION_PERMS = [
 ];
 
 export const MARKETING_ACTION_PERMS = [
-  { module: "marketing", action: "create", label: "Create Marketing Items", description: "Can create campaigns and audiences." },
-  { module: "marketing", action: "edit", label: "Edit Marketing Items", description: "Can edit campaigns and audiences." },
-  { module: "marketing", action: "delete", label: "Delete Marketing Items", description: "Can delete campaigns and audiences." },
+  { module: "marketing", action: "create", label: "Create Campaigns", description: "Can create and duplicate campaigns." },
+  { module: "marketing", action: "edit", label: "Edit Campaigns", description: "Can edit campaign content and audience settings." },
+  { module: "marketing", action: "delete", label: "Delete Campaigns", description: "Can delete campaigns that have not been sent." },
   { module: "marketing", action: "send", label: "Schedule and Send Campaigns", description: "Can move campaigns through the scheduling and sending workflow." },
   { module: "marketing", action: "view_analytics", label: "View Marketing Analytics", description: "Can view campaign performance metrics." },
+  { module: "marketing", action: "manage_audiences", label: "Manage Marketing Audiences", description: "Can create, edit, import, and delete campaign audiences." },
+  { module: "marketing", action: "manage_templates", label: "Manage Marketing Templates", description: "Can create, edit, archive, and reuse marketing templates." },
+  { module: "marketing", action: "manage_automations", label: "Manage Marketing Automations", description: "Can create and manage marketing automations." },
+  { module: "marketing", action: "manage_suppressions", label: "Manage Marketing Suppressions", description: "Can manage customer marketing preferences and suppressions." },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -405,8 +409,8 @@ function UserDetail({
                     <Switch
                       checked={effectiveEnabled}
                       disabled={fromGroup}
-                      onCheckedChange={v => onToggleModule(user.id, `${p.module}-${p.action}`, v, permId)}
-                      data-testid={`toggle-${p.module}-${p.action}-${user.id}`}
+                      onCheckedChange={v => onToggleModule(user.id, `marketing-${p.action}`, v, permId)}
+                      data-testid={`toggle-marketing-${p.action}-${user.id}`}
                     />
                   )}
                 </div>
@@ -512,6 +516,54 @@ function UserDetail({
           <p className="px-4 py-2 text-[11px] text-slate-400 border-t bg-slate-50">
             "Inventory › Audit Queue" module access above controls who can <em>see</em> the queue. This section controls who can <em>submit</em> audits.
           </p>
+        </div>
+
+        {/* Marketing-specific permissions */}
+        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Lock className="h-3.5 w-3.5 text-slate-500" />
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Marketing Permissions</span>
+            </div>
+            {groupId !== "none" && (
+              <span className="text-[10px] text-blue-600 flex items-center gap-1">
+                <UsersRound className="h-3 w-3" /> (G) = from group
+              </span>
+            )}
+          </div>
+          <div className="divide-y">
+            {MARKETING_ACTION_PERMS.map(p => {
+              const perm = permMap.get(`${p.module}:${p.action}`);
+              const permId = perm?.id ?? null;
+              const isBusy = busyKey === `${user.id}-marketing-${p.action}`;
+              const directEnabled = perm ? userHasPerm(user, perm.id) : false;
+              const fromGroup = !directEnabled && perm ? groupPerms.has(perm.id) : false;
+              const effectiveEnabled = directEnabled || fromGroup;
+              return (
+                <div key={p.action} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex-1 min-w-0 pr-4">
+                    <p className="text-sm text-slate-700">
+                      {p.label}
+                      {fromGroup && <span className="ml-2 text-[10px] text-blue-500 font-medium">(G)</span>}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">{p.description}</p>
+                  </div>
+                  {permId === null ? (
+                    <span className="text-[10px] text-slate-400 italic shrink-0">N/A</span>
+                  ) : isBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" />
+                  ) : (
+                    <Switch
+                      checked={effectiveEnabled}
+                      disabled={fromGroup}
+                      onCheckedChange={v => onToggleModule(user.id, `marketing-${p.action}`, v, permId)}
+                      data-testid={`toggle-marketing-${p.action}-${user.id}`}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="h-4" />

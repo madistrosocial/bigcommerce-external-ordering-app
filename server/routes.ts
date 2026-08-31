@@ -6076,11 +6076,12 @@ export async function registerRoutes(
   await (async () => {
     const MARKETING_PERMS: Array<{ module: string; action: string; description: string }> = [
       { module: "marketing", action: "view", description: "Marketing: view dashboard, campaigns, and audiences" },
-      { module: "marketing", action: "create", description: "Marketing: create campaigns and audiences" },
-      { module: "marketing", action: "edit", description: "Marketing: edit campaigns and audiences" },
-      { module: "marketing", action: "delete", description: "Marketing: delete campaigns and audiences" },
+      { module: "marketing", action: "create", description: "Marketing: create and duplicate campaigns" },
+      { module: "marketing", action: "edit", description: "Marketing: edit campaign content and audience settings" },
+      { module: "marketing", action: "delete", description: "Marketing: delete unsent campaigns" },
       { module: "marketing", action: "send", description: "Marketing: schedule, pause, and send campaigns" },
       { module: "marketing", action: "view_analytics", description: "Marketing: view campaign analytics" },
+      { module: "marketing", action: "manage_audiences", description: "Marketing: create, edit, import, and delete audiences" },
       { module: "marketing", action: "manage_templates", description: "Marketing: create, edit, archive, and reuse templates" },
       { module: "marketing", action: "manage_automations", description: "Marketing: create and manage automations" },
       { module: "marketing", action: "manage_suppressions", description: "Marketing: manage customer preferences and suppressions" },
@@ -7716,6 +7717,38 @@ export async function registerRoutes(
     sent: [],
   };
   const getMarketingUserId = (req: Request) => Number((req as any).authUser?.id);
+  const marketingUserCan = async (req: Request, action: string) => {
+    const user = (req as any).authUser;
+    return user?.role === "admin" || (await storage.getUserPermissionStrings(Number(user?.id))).includes(`marketing:${action}`);
+  };
+  const validMarketingAudienceTypes = new Set(["all_eligible", "customer_group", "selected_customers", "saved_audience"]);
+
+  function getMarketingAudienceConfig(value: unknown): Record<string, unknown> {
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  }
+
+  function validateMarketingAudience(
+    audienceTypeValue: unknown,
+    audienceConfigValue: unknown,
+    audienceIdValue: unknown,
+    customerIdsValue: unknown,
+    requireComplete: boolean,
+  ): string | null {
+    const audienceType = String(audienceTypeValue ?? "").trim();
+    if (!audienceType) return requireComplete ? "Choose an audience before continuing" : null;
+    if (!validMarketingAudienceTypes.has(audienceType)) return "Invalid audience type";
+    const config = getMarketingAudienceConfig(audienceConfigValue);
+    if (audienceType === "saved_audience" && !Number(audienceIdValue)) return "A saved audience is required";
+    if (audienceType === "customer_group") {
+      const groupName = String(config.customerGroupName ?? config.customerGroup ?? "").trim();
+      if (!groupName) return "Choose a BigCommerce customer group";
+    }
+    if (audienceType === "selected_customers" && requireComplete) {
+      const ids = Array.isArray(customerIdsValue) ? customerIdsValue : [];
+      if (!ids.some(id => Number.isInteger(Number(id)) && Number(id) > 0)) return "Select at least one customer";
+    }
+    return null;
+  }
 
   app.get("/api/marketing/dashboard", requirePermission("marketing"), async (_req, res) => {
     try { res.json(await storage.getMarketingDashboard()); }
@@ -7771,6 +7804,40 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/marketing/customer-groups", requirePermission("marketing"), async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("bigcommerce_config");
+      const config = setting?.value
+        ? (typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value)
+        : {};
+      const storeHash = config.storeHash || process.env.BC_STORE_HASH;
+      const token = config.token || process.env.BC_TOKEN;
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce is not configured" });
+
+      const groups: Array<{ id: number; name: string }> = [];
+      const pageSize = 250;
+      for (let page = 1; ; page++) {
+        const response = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v2/customer_groups?limit=${pageSize}&page=${page}`,
+          { headers: { "X-Auth-Token": String(token), Accept: "application/json" } },
+        );
+        if (!response.ok) return res.status(502).json({ error: "BigCommerce customer groups could not be loaded" });
+        const pageGroups = await response.json();
+        if (!Array.isArray(pageGroups) || pageGroups.length === 0) break;
+        for (const group of pageGroups) {
+          const id = Number(group?.id);
+          const name = String(group?.name ?? "").trim();
+          if (Number.isInteger(id) && id > 0 && name) groups.push({ id, name });
+        }
+        if (pageGroups.length < pageSize) break;
+      }
+      groups.sort((a, b) => a.name.localeCompare(b.name));
+      res.json(Array.from(new Map(groups.map(group => [group.id, group])).values()));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Unable to load BigCommerce customer groups" });
+    }
+  });
+
   app.get("/api/marketing/campaigns", requirePermission("marketing"), async (req, res) => {
     try {
       const result = await storage.getMarketingCampaigns({
@@ -7795,11 +7862,20 @@ export async function registerRoutes(
     try {
       const body = req.body ?? {};
       if (!String(body.name ?? "").trim()) return res.status(400).json({ error: "Campaign name is required" });
-      if (!marketingStatuses.has(String(body.status ?? "draft"))) return res.status(400).json({ error: "Invalid campaign status" });
-      const audienceType = String(body.audience_type ?? "all_eligible");
-      const validAudienceTypes = new Set(["all_eligible", "customer_group", "selected_customers", "saved_audience"]);
-      if (!validAudienceTypes.has(audienceType)) return res.status(400).json({ error: "Invalid audience type" });
-      if (audienceType === "saved_audience" && !Number(body.audience_id)) return res.status(400).json({ error: "A saved audience is required" });
+      const requestedStatus = String(body.status ?? "draft");
+      if (!marketingStatuses.has(requestedStatus)) return res.status(400).json({ error: "Invalid campaign status" });
+      if (requestedStatus !== "draft" && !(await marketingUserCan(req, "send"))) {
+        return res.status(403).json({ error: "Sending permission is required to create a non-draft campaign" });
+      }
+      const audienceType = String(body.audience_type ?? "").trim();
+      const audienceError = validateMarketingAudience(
+        audienceType,
+        body.audience_config,
+        body.audience_id,
+        body.customer_ids,
+        requestedStatus !== "draft",
+      );
+      if (audienceError) return res.status(400).json({ error: audienceError });
       const campaign = await storage.createMarketingCampaign({
         name: String(body.name),
         internal_description: String(body.internal_description ?? ""),
@@ -7824,7 +7900,21 @@ export async function registerRoutes(
 
   app.patch("/api/marketing/campaigns/:id", requirePermission("marketing", "edit"), async (req, res) => {
     try {
-      const campaign = await storage.updateMarketingCampaign(Number(req.params.id), req.body ?? {}, getMarketingUserId(req));
+      const body = req.body ?? {};
+      const current = await storage.getMarketingCampaign(Number(req.params.id));
+      if (!current) return res.status(404).json({ error: "Campaign not found" });
+      const nextStatus = String(body.status ?? current.status);
+      if (["ready", "scheduled", "queued", "sending", "sent"].includes(nextStatus)) {
+        const audienceError = validateMarketingAudience(
+          body.audience_type ?? current.audience_type,
+          body.audience_config ?? current.audience_config,
+          body.audience_id ?? current.audience_id,
+          body.customer_ids ?? (current.recipients ?? []).map((recipient: any) => recipient.customer_id ?? recipient.id),
+          true,
+        );
+        if (audienceError) return res.status(400).json({ error: audienceError });
+      }
+      const campaign = await storage.updateMarketingCampaign(Number(req.params.id), body, getMarketingUserId(req));
       if (!campaign) return res.status(404).json({ error: "Campaign not found" });
       res.json(campaign);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -7849,6 +7939,14 @@ export async function registerRoutes(
       if (!marketingStatuses.has(next) || !allowedMarketingTransitions[current.status]?.includes(next)) {
         return res.status(409).json({ error: `Cannot move campaign from ${current.status} to ${next}` });
       }
+      const audienceError = validateMarketingAudience(
+        current.audience_type,
+        current.audience_config,
+        current.audience_id,
+        (current.recipients ?? []).map((recipient: any) => recipient.customer_id ?? recipient.id),
+        ["ready", "scheduled", "queued", "sending", "sent"].includes(next),
+      );
+      if (audienceError) return res.status(400).json({ error: audienceError });
       const campaign = await storage.updateMarketingCampaignStatus(id, next, getMarketingUserId(req));
       res.json(campaign);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -7870,6 +7968,14 @@ export async function registerRoutes(
       const campaign = await storage.getMarketingCampaign(id);
       if (!campaign) return res.status(404).json({ error: "Campaign not found" });
       if (!["ready", "failed", "paused"].includes(campaign.status)) return res.status(409).json({ error: `Campaign cannot be sent from ${campaign.status}` });
+      const audienceError = validateMarketingAudience(
+        campaign.audience_type,
+        campaign.audience_config,
+        campaign.audience_id,
+        (campaign.recipients ?? []).map((recipient: any) => recipient.customer_id ?? recipient.id),
+        true,
+      );
+      if (audienceError) return res.status(400).json({ error: audienceError });
       const queued = await storage.updateMarketingCampaignStatus(id, "queued", getMarketingUserId(req));
       void processMarketingCampaign(id);
       res.json(queued);
@@ -7884,6 +7990,14 @@ export async function registerRoutes(
       const campaign = await storage.getMarketingCampaign(id);
       if (!campaign) return res.status(404).json({ error: "Campaign not found" });
       if (!["draft", "ready", "paused"].includes(campaign.status)) return res.status(409).json({ error: `Campaign cannot be scheduled from ${campaign.status}` });
+      const audienceError = validateMarketingAudience(
+        campaign.audience_type,
+        campaign.audience_config,
+        campaign.audience_id,
+        (campaign.recipients ?? []).map((recipient: any) => recipient.customer_id ?? recipient.id),
+        true,
+      );
+      if (audienceError) return res.status(400).json({ error: audienceError });
       const updated = await storage.updateMarketingCampaign(id, { scheduled_at: when, timezone: String(req.body?.timezone ?? "UTC") }, getMarketingUserId(req));
       const scheduled = await storage.updateMarketingCampaignStatus(id, "scheduled", getMarketingUserId(req));
       res.json(scheduled ?? updated);
@@ -7940,7 +8054,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/audiences", requirePermission("marketing", "create"), async (req, res) => {
+  app.post("/api/marketing/audiences", requirePermission("marketing", "manage_audiences"), async (req, res) => {
     try {
       const body = req.body ?? {};
       if (!String(body.name ?? "").trim()) return res.status(400).json({ error: "Audience name is required" });
@@ -7957,7 +8071,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.patch("/api/marketing/audiences/:id", requirePermission("marketing", "edit"), async (req, res) => {
+  app.patch("/api/marketing/audiences/:id", requirePermission("marketing", "manage_audiences"), async (req, res) => {
     try {
       const audience = await storage.updateMarketingAudience(Number(req.params.id), req.body ?? {}, getMarketingUserId(req));
       if (!audience) return res.status(404).json({ error: "Audience not found" });
@@ -7965,7 +8079,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.delete("/api/marketing/audiences/:id", requirePermission("marketing", "delete"), async (req, res) => {
+  app.delete("/api/marketing/audiences/:id", requirePermission("marketing", "manage_audiences"), async (req, res) => {
     try {
       const campaignUse = await storage.getMarketingCampaigns({ limit: 1000 });
       if (campaignUse.campaigns.some(c => c.audience_id === Number(req.params.id))) {
@@ -8032,7 +8146,7 @@ export async function registerRoutes(
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/templates", requirePermission("marketing", "create"), async (req, res) => {
+  app.post("/api/marketing/templates", requirePermission("marketing", "manage_templates"), async (req, res) => {
     try {
       const key = `marketing_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const template = await storage.upsertEmailTemplate(key, { name: String(req.body?.name ?? "").trim(), subject_template: String(req.body?.subject_template ?? ""), body: String(req.body?.body ?? ""), template_type: "marketing", category: String(req.body?.category ?? "general"), updated_by: getMarketingUserId(req) });
@@ -8040,7 +8154,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.patch("/api/marketing/templates/:id", requirePermission("marketing", "edit"), async (req, res) => {
+  app.patch("/api/marketing/templates/:id", requirePermission("marketing", "manage_templates"), async (req, res) => {
     try {
       const current = await storage.getMarketingTemplateById(Number(req.params.id));
       if (!current) return res.status(404).json({ error: "Template not found" });

@@ -162,25 +162,25 @@ function Router() {
         {() => <PermissionRoute component={MarketingCampaigns} module="marketing" />}
       </Route>
       <Route path="/marketing/campaigns/new">
-        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" />}
+        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" action="create" />}
       </Route>
       <Route path="/marketing/campaigns/:id/edit">
-        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" />}
+        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" action="edit" />}
       </Route>
       <Route path="/marketing/campaigns/:id">
         {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" />}
       </Route>
       <Route path="/marketing/audiences">
-        {() => <PermissionRoute component={MarketingAudiences} module="marketing" />}
+        {() => <PermissionRoute component={MarketingAudiences} module="marketing" action="manage_audiences" />}
       </Route>
       <Route path="/marketing/templates">
-        {() => <PermissionRoute component={MarketingTemplates} module="marketing" />}
+        {() => <PermissionRoute component={MarketingTemplates} module="marketing" action="manage_templates" />}
       </Route>
       <Route path="/marketing/automations">
-        {() => <PermissionRoute component={MarketingAutomations} module="marketing" />}
+        {() => <PermissionRoute component={MarketingAutomations} module="marketing" action="manage_automations" />}
       </Route>
       <Route path="/marketing/analytics">
-        {() => <PermissionRoute component={MarketingAnalytics} module="marketing" />}
+        {() => <PermissionRoute component={MarketingAnalytics} module="marketing" action="view_analytics" />}
       </Route>
 
       {/* ── BC Orders ── */}

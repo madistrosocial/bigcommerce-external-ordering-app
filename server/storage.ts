@@ -2275,21 +2275,29 @@ export class DatabaseStorage implements IStorage {
       audienceCount = countRows[0]?.count ?? 0;
     } else if (campaign.audience_type === "saved_audience" && campaign.audience_id) {
       audienceCount = await this.getMarketingAudienceCount(campaign.audience_id);
-    } else {
+    } else if (campaign.audience_type === "customer_group") {
       audienceCount = await this.getMarketingDynamicCustomerCount(
-        campaign.audience_type === "customer_group" ? (campaign.audience_config ?? {}) as Record<string, unknown> : {},
+        (campaign.audience_config ?? {}) as Record<string, unknown>,
       );
+    } else if (campaign.audience_type === "all_eligible") {
+      audienceCount = await this.getMarketingDynamicCustomerCount({});
     }
     return { ...campaign, audience_count: audienceCount, recipients, activity: activity.map(row => ({ ...row.a, user_name: row.user_name })) };
   }
 
   async createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any> {
     const customerIds = [...new Set((data.customer_ids ?? []).filter(Number.isInteger))];
-    const recipientCount = data.audience_type === "selected_customers"
+    const recipientCount = !data.audience_type
+      ? 0
+      : data.audience_type === "selected_customers"
       ? customerIds.length
       : data.audience_type === "saved_audience" && data.audience_id
         ? await this.getMarketingAudienceCount(data.audience_id)
-        : await this.getMarketingDynamicCustomerCount(data.audience_type === "customer_group" ? (data.audience_config ?? {}) : {});
+        : data.audience_type === "customer_group"
+          ? await this.getMarketingDynamicCustomerCount((data.audience_config ?? {}) as Record<string, unknown>)
+          : data.audience_type === "all_eligible"
+            ? await this.getMarketingDynamicCustomerCount({})
+            : 0;
     const result = await db.transaction(async (tx) => {
       const [campaign] = await tx.insert(marketingCampaigns).values({
         name: data.name.trim(),
@@ -2333,10 +2341,16 @@ export class DatabaseStorage implements IStorage {
     const audienceType = String(data.audience_type ?? current.audience_type);
     const audienceId = data.audience_id !== undefined ? (Number(data.audience_id) || null) : current.audience_id;
     const audienceConfig = (data.audience_config ?? current.audience_config ?? {}) as Record<string, unknown>;
-    if (audienceType !== "selected_customers") {
+    if (!audienceType) {
+      update.recipient_count = 0;
+    } else if (audienceType !== "selected_customers") {
       update.recipient_count = audienceType === "saved_audience" && audienceId
         ? await this.getMarketingAudienceCount(audienceId)
-        : await this.getMarketingDynamicCustomerCount(audienceType === "customer_group" ? audienceConfig : {});
+        : audienceType === "customer_group"
+          ? await this.getMarketingDynamicCustomerCount(audienceConfig)
+          : audienceType === "all_eligible"
+            ? await this.getMarketingDynamicCustomerCount({})
+            : 0;
     } else if (data.customer_ids) {
       update.recipient_count = [...new Set(data.customer_ids.filter(Number.isInteger))].length;
     }
@@ -2647,6 +2661,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   private async resolveMarketingCampaignCustomers(campaign: any): Promise<any[]> {
+    if (!String(campaign.audience_type ?? "").trim()) return [];
     if (campaign.audience_type === "selected_customers") {
       return db.select({ customer: customersMirror }).from(marketingCampaignRecipients)
         .innerJoin(customersMirror, eq(customersMirror.id, marketingCampaignRecipients.customer_id))
@@ -2672,7 +2687,14 @@ export class DatabaseStorage implements IStorage {
       }
       return this.getMarketingCandidateCustomers((audience.dynamic_filters ?? {}) as Record<string, unknown>);
     }
-    return this.getMarketingCandidateCustomers(campaign.audience_type === "customer_group" ? (campaign.audience_config ?? {}) : {});
+    if (campaign.audience_type === "customer_group") {
+      const config = (campaign.audience_config ?? {}) as Record<string, unknown>;
+      const groupName = String(config.customerGroupName ?? config.customerGroup ?? "").trim();
+      if (!groupName) return [];
+      return this.getMarketingCandidateCustomers({ ...config, customerGroup: groupName });
+    }
+    if (campaign.audience_type === "all_eligible") return this.getMarketingCandidateCustomers({});
+    return [];
   }
 
   async claimMarketingCampaign(id: number): Promise<any | undefined> {

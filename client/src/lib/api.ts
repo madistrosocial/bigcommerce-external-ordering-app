@@ -95,6 +95,7 @@ export const getMarketingDashboard = () => marketingRequest("/marketing/dashboar
 export const getMarketingCampaigns = (params: { search?: string; status?: string } = {}) =>
   marketingRequest(`/marketing/campaigns?search=${encodeURIComponent(params.search || "")}&status=${encodeURIComponent(params.status || "all")}`);
 export const getMarketingCampaign = (id: number) => marketingRequest(`/marketing/campaigns/${id}`);
+export const getMarketingCustomerGroups = () => marketingRequest("/marketing/customer-groups");
 export const searchMarketingProducts = (query: string) =>
   marketingRequest(`/marketing/products/search?query=${encodeURIComponent(query)}`);
 export const createMarketingCampaign = (data: any) => marketingRequest("/marketing/campaigns", { method: "POST", body: JSON.stringify(data) });

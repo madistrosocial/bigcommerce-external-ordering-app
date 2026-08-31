@@ -379,7 +379,7 @@ export const marketingCampaigns = pgTable("marketing_campaigns", {
   subject_line: text("subject_line").notNull().default(""),
   preview_text: text("preview_text").notNull().default(""),
   message_content: text("message_content").notNull().default(""),
-  audience_type: text("audience_type").notNull().default("all_eligible"),
+  audience_type: text("audience_type").notNull().default(""),
   audience_id: integer("audience_id"),
   audience_config: jsonb("audience_config").notNull().default({}),
   template_id: integer("template_id").references(() => emailTemplates.id, { onDelete: "set null" }),
