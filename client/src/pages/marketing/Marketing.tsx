@@ -19,6 +19,7 @@ import {
   updateMarketingCampaignStatus, sendMarketingTest, sendMarketingCampaign,
   pauseMarketingCampaign, duplicateMarketingCampaign, getMarketingRecipients, scheduleMarketingCampaign,
   getMarketingContacts, importMarketingContacts, getMarketingAudienceMembers, getMarketingAudiencePreview,
+  getMarketingTemplates,
 } from "@/lib/api";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -133,10 +134,11 @@ function CampaignEditor({ id }: { id?: number }) {
   const qc = useQueryClient();
   const { hasPermission } = usePermissions();
   const editing = Boolean(id);
-  const [form, setForm] = useState<any>({ name: "", internal_description: "", subject_line: "", preview_text: "", message_content: "<p></p>", audience_type: "all_eligible", audience_config: {}, audience_id: null, scheduled_at: "" });
+  const [form, setForm] = useState<any>({ name: "", internal_description: "", subject_line: "", preview_text: "", message_content: "<p></p>", template_id: null, audience_type: "all_eligible", audience_config: {}, audience_id: null, scheduled_at: "" });
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const { data: existing } = useQuery<any>({ queryKey: ["marketing-campaign", id], queryFn: () => getMarketingCampaign(id!), enabled: editing });
   const { data: audiences = [] } = useQuery<any[]>({ queryKey: ["marketing-audiences"], queryFn: getMarketingAudiences });
+  const { data: templates = [] } = useQuery<any[]>({ queryKey: ["marketing-templates"], queryFn: getMarketingTemplates });
   const { data: customerPage } = useQuery<any>({ queryKey: ["marketing-audience-customers", "campaign-editor"], queryFn: () => getMarketingAudienceCustomers({ limit: 100 }) });
   useEffect(() => { if (existing) { setForm({ ...existing, scheduled_at: existing.scheduled_at ? new Date(existing.scheduled_at).toISOString().slice(0, 16) : "" }); setSelectedIds((existing.recipients || []).map((r: any) => r.id)); } }, [existing]);
   const saveMutation = useMutation({
@@ -161,11 +163,23 @@ function CampaignEditor({ id }: { id?: number }) {
     onError: (e: any) => toast({ title: "Unable to schedule campaign", description: e.message, variant: "destructive" }),
   });
   const set = (key: string, value: any) => setForm((old: any) => ({ ...old, [key]: value }));
+  const applyTemplate = (value: string) => {
+    const templateId = Number(value) || null;
+    const template = templates.find((candidate: any) => candidate.id === templateId);
+    setForm((old: any) => ({
+      ...old,
+      template_id: templateId,
+      ...(template ? {
+        subject_line: template.subject_template || old.subject_line,
+        message_content: template.body || old.message_content,
+      } : {}),
+    }));
+  };
   const customers = customerPage?.rows ?? [];
   return <PageShell title={editing ? "Edit campaign" : "New campaign"} subtitle="Build, test, schedule, or send this campaign through the configured SMTP connection." action={<Button variant="outline" onClick={() => setLocation(editing ? `/marketing/campaigns/${id}` : "/marketing/campaigns")}><ArrowLeft className="mr-2 h-4 w-4" /> Cancel</Button>}>
     <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]"><div className="space-y-5">
       <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><FileText className="h-4 w-4 text-blue-500" /> Campaign details</h2><div className="space-y-4"><label className="block text-sm font-medium text-slate-700">Campaign name<Input className="mt-1.5" value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. September new arrivals" /></label><label className="block text-sm font-medium text-slate-700">Internal description<textarea className="mt-1.5 min-h-20 w-full rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-blue-400" value={form.internal_description} onChange={e => set("internal_description", e.target.value)} placeholder="What is this campaign for?" /></label><label className="block text-sm font-medium text-slate-700">Subject line<Input className="mt-1.5" value={form.subject_line} onChange={e => set("subject_line", e.target.value)} placeholder="Your subject line" /></label><label className="block text-sm font-medium text-slate-700">Preview text<Input className="mt-1.5" value={form.preview_text} onChange={e => set("preview_text", e.target.value)} placeholder="Optional inbox preview" /></label></div></section>
-      <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><Mail className="h-4 w-4 text-blue-500" /> Message</h2><RichTextEditor value={form.message_content} onChange={value => set("message_content", value)} minHeight={240} /></section>
+       <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><Mail className="h-4 w-4 text-blue-500" /> Message</h2><label className="mb-4 block text-sm font-medium text-slate-700">Use a marketing template<select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.template_id || ""} onChange={e => applyTemplate(e.target.value)}><option value="">Start from scratch</option>{templates.map((template: any) => <option key={template.id} value={template.id}>{template.name}{template.category ? ` · ${template.category}` : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-400">{templates.length ? "Selecting a template fills the subject and message. You can still edit both." : "No active marketing templates are available yet."}</span></label><RichTextEditor value={form.message_content} onChange={value => set("message_content", value)} minHeight={240} /></section>
     </div><div className="space-y-5">
       <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><Users className="h-4 w-4 text-blue-500" /> Audience</h2><div className="space-y-3"><select className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.audience_type} onChange={e => set("audience_type", e.target.value)}><option value="all_eligible">All eligible customers</option><option value="customer_group">Customer group</option><option value="selected_customers">Selected customers</option><option value="saved_audience">Saved audience</option></select>{form.audience_type === "customer_group" && <Input placeholder="Customer group name" value={form.audience_config?.customerGroup || ""} onChange={e => set("audience_config", { customerGroup: e.target.value })} />}{form.audience_type === "saved_audience" && <select className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.audience_id || ""} onChange={e => set("audience_id", Number(e.target.value) || null)}><option value="">Choose a saved audience…</option>{audiences.map((a: any) => <option key={a.id} value={a.id}>{a.name} ({a.member_count})</option>)}</select>}{form.audience_type === "selected_customers" && <div className="max-h-60 space-y-1 overflow-auto rounded-md border p-2">{customers.map((c: any) => <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded p-2 text-sm hover:bg-slate-50"><input type="checkbox" checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(old => e.target.checked ? [...old, c.id] : old.filter(x => x !== c.id))} /><span className="min-w-0 truncate">{c.company || `${c.first_name} ${c.last_name}`}</span><span className="ml-auto text-xs text-slate-400">{c.email}</span></label>)}{!customers.length && <p className="p-3 text-xs text-slate-400">No eligible CRM customers found.</p>}</div>}<p className="text-xs text-slate-400">Customers come from the CRM mirror and must be active customer accounts.</p></div></section>
       <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><CalendarClock className="h-4 w-4 text-blue-500" /> Schedule</h2><label className="block text-sm font-medium text-slate-700">Optional scheduled date<input type="datetime-local" className="mt-1.5 h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.scheduled_at || ""} onChange={e => set("scheduled_at", e.target.value)} /></label></section>
