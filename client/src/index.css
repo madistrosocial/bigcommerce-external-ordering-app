@@ -194,3 +194,62 @@
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
+
+/* Marketing follows the compact mobile scale used by Dashboard's
+   "Needs Attention" card: 12px labels, 10px supporting detail, and a
+   20px page heading. Keep the existing roomier desktop scale intact. */
+@media (max-width: 639px) {
+  .marketing-page h1 {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+  }
+
+  .marketing-page h2,
+  .marketing-page h3 {
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+
+  .marketing-page .text-2xl {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+  }
+
+  .marketing-page .text-xl {
+    font-size: 1.125rem;
+    line-height: 1.5rem;
+  }
+
+  .marketing-page .text-lg,
+  .marketing-page .text-base {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  .marketing-page .text-sm {
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+
+  .marketing-page .text-xs {
+    font-size: 0.625rem;
+    line-height: 0.875rem;
+  }
+
+  .marketing-page .rounded-full.text-xs {
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+
+  .marketing-page input,
+  .marketing-page select,
+  .marketing-page textarea {
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+
+  .marketing-page button {
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+}
