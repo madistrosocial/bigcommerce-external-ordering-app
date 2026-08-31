@@ -4,6 +4,20 @@ import { eq, desc, and, inArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNul
 import { alias } from "drizzle-orm/pg-core";
 import { normalizeMarketingProductDisplayOptions, DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS } from "@shared/marketing-products";
 
+const MARKETING_US_STATE_NAMES: Record<string, string> = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
+  CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
+  HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa",
+  KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+  MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi",
+  MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire",
+  NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina",
+  ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania",
+  RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee",
+  TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington",
+  WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+};
+
 export interface IStorage {
   // User operations
   getUser(id: number): Promise<User | undefined>;
@@ -2645,7 +2659,22 @@ export class DatabaseStorage implements IStorage {
     if (typeof filters.minStoreCredit === "number") conditions.push(sql`${customersMirror.store_credit_balance} >= ${filters.minStoreCredit}`);
     if (typeof filters.maxStoreCredit === "number") conditions.push(sql`${customersMirror.store_credit_balance} <= ${filters.maxStoreCredit}`);
     if (typeof filters.state === "string" && filters.state.trim()) {
-      conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state_or_province', ${customersMirror.billing_address}->>'state_or_province', ${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${filters.state.trim()}`);
+      const selectedState = filters.state.trim();
+      const stateCode = selectedState.toUpperCase();
+      const stateName = MARKETING_US_STATE_NAMES[stateCode];
+      const matchedCode = Object.entries(MARKETING_US_STATE_NAMES).find(([, name]) => name.toLowerCase() === selectedState.toLowerCase())?.[0];
+      const stateValues = stateName
+        ? [stateCode.toLowerCase(), stateName.toLowerCase()]
+        : matchedCode
+          ? [matchedCode.toLowerCase(), MARKETING_US_STATE_NAMES[matchedCode].toLowerCase()]
+          : [selectedState.toLowerCase()];
+      const stateFields = [
+        sql`${customersMirror.shipping_address}->>'state_or_province'`,
+        sql`${customersMirror.billing_address}->>'state_or_province'`,
+        sql`${customersMirror.shipping_address}->>'state'`,
+        sql`${customersMirror.billing_address}->>'state'`,
+      ];
+      conditions.push(or(...stateFields.flatMap(field => stateValues.map(value => sql`lower(trim(${field})) = ${value}`))));
     }
     if (typeof filters.country === "string" && filters.country.trim()) {
       conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'country_code', ${customersMirror.billing_address}->>'country_code', ${customersMirror.shipping_address}->>'country') = ${filters.country.trim()}`);
