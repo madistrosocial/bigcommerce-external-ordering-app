@@ -1,0 +1,500 @@
+MARKETING MODULE UPDATE — CAMPAIGN PRODUCT CONTENT
+
+Update the existing, working Marketing → Campaign Creation page. Do not redesign or break any existing campaign functionality.
+
+The goal of this update is to allow users to select products from our existing BigCommerce product catalog and include those products in marketing campaigns.
+
+IMPORTANT:
+This update is ONLY for displaying/linking products in marketing emails.
+
+DO NOT build the order form or product-selection ordering workflow yet. That will be a separate future feature.
+
+==================================================
+1. PRESERVE EXISTING FUNCTIONALITY
+==================================================
+
+Keep all currently working campaign functionality unchanged, including:
+
+- Campaign details
+- Campaign name
+- Internal description
+- Subject line
+- Preview text
+- Audience selection
+- Schedule
+- Save draft
+- Save & review
+- Test sending
+- Campaign sending
+- Existing templates
+- Existing email editor
+- Existing unsubscribe functionality
+- Existing campaign tracking and status behavior
+
+Do not remove or replace any existing functionality.
+
+==================================================
+2. ADD A PRODUCT CONTENT SECTION
+==================================================
+
+Add a new section called:
+
+PRODUCTS
+
+Place it BELOW the existing Message/email editor section.
+
+The campaign creation flow should now be:
+
+1. Campaign Details
+2. Audience
+3. Schedule
+4. Message
+5. Products
+6. Save / Review / Send
+
+The Products section should initially remain compact.
+
+Initial empty state:
+
+PRODUCTS
+
+Add BigCommerce products to this campaign.
+
+[ + Select Products ]
+
+No products selected
+
+Do not permanently display a large product catalog directly on the campaign page.
+
+==================================================
+3. BIGCOMMERCE PRODUCT PICKER
+==================================================
+
+When the user clicks:
+
++ Select Products
+
+Open a large modal or slide-over product picker.
+
+The product picker should retrieve products from the existing BigCommerce product data/API integration already available in the application.
+
+Do not create a separate duplicate product database if existing product/catalog data can be used.
+
+Each product should display internally:
+
+- Product image thumbnail
+- Product title
+- SKU
+- Current price
+- Current stock, when available
+
+IMPORTANT:
+
+The price shown inside the PRODUCT PICKER is for INTERNAL REFERENCE ONLY.
+
+Seeing the price in the picker does NOT mean the price will automatically be displayed in the marketing email.
+
+Add:
+
+- Search by product title
+- Search by SKU
+- Multi-select products
+- Product selection checkbox or clear selection state
+- Selected product count
+- Cancel button
+- Add Selected Products button
+
+The user must be able to select multiple products.
+
+==================================================
+4. SELECTED PRODUCTS ON THE CAMPAIGN PAGE
+==================================================
+
+After products are selected, display a compact Selected Products area.
+
+Example information per selected product:
+
+[Product Image]
+
+Product Title
+SKU: XXXXX
+
+[ Remove ]
+
+Do NOT show the price by default in the selected products display.
+
+The selected products should use a responsive grid:
+
+Desktop:
+3 to 4 products per row depending on available space.
+
+Tablet:
+2 to 3 products per row.
+
+Mobile:
+2 products per row where practical.
+
+The product cards should remain compact and should not make the campaign page excessively tall.
+
+Include:
+
+[ Edit Products ]
+
+This reopens the product picker.
+
+The user must be able to remove individual selected products.
+
+==================================================
+5. PRODUCT DISPLAY OPTIONS
+==================================================
+
+Add a compact section above the selected products called:
+
+PRODUCT DISPLAY OPTIONS
+
+Use clear toggle controls or checkboxes.
+
+Options:
+
+[ON] Show product images
+
+[ON] Show product titles
+
+[OFF] Show prices
+
+[ON] Show "Shop Now" button
+
+DEFAULT SETTINGS FOR EVERY NEW CAMPAIGN:
+
+Show product images = ON
+
+Show product titles = ON
+
+Show prices = OFF
+
+Show Shop Now button = ON
+
+IMPORTANT:
+
+SHOW PRICES MUST DEFAULT TO OFF.
+
+Most marketing campaigns should not publicly broadcast product prices.
+
+The price should only appear in the generated customer-facing campaign email when the campaign creator explicitly enables:
+
+Show prices
+
+==================================================
+6. PRICE HANDLING
+==================================================
+
+Product prices may be displayed internally inside the product picker for staff reference.
+
+However:
+
+DO NOT automatically insert prices into the email.
+
+DO NOT automatically show prices in the selected product cards on the campaign creation page.
+
+The customer-facing email must follow the campaign-level setting:
+
+Show prices = OFF
+→ No prices displayed in product email blocks.
+
+Show prices = ON
+→ Display the selected product price.
+
+For this version:
+
+Use ONE campaign-level "Show prices" setting that controls all selected products.
+
+Do not build per-product price visibility overrides yet.
+
+==================================================
+7. INSERT PRODUCTS INTO THE EMAIL
+==================================================
+
+Add a clear way to insert selected products into the existing email editor.
+
+Add an editor action such as:
+
+Insert Products
+
+When clicked, allow the user to insert the selected products into the email content.
+
+Support at minimum:
+
+A. Insert all selected products as a product grid
+
+B. Insert an individual selected product
+
+The generated product block should respect the campaign's Product Display Options.
+
+For example, when Show Prices is OFF:
+
+[ PRODUCT IMAGE ]
+
+Product Title
+
+[ SHOP NOW ]
+
+When Show Prices is ON:
+
+[ PRODUCT IMAGE ]
+
+Product Title
+
+$XX.XX
+
+[ SHOP NOW ]
+
+The user should be able to place the product block within the email content using the existing editor workflow.
+
+Do not automatically append products to every campaign.
+
+The campaign creator must choose when to insert products.
+
+==================================================
+8. PRODUCT LINKING
+==================================================
+
+Every product included in a campaign must link to the corresponding product page on our website.
+
+Use the correct BigCommerce/storefront product URL where available.
+
+At minimum:
+
+- Product image should link to the product page
+- Product title should link to the product page
+- "Shop Now" button should link to the product page
+
+The link must open normally for the email recipient.
+
+Do not link recipients to internal admin or BigCommerce management URLs.
+
+==================================================
+9. EMAIL-SAFE PRODUCT GRID
+==================================================
+
+The product layout inserted into emails must be compatible with major email clients.
+
+IMPORTANT:
+
+Do not rely on modern web-only CSS layouts that may fail in Gmail or Outlook.
+
+Use email-safe HTML structure and inline styles where required.
+
+Recommended email layout:
+
+Desktop email:
+Maximum 2 products per row.
+
+Mobile:
+Responsive stacking or safe mobile-friendly layout.
+
+Product blocks should include only the elements enabled in Product Display Options.
+
+Example with prices OFF:
+
+FEATURED PRODUCTS
+
+[Image]                  [Image]
+
+Product Title            Product Title
+
+[SHOP NOW]               [SHOP NOW]
+
+Example with prices ON:
+
+[Image]
+
+Product Title
+
+$XX.XX
+
+[SHOP NOW]
+
+==================================================
+10. CAMPAIGN DATA STORAGE
+==================================================
+
+Store the products selected for each campaign.
+
+For each selected product, preserve enough information to reliably render the campaign later.
+
+Store or snapshot:
+
+- BigCommerce product ID
+- Variant ID, if applicable and relevant
+- Product title
+- SKU
+- Product image URL
+- Product URL
+- Current price snapshot
+
+IMPORTANT:
+
+The price snapshot should be stored even when Show Prices is OFF.
+
+It is stored for campaign consistency and internal reference.
+
+The Show Prices setting determines whether the price is displayed publicly in the email.
+
+Also store campaign-level Product Display Options:
+
+- showProductImages
+- showProductTitles
+- showProductPrices
+- showShopNowButton
+
+==================================================
+11. EXISTING CAMPAIGNS
+==================================================
+
+Existing campaigns must continue to work.
+
+For campaigns created before this update:
+
+- They should load normally.
+- Product selection should be optional.
+- Missing product configuration should not cause errors.
+- Existing sent campaigns must not be modified.
+
+Use safe defaults when older campaign records do not contain product settings.
+
+==================================================
+12. CAMPAIGN REVIEW AND PREVIEW
+==================================================
+
+Ensure selected products render correctly during:
+
+- Campaign preview
+- Campaign review
+- Test email
+- Actual campaign sending
+
+The preview must accurately reflect:
+
+- Selected products
+- Product images
+- Product titles
+- Price visibility setting
+- Shop Now buttons
+
+A campaign preview with Show Prices OFF must never unexpectedly show prices.
+
+==================================================
+13. VALIDATION
+==================================================
+
+Validate the following:
+
+- Products are optional.
+- A campaign can be sent without products.
+- A campaign with products can be saved as draft.
+- Selected products persist after saving and reopening the campaign.
+- Products can be removed.
+- Products can be edited.
+- Multiple products can be selected.
+- Product links point to the correct storefront product page.
+- Show Prices defaults to OFF.
+- Enabling Show Prices displays prices.
+- Disabling Show Prices removes prices from the customer-facing product blocks.
+- Existing campaigns continue working.
+- Test sends correctly render selected products.
+- Live campaign sends correctly render selected products.
+
+==================================================
+14. DO NOT BUILD THESE YET
+==================================================
+
+DO NOT build the following in this update:
+
+- Customer order forms
+- Product ordering directly from the campaign
+- Shopping cart creation from campaign emails
+- Customer product selection forms
+- Product quantity ordering workflow
+- Automatic order creation
+- Per-product price visibility settings
+- Advanced click analytics unless already easily supported by the existing tracking system
+
+These will be built separately later.
+
+==================================================
+15. FUTURE-READY STRUCTURE
+==================================================
+
+Structure this feature so it can later support:
+
+Marketing Campaign
+→ Selected Products
+→ Recipient clicks product
+→ Product click tracking
+
+And separately in the future:
+
+Marketing Campaign
+→ Selected Products
+→ Customer receives product order form
+→ Customer selects products/quantities
+→ Order workflow
+
+But do not implement the order workflow now.
+
+==================================================
+16. UI REQUIREMENTS
+==================================================
+
+Follow the existing MidAtlantic Distribution Sales app design system.
+
+Keep the UI:
+
+- Clean
+- Compact
+- Desktop-friendly
+- Mobile-friendly
+- Consistent with the existing Marketing module
+- Consistent with the existing card layout and controls
+
+Do not overcrowd the Campaign Creation page.
+
+Use the modal or slide-over approach for browsing the full product catalog.
+
+The campaign page should only show:
+
+- Product Display Options
+- Selected products
+- Edit Products action
+- Insert Products action
+
+==================================================
+17. FINAL VERIFICATION
+==================================================
+
+Before finishing:
+
+1. Check the existing Marketing campaign implementation.
+2. Identify and reuse the existing BigCommerce product/catalog integration where possible.
+3. Avoid breaking existing campaign sending.
+4. Build and run the application.
+5. Verify the campaign page loads.
+6. Verify product selection works.
+7. Verify selected products persist.
+8. Verify product insertion into the email editor.
+9. Verify price visibility defaults to OFF.
+10. Verify enabling Show Prices works correctly.
+11. Verify product links point to the correct storefront pages.
+12. Verify a test email renders correctly.
+13. Check server logs for errors.
+14. Do not expose secrets or credentials.
+
+At the end, provide a concise summary of:
+
+- Files/features updated
+- How product selection works
+- How price visibility works
+- How products are inserted into emails
+- Any database/schema changes
+- Any migration required
+- Verification results
