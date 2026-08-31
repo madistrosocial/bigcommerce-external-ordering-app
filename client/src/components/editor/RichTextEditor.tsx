@@ -111,7 +111,10 @@ export default function RichTextEditor({ value, onChange, minHeight = 300 }: Pro
     if (!editor) return;
     const incoming = ensureHtml(value);
     if (editor.getHTML() !== incoming) {
-      editor.commands.setContent(incoming, false);
+      // Tiptap 3 expects an options object here. Preventing an update while
+      // syncing external content avoids an onChange/render loop for markup
+      // inserted by campaign product blocks.
+      editor.commands.setContent(incoming, { emitUpdate: false });
     }
   }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
 
