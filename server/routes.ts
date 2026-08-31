@@ -22,6 +22,7 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
 import { processMarketingCampaign, processMarketingQueue, sendMarketingTestEmail, verifyMarketingUnsubscribeToken } from "./marketing";
+import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
 const DEFAULT_INVOICE_TEMPLATE = `<!DOCTYPE html>
@@ -7721,6 +7722,55 @@ export async function registerRoutes(
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // Marketing product picker. Credentials stay server-side and only the
+  // snapshot fields needed by the campaign editor are returned.
+  app.get("/api/marketing/products/search", requirePermission("marketing"), async (req, res) => {
+    try {
+      const query = String(req.query.query ?? "").trim();
+      if (query.length < 2) return res.json([]);
+      const setting = await storage.getSetting("bigcommerce_config");
+      const config = setting?.value
+        ? (typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value)
+        : {};
+      const storeHash = config.storeHash || process.env.BC_STORE_HASH;
+      const token = config.token || process.env.BC_TOKEN;
+      const storefrontUrl = String(config.storefrontUrl || "").replace(/\/$/, "");
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce is not configured" });
+
+      const response = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(query)}&include=primary_image,variants&limit=50`,
+        {
+          headers: {
+            "X-Auth-Token": String(token),
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+        },
+      );
+      if (!response.ok) return res.status(502).json({ error: "BigCommerce product search failed" });
+      const data = await response.json();
+      const products = (data.data ?? []).map((product: any) => {
+        const path = String(product.custom_url?.url || `/${String(product.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}/`);
+        const productUrl = /^https?:\/\//i.test(path)
+          ? path
+          : storefrontUrl ? `${storefrontUrl}${path.startsWith("/") ? path : `/${path}`}` : "";
+        return {
+          id: Number(product.id),
+          bigcommerce_id: Number(product.id),
+          name: String(product.name ?? ""),
+          sku: String(product.sku ?? ""),
+          price: String(product.price ?? ""),
+          image: String(product.primary_image?.url_standard ?? ""),
+          stock_level: Number(product.inventory_level ?? 0),
+          product_url: productUrl,
+        };
+      });
+      res.json(products);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/marketing/campaigns", requirePermission("marketing"), async (req, res) => {
     try {
       const result = await storage.getMarketingCampaigns({
@@ -7760,6 +7810,8 @@ export async function registerRoutes(
         audience_type: audienceType,
         audience_id: body.audience_id ? Number(body.audience_id) : null,
         audience_config: body.audience_config ?? {},
+         product_snapshots: Array.isArray(body.product_snapshots) ? body.product_snapshots : [],
+         product_display_options: normalizeMarketingProductDisplayOptions(body.product_display_options),
         scheduled_at: body.scheduled_at ? new Date(body.scheduled_at) : null,
          template_id: body.template_id ? Number(body.template_id) : null,
          timezone: String(body.timezone ?? "UTC"),
@@ -7855,7 +7907,10 @@ export async function registerRoutes(
         name: `${original.name} (Copy)`, internal_description: original.internal_description, campaign_type: original.campaign_type,
         subject_line: original.subject_line, preview_text: original.preview_text, message_content: original.message_content,
         audience_type: original.audience_type, audience_id: original.audience_id, audience_config: original.audience_config,
-        template_id: original.template_id, timezone: original.timezone, created_by: getMarketingUserId(req),
+         template_id: original.template_id,
+         product_snapshots: Array.isArray(original.product_snapshots) ? original.product_snapshots : [],
+         product_display_options: normalizeMarketingProductDisplayOptions(original.product_display_options),
+         timezone: original.timezone, created_by: getMarketingUserId(req),
         customer_ids: (original.recipients ?? []).map((r: any) => Number(r.id)).filter(Number.isInteger),
       });
       res.status(201).json(copy);

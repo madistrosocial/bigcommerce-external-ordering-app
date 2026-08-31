@@ -2,6 +2,7 @@ import { db } from "../db";
  import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
 import { eq, desc, and, inArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { normalizeMarketingProductDisplayOptions, DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS } from "@shared/marketing-products";
 
 export interface IStorage {
   // User operations
@@ -183,7 +184,7 @@ export interface IStorage {
   getMarketingDashboard(): Promise<any>;
   getMarketingCampaigns(opts?: { search?: string; status?: string; limit?: number; offset?: number }): Promise<{ campaigns: any[]; total: number }>;
   getMarketingCampaign(id: number): Promise<any | undefined>;
-  createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any>;
+  createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any>;
   updateMarketingCampaign(id: number, data: Record<string, unknown> & { customer_ids?: number[] }, userId: number): Promise<any | undefined>;
   deleteMarketingCampaign(id: number, userId: number): Promise<void>;
   updateMarketingCampaignStatus(id: number, status: string, userId: number): Promise<any | undefined>;
@@ -2260,7 +2261,13 @@ export class DatabaseStorage implements IStorage {
         .innerJoin(customersMirror, eq(customersMirror.id, marketingCampaignRecipients.customer_id))
         .where(eq(marketingCampaignRecipients.campaign_id, id)).limit(100),
     ]);
-    const campaign = { ...rows[0].c, creator_name: rows[0].creator_name, audience_name: rows[0].audience_name };
+     const campaign = {
+       ...rows[0].c,
+       product_snapshots: Array.isArray(rows[0].c.product_snapshots) ? rows[0].c.product_snapshots : [],
+       product_display_options: normalizeMarketingProductDisplayOptions(rows[0].c.product_display_options),
+       creator_name: rows[0].creator_name,
+       audience_name: rows[0].audience_name,
+     };
     let audienceCount = 0;
     if (campaign.audience_type === "selected_customers") {
       const countRows = await db.select({ count: sql<number>`count(*)::int` }).from(marketingCampaignRecipients)
@@ -2276,7 +2283,7 @@ export class DatabaseStorage implements IStorage {
     return { ...campaign, audience_count: audienceCount, recipients, activity: activity.map(row => ({ ...row.a, user_name: row.user_name })) };
   }
 
-  async createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any> {
+  async createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any> {
     const customerIds = [...new Set((data.customer_ids ?? []).filter(Number.isInteger))];
     const recipientCount = data.audience_type === "selected_customers"
       ? customerIds.length
@@ -2295,6 +2302,8 @@ export class DatabaseStorage implements IStorage {
         audience_id: data.audience_id ?? null,
         audience_config: data.audience_config ?? {},
          template_id: data.template_id ?? null,
+         product_snapshots: Array.isArray(data.product_snapshots) ? data.product_snapshots : [],
+         product_display_options: normalizeMarketingProductDisplayOptions(data.product_display_options ?? DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS),
         scheduled_at: data.scheduled_at ?? null,
          timezone: data.timezone ?? "UTC",
         created_by: data.created_by,
@@ -2312,9 +2321,15 @@ export class DatabaseStorage implements IStorage {
   async updateMarketingCampaign(id: number, data: Record<string, unknown> & { customer_ids?: number[] }, userId: number): Promise<any | undefined> {
     const [current] = await db.select().from(marketingCampaigns).where(eq(marketingCampaigns.id, id)).limit(1);
     if (!current) return undefined;
-    const allowed = ["name", "internal_description", "campaign_type", "subject_line", "preview_text", "message_content", "audience_type", "audience_id", "audience_config", "template_id", "scheduled_at", "timezone"] as const;
+     const allowed = ["name", "internal_description", "campaign_type", "subject_line", "preview_text", "message_content", "audience_type", "audience_id", "audience_config", "template_id", "product_snapshots", "product_display_options", "scheduled_at", "timezone"] as const;
     const update: Record<string, unknown> = {};
     for (const key of allowed) if (key in data) update[key] = data[key];
+     if ("product_snapshots" in data) {
+       update.product_snapshots = Array.isArray(data.product_snapshots) ? data.product_snapshots : [];
+     }
+     if ("product_display_options" in data) {
+       update.product_display_options = normalizeMarketingProductDisplayOptions(data.product_display_options);
+     }
     const audienceType = String(data.audience_type ?? current.audience_type);
     const audienceId = data.audience_id !== undefined ? (Number(data.audience_id) || null) : current.audience_id;
     const audienceConfig = (data.audience_config ?? current.audience_config ?? {}) as Record<string, unknown>;

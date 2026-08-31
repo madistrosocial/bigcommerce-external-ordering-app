@@ -383,6 +383,13 @@ export const marketingCampaigns = pgTable("marketing_campaigns", {
   audience_id: integer("audience_id"),
   audience_config: jsonb("audience_config").notNull().default({}),
   template_id: integer("template_id").references(() => emailTemplates.id, { onDelete: "set null" }),
+  product_snapshots: jsonb("product_snapshots").notNull().default([]),
+  product_display_options: jsonb("product_display_options").notNull().default({
+    showProductImages: true,
+    showProductTitles: true,
+    showProductPrices: false,
+    showShopNowButton: true,
+  }),
   status: text("status").notNull().default("draft"),
   scheduled_at: timestamp("scheduled_at"),
   timezone: text("timezone").notNull().default("UTC"),
