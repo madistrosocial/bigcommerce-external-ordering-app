@@ -211,6 +211,7 @@ export interface IStorage {
   recordMarketingEvent(data: { campaign_id: number; recipient_id?: number | null; event_type: string; detail?: Record<string, unknown>; provider_event_id?: string | null }): Promise<void>;
   completeMarketingCampaign(id: number): Promise<any | undefined>;
   getMarketingRecipients(campaignId: number, opts?: { status?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+  getMarketingRecipient(id: number): Promise<any | undefined>;
   getMarketingAnalytics(opts?: { campaignId?: number; dateFrom?: string; dateTo?: string }): Promise<any>;
   markMarketingTestSent(campaignId: number): Promise<void>;
   getMarketingCustomerPreference(customerId: number): Promise<any>;
@@ -2842,6 +2843,12 @@ export class DatabaseStorage implements IStorage {
       campaign_id: data.campaign_id, recipient_id: data.recipient_id ?? null, event_type: data.event_type,
       detail: data.detail ?? {}, provider_event_id: data.provider_event_id ?? null,
     });
+    if (data.event_type === "clicked") {
+      await db.update(marketingCampaigns).set({
+        clicked_count: sql`${marketingCampaigns.clicked_count} + 1`,
+        updated_at: new Date(),
+      }).where(eq(marketingCampaigns.id, data.campaign_id));
+    }
   }
 
   async completeMarketingCampaign(id: number): Promise<any | undefined> {
@@ -2872,6 +2879,18 @@ export class DatabaseStorage implements IStorage {
     return { rows: rows.map(row => ({ ...row.recipient, customer: row.customer ?? row.contact, source: row.contact ? "imported" : "crm" })), total: countRows[0]?.count ?? 0 };
   }
 
+  async getMarketingRecipient(id: number): Promise<any | undefined> {
+    const [row] = await db.select({
+      recipient: marketingCampaignRecipients,
+      customer: customersMirror,
+      contact: marketingContacts,
+    }).from(marketingCampaignRecipients)
+      .leftJoin(customersMirror, eq(customersMirror.id, marketingCampaignRecipients.customer_id))
+      .leftJoin(marketingContacts, eq(marketingContacts.id, marketingCampaignRecipients.marketing_contact_id))
+      .where(eq(marketingCampaignRecipients.id, id)).limit(1);
+    return row ? { ...row.recipient, customer: row.customer ?? row.contact, source: row.contact ? "imported" : "crm" } : undefined;
+  }
+
   async getMarketingAnalytics(opts: { campaignId?: number; dateFrom?: string; dateTo?: string } = {}): Promise<any> {
     const conditions: any[] = [];
     if (opts.campaignId) conditions.push(eq(marketingCampaignEvents.campaign_id, opts.campaignId));
@@ -2886,7 +2905,7 @@ export class DatabaseStorage implements IStorage {
     rows.forEach(row => { result[row.event_type] = row.count; });
     return {
       sent: result.sent ?? 0, failed: result.failed ?? 0, suppressed: result.suppressed ?? 0, unsubscribed: result.unsubscribed ?? 0,
-      delivered: null, opened: null, clicked: null, deliveryAvailable: false,
+      delivered: null, opened: null, clicked: result.clicked ?? 0, clickAvailable: true, deliveryAvailable: false,
     };
   }
 

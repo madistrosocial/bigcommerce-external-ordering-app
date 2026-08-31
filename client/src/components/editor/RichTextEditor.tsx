@@ -1,13 +1,17 @@
 /**
  * RichTextEditor — Tiptap-based WYSIWYG editor with a formatting toolbar.
- * Supports: Bold · Italic · Underline · Font Family · Font Size
+ * Supports: Bold · Italic · Underline · Font Family · Font Size · Images · Alignment
  */
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { TextStyle, FontFamily, FontSize } from "@tiptap/extension-text-style";
 import { Underline as UnderlineExt } from "@tiptap/extension-underline";
-import { Bold, Italic, Underline, ChevronDown } from "lucide-react";
+import Image from "@tiptap/extension-image";
+import TextAlign from "@tiptap/extension-text-align";
+import {
+  AlignCenter, AlignLeft, AlignRight, Bold, ImagePlus, Italic, Underline, ChevronDown,
+} from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -53,6 +57,9 @@ const FONT_SIZES = [
   "18px","20px","24px","28px","32px","36px","48px",
 ];
 
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
 // ── Toolbar helpers ────────────────────────────────────────────────────────────
 
 function ToolbarBtn({
@@ -88,6 +95,9 @@ interface Props {
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function RichTextEditor({ value, onChange, minHeight = 300 }: Props) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageSelectionRef = useRef<{ from: number; to: number } | null>(null);
+  const [imageError, setImageError] = useState("");
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -95,6 +105,17 @@ export default function RichTextEditor({ value, onChange, minHeight = 300 }: Pro
       FontFamily,
       FontSize,
       UnderlineExt,
+      Image.configure({
+        inline: true,
+        allowBase64: true,
+        HTMLAttributes: {
+          class: "max-w-full h-auto rounded-md",
+        },
+      }),
+      TextAlign.configure({
+        types: ["heading", "paragraph"],
+        alignments: ["left", "center", "right"],
+      }),
     ],
     content: ensureHtml(value),
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
@@ -124,6 +145,44 @@ export default function RichTextEditor({ value, onChange, minHeight = 300 }: Pro
   const currentFamily = (attrs.fontFamily as string | undefined) || "";
   const currentSize   = (attrs.fontSize   as string | undefined) || "";
   const currentFamilyLabel = FONT_FAMILIES.find(f => f.value === currentFamily)?.label ?? "Font";
+  const currentAlignment = (editor.getAttributes("paragraph").textAlign
+    || editor.getAttributes("heading").textAlign
+    || "left") as string;
+
+  const openImagePicker = () => {
+    imageSelectionRef.current = {
+      from: editor.state.selection.from,
+      to: editor.state.selection.to,
+    };
+    setImageError("");
+    fileInputRef.current?.click();
+  };
+
+  const insertImage = (file: File) => {
+    if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+      setImageError("Use a PNG, JPEG, GIF, or WebP image.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setImageError("Images must be 2 MB or smaller.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = typeof reader.result === "string" ? reader.result : "";
+      if (!/^data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/i.test(src)) {
+        setImageError("That image could not be inserted.");
+        return;
+      }
+      const selection = imageSelectionRef.current;
+      const chain = editor.chain().focus();
+      if (selection) chain.setTextSelection(selection);
+      chain.setImage({ src, alt: file.name.replace(/\.[^.]+$/, "").slice(0, 120) }).run();
+      setImageError("");
+    };
+    reader.onerror = () => setImageError("That image could not be read.");
+    reader.readAsDataURL(file);
+  };
 
   return (
     <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
@@ -254,10 +313,57 @@ export default function RichTextEditor({ value, onChange, minHeight = 300 }: Pro
           <span className="text-[11px] font-mono leading-none">1.</span>
         </ToolbarBtn>
 
+        <Divider />
+
+        {/* Image insertion */}
+        <ToolbarBtn
+          onClick={openImagePicker}
+          title="Attach image (PNG, JPEG, GIF, or WebP; 2 MB max)"
+        >
+          <ImagePlus className="h-3.5 w-3.5" />
+        </ToolbarBtn>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          className="hidden"
+          onChange={event => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) insertImage(file);
+          }}
+        />
+
+        <Divider />
+
+        {/* Paragraph/image alignment */}
+        <ToolbarBtn
+          active={currentAlignment === "left"}
+          onClick={() => editor.chain().focus().setTextAlign("left").run()}
+          title="Align left"
+        >
+          <AlignLeft className="h-3.5 w-3.5" />
+        </ToolbarBtn>
+        <ToolbarBtn
+          active={currentAlignment === "center"}
+          onClick={() => editor.chain().focus().setTextAlign("center").run()}
+          title="Align center"
+        >
+          <AlignCenter className="h-3.5 w-3.5" />
+        </ToolbarBtn>
+        <ToolbarBtn
+          active={currentAlignment === "right"}
+          onClick={() => editor.chain().focus().setTextAlign("right").run()}
+          title="Align right"
+        >
+          <AlignRight className="h-3.5 w-3.5" />
+        </ToolbarBtn>
+
       </div>
 
       {/* ── Editor area ─────────────────────────────────────────────────────── */}
       <EditorContent editor={editor} />
+      {imageError && <p className="border-t border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{imageError}</p>}
 
     </div>
   );

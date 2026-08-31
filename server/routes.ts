@@ -21,7 +21,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
-import { processMarketingCampaign, processMarketingQueue, sendMarketingTestEmail, verifyMarketingUnsubscribeToken } from "./marketing";
+import { processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
@@ -7882,7 +7882,7 @@ export async function registerRoutes(
         campaign_type: String(body.campaign_type ?? "email"),
         subject_line: String(body.subject_line ?? ""),
         preview_text: String(body.preview_text ?? ""),
-        message_content: String(body.message_content ?? ""),
+         message_content: sanitizeMarketingEditorHtml(String(body.message_content ?? "")),
         audience_type: audienceType,
         audience_id: body.audience_id ? Number(body.audience_id) : null,
         audience_config: body.audience_config ?? {},
@@ -7914,7 +7914,10 @@ export async function registerRoutes(
         );
         if (audienceError) return res.status(400).json({ error: audienceError });
       }
-      const campaign = await storage.updateMarketingCampaign(Number(req.params.id), body, getMarketingUserId(req));
+       const updateBody = body.message_content === undefined
+         ? body
+         : { ...body, message_content: sanitizeMarketingEditorHtml(String(body.message_content)) };
+       const campaign = await storage.updateMarketingCampaign(Number(req.params.id), updateBody, getMarketingUserId(req));
       if (!campaign) return res.status(404).json({ error: "Campaign not found" });
       res.json(campaign);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -8149,7 +8152,7 @@ export async function registerRoutes(
   app.post("/api/marketing/templates", requirePermission("marketing", "manage_templates"), async (req, res) => {
     try {
       const key = `marketing_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const template = await storage.upsertEmailTemplate(key, { name: String(req.body?.name ?? "").trim(), subject_template: String(req.body?.subject_template ?? ""), body: String(req.body?.body ?? ""), template_type: "marketing", category: String(req.body?.category ?? "general"), updated_by: getMarketingUserId(req) });
+       const template = await storage.upsertEmailTemplate(key, { name: String(req.body?.name ?? "").trim(), subject_template: String(req.body?.subject_template ?? ""), body: sanitizeMarketingEditorHtml(String(req.body?.body ?? "")), template_type: "marketing", category: String(req.body?.category ?? "general"), updated_by: getMarketingUserId(req) });
       res.status(201).json(template);
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
@@ -8158,7 +8161,7 @@ export async function registerRoutes(
     try {
       const current = await storage.getMarketingTemplateById(Number(req.params.id));
       if (!current) return res.status(404).json({ error: "Template not found" });
-      const template = await storage.upsertEmailTemplate(current.key, { name: String(req.body?.name ?? current.name), subject_template: String(req.body?.subject_template ?? current.subject_template), body: String(req.body?.body ?? current.body), template_type: "marketing", category: String(req.body?.category ?? current.category), is_active: req.body?.is_active ?? current.is_active, updated_by: getMarketingUserId(req) });
+       const template = await storage.upsertEmailTemplate(current.key, { name: String(req.body?.name ?? current.name), subject_template: String(req.body?.subject_template ?? current.subject_template), body: req.body?.body === undefined ? current.body : sanitizeMarketingEditorHtml(String(req.body.body)), template_type: "marketing", category: String(req.body?.category ?? current.category), is_active: req.body?.is_active ?? current.is_active, updated_by: getMarketingUserId(req) });
       res.json(template);
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
@@ -8233,6 +8236,41 @@ export async function registerRoutes(
   app.delete("/api/marketing/suppressions/:id", requirePermission("marketing", "manage_suppressions"), async (req, res) => {
     try { res.json(await storage.revokeMarketingSuppression(Number(req.params.id), getMarketingUserId(req), String(req.body?.detail ?? "Re-enabled by staff"))); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  // Public, signed product-click endpoint. It only redirects to a URL present in
+  // the campaign snapshot, so the signed link cannot become an open redirect.
+  app.get("/api/marketing/click/:token", async (req, res) => {
+    try {
+      const decoded = verifyMarketingClickToken(String(req.params.token));
+      if (!decoded) return res.status(400).send("Invalid product link");
+      const [campaign, recipient] = await Promise.all([
+        storage.getMarketingCampaign(decoded.campaignId),
+        storage.getMarketingRecipient(decoded.recipientId),
+      ]);
+      if (!campaign || !recipient || Number(recipient.campaign_id) !== decoded.campaignId) {
+        return res.status(404).send("Product link not found");
+      }
+      const product = (Array.isArray(campaign.product_snapshots) ? campaign.product_snapshots : [])
+        .find((candidate: any) => Number(candidate?.id ?? candidate?.bigcommerce_id) === decoded.productId);
+      const targetUrl = String(product?.product_url ?? "").trim();
+      if (!/^https?:\/\//i.test(targetUrl) || targetUrl !== decoded.targetUrl) {
+        return res.status(404).send("Product link not found");
+      }
+      await storage.recordMarketingEvent({
+        campaign_id: decoded.campaignId,
+        recipient_id: decoded.recipientId,
+        event_type: "clicked",
+        detail: {
+          product_id: decoded.productId,
+          bigcommerce_id: Number(product?.bigcommerce_id ?? product?.id) || null,
+        },
+      });
+      res.setHeader("Cache-Control", "no-store");
+      return res.redirect(302, targetUrl);
+    } catch (e: any) {
+      return res.status(500).send("Unable to process product link");
+    }
   });
 
   // Public, signed unsubscribe endpoint. It intentionally does not expose customer data.

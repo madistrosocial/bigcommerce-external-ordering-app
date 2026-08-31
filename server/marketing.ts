@@ -47,6 +47,40 @@ function stripHtml(html: string): string {
     .replace(/&nbsp;/g, " ").replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
 }
 
+const MAX_MARKETING_HTML_BYTES = 8 * 1024 * 1024;
+const MAX_EMBEDDED_IMAGE_BYTES = 2 * 1024 * 1024;
+const EMBEDDED_IMAGE_PATTERN = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/i;
+
+/**
+ * Keep editor HTML safe at the API boundary as well as in the browser. Product
+ * comments, merge fields, inline styles, and ordinary HTTPS images are retained.
+ */
+export function sanitizeMarketingEditorHtml(value: string): string {
+  if (Buffer.byteLength(value, "utf8") > MAX_MARKETING_HTML_BYTES) {
+    throw new Error("Marketing message content is too large.");
+  }
+  let html = value
+    .replace(/<(script|iframe|object|embed|form)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<(script|iframe|object|embed|form)\b[^>]*\/?>/gi, "")
+    .replace(/\s+on[a-z0-9_-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+
+  html = html.replace(/\b(src|href)\s*=\s*(["'])(.*?)\2/gi, (match, attribute, quote, rawUrl) => {
+    const url = String(rawUrl).replace(/&amp;/g, "&").trim();
+    if (/^(?:javascript|vbscript):/i.test(url)) return `${attribute}=${quote}#${quote}`;
+    if (/^data:/i.test(url) && attribute.toLowerCase() !== "src") {
+      return `${attribute}=${quote}#${quote}`;
+    }
+    if (attribute.toLowerCase() === "src" && /^data:/i.test(url)) {
+      const embedded = url.match(EMBEDDED_IMAGE_PATTERN);
+      if (!embedded) return `${attribute}=${quote}#${quote}`;
+      const imageBytes = Buffer.from(embedded[2], "base64").byteLength;
+      if (imageBytes > MAX_EMBEDDED_IMAGE_BYTES) throw new Error("Embedded images must be 2 MB or smaller.");
+    }
+    return match;
+  });
+  return html;
+}
+
 function escapeHtml(value: unknown): string {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -83,6 +117,91 @@ function signUnsubscribeToken(campaignId: number, entityId: number, entityType: 
   const secret = String(process.env.SESSION_SECRET ?? "");
   const signature = createHmac("sha256", secret).update(payload).digest("base64url");
   return Buffer.from(`${payload}.${signature}`).toString("base64url");
+}
+
+function safeProductUrl(value: unknown): string {
+  const url = String(value ?? "").trim();
+  return /^https?:\/\//i.test(url) ? url : "";
+}
+
+function signMarketingClickToken(
+  campaignId: number,
+  recipientId: number,
+  productId: number,
+  targetUrl: string,
+): string {
+  const encodedTarget = Buffer.from(targetUrl).toString("base64url");
+  const payload = `${campaignId}.${recipientId}.${productId}.${encodedTarget}`;
+  const signature = createHmac("sha256", String(process.env.SESSION_SECRET ?? ""))
+    .update(payload).digest("base64url");
+  return Buffer.from(`${payload}.${signature}`).toString("base64url");
+}
+
+export function verifyMarketingClickToken(token: string): {
+  campaignId: number;
+  recipientId: number;
+  productId: number;
+  targetUrl: string;
+} | null {
+  try {
+    const decoded = Buffer.from(token, "base64url").toString("utf8");
+    const parts = decoded.split(".");
+    if (parts.length !== 5) return null;
+    const [rawCampaignId, rawRecipientId, rawProductId, encodedTarget, supplied] = parts;
+    const campaignId = Number(rawCampaignId);
+    const recipientId = Number(rawRecipientId);
+    const productId = Number(rawProductId);
+    const targetUrl = Buffer.from(encodedTarget, "base64url").toString("utf8");
+    const payload = `${campaignId}.${recipientId}.${productId}.${encodedTarget}`;
+    const expected = createHmac("sha256", String(process.env.SESSION_SECRET ?? ""))
+      .update(payload).digest("base64url");
+    if (!Number.isInteger(campaignId) || campaignId < 1
+      || !Number.isInteger(recipientId) || recipientId < 1
+      || !Number.isInteger(productId) || productId < 1
+      || !safeProductUrl(targetUrl) || !supplied
+      || supplied.length !== expected.length
+      || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
+      return null;
+    }
+    return { campaignId, recipientId, productId, targetUrl };
+  } catch {
+    return null;
+  }
+}
+
+function renderMarketingProductTrackingLinks(
+  template: string,
+  campaign: any,
+  recipientId: number,
+): string {
+  if (!recipientId) return template;
+  const snapshots = Array.isArray(campaign?.product_snapshots) ? campaign.product_snapshots : [];
+  const products = new Map<number, { id: number; productUrl: string }>();
+  for (const product of snapshots) {
+    const id = Number(product?.id ?? product?.bigcommerce_id);
+    const productUrl = safeProductUrl(product?.product_url);
+    if (Number.isInteger(id) && id > 0 && productUrl) products.set(id, { id, productUrl });
+  }
+  if (!products.size) return template;
+
+  const rewriteProductBlock = (block: string): string => block.replace(/<a\b[^>]*>/gi, tag => {
+    const hrefMatch = tag.match(/\bhref\s*=\s*"([^"]*)"/i);
+    if (!hrefMatch) return tag;
+    const idMatch = tag.match(/\bdata-marketing-product-id\s*=\s*"(\d+)"/i);
+    const href = hrefMatch[1].replace(/&amp;/g, "&");
+    const product = idMatch
+      ? products.get(Number(idMatch[1]))
+      : Array.from(products.values()).find(candidate => candidate.productUrl === href);
+    if (!product) return tag;
+    const token = signMarketingClickToken(campaign.id, recipientId, product.id, product.productUrl);
+    const trackingUrl = publicMarketingUrl(`/api/marketing/click/${token}`);
+    return tag.replace(/\bhref\s*=\s*"[^"]*"/i, `href="${escapeHtml(trackingUrl)}"`);
+  });
+
+  return template.replace(
+    /<!-- marketing-product-(?:block:\d+|grid) -->[\s\S]*?<!-- \/marketing-product-(?:block:\d+|grid) -->/g,
+    rewriteProductBlock,
+  );
 }
 
 export function verifyMarketingUnsubscribeToken(token: string): { campaignId: number; customerId?: number; contactId?: number; entityType: "customer" | "contact" } | null {
@@ -156,7 +275,11 @@ export async function processMarketingCampaign(campaignId: number): Promise<void
         const token = signUnsubscribeToken(campaignId, entityId, imported ? "contact" : "customer");
         const unsubscribeUrl = publicMarketingUrl(`/api/marketing/unsubscribe/${token}`);
         const subject = renderTemplate(campaign.subject_line || campaign.name, customer);
-        const body = renderTemplate(campaign.message_content || "<p></p>", customer);
+        const body = renderMarketingProductTrackingLinks(
+          renderTemplate(campaign.message_content || "<p></p>", customer),
+          campaign,
+          Number(recipient.id),
+        );
         const html = `${body}<hr style="border:0;border-top:1px solid #e5e7eb;margin:32px 0 16px"><p style="font:12px Arial;color:#64748b">You are receiving this email from Mid Atlantic Distribution. <a href="${unsubscribeUrl}">Unsubscribe from marketing emails</a>.</p>`;
         if (!recipient.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient.email)) {
           await storage.markMarketingRecipientFailed(row.id, "Customer does not have a valid email address.", false);

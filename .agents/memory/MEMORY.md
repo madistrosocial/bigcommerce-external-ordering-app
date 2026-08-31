@@ -15,3 +15,4 @@
 - [SMTP retry safety](smtp-retry-safety.md) — retry only explicit pre-DATA transient responses; post-DATA SMTP failures have uncertain acceptance and must not be retried.
 - [Tiptap external content sync](tiptap-external-content-sync.md) — Tiptap 3 setContent syncs must suppress update events when parent state owns the HTML.
 - [Marketing audience safety](marketing-audience-safety.md) — blank audiences are draft-only; “all eligible” must be an explicit selection, never a fallback.
+- [Marketing editor media](marketing-editor-media.md) — local marketing images use bounded inline data URLs with server-side HTML validation; product clicks use signed redirects.
