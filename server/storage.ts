@@ -2347,6 +2347,18 @@ export class DatabaseStorage implements IStorage {
      const allowed = ["name", "internal_description", "campaign_type", "subject_line", "preview_text", "message_content", "audience_type", "audience_id", "audience_config", "template_id", "product_snapshots", "product_display_options", "scheduled_at", "timezone"] as const;
     const update: Record<string, unknown> = {};
     for (const key of allowed) if (key in data) update[key] = data[key];
+    if ("scheduled_at" in update) {
+      const rawScheduledAt = update.scheduled_at;
+      if (rawScheduledAt === null || rawScheduledAt === undefined || rawScheduledAt === "") {
+        update.scheduled_at = null;
+      } else {
+        const scheduledAt = rawScheduledAt instanceof Date
+          ? rawScheduledAt
+          : new Date(String(rawScheduledAt));
+        if (Number.isNaN(scheduledAt.getTime())) throw new Error("Invalid scheduled time");
+        update.scheduled_at = scheduledAt;
+      }
+    }
      if ("product_snapshots" in data) {
        update.product_snapshots = Array.isArray(data.product_snapshots) ? data.product_snapshots : [];
      }
