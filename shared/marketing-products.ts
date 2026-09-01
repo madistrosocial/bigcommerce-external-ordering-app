@@ -85,7 +85,7 @@ export function renderMarketingProductGrid(
 ): string {
   const normalized = normalizeMarketingProductDisplayOptions(options);
   const cells = products.map(product =>
-    `<div class="marketing-product-cell" style="display:inline-block;vertical-align:top;width:33.333%;max-width:33.333%;padding:6px;box-sizing:border-box;font-size:initial">${productMarkup(product, normalized)}</div>`,
+    `<div class="marketing-product-cell" style="display:inline-block;vertical-align:top;width:50%;max-width:50%;padding:6px;box-sizing:border-box;font-size:initial">${productMarkup(product, normalized)}</div>`,
   ).join("");
-  return `<!-- marketing-product-grid --><style type="text/css">@media only screen and (max-width:600px){.marketing-product-cell{width:50%!important;max-width:50%!important;}}</style><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;margin:18px 0"><tbody><tr><td align="left" style="font-size:0;padding:0">${cells}</td></tr></tbody></table><!-- /marketing-product-grid -->`;
+  return `<!-- marketing-product-grid --><style type="text/css">@media only screen and (min-width:768px){.marketing-product-cell{width:33.333%!important;max-width:33.333%!important;}}@media only screen and (max-width:767px){.marketing-product-cell{width:50%!important;max-width:50%!important;}}</style><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;margin:18px 0"><tbody><tr><td align="left" style="font-size:0;padding:0">${cells}</td></tr></tbody></table><!-- /marketing-product-grid -->`;
 }
