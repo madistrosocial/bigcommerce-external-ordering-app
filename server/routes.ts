@@ -8018,7 +8018,7 @@ export async function registerRoutes(
       if (Number.isNaN(when.getTime()) || when.getTime() <= Date.now()) return res.status(400).json({ error: "Choose a future schedule time" });
       const campaign = await storage.getMarketingCampaign(id);
       if (!campaign) return res.status(404).json({ error: "Campaign not found" });
-      if (!["draft", "ready", "paused"].includes(campaign.status)) return res.status(409).json({ error: `Campaign cannot be scheduled from ${campaign.status}` });
+      if (!["draft", "ready", "paused", "scheduled"].includes(campaign.status)) return res.status(409).json({ error: `Campaign cannot be scheduled from ${campaign.status}` });
       const audienceError = validateMarketingAudience(
         campaign.audience_type,
         campaign.audience_config,
@@ -8028,6 +8028,9 @@ export async function registerRoutes(
       );
       if (audienceError) return res.status(400).json({ error: audienceError });
       const updated = await storage.updateMarketingCampaign(id, { scheduled_at: when, timezone: String(req.body?.timezone ?? "UTC") }, getMarketingUserId(req));
+      if (campaign.status === "scheduled") {
+        return res.json(updated);
+      }
       const scheduled = await storage.updateMarketingCampaignStatus(id, "scheduled", getMarketingUserId(req));
       res.json(scheduled ?? updated);
     } catch (e: any) { res.status(400).json({ error: e.message }); }
