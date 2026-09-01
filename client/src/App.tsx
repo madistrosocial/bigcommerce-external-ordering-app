@@ -51,7 +51,7 @@ import StoreCreditLedger from "@/pages/crm/StoreCreditLedger";
 import PriceOverrideAuditPage from "@/pages/admin/reports/PriceOverrideAudit";
 import StoreCreditUsageReportPage from "@/pages/admin/reports/StoreCreditUsageReport";
 import SalesReportPage from "@/pages/admin/reports/SalesReport";
-import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, MarketingAudiences } from "@/pages/marketing/Marketing";
+import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, MarketingAudiences, MarketingSettings } from "@/pages/marketing/Marketing";
 import { MarketingAnalytics, MarketingTemplates, MarketingAutomations } from "@/pages/marketing/MarketingPhase2";
 import NotFound from "@/pages/not-found";
 
@@ -157,6 +157,9 @@ function Router() {
       {/* ── Marketing routes ── */}
       <Route path="/marketing">
         {() => <PermissionRoute component={MarketingDashboard} module="marketing" />}
+      </Route>
+      <Route path="/marketing/settings">
+        {() => <PermissionRoute component={MarketingSettings} module="marketing" action="send" />}
       </Route>
       <Route path="/marketing/campaigns">
         {() => <PermissionRoute component={MarketingCampaigns} module="marketing" />}

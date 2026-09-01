@@ -4,7 +4,7 @@ import { useLocation, useRoute } from "wouter";
 import {
   Activity, ArrowLeft, BarChart3, CalendarClock, Check, ChevronRight, Clock3,
   FileText, Filter, Mail, Megaphone, MoreHorizontal, Plus, RefreshCw, Search,
-  Send, Target, Trash2, Users, X,
+  Send, Settings as SettingsIcon, Target, Trash2, Users, X,
   Loader2, Package, Pencil, ShoppingBag,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import {
   pauseMarketingCampaign, duplicateMarketingCampaign, getMarketingRecipients, scheduleMarketingCampaign,
   getMarketingContacts, importMarketingContacts, getMarketingAudienceMembers, getMarketingAudiencePreview,
    getMarketingTemplates, getMarketingCustomerGroups, searchMarketingProducts,
+   getMarketingSenderSettings, saveMarketingSenderSettings,
 } from "@/lib/api";
 import {
   DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS,
@@ -124,9 +125,9 @@ export function MarketingDashboard() {
   const { data, isLoading, refetch } = useQuery<any>({ queryKey: ["marketing-dashboard"], queryFn: getMarketingDashboard });
   const [, setLocation] = useLocation();
   const { hasPermission } = usePermissions();
-  if (isLoading) return <PageShell title="Marketing Dashboard" subtitle="Plan and measure customer communications"><div className="py-16 text-center text-sm text-slate-400">Loading marketing data…</div></PageShell>;
+  if (isLoading) return <PageShell title="Marketing" subtitle="Plan and measure customer communications"><div className="py-16 text-center text-sm text-slate-400">Loading marketing data…</div></PageShell>;
   const d = data || {};
-  return <PageShell title="Marketing Dashboard" subtitle="Plan and measure customer communications" action={hasPermission("marketing", "create") ? <Button onClick={() => setLocation("/marketing/campaigns/new")}><Plus className="mr-2 h-4 w-4" /> New campaign</Button> : undefined}>
+  return <PageShell title="Marketing" subtitle="Plan and measure customer communications" action={<div className="flex flex-wrap justify-end gap-2">{hasPermission("marketing", "send") && <Button variant="outline" onClick={() => setLocation("/marketing/settings")}><SettingsIcon className="mr-2 h-4 w-4" /> Settings</Button>}{hasPermission("marketing", "create") && <Button onClick={() => setLocation("/marketing/campaigns/new")}><Plus className="mr-2 h-4 w-4" /> New campaign</Button>}</div>}>
     <div className="flex items-center justify-between"><div><h2 className="text-base font-semibold text-slate-900">Performance snapshot</h2><p className="text-sm text-slate-500">Only recorded campaign activity is shown here.</p></div><Button variant="outline" size="sm" onClick={() => refetch()}><RefreshCw className="mr-2 h-3.5 w-3.5" /> Refresh</Button></div>
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <StatCard label="Total campaigns" value={d.totalCampaigns ?? 0} caption={`${d.draftCampaigns ?? 0} drafts`} icon={Megaphone} />
@@ -138,7 +139,86 @@ export function MarketingDashboard() {
        <section className="rounded-xl border bg-white shadow-sm"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold text-slate-900">Recent campaigns</h2><p className="text-xs text-slate-500">Latest changes across your campaigns</p></div><Button variant="ghost" size="sm" onClick={() => setLocation("/marketing/campaigns")}>View all <ChevronRight className="ml-1 h-4 w-4" /></Button></div><div className="divide-y">{(d.recentCampaigns || []).length ? d.recentCampaigns.map((c: any) => <button key={c.id} onClick={() => setLocation(`/marketing/campaigns/${c.id}`)} className="flex w-full items-center gap-3 px-5 py-4 text-left hover:bg-slate-50"><span className="rounded-lg bg-blue-50 p-2 text-blue-600"><Mail className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-slate-800">{c.name}</span><span className="block text-xs text-slate-400">{c.creator_name || "Unknown creator"} · {c.updated_at ? new Date(c.updated_at).toLocaleDateString() : ""}</span></span><StatusBadge status={c.status} /></button>) : <EmptyState icon={Megaphone} text="No campaigns yet" action={hasPermission("marketing", "create") ? "Create your first campaign" : undefined} onClick={hasPermission("marketing", "create") ? () => setLocation("/marketing/campaigns/new") : undefined} />}</div></section>
       <section className="rounded-xl border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="font-semibold text-slate-900">Activity</h2><p className="text-xs text-slate-500">A real audit trail of marketing changes</p></div><div className="divide-y">{(d.recentActivity || []).length ? d.recentActivity.map((a: any) => <div key={a.id} className="flex gap-3 px-5 py-4"><span className="mt-0.5 rounded-full bg-slate-100 p-1.5 text-slate-500"><Activity className="h-3.5 w-3.5" /></span><div className="min-w-0"><p className="text-sm text-slate-700"><strong>{a.user_name || "System"}</strong> {a.action.replaceAll("_", " ")} <strong>{a.campaign_name || "campaign"}</strong></p><p className="mt-1 text-xs text-slate-400">{a.created_at ? new Date(a.created_at).toLocaleString() : ""}</p></div></div>) : <EmptyState icon={Clock3} text="No activity recorded" />}</div></section>
     </div>
-     <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm text-blue-900"><div className="flex gap-3"><Target className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" /><div><p className="font-semibold">SMTP measurement boundary</p><p className="mt-1 text-blue-800/80">Sent and failed counts are recorded from SMTP responses. Delivery, opens, and clicks are shown as Not Available because this SMTP connection does not provide those events.</p></div></div></div>
+      <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm text-blue-900"><div className="flex gap-3"><Target className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" /><div><p className="font-semibold">SMTP measurement boundary</p><p className="mt-1 text-blue-800/80">Sent and failed counts are recorded from SMTP responses. Delivery and opens are unavailable; product clicks are recorded through tracked campaign links.</p></div></div></div>
+  </PageShell>;
+}
+
+const MARKETING_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function MarketingSettings() {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<{ emails: string[]; defaultEmail: string }>({
+    queryKey: ["marketing-sender-settings"],
+    queryFn: getMarketingSenderSettings,
+  });
+  const [emails, setEmails] = useState<string[]>([]);
+  const [defaultEmail, setDefaultEmail] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+
+  useEffect(() => {
+    if (!data) return;
+    setEmails(Array.isArray(data.emails) ? data.emails : []);
+    setDefaultEmail(data.defaultEmail || "");
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () => saveMarketingSenderSettings({ emails, defaultEmail }),
+    onSuccess: (saved: { emails: string[]; defaultEmail: string }) => {
+      setEmails(saved.emails);
+      setDefaultEmail(saved.defaultEmail);
+      qc.invalidateQueries({ queryKey: ["marketing-sender-settings"] });
+      toast({ title: "Marketing sender settings saved" });
+    },
+    onError: (error: any) => toast({ title: "Unable to save sender settings", description: error.message, variant: "destructive" }),
+  });
+
+  const addEmail = () => {
+    const email = newEmail.trim();
+    if (!MARKETING_EMAIL_PATTERN.test(email)) {
+      toast({ title: "Enter a valid email address", variant: "destructive" });
+      return;
+    }
+    if (emails.some(existing => existing.toLowerCase() === email.toLowerCase())) {
+      toast({ title: "That sender email is already added", variant: "destructive" });
+      return;
+    }
+    setEmails(old => [...old, email]);
+    if (!defaultEmail) setDefaultEmail(email);
+    setNewEmail("");
+  };
+
+  const removeEmail = (email: string) => {
+    const next = emails.filter(candidate => candidate !== email);
+    setEmails(next);
+    if (defaultEmail.toLowerCase() === email.toLowerCase()) setDefaultEmail(next[0] || "");
+  };
+
+  return <PageShell title="Marketing" subtitle="Choose which approved email address campaigns use as their From address" action={<Button variant="outline" onClick={() => setLocation("/marketing")}><ArrowLeft className="mr-2 h-4 w-4" /> Back to Marketing</Button>}>
+    <section className="max-w-3xl rounded-xl border bg-white p-5 shadow-sm">
+      <div className="flex items-start gap-3">
+        <span className="rounded-lg bg-blue-50 p-2 text-blue-600"><SettingsIcon className="h-5 w-5" /></span>
+        <div><h2 className="font-semibold text-slate-900">Campaign sender emails</h2><p className="mt-1 text-sm text-slate-500">Add the addresses your SMTP account is authorized to send from, then choose the default for new campaigns.</p></div>
+      </div>
+      {isLoading ? <div className="py-10 text-center text-sm text-slate-400">Loading sender settings…</div> : <div className="mt-5 space-y-4">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input type="email" value={newEmail} onChange={event => setNewEmail(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); addEmail(); } }} placeholder="marketing@midatlanticdistribution.com" className="flex-1" />
+          <Button type="button" variant="outline" onClick={addEmail}><Plus className="mr-2 h-4 w-4" /> Add email</Button>
+        </div>
+        <div className="divide-y rounded-lg border">
+          {emails.length ? emails.map(email => <div key={email} className="flex items-center gap-3 px-3 py-3">
+            <input type="radio" name="marketing-default-sender" checked={defaultEmail.toLowerCase() === email.toLowerCase()} onChange={() => setDefaultEmail(email)} aria-label={`Make ${email} the default sender`} />
+            <Mail className="h-4 w-4 shrink-0 text-slate-400" />
+            <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{email}</span>
+            {defaultEmail.toLowerCase() === email.toLowerCase() && <span className="text-xs font-medium text-blue-600">Default</span>}
+            <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600" onClick={() => removeEmail(email)} aria-label={`Remove ${email}`}><Trash2 className="h-4 w-4" /></Button>
+          </div>) : <p className="px-3 py-5 text-sm text-slate-400">No campaign sender emails configured yet.</p>}
+        </div>
+        <p className="text-xs text-slate-500">The campaign dropdown uses the default when no sender is selected. Changing this does not change your SMTP login credentials, and your mail provider must authorize each From address.</p>
+        <div className="flex justify-end"><Button onClick={() => save.mutate()} disabled={save.isPending || !emails.length || !defaultEmail}>{save.isPending ? "Saving…" : "Save sender settings"}</Button></div>
+      </div>}
+    </section>
   </PageShell>;
 }
 
@@ -281,7 +361,7 @@ function CampaignEditor({ id }: { id?: number }) {
   const editing = Boolean(id);
   const [form, setForm] = useState<any>({
     name: "", internal_description: "", subject_line: "", preview_text: "",
-     message_content: "<p></p>", template_id: null, audience_type: "",
+     message_content: "<p></p>", sender_email: "", template_id: null, audience_type: "",
      audience_config: {}, audience_id: null, scheduled_at: "",
     product_snapshots: [], product_display_options: DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS,
   });
@@ -290,6 +370,10 @@ function CampaignEditor({ id }: { id?: number }) {
   const [productSearch, setProductSearch] = useState("");
   const [pickerProducts, setPickerProducts] = useState<MarketingProductSnapshot[]>([]);
   const { data: existing } = useQuery<any>({ queryKey: ["marketing-campaign", id], queryFn: () => getMarketingCampaign(id!), enabled: editing });
+  const { data: senderSettings = { emails: [], defaultEmail: "" } } = useQuery<{ emails: string[]; defaultEmail: string }>({
+    queryKey: ["marketing-sender-settings"],
+    queryFn: getMarketingSenderSettings,
+  });
   const { data: audiences = [] } = useQuery<any[]>({ queryKey: ["marketing-audiences"], queryFn: getMarketingAudiences });
   const { data: templates = [] } = useQuery<any[]>({ queryKey: ["marketing-templates"], queryFn: getMarketingTemplates });
   const { data: customerPage } = useQuery<any>({ queryKey: ["marketing-audience-customers", "campaign-editor"], queryFn: () => getMarketingAudienceCustomers({ limit: 100 }) });
@@ -304,7 +388,7 @@ function CampaignEditor({ id }: { id?: number }) {
     queryFn: () => searchMarketingProducts(productSearch.trim()),
     enabled: pickerOpen && productSearch.trim().length >= 2,
   });
-  useEffect(() => { if (existing) { setForm({ ...existing, scheduled_at: existing.scheduled_at ? new Date(existing.scheduled_at).toISOString().slice(0, 16) : "" }); setSelectedIds((existing.recipients || []).map((r: any) => r.id)); } }, [existing]);
+  useEffect(() => { if (existing) { setForm({ ...existing, sender_email: existing.sender_email || "", scheduled_at: existing.scheduled_at ? new Date(existing.scheduled_at).toISOString().slice(0, 16) : "" }); setSelectedIds((existing.recipients || []).map((r: any) => r.id)); } }, [existing]);
   const saveMutation = useMutation({
     mutationFn: (status: string) => {
       const payload = { ...form, status, scheduled_at: form.scheduled_at || null, customer_ids: form.audience_type === "selected_customers" ? selectedIds : undefined };
@@ -329,6 +413,10 @@ function CampaignEditor({ id }: { id?: number }) {
   const set = (key: string, value: any) => setForm((old: any) => ({ ...old, [key]: value }));
   const products: MarketingProductSnapshot[] = (Array.isArray(form.product_snapshots) ? form.product_snapshots : []).map(asProductSnapshot);
   const productOptions = normalizeMarketingProductDisplayOptions(form.product_display_options);
+  const senderOptions = Array.from(new Set([
+    ...(Array.isArray(senderSettings.emails) ? senderSettings.emails : []),
+    ...(form.sender_email ? [String(form.sender_email)] : []),
+  ]));
   const selectedGroupName = String(form.audience_config?.customerGroupName ?? form.audience_config?.customerGroup ?? "").trim();
   const audienceIsComplete = Boolean(
     form.audience_type
@@ -395,7 +483,7 @@ function CampaignEditor({ id }: { id?: number }) {
   const customers = customerPage?.rows ?? [];
   return <PageShell title={editing ? "Edit campaign" : "New campaign"} subtitle="Build, test, schedule, or send this campaign through the configured SMTP connection." action={<Button variant="outline" onClick={() => setLocation(editing ? `/marketing/campaigns/${id}` : "/marketing/campaigns")}><ArrowLeft className="mr-2 h-4 w-4" /> Cancel</Button>}>
     <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]"><div className="space-y-5">
-      <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><FileText className="h-4 w-4 text-blue-500" /> Campaign details</h2><div className="space-y-4"><label className="block text-sm font-medium text-slate-700">Campaign name<Input className="mt-1.5" value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. September new arrivals" /></label><label className="block text-sm font-medium text-slate-700">Internal description<textarea className="mt-1.5 min-h-20 w-full rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-blue-400" value={form.internal_description} onChange={e => set("internal_description", e.target.value)} placeholder="What is this campaign for?" /></label><label className="block text-sm font-medium text-slate-700">Subject line<Input className="mt-1.5" value={form.subject_line} onChange={e => set("subject_line", e.target.value)} placeholder="Your subject line" /></label><label className="block text-sm font-medium text-slate-700">Preview text<Input className="mt-1.5" value={form.preview_text} onChange={e => set("preview_text", e.target.value)} placeholder="Optional inbox preview" /></label></div></section>
+       <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><FileText className="h-4 w-4 text-blue-500" /> Campaign details</h2><div className="space-y-4"><label className="block text-sm font-medium text-slate-700">Campaign name<Input className="mt-1.5" value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. September new arrivals" /></label><label className="block text-sm font-medium text-slate-700">Internal description<textarea className="mt-1.5 min-h-20 w-full rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-blue-400" value={form.internal_description} onChange={e => set("internal_description", e.target.value)} placeholder="What is this campaign for?" /></label><label className="block text-sm font-medium text-slate-700">Subject line<Input className="mt-1.5" value={form.subject_line} onChange={e => set("subject_line", e.target.value)} placeholder="Your subject line" /></label><label className="block text-sm font-medium text-slate-700">Preview text<Input className="mt-1.5" value={form.preview_text} onChange={e => set("preview_text", e.target.value)} placeholder="Optional inbox preview" /></label><label className="block text-sm font-medium text-slate-700">From email<select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.sender_email || ""} onChange={e => set("sender_email", e.target.value)}><option value="">Use default{senderSettings.defaultEmail ? ` (${senderSettings.defaultEmail})` : ""}</option>{senderOptions.map(email => <option key={email} value={email}>{email}{email.toLowerCase() === senderSettings.defaultEmail.toLowerCase() ? " · Default" : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-400">{senderSettings.defaultEmail ? `Defaults to ${senderSettings.defaultEmail}. Manage sender addresses in Marketing settings.` : "No sender addresses are configured yet. Add one in Marketing settings before sending."}</span></label></div></section>
        <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><Mail className="h-4 w-4 text-blue-500" /> Message</h2><label className="mb-4 block text-sm font-medium text-slate-700">Use a marketing template<select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.template_id || ""} onChange={e => applyTemplate(e.target.value)}><option value="">Start from scratch</option>{templates.map((template: any) => <option key={template.id} value={template.id}>{template.name}{template.category ? ` · ${template.category}` : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-400">{templates.length ? "Selecting a template fills the subject and message. You can still edit both." : "No active marketing templates are available yet."}</span></label><RichTextEditor value={form.message_content} onChange={value => setForm((old: any) => ({ ...old, message_content: preserveMarketingProductMarkup(value, old.message_content || "") }))} minHeight={240} /></section>
        <section className="rounded-xl border bg-white p-5 shadow-sm">
          <div className="flex flex-wrap items-start justify-between gap-3">

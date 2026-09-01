@@ -198,7 +198,7 @@ export interface IStorage {
   getMarketingDashboard(): Promise<any>;
   getMarketingCampaigns(opts?: { search?: string; status?: string; limit?: number; offset?: number }): Promise<{ campaigns: any[]; total: number }>;
   getMarketingCampaign(id: number): Promise<any | undefined>;
-  createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any>;
+  createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; sender_email?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any>;
   updateMarketingCampaign(id: number, data: Record<string, unknown> & { customer_ids?: number[] }, userId: number): Promise<any | undefined>;
   deleteMarketingCampaign(id: number, userId: number): Promise<void>;
   updateMarketingCampaignStatus(id: number, status: string, userId: number): Promise<any | undefined>;
@@ -2300,7 +2300,7 @@ export class DatabaseStorage implements IStorage {
     return { ...campaign, audience_count: audienceCount, recipients, activity: activity.map(row => ({ ...row.a, user_name: row.user_name })) };
   }
 
-  async createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any> {
+  async createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; sender_email?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any> {
     const customerIds = [...new Set((data.customer_ids ?? []).filter(Number.isInteger))];
     const recipientCount = !data.audience_type
       ? 0
@@ -2321,6 +2321,7 @@ export class DatabaseStorage implements IStorage {
         subject_line: data.subject_line ?? "",
         preview_text: data.preview_text ?? "",
         message_content: data.message_content ?? "",
+        sender_email: data.sender_email ?? "",
         audience_type: data.audience_type,
         audience_id: data.audience_id ?? null,
         audience_config: data.audience_config ?? {},
@@ -2344,7 +2345,7 @@ export class DatabaseStorage implements IStorage {
   async updateMarketingCampaign(id: number, data: Record<string, unknown> & { customer_ids?: number[] }, userId: number): Promise<any | undefined> {
     const [current] = await db.select().from(marketingCampaigns).where(eq(marketingCampaigns.id, id)).limit(1);
     if (!current) return undefined;
-     const allowed = ["name", "internal_description", "campaign_type", "subject_line", "preview_text", "message_content", "audience_type", "audience_id", "audience_config", "template_id", "product_snapshots", "product_display_options", "scheduled_at", "timezone"] as const;
+     const allowed = ["name", "internal_description", "campaign_type", "subject_line", "preview_text", "message_content", "sender_email", "audience_type", "audience_id", "audience_config", "template_id", "product_snapshots", "product_display_options", "scheduled_at", "timezone"] as const;
     const update: Record<string, unknown> = {};
     for (const key of allowed) if (key in data) update[key] = data[key];
     if ("scheduled_at" in update) {

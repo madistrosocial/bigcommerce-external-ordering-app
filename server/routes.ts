@@ -21,7 +21,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
-import { processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
+import { getMarketingSenderSettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
@@ -7755,6 +7755,31 @@ export async function registerRoutes(
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  app.get("/api/marketing/sender-settings", requirePermission("marketing"), async (_req, res) => {
+    try {
+      res.json(await getMarketingSenderSettings());
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.put("/api/marketing/sender-settings", requirePermission("marketing", "send"), async (req, res) => {
+    try {
+      const requestedEmails = Array.isArray(req.body?.emails)
+        ? req.body.emails.map((email: unknown) => String(email ?? "").trim())
+        : [];
+      if (!requestedEmails.length) return res.status(400).json({ error: "Add at least one campaign sender email." });
+      if (requestedEmails.some(email => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+        return res.status(400).json({ error: "Every sender email must be valid." });
+      }
+      const requestedDefault = String(req.body?.defaultEmail ?? "").trim();
+      if (requestedDefault && !requestedEmails.some(email => email.toLowerCase() === requestedDefault.toLowerCase())) {
+        return res.status(400).json({ error: "The default sender must be one of the configured emails." });
+      }
+      const settings = normalizeMarketingSenderSettings({ emails: requestedEmails, defaultEmail: requestedDefault });
+      await storage.setSetting("marketing_sender_settings", settings);
+      res.json(settings);
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
   // Marketing product picker. Credentials stay server-side and only the
   // snapshot fields needed by the campaign editor are returned.
   app.get("/api/marketing/products/search", requirePermission("marketing"), async (req, res) => {
@@ -7883,6 +7908,7 @@ export async function registerRoutes(
         subject_line: String(body.subject_line ?? ""),
         preview_text: String(body.preview_text ?? ""),
          message_content: sanitizeMarketingEditorHtml(String(body.message_content ?? "")),
+         sender_email: String(body.sender_email ?? "").trim(),
         audience_type: audienceType,
         audience_id: body.audience_id ? Number(body.audience_id) : null,
         audience_config: body.audience_config ?? {},
@@ -8023,6 +8049,7 @@ export async function registerRoutes(
       const copy = await storage.createMarketingCampaign({
         name: `${original.name} (Copy)`, internal_description: original.internal_description, campaign_type: original.campaign_type,
         subject_line: original.subject_line, preview_text: original.preview_text, message_content: original.message_content,
+         sender_email: original.sender_email ?? "",
         audience_type: original.audience_type, audience_id: original.audience_id, audience_config: original.audience_config,
          template_id: original.template_id,
          product_snapshots: Array.isArray(original.product_snapshots) ? original.product_snapshots : [],

@@ -229,6 +229,44 @@ async function getMailSettings() {
   return setting?.value && typeof setting.value === "string" ? JSON.parse(setting.value) : setting?.value ?? {};
 }
 
+const MARKETING_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export type MarketingSenderSettings = {
+  emails: string[];
+  defaultEmail: string;
+};
+
+export function normalizeMarketingSenderSettings(value: unknown, fallbackEmail = ""): MarketingSenderSettings {
+  const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const candidates = Array.isArray(raw.emails) ? raw.emails : [];
+  const emails: string[] = [];
+  for (const candidate of candidates) {
+    const email = String(candidate ?? "").trim();
+    if (MARKETING_EMAIL_PATTERN.test(email) && !emails.some(existing => existing.toLowerCase() === email.toLowerCase())) {
+      emails.push(email);
+    }
+  }
+  const fallback = String(fallbackEmail ?? "").trim();
+  if (!emails.length && MARKETING_EMAIL_PATTERN.test(fallback)) emails.push(fallback);
+  const requestedDefault = String(raw.defaultEmail ?? raw.default_email ?? "").trim();
+  const defaultEmail = emails.find(email => email.toLowerCase() === requestedDefault.toLowerCase()) ?? emails[0] ?? "";
+  return { emails, defaultEmail };
+}
+
+export async function getMarketingSenderSettings(invoiceSettings?: any): Promise<MarketingSenderSettings> {
+  const invoice = invoiceSettings ?? await getMailSettings();
+  const fallback = String(invoice.smtp_from || invoice.company_email || invoice.smtp_user || "").trim();
+  const setting = await storage.getSetting("marketing_sender_settings");
+  return normalizeMarketingSenderSettings(setting?.value, fallback);
+}
+
+export function resolveMarketingSenderEmail(campaign: any, settings: MarketingSenderSettings): string {
+  const requested = String(campaign?.sender_email ?? "").trim();
+  return settings.emails.find(email => email.toLowerCase() === requested.toLowerCase())
+    ?? settings.defaultEmail
+    ?? "";
+}
+
 export async function sendMarketingTestEmail(campaignId: number, email: string): Promise<{ messageId?: string }> {
   const campaign = await storage.getMarketingCampaign(campaignId);
   if (!campaign) throw new Error("Campaign not found");
@@ -236,7 +274,7 @@ export async function sendMarketingTestEmail(campaignId: number, email: string):
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error("Enter a valid test email address.");
   const settings = await getMailSettings();
   const transport = smtpTransport(settings);
-  const from = String(settings.smtp_from || settings.company_email || settings.smtp_user || "").trim();
+  const from = resolveMarketingSenderEmail(campaign, await getMarketingSenderSettings(settings));
   if (!from) throw new Error("SMTP sender address is not configured.");
   const customer = { first_name: "Test", last_name: "Recipient", email: to };
   const subject = renderTemplate(campaign.subject_line || campaign.name, customer);
@@ -255,7 +293,7 @@ export async function processMarketingCampaign(campaignId: number): Promise<void
     if (!campaign) return;
     const settings = await getMailSettings();
     const transport = smtpTransport(settings);
-    const from = String(settings.smtp_from || settings.company_email || settings.smtp_user || "").trim();
+    const from = resolveMarketingSenderEmail(campaign, await getMarketingSenderSettings(settings));
     if (!from) throw new Error("SMTP sender address is not configured.");
     await storage.prepareMarketingRecipients(campaignId);
     while (true) {
