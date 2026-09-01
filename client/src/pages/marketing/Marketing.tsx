@@ -4,11 +4,12 @@ import { useLocation, useRoute } from "wouter";
 import {
   Activity, ArrowLeft, BarChart3, CalendarClock, Check, ChevronRight, Clock3,
   FileText, Filter, Mail, Megaphone, MoreHorizontal, Plus, RefreshCw, Search,
-  Send, Settings as SettingsIcon, Target, Trash2, Users, X,
-  Loader2, Package, Pencil, ShoppingBag,
+  Eye, Monitor, Send, Settings as SettingsIcon, Smartphone, Tablet, Target,
+  Trash2, Users, X, Loader2, Package, Pencil, ShoppingBag,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import RichTextEditor from "@/components/editor/RichTextEditor";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -144,6 +145,100 @@ export function MarketingDashboard() {
 }
 
 const MARKETING_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type MarketingPreviewDevice = "desktop" | "tablet" | "mobile";
+
+const MARKETING_PREVIEW_DEVICES: Array<{
+  value: MarketingPreviewDevice;
+  label: string;
+  width: number;
+  icon: React.ElementType;
+}> = [
+  { value: "desktop", label: "Desktop", width: 680, icon: Monitor },
+  { value: "tablet", label: "Tablet", width: 520, icon: Tablet },
+  { value: "mobile", label: "Mobile", width: 360, icon: Smartphone },
+];
+
+function escapeMarketingPreviewHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderMarketingPreviewTemplate(content: string): string {
+  const values: Record<string, string> = {
+    first_name: "Alex",
+    last_name: "Morgan",
+    full_name: "Alex Morgan",
+    customer_name: "Alex Morgan",
+    company: "Morgan Market",
+    email: "alex@example.com",
+    customer_group: "Retail",
+    customer_type: "Customer",
+    account_health: "Active",
+    lifetime_orders: "12",
+    lifetime_revenue: "$4,280.00",
+    store_credit_balance: "$125.00",
+    last_order_date: "August 28, 2026",
+    unsubscribe_url: "#",
+  };
+  return content.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}|\{([a-zA-Z0-9_]+)\}/g, (_match, doubleKey, singleKey) => {
+    return escapeMarketingPreviewHtml(values[doubleKey || singleKey] ?? "");
+  });
+}
+
+function MarketingEmailPreview({
+  open,
+  onOpenChange,
+  subject,
+  previewText,
+  sender,
+  content,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  subject: string;
+  previewText: string;
+  sender: string;
+  content: string;
+}) {
+  const [device, setDevice] = useState<MarketingPreviewDevice>("desktop");
+  const selectedDevice = MARKETING_PREVIEW_DEVICES.find(option => option.value === device) ?? MARKETING_PREVIEW_DEVICES[0];
+  const previewDocument = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>
+    *{box-sizing:border-box}html,body{margin:0;padding:0;background:#f1f5f9;color:#1e293b;font-family:Arial,Helvetica,sans-serif}
+    body{padding:20px 12px}.email-shell{width:100%;max-width:680px;margin:0 auto;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.12)}
+    .email-meta{padding:16px 20px;border-bottom:1px solid #e2e8f0;background:#fff;font-size:12px;line-height:18px;color:#64748b}
+    .email-meta strong{color:#334155;font-weight:600}.email-content{padding:20px;overflow-wrap:anywhere}
+    .email-content img{max-width:100%;height:auto}.email-content table{max-width:100%}
+    a{color:#2563eb}
+  </style></head><body><div class="email-shell"><div class="email-meta"><div><strong>From:</strong> ${escapeMarketingPreviewHtml(sender || "Not configured")}</div><div><strong>To:</strong> Alex Morgan &lt;alex@example.com&gt;</div><div><strong>Subject:</strong> ${escapeMarketingPreviewHtml(subject || "Your campaign subject")}</div>${previewText ? `<div><strong>Preview:</strong> ${escapeMarketingPreviewHtml(previewText)}</div>` : ""}</div><div class="email-content">${renderMarketingPreviewTemplate(content || "<p>Your campaign message will appear here.</p>")}</div></div></body></html>`;
+
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="flex h-[min(90vh,760px)] w-[calc(100vw-2rem)] max-w-5xl flex-col overflow-hidden p-0">
+      <DialogHeader className="border-b px-5 py-4 pr-12">
+        <DialogTitle className="flex items-center gap-2"><Eye className="h-4 w-4 text-blue-600" /> Email preview</DialogTitle>
+        <DialogDescription>See how this campaign renders at common desktop, tablet, and mobile email widths. Unsaved editor changes are included.</DialogDescription>
+      </DialogHeader>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50 px-5 py-3">
+        <div className="inline-flex rounded-lg border bg-white p-1" role="tablist" aria-label="Preview device">
+          {MARKETING_PREVIEW_DEVICES.map(option => {
+            const Icon = option.icon;
+            return <button key={option.value} type="button" role="tab" aria-selected={device === option.value} onClick={() => setDevice(option.value)} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${device === option.value ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}><Icon className="h-3.5 w-3.5" /> {option.label}</button>;
+          })}
+        </div>
+        <span className="text-xs text-slate-500">{selectedDevice.width}px email width</span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto bg-slate-200 p-4 sm:p-6">
+        <div className="mx-auto flex min-h-full items-start justify-center">
+          <iframe title={`${selectedDevice.label} campaign email preview`} srcDoc={previewDocument} className="shrink-0 rounded-md border border-slate-300 bg-white shadow-lg" style={{ width: `${selectedDevice.width}px`, height: "560px", maxWidth: "100%" }} sandbox="" />
+        </div>
+      </div>
+    </DialogContent>
+  </Dialog>;
+}
 
 export function MarketingSettings() {
   const [, setLocation] = useLocation();
@@ -367,6 +462,7 @@ function CampaignEditor({ id }: { id?: number }) {
   });
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [pickerProducts, setPickerProducts] = useState<MarketingProductSnapshot[]>([]);
   const { data: existing } = useQuery<any>({ queryKey: ["marketing-campaign", id], queryFn: () => getMarketingCampaign(id!), enabled: editing });
@@ -484,7 +580,7 @@ function CampaignEditor({ id }: { id?: number }) {
   return <PageShell title={editing ? "Edit campaign" : "New campaign"} subtitle="Build, test, schedule, or send this campaign through the configured SMTP connection." action={<Button variant="outline" onClick={() => setLocation(editing ? `/marketing/campaigns/${id}` : "/marketing/campaigns")}><ArrowLeft className="mr-2 h-4 w-4" /> Cancel</Button>}>
     <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]"><div className="space-y-5">
        <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><FileText className="h-4 w-4 text-blue-500" /> Campaign details</h2><div className="space-y-4"><label className="block text-sm font-medium text-slate-700">Campaign name<Input className="mt-1.5" value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. September new arrivals" /></label><label className="block text-sm font-medium text-slate-700">Internal description<textarea className="mt-1.5 min-h-20 w-full rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-blue-400" value={form.internal_description} onChange={e => set("internal_description", e.target.value)} placeholder="What is this campaign for?" /></label><label className="block text-sm font-medium text-slate-700">Subject line<Input className="mt-1.5" value={form.subject_line} onChange={e => set("subject_line", e.target.value)} placeholder="Your subject line" /></label><label className="block text-sm font-medium text-slate-700">Preview text<Input className="mt-1.5" value={form.preview_text} onChange={e => set("preview_text", e.target.value)} placeholder="Optional inbox preview" /></label><label className="block text-sm font-medium text-slate-700">From email<select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.sender_email || ""} onChange={e => set("sender_email", e.target.value)}><option value="">Use default{senderSettings.defaultEmail ? ` (${senderSettings.defaultEmail})` : ""}</option>{senderOptions.map(email => <option key={email} value={email}>{email}{email.toLowerCase() === senderSettings.defaultEmail.toLowerCase() ? " · Default" : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-400">{senderSettings.defaultEmail ? `Defaults to ${senderSettings.defaultEmail}. Manage sender addresses in Marketing settings.` : "No sender addresses are configured yet. Add one in Marketing settings before sending."}</span></label></div></section>
-       <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><Mail className="h-4 w-4 text-blue-500" /> Message</h2><label className="mb-4 block text-sm font-medium text-slate-700">Use a marketing template<select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.template_id || ""} onChange={e => applyTemplate(e.target.value)}><option value="">Start from scratch</option>{templates.map((template: any) => <option key={template.id} value={template.id}>{template.name}{template.category ? ` · ${template.category}` : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-400">{templates.length ? "Selecting a template fills the subject and message. You can still edit both." : "No active marketing templates are available yet."}</span></label><RichTextEditor value={form.message_content} onChange={value => setForm((old: any) => ({ ...old, message_content: preserveMarketingProductMarkup(value, old.message_content || "") }))} minHeight={240} /></section>
+       <section className="rounded-xl border bg-white p-5 shadow-sm"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="flex items-center gap-2 font-semibold text-slate-900"><Mail className="h-4 w-4 text-blue-500" /> Message</h2><Button type="button" variant="outline" size="sm" onClick={() => setPreviewOpen(true)}><Eye className="mr-1.5 h-4 w-4" /> Preview email</Button></div><label className="mb-4 block text-sm font-medium text-slate-700">Use a marketing template<select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.template_id || ""} onChange={e => applyTemplate(e.target.value)}><option value="">Start from scratch</option>{templates.map((template: any) => <option key={template.id} value={template.id}>{template.name}{template.category ? ` · ${template.category}` : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-400">{templates.length ? "Selecting a template fills the subject and message. You can still edit both." : "No active marketing templates are available yet."}</span></label><RichTextEditor value={form.message_content} onChange={value => setForm((old: any) => ({ ...old, message_content: preserveMarketingProductMarkup(value, old.message_content || "") }))} minHeight={240} /></section>
        <section className="rounded-xl border bg-white p-5 shadow-sm">
          <div className="flex flex-wrap items-start justify-between gap-3">
            <div><h2 className="flex items-center gap-2 font-semibold text-slate-900"><ShoppingBag className="h-4 w-4 text-blue-500" /> Products <span className="text-xs font-normal text-slate-400">Optional</span></h2><p className="mt-1 text-xs text-slate-500">Feature catalog products in this email. Products are only added to the message when you insert them.</p></div>
@@ -510,7 +606,8 @@ function CampaignEditor({ id }: { id?: number }) {
       <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><CalendarClock className="h-4 w-4 text-blue-500" /> Schedule</h2><label className="block text-sm font-medium text-slate-700">Optional scheduled date<input type="datetime-local" className="mt-1.5 h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.scheduled_at || ""} onChange={e => set("scheduled_at", e.target.value)} /></label></section>
         <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={() => saveMutation.mutate("draft")} disabled={saveMutation.isPending || scheduleMutation.isPending || !hasPermission("marketing", editing ? "edit" : "create")}>Save draft</Button>{hasPermission("marketing", "send") && <>{form.scheduled_at && <Button variant="outline" onClick={() => scheduleMutation.mutate()} disabled={saveMutation.isPending || scheduleMutation.isPending || !audienceIsComplete}><CalendarClock className="mr-1.5 h-4 w-4" /> Schedule</Button>}<Button onClick={() => saveMutation.mutate("ready")} disabled={saveMutation.isPending || !audienceIsComplete || !hasPermission("marketing", editing ? "edit" : "create")}>{saveMutation.isPending ? "Saving…" : "Save & review"}</Button></>}</div>
      </div></div>
-     {pickerOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true" aria-labelledby="marketing-product-picker-title">
+      <MarketingEmailPreview open={previewOpen} onOpenChange={setPreviewOpen} subject={form.subject_line} previewText={form.preview_text} sender={form.sender_email || senderSettings.defaultEmail} content={replaceMarketingProductMarkup(form.message_content || "", products, productOptions)} />
+      {pickerOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true" aria-labelledby="marketing-product-picker-title">
        <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
          <div className="flex items-start justify-between gap-4 border-b px-5 py-4">
            <div><h2 id="marketing-product-picker-title" className="font-semibold text-slate-900">Choose campaign products</h2><p className="mt-1 text-xs text-slate-500">Search BigCommerce by product title or SKU, then select the products to feature.</p></div>

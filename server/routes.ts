@@ -7763,8 +7763,8 @@ export async function registerRoutes(
 
   app.put("/api/marketing/sender-settings", requirePermission("marketing", "send"), async (req, res) => {
     try {
-      const requestedEmails = Array.isArray(req.body?.emails)
-        ? req.body.emails.map((email: unknown) => String(email ?? "").trim())
+      const requestedEmails: string[] = Array.isArray(req.body?.emails)
+        ? req.body.emails.map((email: unknown): string => String(email ?? "").trim())
         : [];
       if (!requestedEmails.length) return res.status(400).json({ error: "Add at least one campaign sender email." });
       if (requestedEmails.some(email => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
