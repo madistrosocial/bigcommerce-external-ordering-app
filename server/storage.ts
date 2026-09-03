@@ -209,6 +209,7 @@ export interface IStorage {
   markMarketingRecipientSent(id: number, providerMessageId?: string | null): Promise<void>;
   markMarketingRecipientFailed(id: number, reason: string, retryable?: boolean): Promise<void>;
   applyMarketingProviderEvent(data: { campaignId?: number | null; recipientId?: number | null; providerEventId?: string | null; eventType: string; detail?: Record<string, unknown> }): Promise<boolean>;
+  unsubscribeMarketingEmail(campaignId: number, email: string): Promise<void>;
   recordMarketingEvent(data: { campaign_id: number; recipient_id?: number | null; event_type: string; detail?: Record<string, unknown>; provider_event_id?: string | null }): Promise<void>;
   completeMarketingCampaign(id: number): Promise<any | undefined>;
   getMarketingRecipients(campaignId: number, opts?: { status?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
@@ -2850,6 +2851,37 @@ export class DatabaseStorage implements IStorage {
       ...(retryable ? {} : { attempt_count: 3 }),
     }).where(eq(marketingCampaignRecipients.id, id)).returning();
     if (recipient) await this.recordMarketingEvent({ campaign_id: recipient.campaign_id, recipient_id: id, event_type: "failed", detail: { reason: reason.slice(0, 500) } });
+  }
+
+  async unsubscribeMarketingEmail(campaignId: number, email: string): Promise<void> {
+    const normalizedEmail = String(email ?? "").trim().toLowerCase();
+    if (!normalizedEmail) throw new Error("Email address is required");
+    const recipients = await db.select().from(marketingCampaignRecipients).where(and(
+      eq(marketingCampaignRecipients.campaign_id, campaignId),
+      sql`lower(${marketingCampaignRecipients.email}) = ${normalizedEmail}`,
+    ));
+    for (const recipient of recipients) {
+      await db.update(marketingCampaignRecipients).set({
+        status: "unsubscribed",
+        unsubscribed_at: new Date(),
+      }).where(eq(marketingCampaignRecipients.id, recipient.id));
+      if (recipient.customer_id) {
+        await this.upsertMarketingCustomerPreference(recipient.customer_id, { email_subscribed: false });
+        await this.createMarketingSuppression({
+          customerId: recipient.customer_id,
+          email: recipient.email,
+          reason: "Unsubscribed from marketing email",
+          source: "unsubscribe",
+        });
+      }
+      if (recipient.marketing_contact_id) await this.deactivateMarketingContact(recipient.marketing_contact_id);
+      await this.recordMarketingEvent({
+        campaign_id: campaignId,
+        recipient_id: recipient.id,
+        event_type: "unsubscribed",
+        detail: { email: recipient.email, source: "zoho" },
+      });
+    }
   }
 
   async applyMarketingProviderEvent(data: { campaignId?: number | null; recipientId?: number | null; providerEventId?: string | null; eventType: string; detail?: Record<string, unknown> }): Promise<boolean> {

@@ -258,7 +258,7 @@ export function MarketingSettings() {
   const [defaultEmail, setDefaultEmail] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [provider, setProvider] = useState<"smtp" | "zoho">("smtp");
-  const [zohoApiBase, setZohoApiBase] = useState("https://campaigns.zoho.com/emailapi/v2");
+  const [zohoApiBase, setZohoApiBase] = useState("https://campaigns.zoho.com/api/v1.1");
   const [replyTo, setReplyTo] = useState("");
 
   useEffect(() => {
@@ -269,7 +269,7 @@ export function MarketingSettings() {
   useEffect(() => {
     if (!deliveryData) return;
     setProvider(deliveryData.provider === "zoho" ? "zoho" : "smtp");
-    setZohoApiBase(deliveryData.zohoApiBase || "https://campaigns.zoho.com/emailapi/v2");
+    setZohoApiBase(deliveryData.zohoApiBase || "https://campaigns.zoho.com/api/v1.1");
     setReplyTo(deliveryData.replyTo || "");
   }, [deliveryData]);
 
@@ -346,14 +346,14 @@ export function MarketingSettings() {
         <div><h2 className="font-semibold text-slate-900">Campaign delivery provider</h2><p className="mt-1 text-sm text-slate-500">Choose how marketing campaigns are transmitted. Invoice and automation email delivery remains SMTP-based.</p></div>
       </div>
       <div className="mt-5 space-y-4">
-        <label className="block text-sm font-medium text-slate-700">Provider<select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={provider} onChange={event => setProvider(event.target.value === "zoho" ? "zoho" : "smtp")}><option value="smtp">Existing SMTP</option><option value="zoho">Zoho Email API v2</option></select></label>
+        <label className="block text-sm font-medium text-slate-700">Provider<select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={provider} onChange={event => setProvider(event.target.value === "zoho" ? "zoho" : "smtp")}><option value="smtp">Existing SMTP</option><option value="zoho">Zoho Campaigns Developer API v1.1</option></select></label>
         {provider === "zoho" ? <div className="space-y-3 rounded-lg border border-violet-100 bg-violet-50/50 p-4">
-          <p className={`text-sm font-medium ${deliveryData?.zohoApiKeyConfigured ? "text-emerald-700" : "text-amber-700"}`}>{deliveryData?.zohoApiKeyConfigured ? "Zoho API key is configured." : "Zoho API key is not configured."}</p>
-          <p className="text-xs text-slate-600">Store ZOHO_EMAIL_API_KEY in Replit Secrets. The app never accepts or displays that key. Zoho also requires a verified sending domain and DKIM.</p>
-          <label className="block text-sm font-medium text-slate-700">Zoho API base URL<Input className="mt-1.5" value={zohoApiBase} onChange={event => setZohoApiBase(event.target.value)} placeholder="https://campaigns.zoho.com/emailapi/v2" /><span className="mt-1 block text-xs font-normal text-slate-400">Use the Zoho data center that owns the verified sending domain.</span></label>
+          <p className={`text-sm font-medium ${deliveryData?.zohoApiTokenConfigured ? "text-emerald-700" : "text-amber-700"}`}>{deliveryData?.zohoApiTokenConfigured ? "Zoho Campaigns access token is configured." : "Zoho Campaigns access token is not configured."}</p>
+          <p className="text-xs text-slate-600">Store ZOHO_CAMPAIGNS_API_TOKEN in Replit Secrets. The app never accepts or displays that token. Zoho requires an authenticated sending domain and a list/campaign account with enough available email credits.</p>
+          <label className="block text-sm font-medium text-slate-700">Zoho Campaigns API base URL<Input className="mt-1.5" value={zohoApiBase} onChange={event => setZohoApiBase(event.target.value)} placeholder="https://campaigns.zoho.com/api/v1.1" /><span className="mt-1 block text-xs font-normal text-slate-400">Use the Zoho data center that owns the account, with the /api/v1.1 path.</span></label>
         </div> : <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs text-slate-600">Campaigns will use the existing invoice SMTP configuration. To avoid mailbox Sent-folder copies, select Zoho after configuring its API key and verified sending domain.</div>}
         <label className="block text-sm font-medium text-slate-700">Reply-To address <Input className="mt-1.5" type="email" value={replyTo} onChange={event => setReplyTo(event.target.value)} placeholder="replies@midatlanticdistribution.com" /><span className="mt-1 block text-xs font-normal text-slate-400">Optional. This address receives replies; it is separate from the From address.</span></label>
-        <div className="flex items-center justify-between gap-3"><p className="text-xs text-slate-500">Use a campaign’s Test email action after saving to verify the selected provider.</p><Button onClick={() => saveDelivery.mutate()} disabled={saveDelivery.isPending || (provider === "zoho" && !deliveryData?.zohoApiKeyConfigured)}>{saveDelivery.isPending ? "Saving…" : "Save delivery settings"}</Button></div>
+        <div className="flex items-center justify-between gap-3"><p className="text-xs text-slate-500">Use a campaign’s Test email action after saving to verify the selected provider.</p><Button onClick={() => saveDelivery.mutate()} disabled={saveDelivery.isPending || (provider === "zoho" && !deliveryData?.zohoApiTokenConfigured)}>{saveDelivery.isPending ? "Saving…" : "Save delivery settings"}</Button></div>
       </div>
     </section>
   </PageShell>;

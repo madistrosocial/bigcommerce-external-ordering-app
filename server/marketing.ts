@@ -18,7 +18,7 @@ type MarketingCustomer = {
 };
 
 const runningCampaigns = new Set<number>();
-const DEFAULT_ZOHO_EMAIL_API_BASE = "https://campaigns.zoho.com/emailapi/v2";
+const DEFAULT_ZOHO_CAMPAIGNS_API_BASE = "https://campaigns.zoho.com/api/v1.1";
 
 export type MarketingDeliveryProvider = "smtp" | "zoho";
 
@@ -36,11 +36,13 @@ export function normalizeMarketingDeliverySettings(value: unknown): MarketingDel
   const raw = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
   const provider = raw.provider === "zoho" ? "zoho" : "smtp";
   const configuredBase = String(raw.zohoApiBase ?? raw.zoho_api_base ?? "").trim().replace(/\/+$/, "");
-  const zohoApiBase = configuredBase || DEFAULT_ZOHO_EMAIL_API_BASE;
+  const zohoApiBase = configuredBase && /\/api\/v1\.1$/i.test(configuredBase)
+    ? configuredBase
+    : DEFAULT_ZOHO_CAMPAIGNS_API_BASE;
   const replyTo = String(raw.replyTo ?? raw.reply_to ?? "").trim();
   return {
     provider,
-    zohoApiBase: /^https:\/\//i.test(zohoApiBase) ? zohoApiBase : DEFAULT_ZOHO_EMAIL_API_BASE,
+    zohoApiBase: /^https:\/\//i.test(zohoApiBase) ? zohoApiBase : DEFAULT_ZOHO_CAMPAIGNS_API_BASE,
     replyTo: MARKETING_EMAIL_PATTERN.test(replyTo) ? replyTo : "",
   };
 }
@@ -49,7 +51,7 @@ export async function getMarketingDeliverySettings(): Promise<MarketingDeliveryS
   const setting = await storage.getSetting("marketing_delivery_settings");
   return normalizeMarketingDeliverySettings(setting?.value ?? {
     provider: process.env.MARKETING_EMAIL_PROVIDER,
-    zohoApiBase: process.env.ZOHO_EMAIL_API_BASE,
+    zohoApiBase: process.env.ZOHO_CAMPAIGNS_API_BASE,
     replyTo: process.env.MARKETING_REPLY_TO,
   });
 }
@@ -57,8 +59,8 @@ export async function getMarketingDeliverySettings(): Promise<MarketingDeliveryS
 export function getMarketingDeliveryStatus(settings: MarketingDeliverySettings) {
   return {
     ...settings,
-    zohoApiKeyConfigured: Boolean(String(process.env.ZOHO_EMAIL_API_KEY ?? "").trim()),
-    zohoWebhookTokenConfigured: Boolean(String(process.env.ZOHO_EMAIL_WEBHOOK_TOKEN ?? "").trim()),
+    zohoApiTokenConfigured: Boolean(String(process.env.ZOHO_CAMPAIGNS_API_TOKEN ?? "").trim()),
+    zohoWebhookTokenConfigured: Boolean(String(process.env.ZOHO_CAMPAIGNS_WEBHOOK_TOKEN ?? "").trim()),
   };
 }
 
@@ -76,113 +78,107 @@ class MarketingDeliveryError extends Error {
 
 function ensureZohoConfigured(settings: MarketingDeliverySettings): string {
   if (settings.provider !== "zoho") throw new MarketingDeliveryError("Zoho delivery is not enabled.");
-  const apiKey = String(process.env.ZOHO_EMAIL_API_KEY ?? "").trim();
-  if (!apiKey) {
-    throw new MarketingDeliveryError("Zoho Email API is selected, but ZOHO_EMAIL_API_KEY is not configured in Replit Secrets.");
+  const apiToken = String(process.env.ZOHO_CAMPAIGNS_API_TOKEN ?? "").trim();
+  if (!apiToken) {
+    throw new MarketingDeliveryError("Zoho Campaigns delivery is selected, but ZOHO_CAMPAIGNS_API_TOKEN is not configured in Replit Secrets.");
   }
-  return apiKey;
+  return apiToken;
 }
 
-function zohoTransmissionId(payload: any): string {
-  return String(
-    payload?.transmission_id
-    ?? payload?.data?.transmission_id
-    ?? payload?.response?.transmission_id
-    ?? payload?.transmission?.id
-    ?? payload?.data?.id
-    ?? "",
-  ).trim();
+function zohoCampaignKey(payload: any): string {
+  return String(payload?.campaignKey ?? payload?.campaign_key ?? payload?.response?.campaignKey ?? "").trim();
 }
 
-async function sendZohoTransmission(
+async function zohoCampaignRequest(
   settings: MarketingDeliverySettings,
-  input: {
-    campaign: any;
-    email: string;
-    subject: string;
-    html: string;
-    from: string;
-    customer?: MarketingCustomer;
-    recipientId?: number;
-    entityId?: number;
-    entityType?: "customer" | "contact";
-    test?: boolean;
-  },
-): Promise<{ messageId: string }> {
-  const apiKey = ensureZohoConfigured(settings);
-  const customer = input.customer ?? {};
-  const fullName = [customer.first_name, customer.last_name].filter(Boolean).join(" ");
-  const additionalData = {
-    campaign_id: String(input.campaign.id),
-    recipient_id: input.recipientId ? String(input.recipientId) : "",
-    customer_id: input.entityType === "customer" && input.entityId ? String(input.entityId) : "",
-    marketing_contact_id: input.entityType === "contact" && input.entityId ? String(input.entityId) : "",
-    test: input.test ? "true" : "false",
-  };
-  const payload = {
-    transmission_name: `${String(input.campaign.name || "Marketing campaign").slice(0, 110)}-${input.recipientId ?? "test"}-${Date.now()}`.slice(0, 150),
-    recipients: [{
-      address: input.email,
-      ...(fullName ? { name: fullName.slice(0, 100) } : {}),
-      additional_data: additionalData,
-      merge_data: {
-        first_name: customer.first_name ?? "",
-        last_name: customer.last_name ?? "",
-        full_name: fullName,
-        company: customer.company ?? "",
-        email: customer.email ?? input.email,
-      },
-    }],
-    options: {
-      open_tracking: "enabled",
-      click_tracking: "enabled",
-    },
-    content: {
-      from: { address: input.from },
-      reply_to: settings.replyTo || undefined,
-      subject: input.subject,
-      html: input.html,
-      text: stripHtml(input.html),
-    },
-  };
-  if (!payload.content.from.address) throw new MarketingDeliveryError("Marketing sender address is not configured.");
-
+  path: string,
+  params: Record<string, string>,
+): Promise<any> {
+  const apiToken = ensureZohoConfigured(settings);
+  const body = new URLSearchParams({ resfmt: "JSON", ...params });
   let response: Response;
   try {
-    response = await fetch(`${settings.zohoApiBase}/transmission`, {
+    response = await fetch(`${settings.zohoApiBase}/${path}`, {
       method: "POST",
       headers: {
-        Authorization: `Zoho-zapikey ${apiKey}`,
-        "Content-Type": "application/json",
+        Authorization: `Zoho-oauthtoken ${apiToken}`,
+        "Content-Type": "application/x-www-form-urlencoded",
         Accept: "application/json",
       },
-      body: JSON.stringify(payload),
+      body,
     });
   } catch (error: any) {
-    throw new MarketingDeliveryError(`Zoho request failed before a response was received: ${String(error?.message ?? error)}`);
+    throw new MarketingDeliveryError(`Zoho Campaigns request failed before a response was received: ${String(error?.message ?? error)}`);
   }
-
   const responseBody = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = String(responseBody?.message ?? responseBody?.error ?? response.statusText ?? "Zoho rejected the transmission").slice(0, 500);
-    // A 408 or 429 response is explicit proof that Zoho did not accept this
-    // request. Network errors and other responses remain non-retryable because
-    // the provider may have accepted the transmission before the failure.
-    throw new MarketingDeliveryError(`Zoho rejected the transmission (${response.status}): ${detail}`, {
+  const code = String(responseBody?.code ?? responseBody?.response?.code ?? "");
+  if (!response.ok || (code && code !== "0" && code !== "200")) {
+    const detail = String(responseBody?.message ?? responseBody?.response?.message ?? responseBody?.error ?? response.statusText ?? "Zoho rejected the request").slice(0, 500);
+    throw new MarketingDeliveryError(`Zoho Campaigns rejected the request${response.status ? ` (${response.status})` : ""}: ${detail}`, {
       retryable: response.status === 408 || response.status === 429,
       statusCode: response.status,
     });
   }
-  const acceptedRecipients = Number(responseBody?.accepted_recipients);
-  if (Number.isFinite(acceptedRecipients) && acceptedRecipients < 1) {
-    const detail = String(responseBody?.errors?.[0]?.message ?? responseBody?.response?.message ?? "Zoho accepted no recipients").slice(0, 500);
-    throw new MarketingDeliveryError(`Zoho accepted no recipients: ${detail}`);
+  return responseBody;
+}
+
+function chunkMarketingEmails(emails: string[], size = 10): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < emails.length; index += size) chunks.push(emails.slice(index, index + size));
+  return chunks;
+}
+
+async function createZohoCampaignList(
+  settings: MarketingDeliverySettings,
+  campaign: any,
+  emails: string[],
+): Promise<string> {
+  const uniqueEmails = Array.from(new Set(emails.map(email => email.trim().toLowerCase()).filter(email => MARKETING_EMAIL_PATTERN.test(email))));
+  if (!uniqueEmails.length) throw new MarketingDeliveryError("Zoho Campaigns cannot create a recipient list without valid email addresses.");
+  const [firstChunk, ...remainingChunks] = chunkMarketingEmails(uniqueEmails);
+  const listName = `MAD-${campaign.id}-${Date.now()}`.slice(0, 90);
+  const created = await zohoCampaignRequest(settings, "addlistandcontacts", {
+    listname: listName,
+    signupform: "private",
+    mode: "newlist",
+    listdescription: `Marketing campaign ${campaign.id} recipient list`,
+    emailids: firstChunk.join(","),
+  });
+  const listKey = String(created?.listkey ?? created?.response?.listkey ?? "").trim();
+  if (!listKey) throw new MarketingDeliveryError("Zoho created the list but did not return a list key.");
+  for (const chunk of remainingChunks) {
+    await zohoCampaignRequest(settings, "addlistsubscribersinbulk", {
+      listkey: listKey,
+      emailids: chunk.join(","),
+    });
   }
-  const messageId = zohoTransmissionId(responseBody);
-  if (!messageId) {
-    throw new MarketingDeliveryError("Zoho accepted the request but did not return a transmission ID. The recipient was not marked sent.");
+  return listKey;
+}
+
+async function sendZohoCampaignV11(
+  settings: MarketingDeliverySettings,
+  campaign: any,
+  from: string,
+  emails: string[],
+): Promise<{ campaignKey: string }> {
+  const listKey = await createZohoCampaignList(settings, campaign, emails);
+  const contentToken = signMarketingContentToken(Number(campaign.id));
+  const contentUrl = publicMarketingUrl(`/api/marketing/zoho/content/${contentToken}`);
+  const created = await zohoCampaignRequest(settings, "createCampaign", {
+    campaignname: String(campaign.name || `Marketing campaign ${campaign.id}`).slice(0, 100),
+    from_email: from,
+    subject: String(campaign.subject_line || campaign.name || "Marketing update").slice(0, 200),
+    list_details: JSON.stringify({ [listKey]: [] }),
+    content_url: contentUrl,
+  });
+  const campaignKey = zohoCampaignKey(created);
+  if (!campaignKey) throw new MarketingDeliveryError("Zoho created the campaign but did not return a campaign key.");
+  const sent = await zohoCampaignRequest(settings, "sendcampaign", { campaignkey: campaignKey });
+  const status = String(sent?.campaign_status ?? sent?.response?.campaign_status ?? "").toLowerCase();
+  if (status && !["inprogress", "sent", "scheduledafterreviewed"].includes(status)) {
+    throw new MarketingDeliveryError(`Zoho returned an unexpected campaign status: ${status}`);
   }
-  return { messageId };
+  return { campaignKey };
 }
 
 function smtpTransport(settings: any) {
@@ -301,6 +297,79 @@ function signMarketingClickToken(
   const signature = createHmac("sha256", String(process.env.SESSION_SECRET ?? ""))
     .update(payload).digest("base64url");
   return Buffer.from(`${payload}.${signature}`).toString("base64url");
+}
+
+export function signMarketingCampaignClickToken(campaignId: number, productId: number, targetUrl: string): string {
+  const encodedTarget = Buffer.from(targetUrl).toString("base64url");
+  const payload = `${campaignId}.campaign.${productId}.${encodedTarget}`;
+  const signature = createHmac("sha256", String(process.env.SESSION_SECRET ?? "")).update(payload).digest("base64url");
+  return Buffer.from(`${payload}.${signature}`).toString("base64url");
+}
+
+export function verifyMarketingCampaignClickToken(token: string): {
+  campaignId: number;
+  productId: number;
+  targetUrl: string;
+} | null {
+  try {
+    const parts = Buffer.from(token, "base64url").toString("utf8").split(".");
+    if (parts.length !== 5 || parts[1] !== "campaign") return null;
+    const campaignId = Number(parts[0]);
+    const productId = Number(parts[2]);
+    const targetUrl = Buffer.from(parts[3], "base64url").toString("utf8");
+    const expected = createHmac("sha256", String(process.env.SESSION_SECRET ?? ""))
+      .update(`${campaignId}.campaign.${productId}.${parts[3]}`).digest("base64url");
+    if (!Number.isInteger(campaignId) || campaignId < 1 || !Number.isInteger(productId) || productId < 1
+      || !safeProductUrl(targetUrl) || parts[4].length !== expected.length
+      || !timingSafeEqual(Buffer.from(parts[4]), Buffer.from(expected))) return null;
+    return { campaignId, productId, targetUrl };
+  } catch {
+    return null;
+  }
+}
+
+export function signMarketingContentToken(campaignId: number): string {
+  const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+  const payload = `${campaignId}.content.${expiresAt}`;
+  const signature = createHmac("sha256", String(process.env.SESSION_SECRET ?? "")).update(payload).digest("base64url");
+  return Buffer.from(`${payload}.${signature}`).toString("base64url");
+}
+
+export function verifyMarketingContentToken(token: string): number | null {
+  try {
+    const parts = Buffer.from(token, "base64url").toString("utf8").split(".");
+    if (parts.length !== 4 || parts[1] !== "content") return null;
+    const campaignId = Number(parts[0]);
+    const expiresAt = Number(parts[2]);
+    const expected = createHmac("sha256", String(process.env.SESSION_SECRET ?? ""))
+      .update(`${campaignId}.content.${expiresAt}`).digest("base64url");
+    if (!Number.isInteger(campaignId) || campaignId < 1 || !Number.isFinite(expiresAt) || expiresAt < Date.now()
+      || parts[3].length !== expected.length || !timingSafeEqual(Buffer.from(parts[3]), Buffer.from(expected))) return null;
+    return campaignId;
+  } catch {
+    return null;
+  }
+}
+
+export function signMarketingCampaignUnsubscribeToken(campaignId: number): string {
+  const payload = `${campaignId}.unsubscribe`;
+  const signature = createHmac("sha256", String(process.env.SESSION_SECRET ?? "")).update(payload).digest("base64url");
+  return Buffer.from(`${payload}.${signature}`).toString("base64url");
+}
+
+export function verifyMarketingCampaignUnsubscribeToken(token: string): number | null {
+  try {
+    const parts = Buffer.from(token, "base64url").toString("utf8").split(".");
+    if (parts.length !== 3 || parts[1] !== "unsubscribe") return null;
+    const campaignId = Number(parts[0]);
+    const expected = createHmac("sha256", String(process.env.SESSION_SECRET ?? ""))
+      .update(`${campaignId}.unsubscribe`).digest("base64url");
+    if (!Number.isInteger(campaignId) || campaignId < 1 || parts[2].length !== expected.length
+      || !timingSafeEqual(Buffer.from(parts[2]), Buffer.from(expected))) return null;
+    return campaignId;
+  } catch {
+    return null;
+  }
 }
 
 export function verifyMarketingClickToken(token: string): {
@@ -447,6 +516,55 @@ function addMarketingPreviewText(html: string, previewText: unknown): string {
   return `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${escapeHtml(value)}</div>${html}`;
 }
 
+function renderZohoMergeTemplate(template: string): string {
+  const defaults: Record<string, string> = {
+    first_name: "Customer", last_name: "", full_name: "Customer", customer_name: "Customer",
+    company: "", email: "", customer_group: "", customer_type: "", account_health: "",
+    lifetime_orders: "0", lifetime_revenue: "0", store_credit_balance: "0", last_order_date: "",
+    unsubscribe_url: "",
+  };
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}|\{([a-zA-Z0-9_]+)\}/g, (_match, doubleKey, singleKey) => {
+    const key = String(doubleKey || singleKey);
+    return `$[${key}|${defaults[key] ?? ""}]$`;
+  });
+}
+
+function renderZohoProductTrackingLinks(template: string, campaign: any): string {
+  const snapshots = Array.isArray(campaign?.product_snapshots) ? campaign.product_snapshots : [];
+  const products = new Map<number, { id: number; productUrl: string }>();
+  for (const product of snapshots) {
+    const id = Number(product?.id ?? product?.bigcommerce_id);
+    const productUrl = safeProductUrl(product?.product_url);
+    if (Number.isInteger(id) && id > 0 && productUrl) products.set(id, { id, productUrl });
+  }
+  if (!products.size) return template;
+  return template.replace(
+    /<!-- marketing-product-(?:block:\d+|grid) -->[\s\S]*?<!-- \/marketing-product-(?:block:\d+|grid) -->/g,
+    block => block.replace(/<a\b[^>]*>/gi, tag => {
+      const hrefMatch = tag.match(/\bhref\s*=\s*"([^"]*)"/i);
+      if (!hrefMatch) return tag;
+      const idMatch = tag.match(/\bdata-marketing-product-id\s*=\s*"(\d+)"/i);
+      const href = hrefMatch[1].replace(/&amp;/g, "&");
+      const product = idMatch
+        ? products.get(Number(idMatch[1]))
+        : Array.from(products.values()).find(candidate => candidate.productUrl === href);
+      if (!product) return tag;
+      const token = signMarketingCampaignClickToken(Number(campaign.id), product.id, product.productUrl);
+      return tag.replace(/\bhref\s*=\s*"[^"]*"/i, `href="${escapeHtml(publicMarketingUrl(`/api/marketing/click/campaign/${token}`))}"`);
+    }),
+  );
+}
+
+export function renderMarketingCampaignContent(campaign: any): string {
+  const body = renderZohoProductTrackingLinks(
+    renderZohoMergeTemplate(sanitizeMarketingEditorHtml(String(campaign?.message_content ?? "<p></p>"))),
+    campaign,
+  );
+  const unsubscribeToken = signMarketingCampaignUnsubscribeToken(Number(campaign.id));
+  const unsubscribeUrl = publicMarketingUrl(`/api/marketing/zoho/unsubscribe/${unsubscribeToken}?email=$[email|]$`);
+  return `${addMarketingPreviewText(body, campaign.preview_text)}<hr style="border:0;border-top:1px solid #e5e7eb;margin:32px 0 16px"><p style="font:12px Arial;color:#64748b">You are receiving this email from Mid Atlantic Distribution. <a data-zcea-unsubcribe="1" href="${unsubscribeUrl}">Unsubscribe from marketing emails</a>.</p>`;
+}
+
 function buildMarketingZohoMessage(campaign: any, customer: MarketingCustomer, recipientId: number, entityId: number, entityType: "customer" | "contact") {
   const subject = renderTemplate(campaign.subject_line || campaign.name, customer);
   const body = renderMarketingProductTrackingLinks(
@@ -473,16 +591,8 @@ export async function sendMarketingTestEmail(campaignId: number, email: string):
   const html = renderTemplate(campaign.message_content || "<p>This is a marketing test email.</p>", customer);
   let messageId: string | undefined;
   if (delivery.provider === "zoho") {
-    const result = await sendZohoTransmission(delivery, {
-      campaign,
-      email: to,
-      subject,
-      html: addMarketingPreviewText(html, campaign.preview_text),
-      from,
-      customer,
-      test: true,
-    });
-    messageId = result.messageId;
+    const result = await sendZohoCampaignV11(delivery, campaign, from, [to]);
+    messageId = result.campaignKey;
   } else {
     const transport = smtpTransport(mailSettings);
     const info = await transport.sendMail({ from, to, subject, html, text: stripHtml(html) });
@@ -507,6 +617,31 @@ export async function processMarketingCampaign(campaignId: number): Promise<void
     const transport = delivery.provider === "smtp" ? smtpTransport(mailSettings) : null;
     if (delivery.provider === "zoho") ensureZohoConfigured(delivery);
     await storage.prepareMarketingRecipients(campaignId);
+    if (delivery.provider === "zoho") {
+      const recipientData = await storage.getMarketingRecipients(campaignId, { status: "all", limit: 100000 });
+      const claimed: any[] = [];
+      for (const row of recipientData.rows.filter((candidate: any) => candidate.status === "eligible" || (candidate.status === "failed" && candidate.attempt_count < 3))) {
+        const recipient = await storage.claimMarketingRecipient(row.id);
+        if (!recipient) continue;
+        if (!recipient.email || !MARKETING_EMAIL_PATTERN.test(recipient.email)) {
+          await storage.markMarketingRecipientFailed(row.id, "Customer does not have a valid email address.", false);
+          continue;
+        }
+        claimed.push(recipient);
+      }
+      if (claimed.length) {
+        try {
+          const result = await sendZohoCampaignV11(delivery, campaign, from, claimed.map(recipient => recipient.email));
+          for (const recipient of claimed) await storage.markMarketingRecipientSent(recipient.id, result.campaignKey);
+        } catch (error: any) {
+          for (const recipient of claimed) {
+            await storage.markMarketingRecipientFailed(recipient.id, String(error?.message ?? error), Boolean(error?.retryable));
+          }
+        }
+      }
+      await storage.completeMarketingCampaign(campaignId);
+      return;
+    }
     while (true) {
       const batch = await storage.getMarketingRecipients(campaignId, { status: "all", limit: 100 });
       const pending = batch.rows.filter((row: any) => row.status === "eligible" || (row.status === "failed" && row.attempt_count < 3));
@@ -534,29 +669,14 @@ export async function processMarketingCampaign(campaignId: number): Promise<void
         }
         try {
           let messageId: string | null = null;
-          if (delivery.provider === "zoho") {
-            const result = await sendZohoTransmission(delivery, {
-              campaign,
-              email: recipient.email,
-              subject,
-              html,
-              from,
-              customer,
-              recipientId: Number(recipient.id),
-              entityId,
-              entityType: imported ? "contact" : "customer",
-            });
-            messageId = result.messageId;
-          } else {
-            const info = await transport!.sendMail({ from, to: recipient.email, subject, html, text: stripHtml(html) });
-            messageId = info.messageId ?? null;
-          }
+          const info = await transport!.sendMail({ from, to: recipient.email, subject, html, text: stripHtml(html) });
+          messageId = info.messageId ?? null;
           await storage.markMarketingRecipientSent(row.id, messageId);
         } catch (error: any) {
           await storage.markMarketingRecipientFailed(
             row.id,
             String(error?.message ?? error),
-            delivery.provider === "zoho" ? Boolean(error?.retryable) : isSafeToRetrySmtpError(error),
+            isSafeToRetrySmtpError(error),
           );
         }
       }
