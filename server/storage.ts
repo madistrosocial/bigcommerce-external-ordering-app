@@ -208,8 +208,6 @@ export interface IStorage {
   claimMarketingRecipient(id: number): Promise<any | undefined>;
   markMarketingRecipientSent(id: number, providerMessageId?: string | null): Promise<void>;
   markMarketingRecipientFailed(id: number, reason: string, retryable?: boolean): Promise<void>;
-  applyMarketingProviderEvent(data: { campaignId?: number | null; recipientId?: number | null; providerEventId?: string | null; eventType: string; detail?: Record<string, unknown> }): Promise<boolean>;
-  unsubscribeMarketingEmail(campaignId: number, email: string): Promise<void>;
   recordMarketingEvent(data: { campaign_id: number; recipient_id?: number | null; event_type: string; detail?: Record<string, unknown>; provider_event_id?: string | null }): Promise<void>;
   completeMarketingCampaign(id: number): Promise<any | undefined>;
   getMarketingRecipients(campaignId: number, opts?: { status?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
@@ -2853,96 +2851,14 @@ export class DatabaseStorage implements IStorage {
     if (recipient) await this.recordMarketingEvent({ campaign_id: recipient.campaign_id, recipient_id: id, event_type: "failed", detail: { reason: reason.slice(0, 500) } });
   }
 
-  async unsubscribeMarketingEmail(campaignId: number, email: string): Promise<void> {
-    const normalizedEmail = String(email ?? "").trim().toLowerCase();
-    if (!normalizedEmail) throw new Error("Email address is required");
-    const recipients = await db.select().from(marketingCampaignRecipients).where(and(
-      eq(marketingCampaignRecipients.campaign_id, campaignId),
-      sql`lower(${marketingCampaignRecipients.email}) = ${normalizedEmail}`,
-    ));
-    for (const recipient of recipients) {
-      await db.update(marketingCampaignRecipients).set({
-        status: "unsubscribed",
-        unsubscribed_at: new Date(),
-      }).where(eq(marketingCampaignRecipients.id, recipient.id));
-      if (recipient.customer_id) {
-        await this.upsertMarketingCustomerPreference(recipient.customer_id, { email_subscribed: false });
-        await this.createMarketingSuppression({
-          customerId: recipient.customer_id,
-          email: recipient.email,
-          reason: "Unsubscribed from marketing email",
-          source: "unsubscribe",
-        });
-      }
-      if (recipient.marketing_contact_id) await this.deactivateMarketingContact(recipient.marketing_contact_id);
-      await this.recordMarketingEvent({
-        campaign_id: campaignId,
-        recipient_id: recipient.id,
-        event_type: "unsubscribed",
-        detail: { email: recipient.email, source: "zoho" },
-      });
-    }
-  }
-
-  async applyMarketingProviderEvent(data: { campaignId?: number | null; recipientId?: number | null; providerEventId?: string | null; eventType: string; detail?: Record<string, unknown> }): Promise<boolean> {
-    const eventType = String(data.eventType ?? "").trim().toLowerCase();
-    if (!eventType) return false;
-    const providerEventId = String(data.providerEventId ?? "").trim() || null;
-    if (providerEventId) {
-      const [existingEvent] = await db.select({ id: marketingCampaignEvents.id })
-        .from(marketingCampaignEvents)
-        .where(and(
-          eq(marketingCampaignEvents.provider_event_id, providerEventId),
-          data.campaignId ? eq(marketingCampaignEvents.campaign_id, data.campaignId) : sql`true`,
-        ))
-        .limit(1);
-      if (existingEvent) return false;
-    }
-
-    let recipient: any | undefined;
-    const recipientId = Number(data.recipientId);
-    if (Number.isInteger(recipientId) && recipientId > 0) {
-      [recipient] = await db.select().from(marketingCampaignRecipients)
-        .where(eq(marketingCampaignRecipients.id, recipientId)).limit(1);
-    }
-    const campaignId = Number(data.campaignId ?? recipient?.campaign_id);
-    if (!Number.isInteger(campaignId) || campaignId < 1) return false;
-
-    if (recipient) {
-      if (eventType === "unsubscribed") {
-        await db.update(marketingCampaignRecipients).set({
-          status: "unsubscribed",
-          unsubscribed_at: new Date(),
-        }).where(eq(marketingCampaignRecipients.id, recipient.id));
-      } else if (["bounced", "bounce", "complained", "complaint", "spam"].includes(eventType)) {
-        await db.update(marketingCampaignRecipients).set({
-          status: "failed",
-          failure_reason: `Zoho provider event: ${eventType}`.slice(0, 1000),
-          attempt_count: 3,
-        }).where(eq(marketingCampaignRecipients.id, recipient.id));
-      }
-    }
-
-    await this.recordMarketingEvent({
-      campaign_id: campaignId,
-      recipient_id: recipient?.id ?? null,
-      event_type: eventType,
-      detail: data.detail ?? {},
-      provider_event_id: providerEventId,
-    });
-    return true;
-  }
-
   async recordMarketingEvent(data: { campaign_id: number; recipient_id?: number | null; event_type: string; detail?: Record<string, unknown>; provider_event_id?: string | null }): Promise<void> {
     await db.insert(marketingCampaignEvents).values({
       campaign_id: data.campaign_id, recipient_id: data.recipient_id ?? null, event_type: data.event_type,
       detail: data.detail ?? {}, provider_event_id: data.provider_event_id ?? null,
     });
-    if (["delivered", "opened", "clicked"].includes(data.event_type)) {
+    if (data.event_type === "clicked") {
       await db.update(marketingCampaigns).set({
-        ...(data.event_type === "delivered" ? { delivered_count: sql`${marketingCampaigns.delivered_count} + 1` } : {}),
-        ...(data.event_type === "opened" ? { opened_count: sql`${marketingCampaigns.opened_count} + 1` } : {}),
-        ...(data.event_type === "clicked" ? { clicked_count: sql`${marketingCampaigns.clicked_count} + 1` } : {}),
+        clicked_count: sql`${marketingCampaigns.clicked_count} + 1`,
         updated_at: new Date(),
       }).where(eq(marketingCampaigns.id, data.campaign_id));
     }

@@ -95,9 +95,6 @@ export const getMarketingDashboard = () => marketingRequest("/marketing/dashboar
 export const getMarketingSenderSettings = () => marketingRequest("/marketing/sender-settings");
 export const saveMarketingSenderSettings = (data: { emails: string[]; defaultEmail: string }) =>
   marketingRequest("/marketing/sender-settings", { method: "PUT", body: JSON.stringify(data) });
-export const getMarketingDeliverySettings = () => marketingRequest("/marketing/delivery-settings");
-export const saveMarketingDeliverySettings = (data: { provider: "smtp" | "zoho"; zohoApiBase?: string; replyTo?: string }) =>
-  marketingRequest("/marketing/delivery-settings", { method: "PUT", body: JSON.stringify(data) });
 export const getMarketingCampaigns = (params: { search?: string; status?: string } = {}) =>
   marketingRequest(`/marketing/campaigns?search=${encodeURIComponent(params.search || "")}&status=${encodeURIComponent(params.status || "all")}`);
 export const getMarketingCampaign = (id: number) => marketingRequest(`/marketing/campaigns/${id}`);

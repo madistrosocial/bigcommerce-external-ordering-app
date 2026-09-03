@@ -22,8 +22,7 @@ import {
   pauseMarketingCampaign, duplicateMarketingCampaign, getMarketingRecipients, scheduleMarketingCampaign,
   getMarketingContacts, importMarketingContacts, getMarketingAudienceMembers, getMarketingAudiencePreview,
    getMarketingTemplates, getMarketingCustomerGroups, searchMarketingProducts,
-    getMarketingSenderSettings, saveMarketingSenderSettings,
-    getMarketingDeliverySettings, saveMarketingDeliverySettings,
+   getMarketingSenderSettings, saveMarketingSenderSettings,
 } from "@/lib/api";
 import {
   DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS,
@@ -125,7 +124,6 @@ function StatusBadge({ status }: { status: string }) {
 
 export function MarketingDashboard() {
   const { data, isLoading, refetch } = useQuery<any>({ queryKey: ["marketing-dashboard"], queryFn: getMarketingDashboard });
-  const { data: delivery } = useQuery<any>({ queryKey: ["marketing-delivery-settings"], queryFn: getMarketingDeliverySettings });
   const [, setLocation] = useLocation();
   const { hasPermission } = usePermissions();
   if (isLoading) return <PageShell title="Marketing" subtitle="Plan and measure customer communications"><div className="py-16 text-center text-sm text-slate-400">Loading marketing data…</div></PageShell>;
@@ -136,13 +134,13 @@ export function MarketingDashboard() {
       <StatCard label="Total campaigns" value={d.totalCampaigns ?? 0} caption={`${d.draftCampaigns ?? 0} drafts`} icon={Megaphone} />
       <StatCard label="Scheduled" value={d.scheduledCampaigns ?? 0} caption={`${d.activeCampaigns ?? 0} active`} icon={CalendarClock} tone="violet" />
       <StatCard label="Recipients reached" value={d.sentRecipients ?? 0} caption={`${d.totalRecipients ?? 0} planned`} icon={Send} tone="green" />
-       <StatCard label="Open rate" value="Not available" caption={delivery?.provider === "zoho" ? "Awaiting recipient events" : "SMTP does not provide open tracking"} icon={BarChart3} />
+      <StatCard label="Open rate" value="Not available" caption="SMTP does not provide open tracking" icon={BarChart3} />
     </div>
      <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
        <section className="rounded-xl border bg-white shadow-sm"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold text-slate-900">Recent campaigns</h2><p className="text-xs text-slate-500">Latest changes across your campaigns</p></div><Button variant="ghost" size="sm" onClick={() => setLocation("/marketing/campaigns")}>View all <ChevronRight className="ml-1 h-4 w-4" /></Button></div><div className="divide-y">{(d.recentCampaigns || []).length ? d.recentCampaigns.map((c: any) => <button key={c.id} onClick={() => setLocation(`/marketing/campaigns/${c.id}`)} className="flex w-full items-center gap-3 px-5 py-4 text-left hover:bg-slate-50"><span className="rounded-lg bg-blue-50 p-2 text-blue-600"><Mail className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-slate-800">{c.name}</span><span className="block text-xs text-slate-400">{c.creator_name || "Unknown creator"} · {c.updated_at ? new Date(c.updated_at).toLocaleDateString() : ""}</span></span><StatusBadge status={c.status} /></button>) : <EmptyState icon={Megaphone} text="No campaigns yet" action={hasPermission("marketing", "create") ? "Create your first campaign" : undefined} onClick={hasPermission("marketing", "create") ? () => setLocation("/marketing/campaigns/new") : undefined} />}</div></section>
       <section className="rounded-xl border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="font-semibold text-slate-900">Activity</h2><p className="text-xs text-slate-500">A real audit trail of marketing changes</p></div><div className="divide-y">{(d.recentActivity || []).length ? d.recentActivity.map((a: any) => <div key={a.id} className="flex gap-3 px-5 py-4"><span className="mt-0.5 rounded-full bg-slate-100 p-1.5 text-slate-500"><Activity className="h-3.5 w-3.5" /></span><div className="min-w-0"><p className="text-sm text-slate-700"><strong>{a.user_name || "System"}</strong> {a.action.replaceAll("_", " ")} <strong>{a.campaign_name || "campaign"}</strong></p><p className="mt-1 text-xs text-slate-400">{a.created_at ? new Date(a.created_at).toLocaleString() : ""}</p></div></div>) : <EmptyState icon={Clock3} text="No activity recorded" />}</div></section>
     </div>
-       <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm text-blue-900"><div className="flex gap-3"><Target className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" /><div><p className="font-semibold">{delivery?.provider === "zoho" ? "Zoho campaign measurement" : "SMTP measurement boundary"}</p><p className="mt-1 text-blue-800/80">{delivery?.provider === "zoho" ? "Zoho delivery, open, and click events are recorded through the configured webhook. Product links continue to use the app’s signed click tracking." : "Sent and failed counts are recorded from SMTP responses. Delivery and opens are unavailable; product clicks are recorded through tracked campaign links."}</p></div></div></div>
+      <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm text-blue-900"><div className="flex gap-3"><Target className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" /><div><p className="font-semibold">SMTP measurement boundary</p><p className="mt-1 text-blue-800/80">Sent and failed counts are recorded from SMTP responses. Delivery and opens are unavailable; product clicks are recorded through tracked campaign links.</p></div></div></div>
   </PageShell>;
 }
 
@@ -250,28 +248,15 @@ export function MarketingSettings() {
     queryKey: ["marketing-sender-settings"],
     queryFn: getMarketingSenderSettings,
   });
-  const { data: deliveryData } = useQuery<any>({
-    queryKey: ["marketing-delivery-settings"],
-    queryFn: getMarketingDeliverySettings,
-  });
   const [emails, setEmails] = useState<string[]>([]);
   const [defaultEmail, setDefaultEmail] = useState("");
   const [newEmail, setNewEmail] = useState("");
-  const [provider, setProvider] = useState<"smtp" | "zoho">("smtp");
-  const [zohoApiBase, setZohoApiBase] = useState("https://campaigns.zoho.com/api/v1.1");
-  const [replyTo, setReplyTo] = useState("");
 
   useEffect(() => {
     if (!data) return;
     setEmails(Array.isArray(data.emails) ? data.emails : []);
     setDefaultEmail(data.defaultEmail || "");
   }, [data]);
-  useEffect(() => {
-    if (!deliveryData) return;
-    setProvider(deliveryData.provider === "zoho" ? "zoho" : "smtp");
-    setZohoApiBase(deliveryData.zohoApiBase || "https://campaigns.zoho.com/api/v1.1");
-    setReplyTo(deliveryData.replyTo || "");
-  }, [deliveryData]);
 
   const save = useMutation({
     mutationFn: () => saveMarketingSenderSettings({ emails, defaultEmail }),
@@ -282,17 +267,6 @@ export function MarketingSettings() {
       toast({ title: "Marketing sender settings saved" });
     },
     onError: (error: any) => toast({ title: "Unable to save sender settings", description: error.message, variant: "destructive" }),
-  });
-  const saveDelivery = useMutation({
-    mutationFn: () => saveMarketingDeliverySettings({ provider, zohoApiBase, replyTo }),
-    onSuccess: (saved: any) => {
-      setProvider(saved.provider === "zoho" ? "zoho" : "smtp");
-      setZohoApiBase(saved.zohoApiBase || zohoApiBase);
-      setReplyTo(saved.replyTo || "");
-      qc.invalidateQueries({ queryKey: ["marketing-delivery-settings"] });
-      toast({ title: "Marketing delivery settings saved" });
-    },
-    onError: (error: any) => toast({ title: "Unable to save delivery settings", description: error.message, variant: "destructive" }),
   });
 
   const addEmail = () => {
@@ -316,11 +290,11 @@ export function MarketingSettings() {
     if (defaultEmail.toLowerCase() === email.toLowerCase()) setDefaultEmail(next[0] || "");
   };
 
-  return <PageShell title="Marketing" subtitle="Choose the sender identity and delivery provider for campaigns" action={<Button variant="outline" onClick={() => setLocation("/marketing")}><ArrowLeft className="mr-2 h-4 w-4" /> Back to Marketing</Button>}>
+  return <PageShell title="Marketing" subtitle="Choose which approved email address campaigns use as their From address" action={<Button variant="outline" onClick={() => setLocation("/marketing")}><ArrowLeft className="mr-2 h-4 w-4" /> Back to Marketing</Button>}>
     <section className="max-w-3xl rounded-xl border bg-white p-5 shadow-sm">
       <div className="flex items-start gap-3">
         <span className="rounded-lg bg-blue-50 p-2 text-blue-600"><SettingsIcon className="h-5 w-5" /></span>
-         <div><h2 className="font-semibold text-slate-900">Campaign sender emails</h2><p className="mt-1 text-sm text-slate-500">Add the addresses your configured delivery provider is authorized to send from, then choose the default for new campaigns.</p></div>
+        <div><h2 className="font-semibold text-slate-900">Campaign sender emails</h2><p className="mt-1 text-sm text-slate-500">Add the addresses your SMTP account is authorized to send from, then choose the default for new campaigns.</p></div>
       </div>
       {isLoading ? <div className="py-10 text-center text-sm text-slate-400">Loading sender settings…</div> : <div className="mt-5 space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -339,22 +313,6 @@ export function MarketingSettings() {
         <p className="text-xs text-slate-500">The campaign dropdown uses the default when no sender is selected. Changing this does not change your SMTP login credentials, and your mail provider must authorize each From address.</p>
         <div className="flex justify-end"><Button onClick={() => save.mutate()} disabled={save.isPending || !emails.length || !defaultEmail}>{save.isPending ? "Saving…" : "Save sender settings"}</Button></div>
       </div>}
-    </section>
-    <section className="max-w-3xl rounded-xl border bg-white p-5 shadow-sm">
-      <div className="flex items-start gap-3">
-        <span className="rounded-lg bg-violet-50 p-2 text-violet-600"><Send className="h-5 w-5" /></span>
-        <div><h2 className="font-semibold text-slate-900">Campaign delivery provider</h2><p className="mt-1 text-sm text-slate-500">Choose how marketing campaigns are transmitted. Invoice and automation email delivery remains SMTP-based.</p></div>
-      </div>
-      <div className="mt-5 space-y-4">
-        <label className="block text-sm font-medium text-slate-700">Provider<select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={provider} onChange={event => setProvider(event.target.value === "zoho" ? "zoho" : "smtp")}><option value="smtp">Existing SMTP</option><option value="zoho">Zoho Campaigns Developer API v1.1</option></select></label>
-        {provider === "zoho" ? <div className="space-y-3 rounded-lg border border-violet-100 bg-violet-50/50 p-4">
-          <p className={`text-sm font-medium ${deliveryData?.zohoApiTokenConfigured ? "text-emerald-700" : "text-amber-700"}`}>{deliveryData?.zohoApiTokenConfigured ? "Zoho Campaigns access token is configured." : "Zoho Campaigns access token is not configured."}</p>
-          <p className="text-xs text-slate-600">Store ZOHO_CAMPAIGNS_API_TOKEN in Replit Secrets. The app never accepts or displays that token. Zoho requires an authenticated sending domain and a list/campaign account with enough available email credits.</p>
-          <label className="block text-sm font-medium text-slate-700">Zoho Campaigns API base URL<Input className="mt-1.5" value={zohoApiBase} onChange={event => setZohoApiBase(event.target.value)} placeholder="https://campaigns.zoho.com/api/v1.1" /><span className="mt-1 block text-xs font-normal text-slate-400">Use the Zoho data center that owns the account, with the /api/v1.1 path.</span></label>
-        </div> : <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs text-slate-600">Campaigns will use the existing invoice SMTP configuration. To avoid mailbox Sent-folder copies, select Zoho after configuring its API key and verified sending domain.</div>}
-         <label className="block text-sm font-medium text-slate-700">Reply-To address <Input className="mt-1.5" type="email" value={replyTo} onChange={event => setReplyTo(event.target.value)} placeholder="replies@midatlanticdistribution.com" /><span className="mt-1 block text-xs font-normal text-slate-400">Optional for SMTP delivery. Zoho Campaigns Developer API v1.1 does not expose Reply-To in createCampaign, so Zoho sends use the account’s configured reply address.</span></label>
-        <div className="flex items-center justify-between gap-3"><p className="text-xs text-slate-500">Use a campaign’s Test email action after saving to verify the selected provider.</p><Button onClick={() => saveDelivery.mutate()} disabled={saveDelivery.isPending || (provider === "zoho" && !deliveryData?.zohoApiTokenConfigured)}>{saveDelivery.isPending ? "Saving…" : "Save delivery settings"}</Button></div>
-      </div>
     </section>
   </PageShell>;
 }
@@ -458,7 +416,6 @@ function CampaignDetail({ id }: { id: number }) {
   const { hasPermission } = usePermissions();
   const qc = useQueryClient();
   const { data: campaign, isLoading } = useQuery<any>({ queryKey: ["marketing-campaign", id], queryFn: () => getMarketingCampaign(id) });
-  const { data: delivery } = useQuery<any>({ queryKey: ["marketing-delivery-settings"], queryFn: getMarketingDeliverySettings });
   const { data: recipientData } = useQuery<any>({ queryKey: ["marketing-recipients", id], queryFn: () => getMarketingRecipients(id), enabled: !!id, refetchInterval: campaign?.status === "sending" || campaign?.status === "queued" ? 5000 : false });
   const statusMutation = useMutation({ mutationFn: (status: string) => updateMarketingCampaignStatus(id, status), onSuccess: () => { qc.invalidateQueries({ queryKey: ["marketing-campaign", id] }); qc.invalidateQueries({ queryKey: ["marketing-dashboard"] }); }, onError: (e: any) => toast({ title: "Unable to update status", description: e.message, variant: "destructive" }) });
   const deleteMutation = useMutation({ mutationFn: () => deleteMarketingCampaign(id), onSuccess: () => { setLocation("/marketing/campaigns"); qc.invalidateQueries({ queryKey: ["marketing-campaigns"] }); } });
@@ -482,7 +439,7 @@ function CampaignDetail({ id }: { id: number }) {
        <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 font-semibold text-slate-900">Audience</h2><div className="flex items-center gap-3 rounded-lg bg-slate-50 p-4"><Users className="h-5 w-5 text-blue-500" /><div><p className="text-sm font-medium text-slate-800">{campaign.audience_name || (campaign.audience_type === "all_eligible" ? "All eligible customers" : campaign.audience_type.replaceAll("_", " "))}</p><p className="text-xs text-slate-500">{campaign.recipient_count ?? campaign.audience_count ?? 0} planned recipients · {campaign.suppressed_count ?? 0} suppressed</p></div></div></section>
       <section className="rounded-xl border bg-white p-5 shadow-sm"><div className="mb-4 flex items-center justify-between"><h2 className="font-semibold text-slate-900">Message preview</h2><span className="text-xs text-slate-400">{campaign.campaign_type}</span></div><div className="rounded-lg border bg-slate-50 p-4"><p className="mb-3 text-sm font-semibold text-slate-800">{campaign.subject_line || "No subject line"}</p><div className="prose prose-sm max-w-none text-slate-600" dangerouslySetInnerHTML={{ __html: campaign.message_content || "<p>No message content yet.</p>" }} /></div></section>
     </div><div className="space-y-5">
-       <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 font-semibold text-slate-900">Analytics</h2><div className="grid grid-cols-2 gap-3">{[["Planned", campaign.recipient_count ?? 0], ["Sent", campaign.sent_count ?? 0], ["Failed", campaign.failed_count ?? 0], ["Suppressed", campaign.suppressed_count ?? 0], ["Delivered", delivery?.provider === "zoho" ? (campaign.delivered_count ?? 0) : "Not available"], ["Opened", delivery?.provider === "zoho" ? (campaign.opened_count ?? 0) : "Not available"], ["Clicked", campaign.clicked_count ?? 0]].map(([label, value]) => <div key={String(label)} className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-xl font-bold text-slate-800">{value}</p></div>)}</div><p className="mt-4 text-xs text-slate-400">{delivery?.provider === "zoho" ? "Counts update when Zoho sends delivery, open, and click webhook events. Product links also record signed clicks in the app." : "SMTP does not provide delivery or open tracking. Product links record clicks when recipients follow them."}</p></section>
+       <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 font-semibold text-slate-900">Analytics</h2><div className="grid grid-cols-2 gap-3">{[["Planned", campaign.recipient_count ?? 0], ["Sent", campaign.sent_count ?? 0], ["Failed", campaign.failed_count ?? 0], ["Suppressed", campaign.suppressed_count ?? 0], ["Delivered", "Not available"], ["Opened", "Not available"], ["Clicked", campaign.clicked_count ?? 0]].map(([label, value]) => <div key={String(label)} className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-xl font-bold text-slate-800">{value}</p></div>)}</div><p className="mt-4 text-xs text-slate-400">SMTP does not provide delivery or open tracking. Product links record clicks when recipients follow them.</p></section>
        <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-3 font-semibold text-slate-900">Recipients</h2><div className="space-y-2">{(recipientData?.rows || []).slice(0, 20).map((r: any) => <div key={r.id} className="flex items-center gap-2 rounded-lg border p-2.5 text-xs"><span className="min-w-0 flex-1 truncate">{r.customer?.company || [r.customer?.first_name, r.customer?.last_name].filter(Boolean).join(" ") || r.email}</span><span className="text-slate-400 truncate max-w-[160px]">{r.email}</span><StatusBadge status={r.status} /></div>)}{!recipientData?.rows?.length && <p className="text-sm text-slate-400">Recipients are prepared when the campaign starts.</p>}</div></section>
       <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-3 font-semibold text-slate-900">Activity</h2><div className="space-y-3">{(campaign.activity || []).length ? campaign.activity.map((a: any) => <div key={a.id} className="flex gap-2 text-sm"><Activity className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" /><span className="text-slate-600">{a.action.replaceAll("_", " ")} <span className="text-xs text-slate-400">· {a.user_name || "System"} · {new Date(a.created_at).toLocaleString()}</span></span></div>) : <p className="text-sm text-slate-400">No activity yet.</p>}</div></section>
          {hasPermission("marketing", "send") && <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-3 text-sm font-semibold text-slate-900">Workflow</h2><div className="flex flex-wrap gap-2">{next && <Button size="sm" onClick={() => statusMutation.mutate(next)} disabled={statusMutation.isPending}>{next === "ready" ? "Mark ready" : "Pause campaign"}</Button>}{["ready", "paused", "scheduled"].includes(campaign.status) && <Button size="sm" variant="outline" onClick={() => setLocation(`/marketing/campaigns/${id}/edit`)}><CalendarClock className="mr-1.5 h-4 w-4" /> {campaign.status === "scheduled" ? "Reschedule" : "Schedule campaign"}</Button>}{["ready", "failed", "paused"].includes(campaign.status) && <Button size="sm" onClick={sendNow}><Send className="mr-1.5 h-4 w-4" /> Send now</Button>}{["scheduled", "queued", "sending"].includes(campaign.status) && <Button size="sm" variant="outline" onClick={async () => { try { await pauseMarketingCampaign(id); qc.invalidateQueries({ queryKey: ["marketing-campaign", id] }); } catch (e: any) { toast({ title: "Unable to pause", description: e.message, variant: "destructive" }); } }}>Pause</Button>}<Button size="sm" variant="outline" onClick={testSend}>Test email</Button>{hasPermission("marketing", "create") && <Button size="sm" variant="outline" onClick={async () => { const copy = await duplicateMarketingCampaign(id); toast({ title: "Campaign duplicated" }); setLocation(`/marketing/campaigns/${copy.id}/edit`); }}>Duplicate</Button>}{hasPermission("marketing", "delete") && campaign.status !== "sent" && <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => { if (window.confirm("Delete this campaign?")) deleteMutation.mutate(); }}><Trash2 className="mr-1 h-4 w-4" /> Delete</Button>}</div><p className="mt-3 text-xs text-slate-400">Sending runs on the server and respects current CRM preferences and suppressions.</p></section>}
@@ -620,7 +577,7 @@ function CampaignEditor({ id }: { id?: number }) {
     }));
   };
   const customers = customerPage?.rows ?? [];
-  return <PageShell title={editing ? "Edit campaign" : "New campaign"} subtitle="Build, test, schedule, or send this campaign through the configured delivery provider." action={<Button variant="outline" onClick={() => setLocation(editing ? `/marketing/campaigns/${id}` : "/marketing/campaigns")}><ArrowLeft className="mr-2 h-4 w-4" /> Cancel</Button>}>
+  return <PageShell title={editing ? "Edit campaign" : "New campaign"} subtitle="Build, test, schedule, or send this campaign through the configured SMTP connection." action={<Button variant="outline" onClick={() => setLocation(editing ? `/marketing/campaigns/${id}` : "/marketing/campaigns")}><ArrowLeft className="mr-2 h-4 w-4" /> Cancel</Button>}>
     <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]"><div className="space-y-5">
        <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><FileText className="h-4 w-4 text-blue-500" /> Campaign details</h2><div className="space-y-4"><label className="block text-sm font-medium text-slate-700">Campaign name<Input className="mt-1.5" value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. September new arrivals" /></label><label className="block text-sm font-medium text-slate-700">Internal description<textarea className="mt-1.5 min-h-20 w-full rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-blue-400" value={form.internal_description} onChange={e => set("internal_description", e.target.value)} placeholder="What is this campaign for?" /></label><label className="block text-sm font-medium text-slate-700">Subject line<Input className="mt-1.5" value={form.subject_line} onChange={e => set("subject_line", e.target.value)} placeholder="Your subject line" /></label><label className="block text-sm font-medium text-slate-700">Preview text<Input className="mt-1.5" value={form.preview_text} onChange={e => set("preview_text", e.target.value)} placeholder="Optional inbox preview" /></label><label className="block text-sm font-medium text-slate-700">From email<select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.sender_email || ""} onChange={e => set("sender_email", e.target.value)}><option value="">Use default{senderSettings.defaultEmail ? ` (${senderSettings.defaultEmail})` : ""}</option>{senderOptions.map(email => <option key={email} value={email}>{email}{email.toLowerCase() === senderSettings.defaultEmail.toLowerCase() ? " · Default" : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-400">{senderSettings.defaultEmail ? `Defaults to ${senderSettings.defaultEmail}. Manage sender addresses in Marketing settings.` : "No sender addresses are configured yet. Add one in Marketing settings before sending."}</span></label></div></section>
        <section className="rounded-xl border bg-white p-5 shadow-sm"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="flex items-center gap-2 font-semibold text-slate-900"><Mail className="h-4 w-4 text-blue-500" /> Message</h2><Button type="button" variant="outline" size="sm" onClick={() => setPreviewOpen(true)}><Eye className="mr-1.5 h-4 w-4" /> Preview email</Button></div><label className="mb-4 block text-sm font-medium text-slate-700">Use a marketing template<select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.template_id || ""} onChange={e => applyTemplate(e.target.value)}><option value="">Start from scratch</option>{templates.map((template: any) => <option key={template.id} value={template.id}>{template.name}{template.category ? ` · ${template.category}` : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-400">{templates.length ? "Selecting a template fills the subject and message. You can still edit both." : "No active marketing templates are available yet."}</span></label><RichTextEditor value={form.message_content} onChange={value => setForm((old: any) => ({ ...old, message_content: preserveMarketingProductMarkup(value, old.message_content || "") }))} minHeight={240} /></section>

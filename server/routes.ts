@@ -21,7 +21,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
-import { getMarketingDeliverySettings, getMarketingDeliveryStatus, getMarketingSenderSettings, normalizeMarketingDeliverySettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, renderMarketingCampaignContent, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingCampaignClickToken, verifyMarketingCampaignUnsubscribeToken, verifyMarketingClickToken, verifyMarketingContentToken, verifyMarketingUnsubscribeToken } from "./marketing";
+import { getMarketingSenderSettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
@@ -7780,23 +7780,6 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/delivery-settings", requirePermission("marketing"), async (_req, res) => {
-    try {
-      res.json(getMarketingDeliveryStatus(await getMarketingDeliverySettings()));
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  app.put("/api/marketing/delivery-settings", requirePermission("marketing", "send"), async (req, res) => {
-    try {
-      const requested = normalizeMarketingDeliverySettings(req.body ?? {});
-      if (requested.provider === "zoho" && !String(process.env.ZOHO_CAMPAIGNS_API_TOKEN ?? "").trim()) {
-        return res.status(400).json({ error: "Zoho Campaigns delivery requires the ZOHO_CAMPAIGNS_API_TOKEN Replit Secret before it can be enabled." });
-      }
-      await storage.setSetting("marketing_delivery_settings", requested);
-      res.json(getMarketingDeliveryStatus(requested));
-    } catch (e: any) { res.status(400).json({ error: e.message }); }
-  });
-
   // Marketing product picker. Credentials stay server-side and only the
   // snapshot fields needed by the campaign editor are returned.
   app.get("/api/marketing/products/search", requirePermission("marketing"), async (req, res) => {
@@ -8287,40 +8270,6 @@ export async function registerRoutes(
 
   // Public, signed product-click endpoint. It only redirects to a URL present in
   // the campaign snapshot, so the signed link cannot become an open redirect.
-  app.get("/api/marketing/zoho/content/:token", async (req, res) => {
-    try {
-      const campaignId = verifyMarketingContentToken(String(req.params.token));
-      if (!campaignId) return res.status(400).send("Invalid campaign content link");
-      const campaign = await storage.getMarketingCampaign(campaignId);
-      if (!campaign) return res.status(404).send("Campaign content not found");
-      res.setHeader("Cache-Control", "no-store");
-      res.type("html").send(renderMarketingCampaignContent(campaign));
-    } catch (e: any) {
-      res.status(500).send("Unable to render campaign content");
-    }
-  });
-
-  app.get("/api/marketing/click/campaign/:token", async (req, res) => {
-    try {
-      const decoded = verifyMarketingCampaignClickToken(String(req.params.token));
-      if (!decoded) return res.status(400).send("Invalid product link");
-      const campaign = await storage.getMarketingCampaign(decoded.campaignId);
-      if (!campaign) return res.status(404).send("Product link not found");
-      const product = (Array.isArray(campaign.product_snapshots) ? campaign.product_snapshots : [])
-        .find((candidate: any) => Number(candidate?.id ?? candidate?.bigcommerce_id) === decoded.productId);
-      if (!product || String(product.product_url ?? "") !== decoded.targetUrl) return res.status(404).send("Product link not found");
-      await storage.recordMarketingEvent({
-        campaign_id: decoded.campaignId,
-        event_type: "clicked",
-        detail: { product_id: decoded.productId, source: "zoho_campaigns" },
-      });
-      res.setHeader("Cache-Control", "no-store");
-      return res.redirect(302, decoded.targetUrl);
-    } catch (e: any) {
-      return res.status(500).send("Unable to process product link");
-    }
-  });
-
   app.get("/api/marketing/click/:token", async (req, res) => {
     try {
       const decoded = verifyMarketingClickToken(String(req.params.token));
@@ -8351,79 +8300,6 @@ export async function registerRoutes(
       return res.redirect(302, targetUrl);
     } catch (e: any) {
       return res.status(500).send("Unable to process product link");
-    }
-  });
-
-  app.get("/api/marketing/zoho/unsubscribe/:token", async (req, res) => {
-    try {
-      const campaignId = verifyMarketingCampaignUnsubscribeToken(String(req.params.token));
-      const email = String(req.query.email ?? "").trim();
-      if (!campaignId || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        return res.status(400).send("<h1>Invalid unsubscribe link</h1>");
-      }
-      await storage.unsubscribeMarketingEmail(campaignId, email);
-      return res.status(200).send("<!doctype html><html><body style=\"font-family:Arial;padding:48px;text-align:center\"><h1>You’re unsubscribed</h1><p>You will no longer receive marketing emails from Mid Atlantic Distribution.</p></body></html>");
-    } catch (e: any) {
-      return res.status(500).send("Unable to process unsubscribe");
-    }
-  });
-
-  // Zoho Email API webhooks are intentionally isolated from the app's
-  // authenticated routes. Configure ZOHO_CAMPAIGNS_WEBHOOK_TOKEN and use it as
-  // the webhook URL query token; provider payloads are normalized here so
-  // campaigns continue to own suppression and analytics state.
-  app.post("/api/marketing/webhooks/zoho", async (req, res) => {
-    try {
-      const expectedToken = String(process.env.ZOHO_CAMPAIGNS_WEBHOOK_TOKEN ?? "").trim();
-      if (!expectedToken) return res.status(503).json({ error: "Zoho webhook token is not configured" });
-      const suppliedToken = String(req.header("x-zoho-webhook-token") ?? req.query.token ?? "").trim();
-      if (!suppliedToken || suppliedToken !== expectedToken) return res.status(401).json({ error: "Invalid webhook token" });
-
-      const payload = req.body ?? {};
-      const envelopeEvent = String(payload.action ?? payload.actionType ?? "").trim().toLowerCase();
-      const rows = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload.data) ? payload.data
-          : Array.isArray(payload.events) ? payload.events
-            : [payload];
-      let processed = 0;
-      for (const row of rows) {
-        const additional = row?.rcpt_additional_data ?? row?.recipient?.additional_data ?? row?.additional_data ?? {};
-        const campaignId = Number(additional.campaign_id ?? row?.campaign_id);
-        const recipientId = Number(additional.recipient_id ?? row?.recipient_id);
-        const rawEvent = String(row?.event_type ?? row?.event ?? row?.action ?? row?.status ?? row?.eventName ?? envelopeEvent).trim().toLowerCase();
-        const eventType = rawEvent.includes("deliver") ? "delivered"
-          : rawEvent.includes("open") ? "opened"
-            : rawEvent.includes("click") ? "clicked"
-              : rawEvent.includes("unsubscribe") ? "unsubscribed"
-                : rawEvent.includes("complaint") ? "complaint"
-                  : rawEvent.includes("spam") ? "spam"
-                    : rawEvent.includes("bounce") ? "bounced"
-                      : rawEvent;
-        if (!eventType || (!Number.isInteger(campaignId) && !Number.isInteger(recipientId))) continue;
-        const providerEventId = String(
-          row?.event_id
-          ?? row?.eventId
-          ?? row?.id
-          ?? [row?.transmission_id, row?.contact_id, row?.action_time].filter(Boolean).join(":"),
-        ).trim() || null;
-        const applied = await storage.applyMarketingProviderEvent({
-          campaignId: Number.isInteger(campaignId) && campaignId > 0 ? campaignId : null,
-          recipientId: Number.isInteger(recipientId) && recipientId > 0 ? recipientId : null,
-          providerEventId,
-          eventType,
-          detail: {
-            provider: "zoho",
-            transmission_id: row?.transmission_id ?? row?.transmissionId ?? null,
-            raw_event: rawEvent,
-            payload: row,
-          },
-        });
-        if (applied) processed++;
-      }
-      res.json({ ok: true, processed });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message || "Unable to process Zoho webhook" });
     }
   });
 
