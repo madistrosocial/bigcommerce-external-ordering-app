@@ -21,7 +21,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
-import { getMarketingSenderSettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
+import { getMarketingDeliverySettings, getMarketingDeliveryStatus, getMarketingSenderSettings, normalizeMarketingDeliverySettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
@@ -7780,6 +7780,23 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
+  app.get("/api/marketing/delivery-settings", requirePermission("marketing"), async (_req, res) => {
+    try {
+      res.json(getMarketingDeliveryStatus(await getMarketingDeliverySettings()));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.put("/api/marketing/delivery-settings", requirePermission("marketing", "send"), async (req, res) => {
+    try {
+      const requested = normalizeMarketingDeliverySettings(req.body ?? {});
+      if (requested.provider === "zoho" && !String(process.env.ZOHO_EMAIL_API_KEY ?? "").trim()) {
+        return res.status(400).json({ error: "Zoho delivery requires the ZOHO_EMAIL_API_KEY Replit Secret before it can be enabled." });
+      }
+      await storage.setSetting("marketing_delivery_settings", requested);
+      res.json(getMarketingDeliveryStatus(requested));
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
   // Marketing product picker. Credentials stay server-side and only the
   // snapshot fields needed by the campaign editor are returned.
   app.get("/api/marketing/products/search", requirePermission("marketing"), async (req, res) => {
@@ -8300,6 +8317,65 @@ export async function registerRoutes(
       return res.redirect(302, targetUrl);
     } catch (e: any) {
       return res.status(500).send("Unable to process product link");
+    }
+  });
+
+  // Zoho Email API webhooks are intentionally isolated from the app's
+  // authenticated routes. Configure ZOHO_EMAIL_WEBHOOK_TOKEN and use it as
+  // the webhook URL query token; provider payloads are normalized here so
+  // campaigns continue to own suppression and analytics state.
+  app.post("/api/marketing/webhooks/zoho", async (req, res) => {
+    try {
+      const expectedToken = String(process.env.ZOHO_EMAIL_WEBHOOK_TOKEN ?? "").trim();
+      if (!expectedToken) return res.status(503).json({ error: "Zoho webhook token is not configured" });
+      const suppliedToken = String(req.header("x-zoho-webhook-token") ?? req.query.token ?? "").trim();
+      if (!suppliedToken || suppliedToken !== expectedToken) return res.status(401).json({ error: "Invalid webhook token" });
+
+      const payload = req.body ?? {};
+      const envelopeEvent = String(payload.action ?? payload.actionType ?? "").trim().toLowerCase();
+      const rows = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload.data) ? payload.data
+          : Array.isArray(payload.events) ? payload.events
+            : [payload];
+      let processed = 0;
+      for (const row of rows) {
+        const additional = row?.rcpt_additional_data ?? row?.recipient?.additional_data ?? row?.additional_data ?? {};
+        const campaignId = Number(additional.campaign_id ?? row?.campaign_id);
+        const recipientId = Number(additional.recipient_id ?? row?.recipient_id);
+        const rawEvent = String(row?.event_type ?? row?.event ?? row?.action ?? row?.status ?? row?.eventName ?? envelopeEvent).trim().toLowerCase();
+        const eventType = rawEvent.includes("deliver") ? "delivered"
+          : rawEvent.includes("open") ? "opened"
+            : rawEvent.includes("click") ? "clicked"
+              : rawEvent.includes("unsubscribe") ? "unsubscribed"
+                : rawEvent.includes("complaint") ? "complaint"
+                  : rawEvent.includes("spam") ? "spam"
+                    : rawEvent.includes("bounce") ? "bounced"
+                      : rawEvent;
+        if (!eventType || (!Number.isInteger(campaignId) && !Number.isInteger(recipientId))) continue;
+        const providerEventId = String(
+          row?.event_id
+          ?? row?.eventId
+          ?? row?.id
+          ?? [row?.transmission_id, row?.contact_id, row?.action_time].filter(Boolean).join(":"),
+        ).trim() || null;
+        const applied = await storage.applyMarketingProviderEvent({
+          campaignId: Number.isInteger(campaignId) && campaignId > 0 ? campaignId : null,
+          recipientId: Number.isInteger(recipientId) && recipientId > 0 ? recipientId : null,
+          providerEventId,
+          eventType,
+          detail: {
+            provider: "zoho",
+            transmission_id: row?.transmission_id ?? row?.transmissionId ?? null,
+            raw_event: rawEvent,
+            payload: row,
+          },
+        });
+        if (applied) processed++;
+      }
+      res.json({ ok: true, processed });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message || "Unable to process Zoho webhook" });
     }
   });
 
