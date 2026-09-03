@@ -78,11 +78,31 @@ class MarketingDeliveryError extends Error {
 
 function ensureZohoConfigured(settings: MarketingDeliverySettings): string {
   if (settings.provider !== "zoho") throw new MarketingDeliveryError("Zoho delivery is not enabled.");
-  const apiToken = String(process.env.ZOHO_CAMPAIGNS_API_TOKEN ?? "").trim();
+  const apiToken = String(process.env.ZOHO_CAMPAIGNS_ACCESS_TOKEN ?? process.env.ZOHO_CAMPAIGNS_API_TOKEN ?? "").trim();
   if (!apiToken) {
-    throw new MarketingDeliveryError("Zoho Campaigns delivery is selected, but ZOHO_CAMPAIGNS_API_TOKEN is not configured in Replit Secrets.");
+    throw new MarketingDeliveryError("Zoho Campaigns delivery is selected, but a Zoho Campaigns OAuth access token is not configured in Replit Secrets.");
   }
   return apiToken;
+}
+
+async function refreshZohoAccessToken(): Promise<string | null> {
+  const refreshToken = String(process.env.ZOHO_CAMPAIGNS_REFRESH_TOKEN ?? "").trim();
+  const clientId = String(process.env.ZOHO_CAMPAIGNS_CLIENT_ID ?? "").trim();
+  const clientSecret = String(process.env.ZOHO_CAMPAIGNS_CLIENT_SECRET ?? "").trim();
+  if (!refreshToken || !clientId || !clientSecret) return null;
+  const accountsBase = String(process.env.ZOHO_ACCOUNTS_API_BASE ?? "https://accounts.zoho.com").trim().replace(/\/+$/, "");
+  const response = await fetch(`${accountsBase}/oauth/v2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    body: new URLSearchParams({
+      refresh_token: refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "refresh_token",
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  return response.ok && result?.access_token ? String(result.access_token) : null;
 }
 
 function zohoCampaignKey(payload: any): string {
@@ -93,8 +113,9 @@ async function zohoCampaignRequest(
   settings: MarketingDeliverySettings,
   path: string,
   params: Record<string, string>,
+  tokenOverride?: string,
 ): Promise<any> {
-  const apiToken = ensureZohoConfigured(settings);
+  const apiToken = tokenOverride ?? ensureZohoConfigured(settings);
   const body = new URLSearchParams({ resfmt: "JSON", ...params });
   let response: Response;
   try {
@@ -109,6 +130,10 @@ async function zohoCampaignRequest(
     });
   } catch (error: any) {
     throw new MarketingDeliveryError(`Zoho Campaigns request failed before a response was received: ${String(error?.message ?? error)}`);
+  }
+  if (response.status === 401 && !tokenOverride) {
+    const refreshedToken = await refreshZohoAccessToken();
+    if (refreshedToken) return zohoCampaignRequest(settings, path, params, refreshedToken);
   }
   const responseBody = await response.json().catch(() => ({}));
   const code = String(responseBody?.code ?? responseBody?.response?.code ?? "");
