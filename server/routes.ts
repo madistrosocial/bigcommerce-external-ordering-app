@@ -22,6 +22,7 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
 import { getMarketingSenderSettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
+import { getZohoCampaignsStatus } from "./zoho-campaigns";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
@@ -7759,6 +7760,10 @@ export async function registerRoutes(
     try {
       res.json(await getMarketingSenderSettings());
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/marketing/provider-status", requirePermission("marketing"), (_req, res) => {
+    res.json(getZohoCampaignsStatus());
   });
 
   app.put("/api/marketing/sender-settings", requirePermission("marketing", "send"), async (req, res) => {

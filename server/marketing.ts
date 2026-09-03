@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { storage } from "./storage";
 import { createHmac, timingSafeEqual } from "crypto";
+import { sendZohoCampaignEmail } from "./zoho-campaigns";
 
 type MarketingCustomer = {
   id?: number;
@@ -273,16 +274,27 @@ export async function sendMarketingTestEmail(campaignId: number, email: string):
   const to = email.trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error("Enter a valid test email address.");
   const settings = await getMailSettings();
-  const transport = smtpTransport(settings);
   const from = resolveMarketingSenderEmail(campaign, await getMarketingSenderSettings(settings));
-  if (!from) throw new Error("SMTP sender address is not configured.");
+  if (!from) throw new Error("Zoho Campaigns sender address is not configured.");
   const customer = { first_name: "Test", last_name: "Recipient", email: to };
   const subject = renderTemplate(campaign.subject_line || campaign.name, customer);
   const html = renderTemplate(campaign.message_content || "<p>This is a marketing test email.</p>", customer);
-  const info = await transport.sendMail({ from, to, subject, html, text: stripHtml(html) });
+  const info = await sendZohoCampaignEmail({
+    transmissionName: `marketing-test-${campaignId}-${Date.now()}`,
+    to,
+    recipientName: "Test Recipient",
+    from,
+    fromName: String(settings.company_name || settings.companyName || "Mid Atlantic Distribution"),
+    replyTo: from,
+    subject,
+    html,
+    text: stripHtml(html),
+    mergeData: { first_name: "Test", last_name: "Recipient" },
+    additionalData: { campaign_id: campaignId, test: true },
+  });
   await storage.markMarketingTestSent(campaignId);
-  await storage.recordMarketingEvent({ campaign_id: campaignId, event_type: "test_sent", detail: { email: to, message_id: info.messageId ?? null } });
-  return { messageId: info.messageId };
+  await storage.recordMarketingEvent({ campaign_id: campaignId, event_type: "test_sent", detail: { email: to, message_id: info.transmissionId } });
+  return { messageId: info.transmissionId };
 }
 
 export async function processMarketingCampaign(campaignId: number): Promise<void> {
@@ -292,9 +304,8 @@ export async function processMarketingCampaign(campaignId: number): Promise<void
     const campaign = await storage.claimMarketingCampaign(campaignId);
     if (!campaign) return;
     const settings = await getMailSettings();
-    const transport = smtpTransport(settings);
     const from = resolveMarketingSenderEmail(campaign, await getMarketingSenderSettings(settings));
-    if (!from) throw new Error("SMTP sender address is not configured.");
+    if (!from) throw new Error("Zoho Campaigns sender address is not configured.");
     await storage.prepareMarketingRecipients(campaignId);
     while (true) {
       const batch = await storage.getMarketingRecipients(campaignId, { status: "all", limit: 100 });
@@ -324,13 +335,34 @@ export async function processMarketingCampaign(campaignId: number): Promise<void
           continue;
         }
         try {
-          const info = await transport.sendMail({ from, to: recipient.email, subject, html, text: stripHtml(html) });
-          await storage.markMarketingRecipientSent(row.id, info.messageId ?? null);
+          const info = await sendZohoCampaignEmail({
+            transmissionName: `marketing-${campaignId}-${recipient.id}-${Date.now()}`,
+            to: recipient.email,
+            recipientName: [customer.first_name, customer.last_name].filter(Boolean).join(" ").slice(0, 100),
+            from,
+            fromName: String(settings.company_name || settings.companyName || "Mid Atlantic Distribution"),
+            replyTo: from,
+            subject,
+            html,
+            text: stripHtml(html),
+            mergeData: {
+              first_name: customer.first_name ?? "",
+              last_name: customer.last_name ?? "",
+              company: customer.company ?? "",
+            },
+            additionalData: {
+              campaign_id: campaignId,
+              recipient_id: recipient.id,
+              customer_id: customer.id ?? null,
+              source: row.source ?? "customer",
+            },
+          });
+          await storage.markMarketingRecipientSent(row.id, info.transmissionId);
         } catch (error: any) {
           await storage.markMarketingRecipientFailed(
             row.id,
             String(error?.message ?? error),
-            isSafeToRetrySmtpError(error),
+            false,
           );
         }
       }

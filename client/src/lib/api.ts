@@ -93,6 +93,7 @@ async function marketingRequest(path: string, init: RequestInit = {}) {
 
 export const getMarketingDashboard = () => marketingRequest("/marketing/dashboard");
 export const getMarketingSenderSettings = () => marketingRequest("/marketing/sender-settings");
+export const getMarketingProviderStatus = () => marketingRequest("/marketing/provider-status");
 export const saveMarketingSenderSettings = (data: { emails: string[]; defaultEmail: string }) =>
   marketingRequest("/marketing/sender-settings", { method: "PUT", body: JSON.stringify(data) });
 export const getMarketingCampaigns = (params: { search?: string; status?: string } = {}) =>

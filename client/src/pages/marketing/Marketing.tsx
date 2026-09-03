@@ -22,7 +22,7 @@ import {
   pauseMarketingCampaign, duplicateMarketingCampaign, getMarketingRecipients, scheduleMarketingCampaign,
   getMarketingContacts, importMarketingContacts, getMarketingAudienceMembers, getMarketingAudiencePreview,
    getMarketingTemplates, getMarketingCustomerGroups, searchMarketingProducts,
-   getMarketingSenderSettings, saveMarketingSenderSettings,
+   getMarketingSenderSettings, saveMarketingSenderSettings, getMarketingProviderStatus,
 } from "@/lib/api";
 import {
   DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS,
@@ -248,6 +248,16 @@ export function MarketingSettings() {
     queryKey: ["marketing-sender-settings"],
     queryFn: getMarketingSenderSettings,
   });
+  const { data: providerStatus, isLoading: providerLoading } = useQuery<{
+    provider: string;
+    configured: boolean;
+    apiBase: string;
+    authentication: string;
+    missing: string[];
+  }>({
+    queryKey: ["marketing-provider-status"],
+    queryFn: getMarketingProviderStatus,
+  });
   const [emails, setEmails] = useState<string[]>([]);
   const [defaultEmail, setDefaultEmail] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -290,11 +300,27 @@ export function MarketingSettings() {
     if (defaultEmail.toLowerCase() === email.toLowerCase()) setDefaultEmail(next[0] || "");
   };
 
-  return <PageShell title="Marketing" subtitle="Choose which approved email address campaigns use as their From address" action={<Button variant="outline" onClick={() => setLocation("/marketing")}><ArrowLeft className="mr-2 h-4 w-4" /> Back to Marketing</Button>}>
+  return <PageShell title="Marketing" subtitle="Configure campaign delivery and approved From addresses" action={<Button variant="outline" onClick={() => setLocation("/marketing")}><ArrowLeft className="mr-2 h-4 w-4" /> Back to Marketing</Button>}>
+    <section className="mb-4 max-w-3xl rounded-xl border bg-white p-5 shadow-sm">
+      <div className="flex items-start gap-3">
+        <span className={`rounded-lg p-2 ${providerStatus?.configured ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"}`}>
+          {providerStatus?.configured ? <Check className="h-5 w-5" /> : <SettingsIcon className="h-5 w-5" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="font-semibold text-slate-900">Campaign delivery provider</h2>
+          <p className="mt-1 text-sm text-slate-500">Marketing campaigns use Zoho Campaigns Email API and are not sent through the mailbox SMTP account.</p>
+          {providerLoading ? <p className="mt-3 text-xs text-slate-400">Checking configuration…</p> : providerStatus?.configured ? (
+            <p className="mt-3 text-xs text-emerald-700">Configured · {providerStatus.apiBase}</p>
+          ) : (
+            <p className="mt-3 text-xs text-amber-700">Not configured. Add {providerStatus?.missing?.join(", ") || "the Zoho API token"} in Replit Secrets.</p>
+          )}
+        </div>
+      </div>
+    </section>
     <section className="max-w-3xl rounded-xl border bg-white p-5 shadow-sm">
       <div className="flex items-start gap-3">
         <span className="rounded-lg bg-blue-50 p-2 text-blue-600"><SettingsIcon className="h-5 w-5" /></span>
-        <div><h2 className="font-semibold text-slate-900">Campaign sender emails</h2><p className="mt-1 text-sm text-slate-500">Add the addresses your SMTP account is authorized to send from, then choose the default for new campaigns.</p></div>
+        <div><h2 className="font-semibold text-slate-900">Campaign sender emails</h2><p className="mt-1 text-sm text-slate-500">Add the addresses your Zoho Campaigns sending domain is authorized to use, then choose the default for new campaigns.</p></div>
       </div>
       {isLoading ? <div className="py-10 text-center text-sm text-slate-400">Loading sender settings…</div> : <div className="mt-5 space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -310,7 +336,7 @@ export function MarketingSettings() {
             <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600" onClick={() => removeEmail(email)} aria-label={`Remove ${email}`}><Trash2 className="h-4 w-4" /></Button>
           </div>) : <p className="px-3 py-5 text-sm text-slate-400">No campaign sender emails configured yet.</p>}
         </div>
-        <p className="text-xs text-slate-500">The campaign dropdown uses the default when no sender is selected. Changing this does not change your SMTP login credentials, and your mail provider must authorize each From address.</p>
+        <p className="text-xs text-slate-500">The campaign dropdown uses the default when no sender is selected. Each From address must be authorized in Zoho Campaigns for the verified sending domain.</p>
         <div className="flex justify-end"><Button onClick={() => save.mutate()} disabled={save.isPending || !emails.length || !defaultEmail}>{save.isPending ? "Saving…" : "Save sender settings"}</Button></div>
       </div>}
     </section>
