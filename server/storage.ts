@@ -206,6 +206,7 @@ export interface IStorage {
   getMarketingQueueCampaigns(): Promise<any[]>;
   prepareMarketingRecipients(campaignId: number): Promise<{ eligible: number; suppressed: number; unsubscribed: number }>;
   claimMarketingRecipient(id: number): Promise<any | undefined>;
+  resetMarketingFailedRecipients(campaignId: number): Promise<void>;
   markMarketingRecipientSent(id: number, providerMessageId?: string | null): Promise<void>;
   markMarketingRecipientFailed(id: number, reason: string, retryable?: boolean): Promise<void>;
   recordMarketingEvent(data: { campaign_id: number; recipient_id?: number | null; event_type: string; detail?: Record<string, unknown>; provider_event_id?: string | null }): Promise<void>;
@@ -2835,6 +2836,19 @@ export class DatabaseStorage implements IStorage {
       status: "sending", attempt_count: sql`${marketingCampaignRecipients.attempt_count} + 1`, last_attempt_at: new Date(),
     }).where(and(eq(marketingCampaignRecipients.id, id), or(eq(marketingCampaignRecipients.status, "eligible"), and(eq(marketingCampaignRecipients.status, "failed"), sql`${marketingCampaignRecipients.attempt_count} < 3`)))).returning();
     return recipient;
+  }
+
+  async resetMarketingFailedRecipients(campaignId: number): Promise<void> {
+    await db.update(marketingCampaignRecipients).set({
+      status: "eligible",
+      attempt_count: 0,
+      last_attempt_at: null,
+      failure_reason: null,
+      provider_message_id: null,
+    }).where(and(
+      eq(marketingCampaignRecipients.campaign_id, campaignId),
+      eq(marketingCampaignRecipients.status, "failed"),
+    ));
   }
 
   async markMarketingRecipientSent(id: number, providerMessageId?: string | null): Promise<void> {

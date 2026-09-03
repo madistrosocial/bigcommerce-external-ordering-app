@@ -310,7 +310,7 @@ export function MarketingSettings() {
           <h2 className="font-semibold text-slate-900">Campaign delivery provider</h2>
           <p className="mt-1 text-sm text-slate-500">Marketing campaigns use Zoho Campaigns Email API and are not sent through the mailbox SMTP account.</p>
           {providerLoading ? <p className="mt-3 text-xs text-slate-400">Checking configuration…</p> : providerStatus?.configured ? (
-            <p className="mt-3 text-xs text-emerald-700">Configured · {providerStatus.apiBase}</p>
+            <p className="mt-3 text-xs text-emerald-700">API token configured · {providerStatus.apiBase}</p>
           ) : (
             <p className="mt-3 text-xs text-amber-700">Not configured. Add {providerStatus?.missing?.join(", ") || "the Zoho API token"} in Replit Secrets.</p>
           )}

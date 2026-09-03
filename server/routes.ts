@@ -8010,6 +8010,9 @@ export async function registerRoutes(
         true,
       );
       if (audienceError) return res.status(400).json({ error: audienceError });
+      if (campaign.status === "failed") {
+        await storage.resetMarketingFailedRecipients(id);
+      }
       const queued = await storage.updateMarketingCampaignStatus(id, "queued", getMarketingUserId(req));
       void processMarketingCampaign(id);
       res.json(queued);

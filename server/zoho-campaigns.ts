@@ -142,8 +142,11 @@ export async function sendZohoCampaignEmail(input: ZohoCampaignEmailInput): Prom
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const code = body?.code ?? body?.response?.code;
+    const message = response.status === 401
+      ? "Authentication failed. ZOHO_CAMPAIGNS_API_TOKEN must be a Zoho Campaigns Email API key created under API Keys with the ZohoCampaigns.emailapi.ALL scope; an OAuth access token will not work here."
+      : providerErrorMessage(body, response.statusText || "request rejected");
     throw new ZohoCampaignsError(
-      `Zoho Campaigns rejected the transmission (${response.status}): ${providerErrorMessage(body, response.statusText || "request rejected")}`,
+      `Zoho Campaigns rejected the transmission (${response.status}): ${message}`,
       { status: response.status, providerCode: code },
     );
   }
