@@ -228,7 +228,7 @@ export default function AdminZohoPage() {
         <CardContent className="space-y-3 text-sm text-slate-600">
           <div className="rounded-lg bg-slate-50 p-3">
             <p className="font-medium text-slate-800">For campaign sending</p>
-            <p className="mt-1 text-xs leading-5">In Zoho Campaigns, open Settings → Developer Space → API Keys and create an Email API key with the <code className="rounded bg-white px-1 py-0.5">ZohoCampaigns.emailapi.ALL</code> scope. Put that key in the first field above. An OAuth access token or Bearer token will not work in that field.</p>
+            <p className="mt-1 text-xs leading-5">Open the <a href="https://campaigns.zoho.com/" target="_blank" rel="noreferrer" className="font-medium text-blue-600 hover:text-blue-700">Zoho Campaigns Email API homepage</a>, choose <strong>API Keys</strong> from the left navigation, and create an Email API key with the <code className="rounded bg-white px-1 py-0.5">ZohoCampaigns.emailapi.ALL</code> scope. Put that key in the first field above. The OAuth page under Settings → Developer Space → APIs is a different API and its access token will not work in that field.</p>
           </div>
           <div className="rounded-lg bg-slate-50 p-3">
             <p className="font-medium text-slate-800">For optional OAuth credentials</p>

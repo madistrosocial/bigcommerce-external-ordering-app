@@ -25,7 +25,7 @@ Only one credential is required by this implementation:
 ### `ZOHO_CAMPAIGNS_API_TOKEN`
 
 1. Sign in to the Zoho Campaigns organization that owns the sending domain.
-2. Open the Email API area and go to **API Keys** in the left navigation.
+2. Open the [Zoho Campaigns Email API homepage](https://campaigns.zoho.com/), then choose **API Keys** in the left navigation. This is separate from **Settings → Developer Space → APIs**, which is the OAuth-based Campaigns API 1.1 area.
 3. Create an API key with the `ZohoCampaigns.emailapi.ALL` scope.
 4. Copy the generated key once and save it as the
    `ZOHO_CAMPAIGNS_API_TOKEN` environment variable, or enter it in

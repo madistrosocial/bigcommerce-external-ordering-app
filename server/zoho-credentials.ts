@@ -12,7 +12,7 @@ export const ZOHO_CREDENTIAL_FIELDS = [
     label: "Zoho Campaigns Email API key",
     secret: true,
     required: true,
-    instructions: "Create this in Zoho Campaigns → Settings → Developer Space → API Keys with the ZohoCampaigns.emailapi.ALL scope.",
+    instructions: "Open the Zoho Campaigns Email API homepage, choose API Keys from the left navigation, and create a key with the ZohoCampaigns.emailapi.ALL scope.",
   },
   {
     key: "clientId",

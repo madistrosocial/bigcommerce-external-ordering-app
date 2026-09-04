@@ -62,7 +62,7 @@ export async function sendZohoCampaignEmail(input: ZohoCampaignEmailInput): Prom
   const credentials = await getZohoCampaignsCredentials();
   if (!credentials.apiKey) {
     throw new ZohoCampaignsError(
-      "Zoho Campaigns Email API is not configured. Add the API key in Admin → Zoho or set ZOHO_CAMPAIGNS_API_TOKEN in Replit Secrets.",
+      "Zoho Campaigns Email API is not configured. Add the API key in Admin → Zoho or set the ZOHO_CAMPAIGNS_API_TOKEN environment variable.",
     );
   }
   if (!validEmail(input.to)) throw new ZohoCampaignsError("Zoho recipient email is invalid.");
@@ -115,7 +115,7 @@ export async function sendZohoCampaignEmail(input: ZohoCampaignEmailInput): Prom
   if (!response.ok) {
     const code = body?.code ?? body?.response?.code;
     const message = response.status === 401
-      ? "Authentication failed. Add a Zoho Campaigns Email API key in Admin → Zoho or set ZOHO_CAMPAIGNS_API_TOKEN in Replit Secrets. An OAuth access token will not work here."
+      ? "Authentication failed. Add a Zoho Campaigns Email API key in Admin → Zoho or set the ZOHO_CAMPAIGNS_API_TOKEN environment variable. An OAuth access token will not work here."
       : providerErrorMessage(body, response.statusText || "request rejected");
     throw new ZohoCampaignsError(
       `Zoho Campaigns rejected the transmission (${response.status}): ${message}`,
