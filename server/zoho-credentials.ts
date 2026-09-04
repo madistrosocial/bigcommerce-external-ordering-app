@@ -36,7 +36,7 @@ export const ZOHO_CREDENTIAL_FIELDS = [
     label: "Zoho OAuth refresh token",
     secret: true,
     required: false,
-    instructions: "Optional OAuth credential for future Zoho API features. Keep it in Replit Secrets in production when possible.",
+    instructions: "Optional OAuth credential for future Zoho API features. Keep it in an environment variable in production when possible.",
   },
   {
     key: "apiBase",
@@ -130,7 +130,7 @@ function decryptCredentials(value: unknown): ZohoCredentialValues {
     return values;
   } catch {
     // An old SESSION_SECRET must not prevent valid production environment
-    // secrets from working. The admin override is treated as unavailable.
+    // variables from working. The admin-defined value is treated as unavailable.
     return {};
   }
 }

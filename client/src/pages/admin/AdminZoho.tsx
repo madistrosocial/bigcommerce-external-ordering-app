@@ -36,8 +36,8 @@ type ZohoStatus = {
 };
 
 function sourceLabel(source: CredentialSource): string {
-  if (source === "environment") return "Environment secret";
-  if (source === "admin") return "Admin override";
+  if (source === "environment") return "Environment variable";
+  if (source === "admin") return "Admin-defined value";
   if (source === "default") return "Default";
   return "Not configured";
 }
@@ -87,10 +87,10 @@ export default function AdminZohoPage() {
     onSuccess: (next: ZohoStatus) => {
       queryClient.setQueryData(["admin-zoho-credentials"], next);
       queryClient.setQueryData(["marketing-provider-status"], next);
-      toast({ title: "Admin Zoho overrides cleared", description: "Environment secrets, if present, remain active." });
+      toast({ title: "Admin Zoho values cleared", description: "Environment variables, if present, remain active." });
     },
     onError: (error: any) => toast({
-      title: "Unable to clear admin overrides",
+      title: "Unable to clear admin-defined values",
       description: error.message,
       variant: "destructive",
     }),
@@ -145,7 +145,7 @@ export default function AdminZohoPage() {
           </div>
           <div className="flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
-            <p><strong>Precedence:</strong> Replit environment secrets always win over admin-entered values. Admin values are an encrypted fallback for testing. Nothing secret is returned to the browser.</p>
+            <p><strong>Precedence:</strong> Environment variables are checked first for each setting. If one is not available, the admin-defined value is used. Nothing secret is returned to the browser.</p>
           </div>
         </CardContent>
       </Card>
@@ -154,7 +154,7 @@ export default function AdminZohoPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold text-slate-700">Credentials and connection settings</CardTitle>
           <CardDescription>
-            Enter a value only when you want to add or replace the encrypted admin fallback. Existing values are never prefilled.
+            Enter a value only when you want to add or replace the encrypted admin-defined value. Existing values are never prefilled.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -178,7 +178,7 @@ export default function AdminZohoPage() {
                     type={field.secret && !isVisible ? "password" : "text"}
                     value={values[key] ?? ""}
                     onChange={event => updateValue(key, event.target.value)}
-                    placeholder={field.source === "environment" ? "Environment value is active; enter an admin fallback only if needed" : field.configured ? "Saved securely; enter to replace" : `Enter ${field.label.toLowerCase()}`}
+                    placeholder={field.source === "environment" ? "Environment variable is active; enter an admin-defined fallback only if needed" : field.configured ? "Saved securely; enter to replace" : `Enter ${field.label.toLowerCase()}`}
                     className={field.secret ? "pr-10 font-mono text-xs" : "font-mono text-xs"}
                     autoComplete="new-password"
                   />
@@ -205,13 +205,13 @@ export default function AdminZohoPage() {
               className="text-red-600 hover:text-red-700"
               disabled={clear.isPending}
               onClick={() => {
-                if (window.confirm("Clear all admin-entered Zoho overrides? Environment secrets will not be changed.")) {
+                if (window.confirm("Clear all admin-defined Zoho values? Environment variables will not be changed.")) {
                   clear.mutate();
                 }
               }}
             >
               {clear.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
-              Clear admin overrides
+              Clear admin-defined values
             </Button>
             <Button type="button" onClick={() => save.mutate()} disabled={!hasValuesToSave || save.isPending}>
               {save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}

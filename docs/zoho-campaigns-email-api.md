@@ -8,15 +8,15 @@ the existing SMTP configuration.
 
 Zoho credentials can be supplied in either place:
 
-1. **Production:** add the environment secret names listed below in Replit
-   Secrets (or the equivalent production environment).
-2. **Testing:** open **Admin → Zoho** and enter encrypted fallback values.
+1. **Production:** add the environment variable names listed below to the
+   production environment.
+2. **Testing:** open **Admin → Zoho** and enter encrypted admin-defined values.
 
-The application checks environment secrets first, independently for each
-field. An environment value overrides an admin value; when no environment
-value exists, the encrypted admin value is used. Secret values are never
-returned to the browser. Keep `SESSION_SECRET` stable if admin fallback values
-are being used, because it protects their encryption at rest.
+The application checks environment variables first, independently for each
+field. When an environment variable is not available, the encrypted
+admin-defined value is used. Secret values are never returned to the browser.
+Keep `SESSION_SECRET` stable if admin-defined values are being used, because
+it protects their encryption at rest.
 
 ## Required credential
 
@@ -27,8 +27,9 @@ Only one credential is required by this implementation:
 1. Sign in to the Zoho Campaigns organization that owns the sending domain.
 2. Open the Email API area and go to **API Keys** in the left navigation.
 3. Create an API key with the `ZohoCampaigns.emailapi.ALL` scope.
-4. Copy the generated key once and save it as the Replit Secret named
-   `ZOHO_CAMPAIGNS_API_TOKEN`, or enter it in **Admin → Zoho** for testing.
+4. Copy the generated key once and save it as the
+   `ZOHO_CAMPAIGNS_API_TOKEN` environment variable, or enter it in
+   **Admin → Zoho** for testing.
 
 The application sends it server-side as:
 
@@ -46,19 +47,19 @@ The default endpoint is:
 https://campaigns.zoho.com/emailapi/v2/transmission
 ```
 
-If the Zoho organization is in another data center, add the Replit Secret
-`ZOHO_CAMPAIGNS_API_BASE` or enter it under **Admin → Zoho** with the regional
-Zoho Campaigns base URL. The app appends `/emailapi/v2/transmission`
-automatically. Use the base URL shown by Zoho for the organization; do not mix
-a US API key with another data center.
+If the Zoho organization is in another data center, add the
+`ZOHO_CAMPAIGNS_API_BASE` environment variable or enter it under
+**Admin → Zoho** with the regional Zoho Campaigns base URL. The app appends
+`/emailapi/v2/transmission` automatically. Use the base URL shown by Zoho for
+the organization; do not mix a US API key with another data center.
 
 ## Credentials that are not used
 
 `ZOHO_CAMPAIGNS_CLIENT_ID`, `ZOHO_CAMPAIGNS_CLIENT_SECRET`, and
 `ZOHO_CAMPAIGNS_REFRESH_TOKEN` are OAuth credentials for other Zoho APIs or
-flows. They can be saved in Replit Secrets or under **Admin → Zoho** for
-future Zoho features. Email API v2 authentication uses the API key above, so
-those three values are not required for campaign transmission and are not
+flows. They can be saved as environment variables or under **Admin → Zoho**
+for future Zoho features. Email API v2 authentication uses the API key above,
+so those three values are not required for campaign transmission and are not
 read by this delivery path.
 
 ## Zoho account setup
