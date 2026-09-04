@@ -22,7 +22,11 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
 import { getMarketingSenderSettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
-import { getZohoCampaignsStatus } from "./zoho-campaigns";
+import {
+  clearZohoCampaignsCredentials,
+  getZohoCampaignsCredentialStatus,
+  saveZohoCampaignsCredentials,
+} from "./zoho-credentials";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
@@ -2669,6 +2673,9 @@ export async function registerRoutes(
   // ===== SETTINGS ROUTES =====
   app.get("/api/settings/:key", requireAuth, async (req, res) => {
     try {
+      if (req.params.key === "zoho_credentials") {
+        return res.status(403).json({ error: "Use the Admin → Zoho page to manage this protected setting." });
+      }
       const sensitiveSettingKeys = new Set(["bigcommerce_config", "skuvault_config", "google_sheets_webhook"]);
       const authUser = (req as any).authUser;
       if (sensitiveSettingKeys.has(req.params.key) && authUser?.role !== "admin") {
@@ -2714,6 +2721,9 @@ export async function registerRoutes(
   app.post("/api/settings", requireAdmin, async (req, res) => {
     try {
       const { key, value } = req.body;
+      if (key === "zoho_credentials") {
+        return res.status(400).json({ error: "Use the Admin → Zoho page to manage this protected setting." });
+      }
       await storage.setSetting(key, value);
       res.json({ success: true });
     } catch (error: any) {
@@ -7762,8 +7772,37 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/provider-status", requirePermission("marketing"), (_req, res) => {
-    res.json(getZohoCampaignsStatus());
+  app.get("/api/marketing/provider-status", requirePermission("marketing"), async (_req, res) => {
+    res.json(await getZohoCampaignsCredentialStatus());
+  });
+
+  app.get("/api/admin/zoho-credentials", requireAdmin, async (_req, res) => {
+    try {
+      res.json(await getZohoCampaignsCredentialStatus());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/admin/zoho-credentials", requireAdmin, async (req, res) => {
+    try {
+      await saveZohoCampaignsCredentials({
+        credentials: req.body?.credentials,
+        clear: req.body?.clear,
+      });
+      res.json(await getZohoCampaignsCredentialStatus());
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/admin/zoho-credentials", requireAdmin, async (_req, res) => {
+    try {
+      await clearZohoCampaignsCredentials();
+      res.json(await getZohoCampaignsCredentialStatus());
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
   });
 
   app.put("/api/marketing/sender-settings", requirePermission("marketing", "send"), async (req, res) => {

@@ -96,6 +96,14 @@ export const getMarketingSenderSettings = () => marketingRequest("/marketing/sen
 export const getMarketingProviderStatus = () => marketingRequest("/marketing/provider-status");
 export const saveMarketingSenderSettings = (data: { emails: string[]; defaultEmail: string }) =>
   marketingRequest("/marketing/sender-settings", { method: "PUT", body: JSON.stringify(data) });
+
+export const getAdminZohoCredentials = () => marketingRequest("/admin/zoho-credentials");
+export const saveAdminZohoCredentials = (data: {
+  credentials: Record<string, string>;
+  clear?: string[];
+}) => marketingRequest("/admin/zoho-credentials", { method: "PUT", body: JSON.stringify(data) });
+export const clearAdminZohoCredentials = () =>
+  marketingRequest("/admin/zoho-credentials", { method: "DELETE" });
 export const getMarketingCampaigns = (params: { search?: string; status?: string } = {}) =>
   marketingRequest(`/marketing/campaigns?search=${encodeURIComponent(params.search || "")}&status=${encodeURIComponent(params.status || "all")}`);
 export const getMarketingCampaign = (id: number) => marketingRequest(`/marketing/campaigns/${id}`);

@@ -1,4 +1,4 @@
-const DEFAULT_ZOHO_CAMPAIGNS_API_BASE = "https://campaigns.zoho.com";
+import { getZohoCampaignsCredentials } from "./zoho-credentials";
 
 export type ZohoCampaignEmailInput = {
   transmissionName: string;
@@ -27,34 +27,6 @@ export class ZohoCampaignsError extends Error {
     this.status = options.status;
     this.providerCode = options.providerCode;
   }
-}
-
-function getZohoCampaignsApiBase(): string {
-  return String(process.env.ZOHO_CAMPAIGNS_API_BASE || DEFAULT_ZOHO_CAMPAIGNS_API_BASE)
-    .trim()
-    .replace(/\/+$/, "");
-}
-
-function getZohoCampaignsApiToken(): string {
-  return String(process.env.ZOHO_CAMPAIGNS_API_TOKEN || "").trim();
-}
-
-export function getZohoCampaignsStatus(): {
-  provider: "zoho_campaigns_email_api";
-  configured: boolean;
-  apiBase: string;
-  authentication: "api_key";
-  missing: string[];
-} {
-  const missing: string[] = [];
-  if (!getZohoCampaignsApiToken()) missing.push("ZOHO_CAMPAIGNS_API_TOKEN");
-  return {
-    provider: "zoho_campaigns_email_api",
-    configured: missing.length === 0,
-    apiBase: getZohoCampaignsApiBase(),
-    authentication: "api_key",
-    missing,
-  };
 }
 
 function transmissionName(value: string): string {
@@ -87,10 +59,10 @@ export async function sendZohoCampaignEmail(input: ZohoCampaignEmailInput): Prom
   transmissionId: string;
   acceptedRecipients: number;
 }> {
-  const token = getZohoCampaignsApiToken();
-  if (!token) {
+  const credentials = await getZohoCampaignsCredentials();
+  if (!credentials.apiKey) {
     throw new ZohoCampaignsError(
-      "Zoho Campaigns Email API is not configured. Add ZOHO_CAMPAIGNS_API_TOKEN in Replit Secrets.",
+      "Zoho Campaigns Email API is not configured. Add the API key in Admin → Zoho or set ZOHO_CAMPAIGNS_API_TOKEN in Replit Secrets.",
     );
   }
   if (!validEmail(input.to)) throw new ZohoCampaignsError("Zoho recipient email is invalid.");
@@ -124,10 +96,10 @@ export async function sendZohoCampaignEmail(input: ZohoCampaignEmailInput): Prom
 
   let response: Response;
   try {
-    response = await fetch(`${getZohoCampaignsApiBase()}/emailapi/v2/transmission`, {
+    response = await fetch(`${credentials.apiBase}/emailapi/v2/transmission`, {
       method: "POST",
       headers: {
-        Authorization: `Zoho-zapikey ${token}`,
+        Authorization: `Zoho-zapikey ${credentials.apiKey}`,
         "Content-Type": "application/json",
         Accept: "application/json",
       },
@@ -143,7 +115,7 @@ export async function sendZohoCampaignEmail(input: ZohoCampaignEmailInput): Prom
   if (!response.ok) {
     const code = body?.code ?? body?.response?.code;
     const message = response.status === 401
-      ? "Authentication failed. ZOHO_CAMPAIGNS_API_TOKEN must be a Zoho Campaigns Email API key created under API Keys with the ZohoCampaigns.emailapi.ALL scope; an OAuth access token will not work here."
+      ? "Authentication failed. Add a Zoho Campaigns Email API key in Admin → Zoho or set ZOHO_CAMPAIGNS_API_TOKEN in Replit Secrets. An OAuth access token will not work here."
       : providerErrorMessage(body, response.statusText || "request rejected");
     throw new ZohoCampaignsError(
       `Zoho Campaigns rejected the transmission (${response.status}): ${message}`,
