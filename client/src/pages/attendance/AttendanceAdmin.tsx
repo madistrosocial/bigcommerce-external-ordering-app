@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import {
   AlertTriangle, BarChart3, CalendarDays, CheckCircle2, ChevronRight, Clock3,
-  Download, FileClock, Filter, Loader2, MapPin, Settings2, Users,
+  Download, FileClock, Filter, Loader2, MapPin, Settings2, Users, X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,113 @@ function statusBadge(status: string) {
     captured: "border-0 bg-emerald-100 text-emerald-700",
   };
   return <Badge className={styles[status] ?? "border-0 bg-slate-100 text-slate-600"}>{status.replace(/_/g, " ")}</Badge>;
+}
+
+const MS_PER_DAY = 86_400_000;
+const EXPECTED_DAILY_SECONDS = 8 * 60 * 60;
+
+function dateOnly(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function dateFromOnly(value: string) {
+  return new Date(`${value}T00:00:00Z`);
+}
+
+function addDays(value: string, amount: number) {
+  const date = dateFromOnly(value);
+  date.setUTCDate(date.getUTCDate() + amount);
+  return dateOnly(date);
+}
+
+function defaultLogRange() {
+  const today = dateOnly(new Date());
+  return { from: addDays(today, -13), to: today };
+}
+
+function nthWeekday(year: number, month: number, weekday: number, occurrence: number) {
+  const date = new Date(Date.UTC(year, month, 1));
+  date.setUTCDate(1 + ((weekday - date.getUTCDay() + 7) % 7) + (occurrence - 1) * 7);
+  return dateOnly(date);
+}
+
+function lastWeekday(year: number, month: number, weekday: number) {
+  const date = new Date(Date.UTC(year, month + 1, 0));
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() - weekday + 7) % 7));
+  return dateOnly(date);
+}
+
+function observedHoliday(date: string, name: string) {
+  const day = dateFromOnly(date).getUTCDay();
+  if (day === 6) return { date: addDays(date, -1), name: `${name} (observed)` };
+  if (day === 0) return { date: addDays(date, 1), name: `${name} (observed)` };
+  return { date, name };
+}
+
+function usHolidaysForYear(year: number) {
+  const fixed = [
+    [`${year}-01-01`, "New Year's Day"],
+    [`${year}-06-19`, "Juneteenth"],
+    [`${year}-07-04`, "Independence Day"],
+    [`${year}-11-11`, "Veterans Day"],
+    [`${year}-12-25`, "Christmas Day"],
+  ];
+  const holidays = [
+    ...fixed,
+    [nthWeekday(year, 0, 1, 3), "Martin Luther King Jr. Day"],
+    [nthWeekday(year, 1, 1, 3), "Presidents' Day"],
+    [lastWeekday(year, 4, 1), "Memorial Day"],
+    [nthWeekday(year, 8, 1, 1), "Labor Day"],
+    [nthWeekday(year, 9, 1, 2), "Columbus Day"],
+    [nthWeekday(year, 10, 4, 4), "Thanksgiving Day"],
+  ];
+  return holidays.flatMap(([date, name]) => {
+    const actual = { date: String(date), name: String(name) };
+    const observed = observedHoliday(actual.date, actual.name);
+    return observed.date === actual.date ? [actual] : [actual, observed];
+  });
+}
+
+function getUsHolidayMap(from: string, to: string) {
+  const map = new Map<string, string>();
+  for (let year = dateFromOnly(from).getUTCFullYear(); year <= dateFromOnly(to).getUTCFullYear(); year += 1) {
+    for (const holiday of usHolidaysForYear(year)) map.set(holiday.date, holiday.name);
+  }
+  return map;
+}
+
+function datesBetween(from: string, to: string) {
+  const dates: string[] = [];
+  for (let date = from; date <= to; date = addDays(date, 1)) dates.push(date);
+  return dates;
+}
+
+function shortDate(value: string) {
+  return dateFromOnly(value).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function weekday(value: string) {
+  return dateFromOnly(value).toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+}
+
+function dayKind(date: string, holidayMap: Map<string, string>) {
+  const day = dateFromOnly(date).getUTCDay();
+  if (holidayMap.has(date)) return "holiday";
+  if (day === 0 || day === 6) return "weekend";
+  return "weekday";
+}
+
+function ledgerStatus(
+  date: string,
+  holidayMap: Map<string, string>,
+  record: any | undefined,
+  selectedUserId: string,
+) {
+  const kind = dayKind(date, holidayMap);
+  if (kind === "holiday") return "holiday";
+  if (kind === "weekend") return "weekend";
+  if (!selectedUserId && record?.loggedCount > 0) return "team";
+  return record ? (record.status === "active" ? "active" : "worked") : "absent";
 }
 
 const tabs = [
@@ -132,16 +239,143 @@ function Logs() {
   const fmt = useTimeService();
   const [status, setStatus] = useState("all");
   const [startMethod, setStartMethod] = useState("all");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const initialRange = useMemo(defaultLogRange, []);
+  const [from, setFrom] = useState(initialRange.from);
+  const [to, setTo] = useState(initialRange.to);
+  const [userId, setUserId] = useState("all");
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const params = new URLSearchParams({ status, startMethod });
+  const usersQuery = useQuery({ queryKey: ["attendance", "team-members"], queryFn: () => apiJson("/api/users") });
+  const params = new URLSearchParams({ status, startMethod, limit: "500" });
   if (from) params.set("from", from);
   if (to) params.set("to", to);
-  const query = useQuery({ queryKey: ["attendance", "logs", status, startMethod, from, to], queryFn: () => apiJson(`/api/attendance/admin/logs?${params}`) });
+  if (userId !== "all") params.set("userId", userId);
+  const query = useQuery({ queryKey: ["attendance", "logs", status, startMethod, from, to, userId], queryFn: () => apiJson(`/api/attendance/admin/logs?${params}`), enabled: Boolean(from && to && from <= to) });
+  const teamMembers = (usersQuery.data ?? []).filter((user: any) => user.is_enabled);
+  const selectedMember = teamMembers.find((user: any) => String(user.id) === userId);
+  const dates = useMemo(() => from && to && from <= to ? datesBetween(from, to) : [], [from, to]);
+  const holidayMap = useMemo(() => from && to && from <= to ? getUsHolidayMap(from, to) : new Map<string, string>(), [from, to]);
+  const rows = query.data?.rows ?? [];
+  const recordsByDate = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const row of rows) {
+      const current = map.get(row.work_date) ?? { date: row.work_date, records: [], totalSeconds: 0, loggedCount: 0 };
+      current.records.push(row);
+      current.totalSeconds += Number(row.total_seconds ?? 0);
+      current.loggedCount += 1;
+      map.set(row.work_date, current);
+    }
+    return map;
+  }, [rows]);
+  const expectedTeamMembers = selectedMember ? 1 : teamMembers.length;
+  const businessDates = dates.filter(date => dayKind(date, holidayMap) === "weekday");
+  const workedRows = rows.filter((row: any) => dayKind(row.work_date, holidayMap) === "weekday");
+  const totalSeconds = workedRows.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
+  const expectedSeconds = businessDates.length * expectedTeamMembers * EXPECTED_DAILY_SECONDS;
+  const daysWorked = new Set(workedRows.map((row: any) => `${row.user_id}:${row.work_date}`)).size;
+  const absentDays = Math.max(0, businessDates.length * expectedTeamMembers - daysWorked);
+  const lostSeconds = Math.max(0, expectedSeconds - totalSeconds);
+  const setQuickRange = (preset: "week" | "pay_period" | "month") => {
+    const today = dateOnly(new Date());
+    if (preset === "week") {
+      const start = dateFromOnly(today);
+      start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
+      setFrom(dateOnly(start));
+      setTo(addDays(dateOnly(start), 6));
+    } else if (preset === "month") {
+      const start = new Date(Date.UTC(dateFromOnly(today).getUTCFullYear(), dateFromOnly(today).getUTCMonth(), 1));
+      setFrom(dateOnly(start));
+      setTo(today);
+    } else {
+      setFrom(addDays(today, -13));
+      setTo(today);
+    }
+  };
+  const clearFilters = () => {
+    const range = defaultLogRange();
+    setFrom(range.from);
+    setTo(range.to);
+    setUserId("all");
+    setStatus("all");
+    setStartMethod("all");
+  };
+  const statusLabel: Record<string, string> = { worked: "Worked", active: "Working", absent: "Absent", weekend: "Weekend", holiday: "US holiday", team: "Team logged" };
+  const statusClass: Record<string, string> = {
+    worked: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    active: "border-blue-200 bg-blue-50 text-blue-700",
+    absent: "border-red-200 bg-red-50 text-red-700",
+    weekend: "border-slate-200 bg-slate-100 text-slate-500",
+    holiday: "border-amber-200 bg-amber-50 text-amber-700",
+    team: "border-indigo-200 bg-indigo-50 text-indigo-700",
+  };
   return <AdminShell activeTab="logs">
-    <Card className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4"><div className="flex items-center gap-2 text-xs font-semibold text-slate-600"><Filter className="h-4 w-4 text-red-600" />Filters</div><div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><div><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px] text-slate-500">Status</Label><Select value={status} onValueChange={setStatus}><SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="active">Active</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="exception">Exception</SelectItem></SelectContent></Select></div><div><Label className="text-[11px] text-slate-500">Start method</Label><Select value={startMethod} onValueChange={setStartMethod}><SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All methods</SelectItem><SelectItem value="warehouse">Warehouse</SelectItem><SelectItem value="driving">Driving</SelectItem></SelectContent></Select></div><div className="flex items-end"><Button variant="outline" className="h-9 w-full text-xs" onClick={() => { setFrom(""); setTo(""); setStatus("all"); setStartMethod("all"); }}>Clear Filters</Button></div></div></CardContent></Card>
-    {selectedId ? <div className="mt-4"><LogDetail id={selectedId} onClose={() => setSelectedId(null)} /></div> : <div className="mt-4 grid gap-2 md:grid-cols-2">{query.isLoading ? <div className="p-8 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></div> : query.data?.rows?.length ? query.data.rows.map((row: any) => <EmployeeRow key={row.id} row={row} fmt={fmt} onClick={() => setSelectedId(row.id)} />) : <Card className="border-dashed border-slate-200 md:col-span-2"><CardContent className="p-10 text-center text-sm text-slate-400">No attendance logs match these filters.</CardContent></Card>}</div>}
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 className="text-base font-bold text-slate-900">Attendance ledger</h2>
+        <p className="mt-1 text-xs text-slate-500">A daily view for payroll review, absences, and time reconciliation.</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {[["week", "This week"], ["pay_period", "Last 14 days"], ["month", "This month"]].map(([key, label]) => <Button key={key} size="sm" variant="outline" className="h-8 text-xs" onClick={() => setQuickRange(key as "week" | "pay_period" | "month")}>{label}</Button>)}
+      </div>
+    </div>
+    <Card className="mt-4 rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4">
+      <div className="flex items-center gap-2 text-xs font-semibold text-slate-600"><Filter className="h-4 w-4 text-red-600" />Filter the ledger</div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <div><Label className="text-[11px] text-slate-500">Team member</Label><Select value={userId} onValueChange={setUserId}><SelectTrigger className="mt-1 h-9 text-xs"><SelectValue placeholder="All team members" /></SelectTrigger><SelectContent><SelectItem value="all">All team members</SelectItem>{teamMembers.map((user: any) => <SelectItem key={user.id} value={String(user.id)}>{user.name || user.username}</SelectItem>)}</SelectContent></Select></div>
+        <div><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="mt-1 h-9 text-xs" /></div>
+        <div><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="mt-1 h-9 text-xs" /></div>
+        <div><Label className="text-[11px] text-slate-500">Log status</Label><Select value={status} onValueChange={setStatus}><SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="active">Working</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="exception">Exception</SelectItem></SelectContent></Select></div>
+        <div><Label className="text-[11px] text-slate-500">Start method</Label><Select value={startMethod} onValueChange={setStartMethod}><SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All methods</SelectItem><SelectItem value="warehouse">Warehouse</SelectItem><SelectItem value="driving">Route start</SelectItem></SelectContent></Select></div>
+        <div className="flex items-end"><Button variant="outline" className="h-9 w-full text-xs" onClick={clearFilters}><X className="mr-1.5 h-3.5 w-3.5" />Reset</Button></div>
+      </div>
+    </CardContent></Card>
+    <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+      {[
+        ["Hours worked", hours(totalSeconds), "Actual recorded time", "text-blue-600"],
+        ["Hours lost / short", hours(lostSeconds), "Against 8h weekday expectation", "text-red-600"],
+        ["Days worked", String(daysWorked), selectedMember ? "Days with a log" : "Team member-days", "text-emerald-600"],
+        ["Absent days", String(absentDays), selectedMember ? "Weekdays with no log" : "Across selected team", "text-amber-600"],
+        ["Business days", String(businessDates.length), `${expectedTeamMembers || 0} team member${expectedTeamMembers === 1 ? "" : "s"} selected`, "text-slate-600"],
+      ].map(([label, value, hint, color]) => <Card key={label} className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4"><p className={`text-xl font-bold ${color}`}>{value}</p><p className="mt-1 text-xs font-semibold text-slate-700">{label}</p><p className="mt-1 text-[10px] leading-4 text-slate-400">{hint}</p></CardContent></Card>)}
+    </div>
+    <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[11px] text-slate-500">
+      <span className="font-semibold text-slate-700">{selectedMember ? selectedMember.name : "All team members"}</span>
+      <span>{from && to ? `${shortDate(from)} – ${shortDate(to)}` : "Choose a valid date range"}</span>
+      <span className="text-slate-300">•</span>
+      <span><span className="font-semibold text-slate-700">Weekdays</span> are expected workdays</span>
+      <span><span className="font-semibold text-amber-700">US holidays</span> and <span className="font-semibold text-slate-600">weekends</span> are excluded</span>
+      <span className="ml-auto text-slate-400">Expected time uses 8 hours per weekday</span>
+    </div>
+    {selectedId ? <div className="mt-4"><LogDetail id={selectedId} onClose={() => setSelectedId(null)} /></div> : <Card className="mt-4 overflow-hidden rounded-xl border-slate-200 shadow-sm">
+      <CardHeader className="border-b border-slate-100 bg-white pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-sm">Daily attendance</CardTitle><span className="text-xs text-slate-400">{dates.length} calendar days · {rows.length} logs</span></div></CardHeader>
+      <CardContent className="p-0">
+        {query.isLoading || usersQuery.isLoading ? <div className="p-12 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /><p className="mt-2">Loading attendance ledger…</p></div> : query.isError || usersQuery.isError ? <div className="p-10 text-center text-sm text-red-600">Attendance logs could not be loaded. Try refreshing the page.</div> : !dates.length ? <div className="p-10 text-center text-sm text-slate-400">Choose a valid date range to view the ledger.</div> : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-xs">
+              <thead><tr className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Day</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Hours</th><th className="px-4 py-3 font-semibold">Team / note</th><th className="px-4 py-3 text-right font-semibold">Details</th></tr></thead>
+              <tbody>
+                {dates.map(date => {
+                  const summary = recordsByDate.get(date);
+                  const record = selectedMember ? summary?.records.find((row: any) => String(row.user_id) === userId) : undefined;
+                  const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, userId === "all" ? "" : userId);
+                  const holiday = holidayMap.get(date);
+                  const dateRecords = summary?.records ?? [];
+                  const names = dateRecords.map((row: any) => row.employee_name || row.employee_username).filter(Boolean);
+                  const displayHours = selectedMember ? hours(record?.total_seconds) : hours(summary?.totalSeconds);
+                  return <tr key={date} className={`border-b border-slate-100 last:border-0 ${statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
+                    <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold text-slate-800">{shortDate(date)}</span><span className="ml-2 text-[10px] text-slate-400">{date}</span></td>
+                    <td className={`px-4 py-3 font-medium ${statusKey === "weekend" ? "text-slate-400" : "text-slate-600"}`}>{weekday(date)}</td>
+                    <td className="px-4 py-3"><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span>{holiday && <span className="ml-2 text-[10px] text-amber-700">{holiday}</span>}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</td>
+                    <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? `${record.start_method === "warehouse" ? "Warehouse" : "Route start"} · ${record.status}` : statusKey === "absent" ? "No attendance log recorded" : "Not expected") : (names.length ? `${names.slice(0, 3).join(", ")}${names.length > 3 ? ` +${names.length - 3}` : ""}` : statusKey === "absent" ? "No team member logged time" : "Not expected")}</td>
+                    <td className="px-4 py-3 text-right">{record && <Button variant="ghost" size="sm" className="h-7 text-[11px] text-red-600 hover:text-red-700" onClick={() => setSelectedId(record.id)}>Open log<ChevronRight className="ml-1 h-3 w-3" /></Button>}</td>
+                  </tr>;
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>}
   </AdminShell>;
 }
 
