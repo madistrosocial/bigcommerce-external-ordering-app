@@ -175,13 +175,14 @@ function Reports() {
 
 export function AttendanceSettingsPage() {
   const client = useQueryClient();
-  const query = useQuery({ queryKey: ["attendance", "settings"], queryFn: () => apiJson("/api/attendance/settings") });
+  const query = useQuery({ queryKey: ["attendance", "settings"], queryFn: () => apiJson("/api/attendance/settings"), retry: false });
   const [form, setForm] = useState<any>(null);
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState("");
   useEffect(() => { if (query.data) setForm(query.data); }, [query.data]);
   const save = useMutation({ mutationFn: () => apiJson("/api/attendance/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) }), onSuccess: data => { setForm(data); client.invalidateQueries({ queryKey: ["attendance", "settings"] }); } });
-  if (!form) return <AdminShell activeTab="settings"><Card><CardContent className="p-8 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></CardContent></Card></AdminShell>;
+  if (query.isLoading || !form) return <AdminShell activeTab="settings"><Card><CardContent className="p-8 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></CardContent></Card></AdminShell>;
+  if (query.isError) return <AdminShell activeTab="settings"><Card className="border-red-200"><CardContent className="p-8 text-center"><p className="text-sm font-semibold text-red-700">Attendance settings could not be loaded.</p><p className="mt-2 text-sm text-slate-500">Use an administrator account and open this page from Admin → Attendance Settings.</p><Button className="mt-5 bg-red-600 hover:bg-red-700" onClick={() => query.refetch()}>Try Again</Button></CardContent></Card></AdminShell>;
   const set = (key: string, value: any) => setForm((current: any) => ({ ...current, [key]: value }));
   const useCurrentLocation = () => {
     setLocationError("");

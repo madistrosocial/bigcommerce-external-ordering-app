@@ -174,10 +174,7 @@ function Router() {
         {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_reports" />}
       </Route>
       <Route path="/attendance/settings">
-        {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="manage_settings" />}
-      </Route>
-      <Route path="/admin/attendance">
-        {() => <AdminRoute component={AttendanceSettingsPage} />}
+        {() => <Redirect to="/admin/attendance" />}
       </Route>
 
       {/* ── Marketing routes ── */}
@@ -238,6 +235,9 @@ function Router() {
       </Route>
 
       {/* ── Admin routes ── */}
+      <Route path="/admin/attendance">
+        {() => <AdminRoute component={AttendanceSettingsPage} />}
+      </Route>
       <Route path="/admin">
         {() => <ProtectedRoute component={AdminDashboard} role="admin" />}
       </Route>

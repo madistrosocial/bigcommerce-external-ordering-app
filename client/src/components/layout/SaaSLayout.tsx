@@ -150,7 +150,6 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("attendance", "view_logs") ? [{ label: "Attendance Logs", path: "/attendance/logs" }] : []),
     ...(hasPermission("attendance", "view_exceptions") ? [{ label: "Exceptions", path: "/attendance/exceptions" }] : []),
     ...(hasPermission("attendance", "view_reports") ? [{ label: "Reports", path: "/attendance/reports" }] : []),
-    ...(hasPermission("attendance", "manage_settings") ? [{ label: "Settings", path: "/attendance/settings" }] : []),
   ];
 
   // CRM children
