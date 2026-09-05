@@ -7026,7 +7026,7 @@ export async function registerRoutes(
         homeExclusionRadiusMeters: settings.homeExclusionRadiusMeters,
         message: valid
           ? "Route start verified. You are outside your home area."
-          : `You must be more than ${settings.homeExclusionRadiusMeters} meters from your saved home location to start your route.`,
+          : "The system must confirm that you have begun driving to location",
       });
     } catch (e: any) {
       res.status(500).json({ valid: false, error: e.message });
@@ -7071,7 +7071,7 @@ export async function registerRoutes(
           longitude,
           settings.homeExclusionRadiusMeters,
         )) {
-          return res.status(403).json({ code: "inside_home_exclusion", error: `You must be more than ${settings.homeExclusionRadiusMeters} meters from your saved home location to start your route.` });
+          return res.status(403).json({ code: "inside_home_exclusion", error: "The system must confirm that you have begun driving to location" });
         }
       }
       if (settings.warehouseVerificationEnabled && (latitude == null || latitude < -90 || latitude > 90 || longitude == null)) {
