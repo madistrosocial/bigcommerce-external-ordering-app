@@ -1,0 +1,1232 @@
+BUILD: ATTENDANCE MODULE V1
+
+Build a new Attendance module for SalesCore / MidAtlantic Sales.
+
+IMPORTANT:
+I am attaching two final UI design references with this prompt.
+
+1. Final employee Attendance mobile UI showing the Warehouse and Driving to First Stop flows.
+2. Final Admin Attendance submodule UI showing Overview, Attendance Logs, Attendance Log Details, Exceptions, Reports, and Settings.
+
+Use these images as the visual source of truth for the Attendance UI.
+
+Do not redesign the existing application.
+Do not introduce a new visual style.
+The implementation must match the existing SalesCore design system and the attached Attendance designs.
+
+The entire Attendance module must be mobile friendly. This includes the employee experience AND every Admin/Manager screen. Admin screens must remain fully usable on phone screens without requiring horizontal scrolling for normal workflows.
+
+==================================================
+1. ATTENDANCE MODULE LOCATION
+==================================================
+
+Add Attendance as a separate top level module in the existing sidebar.
+
+Place it between Tools and Reporting.
+
+Existing structure:
+
+MAIN
+
+Dashboard
+POS
+Customers
+Orders
+Inventory
+Catalog
+Cart
+Tools
+Attendance
+Reporting
+
+Attendance should be expandable.
+
+Do not move or redesign the other existing modules.
+
+Attendance navigation should be permission aware.
+
+==================================================
+2. RBAC
+==================================================
+
+Attendance must use the existing RBAC architecture.
+
+Do not hardcode access based only on role names.
+
+Create granular Attendance permissions that can be assigned independently to users and groups.
+
+Recommended permissions:
+
+attendance:clock
+attendance:view_own
+attendance:view_dashboard
+attendance:view_all
+attendance:view_logs
+attendance:view_exceptions
+attendance:view_reports
+attendance:review_exceptions
+attendance:manage_settings
+attendance:manage
+
+Sales Representatives:
+
+Can:
+1. Start their own day
+2. End their own day
+3. View their own current attendance
+4. View their own attendance history
+5. View their own personal Attendance dashboard
+6. View their own CRM To Do activity
+
+Cannot:
+1. View other employees
+2. View company attendance totals
+3. View other employees' location information
+4. View exceptions for other employees
+5. View attendance reports
+6. Modify attendance records
+7. Modify Attendance settings
+
+Managers / Admins:
+
+Can view:
+1. Full Attendance dashboard
+2. All employee attendance
+3. Detailed attendance logs
+4. Location checkpoints
+5. Attendance exceptions
+6. Attendance reports
+7. Pay period totals
+
+Authorized Admin users can also manage Attendance settings.
+
+Use the existing permission and user/group architecture wherever possible.
+
+==================================================
+3. EMPLOYEE ATTENDANCE EXPERIENCE
+==================================================
+
+The employee experience must be extremely simple.
+
+Follow the attached employee Attendance design.
+
+Do not expose unnecessary GPS information.
+
+Do not show:
+1. Coordinates
+2. Distance from warehouse
+3. GPS accuracy
+4. Maps
+5. Speed
+6. Technical location diagnostics
+7. Continuous tracking information
+
+The employee should feel that the application is simply validating their attendance, not presenting a GPS tracking dashboard.
+
+==================================================
+4. START DAY SCREEN
+==================================================
+
+When an employee has not started their day, the Attendance page should display:
+
+Attendance
+
+Start your day
+
+Where are you starting?
+
+Option 1:
+
+Warehouse
+Start from here
+
+Option 2:
+
+Driving to first stop
+I'm already driving
+
+Use the attached final design for the exact visual treatment.
+
+The employee selects one of these options.
+
+They do NOT manually choose a clock in method after validation.
+
+==================================================
+5. WAREHOUSE START FLOW
+==================================================
+
+When the employee selects Warehouse:
+
+Immediately begin location validation.
+
+Show a simple Apple style validation animation.
+
+Example:
+
+Checking your location...
+
+Do not show technical GPS information.
+
+The system checks whether the current device location is inside the configured warehouse geofence.
+
+The warehouse location and allowed radius must come from Attendance Settings.
+
+Do not hardcode coordinates.
+
+If the employee is NOT inside the allowed warehouse area:
+
+Show a simple message:
+
+You have to be at the location to log in.
+
+Provide:
+
+Try Again
+
+Do not show how far away they are.
+
+Do not show coordinates.
+
+Do not show a map.
+
+Do not imply that the application is continuously monitoring them.
+
+If the employee is inside the warehouse geofence:
+
+Show:
+
+You're at the warehouse
+
+Then display:
+
+TIME IN
+
+The employee manually presses TIME IN.
+
+Once pressed:
+
+Create the attendance session.
+
+Store the exact Time In timestamp and location evidence.
+
+Then display the successful clocked in state.
+
+Example:
+
+You're clocked in
+
+8:04 AM
+
+Started at the warehouse
+
+Then transition to the normal active Attendance screen.
+
+==================================================
+6. DRIVING TO FIRST STOP FLOW
+==================================================
+
+When the employee selects:
+
+Driving to first stop
+
+DO NOT display a manual Time In button.
+
+The employee should not need to interact with the phone while driving.
+
+Immediately begin driving validation.
+
+Display a minimal screen:
+
+Validating...
+
+Please keep your phone safely stored while driving.
+
+The system should determine whether driving can be reliably validated using the capabilities available in the current SalesCore environment.
+
+Do NOT fake driving detection.
+
+Do NOT allow the employee to simply press a button claiming they are driving.
+
+Use the strongest reliable device/browser location and movement signals available in the existing application environment.
+
+If the current web/PWA environment cannot reliably detect driving in the background, do not create an unsafe manual override. Build the driving validation behind a provider/service abstraction and clearly document the platform limitation.
+
+When driving is successfully validated:
+
+Automatically create the attendance record.
+
+No manual confirmation button.
+
+Immediately show:
+
+You're clocked in
+
+[Time]
+
+Started while driving to your first stop.
+
+Then show a brief safety message such as:
+
+Drive safely.
+Your attendance has been recorded.
+No further action is required.
+
+After the confirmation, transition automatically to the normal active Attendance screen.
+
+==================================================
+7. ACTIVE ATTENDANCE SCREEN
+==================================================
+
+Once clocked in, the employee should have a simple Attendance screen.
+
+Use the attached design as the visual reference.
+
+Display:
+
+Attendance
+
+Status:
+On Route
+
+or:
+
+On Site
+
+depending on the current attendance context.
+
+Display:
+
+Time In
+8:17 AM
+
+Started while driving
+
+or:
+
+Time In
+8:04 AM
+
+Started at the warehouse
+
+Provide:
+
+End Day
+
+Then:
+
+Today's Activity
+
+Today's Activity should pull from the existing CRM To Do system.
+
+Only show the logged in user's To Do records.
+
+Do not add View Route yet.
+
+There is no RouteIQ or Zoho CRM route integration available yet.
+
+Do not build fake route data.
+
+When RouteIQ / Zoho CRM route integration is eventually connected, View Route can be added later.
+
+Today's Activity can show:
+1. Open To Do
+2. Due time
+3. Customer name
+4. To Do title
+5. Completion status
+
+Use the existing CRM To Do data and components where possible.
+
+==================================================
+8. END DAY
+==================================================
+
+Both Warehouse and Driving attendance sessions use the exact same End Day experience.
+
+When the employee selects End Day:
+
+Show:
+
+End your day?
+
+This will record your time out.
+
+Buttons:
+
+End Day
+Cancel
+
+Use the same screen and behavior for both start methods.
+
+If confirmed:
+
+Capture:
+1. Time Out timestamp
+2. Latitude
+3. Longitude
+4. Location accuracy if available
+5. Location capture status
+
+End the attendance session.
+
+Calculate total attendance duration.
+
+Show a simple confirmation.
+
+Do not require the employee to be at the warehouse to end the day unless this is later configured as a business rule.
+
+For V1, Time Out location is captured for audit purposes but does not require warehouse verification.
+
+==================================================
+9. ATTENDANCE DATA MODEL
+==================================================
+
+Create a proper attendance session model rather than only storing Time In and Time Out.
+
+Use the existing Prisma/PostgreSQL architecture.
+
+Suggested Attendance record:
+
+attendance
+1. id
+2. user_id
+3. work_date
+4. time_in
+5. time_out
+6. start_method
+7. status
+8. total_seconds
+9. time_in_latitude
+10. time_in_longitude
+11. time_in_accuracy
+12. time_in_verification
+13. time_out_latitude
+14. time_out_longitude
+15. time_out_accuracy
+16. time_out_verification
+17. driving_verified
+18. driving_verified_at
+19. created_at
+20. updated_at
+
+start_method values:
+
+warehouse
+driving
+
+status values should support at minimum:
+
+active
+completed
+incomplete
+exception
+
+Do not use free form values throughout the application.
+
+Use enums/constants consistent with the existing project architecture.
+
+==================================================
+10. HOURLY LOCATION CHECKPOINTS
+==================================================
+
+While an employee has an active attendance session, collect a location checkpoint approximately every hour.
+
+Do NOT continuously store GPS coordinates.
+
+Create a child table related to the attendance session.
+
+Suggested:
+
+attendance_location_checkpoints
+
+1. id
+2. attendance_id
+3. captured_at
+4. latitude
+5. longitude
+6. accuracy
+7. checkpoint_type
+8. capture_status
+9. created_at
+
+checkpoint_type can include:
+
+hourly
+time_in
+time_out
+validation
+
+For hourly checkpoints:
+
+Attempt to capture approximately every hour while attendance is active.
+
+The system must account for browser/PWA limitations.
+
+Do not assume that an hourly background location callback will always execute.
+
+If a checkpoint cannot be collected, record the failed/missed checkpoint appropriately rather than fabricating a location.
+
+Do not continuously retry in a way that drains the employee's battery.
+
+The employee does not need to see hourly checkpoint notifications.
+
+==================================================
+11. FIRST FOUR HOUR VALIDATION
+==================================================
+
+Implement the previously defined administrative validation.
+
+If an employee starts their day using:
+
+Driving to first stop
+
+the system should silently evaluate their location during the first four hours after Time In.
+
+If the location checkpoints indicate significant warehouse presence during the first four hours, create an Attendance Exception.
+
+This validation must NOT:
+1. Change the employee's Time In
+2. Automatically change the attendance method
+3. Notify the employee
+4. Interrupt the employee
+5. Display a warning to the employee
+
+It is an Admin/Manager validation only.
+
+The validation should be based on configurable rules rather than hardcoded assumptions.
+
+For example:
+
+First four hour validation window:
+4 hours
+
+Warehouse presence review threshold:
+60 minutes
+
+These should be configurable in Attendance Settings.
+
+The system should preserve the underlying evidence.
+
+Example:
+
+Driving start:
+7:52 AM
+
+Warehouse presence detected:
+8:31 AM to 11:42 AM
+
+Warehouse presence:
+3h 11m
+
+Create:
+
+Attendance Exception
+Driving Start + Warehouse Presence
+
+Status:
+Open
+
+Do not label this as misconduct.
+
+It is simply an attendance validation requiring administrative review.
+
+==================================================
+12. ADMIN ATTENDANCE MODULE
+==================================================
+
+For authorized Managers/Admins, Attendance should contain:
+
+Overview
+Attendance Logs
+Exceptions
+Reports
+Settings
+
+Use the attached Admin Attendance design as the visual source of truth.
+
+The Admin UI must be fully responsive.
+
+Desktop should use the dense enterprise layout shown in the reference.
+
+Mobile should transform intelligently into:
+1. Stacked KPI cards
+2. Scrollable/filterable sections
+3. Compact tables or responsive record cards
+4. Drawers or detail pages for individual records
+5. No unnecessary horizontal scrolling
+
+Do not simply shrink the desktop table onto a phone.
+
+==================================================
+13. ADMIN OVERVIEW
+==================================================
+
+Overview is the primary management dashboard.
+
+Provide period filters:
+
+Today
+This Week
+Pay Period
+Custom
+
+The Pay Period option should use the configured payroll schedule.
+
+Display KPIs such as:
+
+Total Hours
+Sales Reps
+Currently Working
+Not Logged In
+Exceptions
+
+Then show today's employee attendance.
+
+Columns on desktop can include:
+
+Employee
+Status
+Time In
+Hours
+Start Method
+Last Known Attendance Location
+Validation
+
+On mobile, convert this to compact employee cards.
+
+Clicking an employee should open the relevant attendance details.
+
+The Overview must be filter aware.
+
+KPIs must recalculate according to the selected period/filter.
+
+==================================================
+14. ATTENDANCE LOGS
+==================================================
+
+Attendance Logs is the detailed company history.
+
+Filters:
+
+Employee
+From Date
+To Date
+Status
+Start Method
+Pay Period
+
+Include:
+
+Search
+Clear Filters
+
+Table columns:
+
+Date
+Employee
+Time In
+Time Out
+Total Hours
+Start Method
+Status
+Validation
+
+On mobile, use responsive record cards rather than forcing a large desktop table.
+
+Each attendance record must be clickable.
+
+==================================================
+15. ATTENDANCE LOG DETAILS
+==================================================
+
+Create a detailed attendance record view.
+
+Show:
+
+Employee
+Work Date
+Time In
+Time Out
+Total Hours
+Start Method
+Status
+
+TIME IN DETAILS
+
+Timestamp
+Latitude
+Longitude
+Accuracy
+Verification
+
+TIME OUT DETAILS
+
+Timestamp
+Latitude
+Longitude
+Accuracy
+Verification
+
+LOCATION HISTORY
+
+Display the hourly checkpoints chronologically.
+
+Example:
+
+8:04 AM
+Time In
+Warehouse Verified
+
+9:04 AM
+Hourly Checkpoint
+
+10:04 AM
+Hourly Checkpoint
+
+11:04 AM
+Hourly Checkpoint
+
+12:04 PM
+Hourly Checkpoint
+
+1:04 PM
+Hourly Checkpoint
+
+2:04 PM
+Hourly Checkpoint
+
+3:04 PM
+Hourly Checkpoint
+
+4:04 PM
+Hourly Checkpoint
+
+5:12 PM
+Time Out
+
+Do not display this level of technical location information to Sales Reps unless their own history permissions explicitly allow it.
+
+Admins/Managers with the correct permissions can see the detailed information.
+
+If map visualization is implemented, keep it optional and secondary.
+
+Do not make the map the primary attendance UI.
+
+==================================================
+16. ATTENDANCE EXCEPTIONS
+==================================================
+
+Create an Exceptions management screen.
+
+Tabs/filters:
+
+Open
+Resolved
+All
+
+Exception types should include at minimum:
+
+Driving Start + Warehouse Presence
+Missing Time Out
+Missing Location Checkpoint
+Invalid Warehouse Start
+Driving Not Verified
+Location Accuracy Issue
+
+Display:
+
+Date
+Employee
+Exception Type
+Details
+Status
+Action
+
+Clicking an exception opens the details.
+
+Managers/Admins with review permission can mark an exception as reviewed/resolved.
+
+Do not overwrite the original attendance evidence when resolving an exception.
+
+Store the review action separately.
+
+Record:
+1. Reviewer
+2. Review timestamp
+3. Resolution status
+4. Optional notes
+
+==================================================
+17. ATTENDANCE REPORTS
+==================================================
+
+Create Attendance Reports.
+
+Period options:
+
+Daily
+Weekly
+Pay Period
+Custom
+
+Pay Period must support the company's two week payroll schedule.
+
+Current business requirement:
+
+Employees are paid every two weeks on Friday.
+
+Do not hardcode dates.
+
+Create configurable payroll period settings so the system can determine:
+1. Current pay period
+2. Previous pay period
+3. Next pay period
+4. Payday
+
+Example:
+
+Pay Period
+Aug 28 to Sep 10
+
+Payday
+Friday, Sep 11
+
+Reports should show employee totals.
+
+Example:
+
+Employee
+Regular Hours
+Overtime Hours
+Total Hours
+
+Do not implement payroll calculations beyond attendance hours unless already supported elsewhere.
+
+The primary requirement is accurate attendance hour reporting.
+
+Also support manual date filtering regardless of payroll period.
+
+Reports should eventually support export using the existing application export architecture if available.
+
+==================================================
+18. ATTENDANCE SETTINGS
+==================================================
+
+Create an Attendance Settings screen restricted by RBAC.
+
+Warehouse Location:
+
+Warehouse Name
+Latitude
+Longitude
+Allowed Radius
+
+Provide a way for an authorized admin to configure the warehouse location.
+
+Attendance Rules:
+
+Warehouse verification
+Enabled/Disabled
+
+Driving start
+Enabled/Disabled
+
+Hourly location checkpoint
+Enabled/Disabled
+
+Checkpoint interval
+Default: 1 hour
+
+First four hour validation
+Enabled/Disabled
+
+First four hour validation window
+Default: 4 hours
+
+Warehouse presence review threshold
+Default: 60 minutes
+
+Location accuracy requirement should be configurable if supported reliably by the current application.
+
+Do not expose technical settings to Sales Reps.
+
+==================================================
+19. PAY PERIOD CONFIGURATION
+==================================================
+
+Attendance must understand the company's payroll schedule.
+
+Default:
+
+Frequency:
+Every 2 weeks
+
+Payday:
+Friday
+
+Do not hardcode the calendar.
+
+Store the payroll schedule in the database/settings.
+
+Allow authorized administrators to configure the schedule.
+
+Attendance Overview, Logs, and Reports should all use the same pay period calculation service.
+
+Do not duplicate pay period logic in multiple components.
+
+Create a reusable pay period utility/service.
+
+==================================================
+20. LOCATION PRIVACY AND STORAGE
+==================================================
+
+Do not implement continuous GPS surveillance.
+
+Attendance should collect only the location information required for attendance verification and audit.
+
+Required location events:
+
+1. Time In
+2. Time Out
+3. Hourly checkpoints while actively clocked in
+4. Driving validation events where technically available
+5. Warehouse validation events
+
+Do not collect unnecessary location data when the employee is not actively clocked in.
+
+Do not show continuous location monitoring indicators in the employee UI.
+
+The Admin system can access detailed attendance location history only according to RBAC.
+
+==================================================
+21. MOBILE RESPONSIVENESS
+==================================================
+
+This requirement applies to EVERY screen.
+
+Employee:
+
+Must be designed mobile first.
+
+Admin:
+
+Must also be fully mobile friendly.
+
+Do not simply make the desktop admin tables overflow horizontally.
+
+On mobile:
+
+KPI cards stack cleanly.
+
+Filters become compact controls or filter drawers.
+
+Tables become responsive cards where appropriate.
+
+Attendance details use stacked sections.
+
+Exceptions become compact cards.
+
+Reports use stacked employee rows.
+
+Settings use grouped cards and full width controls.
+
+Maintain the same SalesCore visual language.
+
+Use the existing Tailwind and shadcn/ui foundation.
+
+Use existing reusable components wherever possible.
+
+Use Lucide icons.
+
+Do not introduce a separate UI framework.
+
+==================================================
+22. VISUAL DESIGN
+==================================================
+
+The attached designs are the visual reference.
+
+Use:
+
+White backgrounds
+Dark navy existing SalesCore navigation
+Black/dark typography
+Red primary Attendance accent
+Light gray borders
+Subtle shadows
+Rounded cards
+Compact enterprise information density
+Clean typography
+Minimal animations
+Minimal explanatory text
+
+The Attendance employee experience should feel Apple inspired:
+
+Quiet
+Simple
+Clear
+Minimal
+Confident
+
+Do not create verbose GPS dashboards.
+
+Do not show unnecessary technical information.
+
+Use red as the Attendance accent consistently with the attached design.
+
+Do not replace the existing SalesCore branding or sidebar design.
+
+==================================================
+23. CRM TODO INTEGRATION
+==================================================
+
+The active employee Attendance screen must show:
+
+Today's Activity
+
+This should use the existing CRM To Do records for the logged in user.
+
+Do not create a duplicate To Do system.
+
+Reuse the existing CRM Notes/To Do implementation.
+
+Show relevant open/due To Dos.
+
+Route integration is NOT available yet.
+
+Do not build RouteIQ functionality now.
+
+Do not show View Route until RouteIQ / Zoho CRM route integration is actually connected.
+
+Leave the architecture extensible so View Route can be added later.
+
+==================================================
+24. DATA INTEGRITY
+==================================================
+
+Attendance records are audit records.
+
+Do not allow normal users to edit historical Time In or Time Out values.
+
+Do not delete attendance evidence when resolving an exception.
+
+If an authorized administrator needs to correct an attendance record in the future, use an explicit adjustment/audit mechanism rather than silently changing the original record.
+
+Preserve:
+1. Original timestamps
+2. Original location evidence
+3. Original start method
+4. Original validation result
+5. Reviewer information
+6. Adjustment information if introduced later
+
+==================================================
+25. API AND BACKEND
+==================================================
+
+Use the existing Express backend architecture.
+
+Create clean Attendance API routes.
+
+Recommended areas:
+
+/api/attendance
+/api/attendance/today
+/api/attendance/start
+/api/attendance/validate-warehouse
+/api/attendance/validate-driving
+/api/attendance/end
+/api/attendance/history
+/api/attendance/checkpoints
+/api/attendance/admin/overview
+/api/attendance/admin/logs
+/api/attendance/admin/exceptions
+/api/attendance/admin/reports
+/api/attendance/settings
+
+Use the existing authentication and authorization middleware.
+
+Every Admin endpoint must enforce the appropriate RBAC permission server side.
+
+Do not rely on hiding frontend navigation as security.
+
+Sales Reps must never be able to request another employee's attendance data by changing an ID in the URL/API request.
+
+==================================================
+26. REUSABLE SERVICES
+==================================================
+
+Do not put all Attendance logic inside React components.
+
+Create reusable backend/services for:
+
+Attendance session management
+Warehouse geofence validation
+Driving validation abstraction
+Location checkpoint management
+First four hour validation
+Attendance exception creation
+Pay period calculation
+Attendance reporting
+RBAC authorization
+
+The same services should power Overview, Logs, Reports, and employee screens.
+
+Avoid duplicate attendance calculation logic.
+
+==================================================
+27. EXISTING APP INVESTIGATION
+==================================================
+
+Before implementing, inspect the existing SalesCore application.
+
+Identify and reuse:
+
+1. Existing authentication
+2. Existing users table
+3. Existing RBAC/permissions
+4. Existing CRM To Do system
+5. Existing navigation/sidebar
+6. Existing dashboard components
+7. Existing filter components
+8. Existing date handling
+9. Existing reporting/export architecture
+10. Existing audit logging patterns
+11. Existing database conventions
+12. Existing mobile responsive components
+
+Do not create duplicate versions of functionality that already exists.
+
+Do not change unrelated modules.
+
+==================================================
+28. IMPORTANT PLATFORM CONSTRAINT
+==================================================
+
+The Driving to First Stop flow must never require the employee to manually interact with the phone while driving.
+
+Do not implement:
+
+"I'm driving" checkbox followed by a manual Time In button.
+
+The employee selects Driving to First Stop before driving or when safely stopped.
+
+The system validates driving.
+
+Once driving is validated, attendance automatically starts.
+
+If the current browser/PWA platform cannot reliably detect driving state in the background, do not pretend that it can.
+
+Create a clean validation abstraction that can later use a native/mobile capability if required.
+
+Document exactly what is and is not technically possible in the current SalesCore environment.
+
+Do not create an unsafe workaround.
+
+==================================================
+29. NOT IN V1
+==================================================
+
+Do NOT build:
+
+1. RouteIQ integration
+2. Zoho CRM route integration
+3. Live route tracking
+4. Continuous GPS tracking
+5. Payroll processing
+6. Payroll tax calculations
+7. Overtime rules beyond reporting captured hours
+8. Employee GPS maps as a primary feature
+9. Automatic disciplinary actions
+10. Automatic attendance corrections
+11. Customer visit tracking
+12. Geofencing around every customer
+
+These can be future enhancements.
+
+==================================================
+30. ACCEPTANCE CRITERIA
+==================================================
+
+The implementation is complete when:
+
+1. Attendance appears between Tools and Reporting.
+2. RBAC controls Attendance visibility and capabilities.
+3. Sales Reps can only manage and view their own attendance.
+4. Admins/Managers can view authorized company attendance.
+5. Warehouse start validates location before allowing Time In.
+6. Warehouse start does not display distance or technical GPS information.
+7. Warehouse start displays Time In only after successful validation.
+8. Driving to First Stop does not have a manual Time In button.
+9. Driving validation automatically clocks the employee in once verified.
+10. The active Attendance screen displays Today's Activity from CRM To Do.
+11. View Route is not displayed.
+12. End Day uses the same confirmation flow for both start methods.
+13. Time Out captures timestamp and coordinates.
+14. Time In captures timestamp and coordinates.
+15. Hourly location checkpoints are collected while actively clocked in where platform capabilities permit.
+16. Missing checkpoints are handled honestly and are never fabricated.
+17. First four hour warehouse presence validation works for driving starts.
+18. First four hour validation creates an Admin exception without notifying the employee.
+19. Admin Overview supports Today, This Week, Pay Period, and Custom.
+20. Attendance Logs provide detailed historical records.
+21. Attendance Log Details display Time In, Time Out, and hourly location history to authorized users.
+22. Exceptions provide a review workflow.
+23. Reports support Daily, Weekly, Pay Period, and Custom.
+24. Pay periods default to every two weeks with Friday payday and are configurable.
+25. Settings allow authorized users to configure warehouse and validation rules.
+26. All Attendance screens work properly on mobile.
+27. Admin tables transform appropriately on mobile instead of becoming unusable horizontal tables.
+28. Existing SalesCore design system is preserved.
+29. No unrelated application functionality is changed.
+30. Production build succeeds.
+31. No new TypeScript errors are introduced by Attendance.
+32. Existing tests/build checks continue to pass.
+
+==================================================
+31. IMPLEMENTATION APPROACH
+==================================================
+
+Do not start by blindly coding.
+
+First inspect the existing application architecture, database schema, RBAC implementation, CRM To Do implementation, navigation, and responsive components.
+
+Then implement Attendance using the existing patterns.
+
+Keep the implementation modular and reusable.
+
+Do not make unrelated refactors.
+
+Use the two attached final Attendance design images as the primary UI reference.
+
+After implementation:
+
+1. Run the production build.
+2. Run the relevant type checks.
+3. Test Sales Rep permissions.
+4. Test Manager/Admin permissions.
+5. Test Warehouse validation.
+6. Test failed warehouse validation.
+7. Test successful warehouse Time In.
+8. Test Driving validation.
+9. Test automatic Driving Time In.
+10. Test Time Out.
+11. Test hourly checkpoints.
+12. Test first four hour validation.
+13. Test Exceptions.
+14. Test Pay Period reporting.
+15. Test mobile layouts.
+16. Verify no unrelated modules were changed.
+
+If a platform limitation prevents reliable driving detection or hourly background location collection, do not fake the functionality. Clearly identify the limitation and implement the cleanest safe architecture for future native/mobile support.
+
+Do not publish or deploy automatically.
+
+Finish by reporting:
+1. What was implemented
+2. Database changes
+3. API changes
+4. RBAC permissions added
+5. Platform limitations discovered
+6. Build/test results
+7. Any remaining items that require external/native capability
