@@ -7074,10 +7074,10 @@ export async function registerRoutes(
           return res.status(403).json({ code: "inside_home_exclusion", error: "The system must confirm that you have begun driving to location" });
         }
       }
-      if (settings.warehouseVerificationEnabled && (latitude == null || latitude < -90 || latitude > 90 || longitude == null)) {
+      if (startMethod === "warehouse" && settings.warehouseVerificationEnabled && (latitude == null || latitude < -90 || latitude > 90 || longitude == null)) {
         return res.status(400).json({ code: "location_unavailable", error: "Your location could not be verified." });
       }
-      if (latitude != null && longitude != null && !isInsideWarehouse(settings, latitude, longitude)) {
+      if (startMethod === "warehouse" && latitude != null && longitude != null && !isInsideWarehouse(settings, latitude, longitude)) {
         return res.status(403).json({ code: "outside_warehouse", error: "You have to be at the location to log in." });
       }
       const now = new Date();
