@@ -256,9 +256,9 @@ export default function AttendancePage() {
             </div>
             <div className="mt-8 space-y-3">
               <StartChoice icon={<MapPin className="h-6 w-6" />} title="Warehouse" subtitle="Start from here" onClick={startWarehouse} />
-              <StartChoice icon={<Car className="h-6 w-6" />} title="Driving to first stop" subtitle="I'm already on the road" onClick={startDriving} />
+              <StartChoice icon={<Car className="h-6 w-6" />} title="Driving to first stop" subtitle="Unavailable in this browser — choose Warehouse" onClick={startDriving} disabled />
             </div>
-            <div className="mt-6 flex items-start gap-2 rounded-xl bg-white p-3 text-xs leading-5 text-slate-500"><Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />Warehouse starts use the configured location check. Driving validation will only clock you in when a reliable device capability is available.</div>
+            <div className="mt-6 flex items-start gap-2 rounded-xl bg-white p-3 text-xs leading-5 text-slate-500"><Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />Choose Warehouse to verify your current location against the configured warehouse. Driving validation requires a native device capability and is unavailable in this browser.</div>
           </div>
         )}
 
