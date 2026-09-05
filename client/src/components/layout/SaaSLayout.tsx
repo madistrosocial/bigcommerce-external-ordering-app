@@ -197,6 +197,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     { label: "BC Integration", path: "/admin/integration", icon: Plug },
     { label: "SKUVault", path: "/admin/skuvault", icon: Plug },
     { label: "Zoho", path: "/admin/zoho", icon: KeyRound },
+    { label: "Attendance Settings", path: "/admin/attendance", icon: Clock3 },
     { label: "Price Tiers", path: "/admin/price-tiers", icon: Layers },
     { label: "Invoice Settings", path: "/admin/invoice", icon: Receipt },
     { label: "ShipStation Export", path: "/admin/shipstation", icon: Ship },

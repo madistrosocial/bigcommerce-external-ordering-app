@@ -173,17 +173,39 @@ function Reports() {
   </AdminShell>;
 }
 
-function SettingsPage() {
+export function AttendanceSettingsPage() {
   const client = useQueryClient();
   const query = useQuery({ queryKey: ["attendance", "settings"], queryFn: () => apiJson("/api/attendance/settings") });
   const [form, setForm] = useState<any>(null);
+  const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState("");
   useEffect(() => { if (query.data) setForm(query.data); }, [query.data]);
   const save = useMutation({ mutationFn: () => apiJson("/api/attendance/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) }), onSuccess: data => { setForm(data); client.invalidateQueries({ queryKey: ["attendance", "settings"] }); } });
   if (!form) return <AdminShell activeTab="settings"><Card><CardContent className="p-8 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></CardContent></Card></AdminShell>;
   const set = (key: string, value: any) => setForm((current: any) => ({ ...current, [key]: value }));
+  const useCurrentLocation = () => {
+    setLocationError("");
+    if (!navigator.geolocation) {
+      setLocationError("This browser does not provide location access.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      position => {
+        set("warehouseLatitude", position.coords.latitude.toFixed(6));
+        set("warehouseLongitude", position.coords.longitude.toFixed(6));
+        setLocating(false);
+      },
+      () => {
+        setLocationError("Location access was unavailable. Allow location access in the browser and try again.");
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 12_000, maximumAge: 30_000 },
+    );
+  };
   return <AdminShell activeTab="settings">
     <div className="grid gap-4 lg:grid-cols-2">
-      <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader><CardTitle className="text-sm">Warehouse Location</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><div className="sm:col-span-2"><Label className="text-xs">Warehouse name</Label><Input value={form.warehouseName} onChange={e => set("warehouseName", e.target.value)} className="mt-1" /></div><div><Label className="text-xs">Latitude</Label><Input type="number" step="any" value={form.warehouseLatitude ?? ""} onChange={e => set("warehouseLatitude", e.target.value)} className="mt-1" /></div><div><Label className="text-xs">Longitude</Label><Input type="number" step="any" value={form.warehouseLongitude ?? ""} onChange={e => set("warehouseLongitude", e.target.value)} className="mt-1" /></div><div><Label className="text-xs">Allowed radius (meters)</Label><Input type="number" value={form.allowedRadiusMeters} onChange={e => set("allowedRadiusMeters", e.target.value)} className="mt-1" /></div><div className="flex items-end pb-2 text-xs text-slate-500"><MapPin className="mr-2 h-4 w-4 text-red-600" />Used for Warehouse validation</div></CardContent></Card>
+      <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader><CardTitle className="text-sm">Warehouse Location</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><div className="sm:col-span-2"><Label className="text-xs">Warehouse name</Label><Input value={form.warehouseName} onChange={e => set("warehouseName", e.target.value)} className="mt-1" /></div><div><Label className="text-xs">Latitude</Label><Input type="number" step="any" value={form.warehouseLatitude ?? ""} onChange={e => set("warehouseLatitude", e.target.value)} className="mt-1" /></div><div><Label className="text-xs">Longitude</Label><Input type="number" step="any" value={form.warehouseLongitude ?? ""} onChange={e => set("warehouseLongitude", e.target.value)} className="mt-1" /></div><div><Label className="text-xs">Allowed radius (meters)</Label><Input type="number" value={form.allowedRadiusMeters} onChange={e => set("allowedRadiusMeters", e.target.value)} className="mt-1" /></div><div className="flex items-end pb-2 text-xs text-slate-500"><MapPin className="mr-2 h-4 w-4 text-red-600" />Used for Warehouse validation</div><div className="sm:col-span-2 flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 p-3"><Button type="button" variant="outline" size="sm" className="text-xs" onClick={useCurrentLocation} disabled={locating}><MapPin className="mr-2 h-3.5 w-3.5" />{locating ? "Locating..." : "Use my current location"}</Button><span className="text-xs text-slate-500">Or enter the warehouse latitude and longitude manually.</span>{locationError && <span className="w-full text-xs text-red-600">{locationError}</span>}</div>{(form.warehouseLatitude == null || form.warehouseLongitude == null) && <div className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">Warehouse coordinates are not set yet. Save coordinates before employees can use Warehouse to clock in.</div>}</CardContent></Card>
       <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader><CardTitle className="text-sm">Attendance Rules</CardTitle></CardHeader><CardContent className="space-y-4">{[["warehouseVerificationEnabled", "Warehouse verification"], ["drivingStartEnabled", "Driving start (provider capability required)"], ["hourlyCheckpointEnabled", "Hourly location checkpoint"], ["firstFourHourValidationEnabled", "First four hour validation"], ["locationAccuracyRequired", "Require location accuracy"]].map(([key, label]) => <div key={key} className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-slate-700">{label}</p><p className="text-xs text-slate-400">Configure whether this rule is active.</p></div><Switch checked={Boolean(form[key])} onCheckedChange={value => set(key, value)} /></div>)}<div className="grid gap-3 sm:grid-cols-2"><div><Label className="text-xs">Checkpoint interval (minutes)</Label><Input type="number" value={form.checkpointIntervalMinutes} onChange={e => set("checkpointIntervalMinutes", e.target.value)} className="mt-1" /></div><div><Label className="text-xs">Warehouse threshold (minutes)</Label><Input type="number" value={form.warehousePresenceThresholdMinutes} onChange={e => set("warehousePresenceThresholdMinutes", e.target.value)} className="mt-1" /></div></div></CardContent></Card>
       <Card className="rounded-xl border-slate-200 shadow-sm lg:col-span-2"><CardHeader><CardTitle className="text-sm">Pay Period Configuration</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-3"><div><Label className="text-xs">Period length (days)</Label><Input type="number" value={form.payPeriodLengthDays} onChange={e => set("payPeriodLengthDays", e.target.value)} className="mt-1" /></div><div><Label className="text-xs">Period anchor date</Label><Input type="date" value={form.payPeriodAnchorDate} onChange={e => set("payPeriodAnchorDate", e.target.value)} className="mt-1" /></div><div><Label className="text-xs">Payday</Label><Select value={String(form.paydayWeekday)} onValueChange={value => set("paydayWeekday", Number(value))}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent>{["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((day, index) => <SelectItem key={day} value={String(index)}>{day}</SelectItem>)}</SelectContent></Select></div></CardContent></Card>
     </div>
@@ -197,6 +219,6 @@ export default function AttendanceAdminPage() {
   if (tab === "logs") return <Logs />;
   if (tab === "exceptions") return <Exceptions />;
   if (tab === "reports") return <Reports />;
-  if (tab === "settings") return <SettingsPage />;
+  if (tab === "settings") return <AttendanceSettingsPage />;
   return <Overview />;
 }

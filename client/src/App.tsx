@@ -55,7 +55,7 @@ import SalesReportPage from "@/pages/admin/reports/SalesReport";
 import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, MarketingAudiences, MarketingSettings } from "@/pages/marketing/Marketing";
 import { MarketingAnalytics, MarketingTemplates, MarketingAutomations } from "@/pages/marketing/MarketingPhase2";
 import AttendancePage from "@/pages/attendance/Attendance";
-import AttendanceAdminPage from "@/pages/attendance/AttendanceAdmin";
+import AttendanceAdminPage, { AttendanceSettingsPage } from "@/pages/attendance/AttendanceAdmin";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -175,6 +175,9 @@ function Router() {
       </Route>
       <Route path="/attendance/settings">
         {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="manage_settings" />}
+      </Route>
+      <Route path="/admin/attendance">
+        {() => <AdminRoute component={AttendanceSettingsPage} />}
       </Route>
 
       {/* ── Marketing routes ── */}
