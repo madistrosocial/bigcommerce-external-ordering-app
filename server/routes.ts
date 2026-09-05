@@ -33,6 +33,7 @@ import {
   DEFAULT_ATTENDANCE_SETTINGS,
   getAttendanceSettings,
   getPayPeriod,
+  isOutsideHome,
   isInsideWarehouse,
   parseAccuracy,
   parseCoordinate,
@@ -6965,6 +6966,73 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/attendance/home-location", requirePermission("attendance", "clock"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const employee = await storage.getUser(user.id);
+      res.json({
+        configured: employee?.attendance_home_latitude != null && employee?.attendance_home_longitude != null,
+        setAt: employee?.attendance_home_set_at ?? null,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/attendance/home-location", requirePermission("attendance", "clock"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const employee = await storage.getUser(user.id);
+      if (employee?.attendance_home_latitude != null && employee?.attendance_home_longitude != null) {
+        return res.status(409).json({ code: "home_location_already_configured", error: "Your home location is already configured. An administrator must reset it before it can be changed." });
+      }
+      const latitude = parseCoordinate(req.body?.latitude);
+      const longitude = parseCoordinate(req.body?.longitude);
+      if (latitude == null || latitude < -90 || latitude > 90 || longitude == null || longitude < -180 || longitude > 180) {
+        return res.status(400).json({ code: "location_unavailable", error: "Your location could not be verified. Allow location access and try again." });
+      }
+      const updated = await storage.setAttendanceHomeLocation(user.id, latitude.toFixed(7), longitude.toFixed(7));
+      res.status(201).json({ configured: true, setAt: updated.attendance_home_set_at ?? null });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/attendance/validate-route-start", requirePermission("attendance", "clock"), async (req, res) => {
+    try {
+      const settings = await getAttendanceSettings(storage);
+      const user = (req as any).authUser;
+      const employee = await storage.getUser(user.id);
+      if (!settings.routeStartEnabled) {
+        return res.status(409).json({ valid: false, code: "route_start_disabled", message: "Route start is not enabled in Attendance Settings." });
+      }
+      const latitude = parseCoordinate(req.body?.latitude);
+      const longitude = parseCoordinate(req.body?.longitude);
+      if (latitude == null || latitude < -90 || latitude > 90 || longitude == null || longitude < -180 || longitude > 180) {
+        return res.status(400).json({ valid: false, code: "location_unavailable", message: "Your location could not be verified. Allow location access and try again." });
+      }
+      if (employee?.attendance_home_latitude == null || employee?.attendance_home_longitude == null) {
+        return res.status(400).json({ valid: false, code: "home_location_required", message: "Set your home location before starting from your route." });
+      }
+      const valid = isOutsideHome(
+        Number(employee.attendance_home_latitude),
+        Number(employee.attendance_home_longitude),
+        latitude,
+        longitude,
+        settings.homeExclusionRadiusMeters,
+      );
+      res.json({
+        valid,
+        homeExclusionRadiusMeters: settings.homeExclusionRadiusMeters,
+        message: valid
+          ? "Route start verified. You are outside your home area."
+          : `You must be more than ${settings.homeExclusionRadiusMeters} meters from your saved home location to start your route.`,
+      });
+    } catch (e: any) {
+      res.status(500).json({ valid: false, error: e.message });
+    }
+  });
+
   app.post("/api/attendance/validate-driving", requirePermission("attendance", "clock"), async (_req, res) => {
     const settings = await getAttendanceSettings(storage);
     if (!settings.drivingStartEnabled) {
@@ -6991,7 +7059,20 @@ export async function registerRoutes(
       const longitude = parseCoordinate(req.body?.longitude);
       const accuracy = parseAccuracy(req.body?.accuracy);
       if (startMethod === "driving") {
-        return res.status(409).json({ code: "driving_validation_unavailable", error: "Driving validation is not available in this browser. Choose Warehouse when safely stopped." });
+        if (!settings.routeStartEnabled) return res.status(409).json({ code: "route_start_disabled", error: "Route start is not enabled in Attendance Settings." });
+        if (latitude == null || longitude == null) return res.status(400).json({ code: "location_unavailable", error: "Your location could not be verified." });
+        if (user.attendance_home_latitude == null || user.attendance_home_longitude == null) {
+          return res.status(400).json({ code: "home_location_required", error: "Set your home location before starting from your route." });
+        }
+        if (!isOutsideHome(
+          Number(user.attendance_home_latitude),
+          Number(user.attendance_home_longitude),
+          latitude,
+          longitude,
+          settings.homeExclusionRadiusMeters,
+        )) {
+          return res.status(403).json({ code: "inside_home_exclusion", error: `You must be more than ${settings.homeExclusionRadiusMeters} meters from your saved home location to start your route.` });
+        }
       }
       if (settings.warehouseVerificationEnabled && (latitude == null || latitude < -90 || latitude > 90 || longitude == null)) {
         return res.status(400).json({ code: "location_unavailable", error: "Your location could not be verified." });
@@ -7004,13 +7085,15 @@ export async function registerRoutes(
         user_id: user.id,
         work_date: now.toISOString().slice(0, 10),
         time_in: now,
-        start_method: "warehouse",
+         start_method: startMethod,
         status: "active",
         total_seconds: 0,
         time_in_latitude: latitude?.toString() ?? null,
         time_in_longitude: longitude?.toString() ?? null,
         time_in_accuracy: accuracy?.toString() ?? null,
-        time_in_verification: settings.warehouseVerificationEnabled ? "warehouse_verified" : "warehouse_verification_disabled",
+         time_in_verification: startMethod === "driving"
+           ? "outside_home_verified"
+           : settings.warehouseVerificationEnabled ? "warehouse_verified" : "warehouse_verification_disabled",
         driving_verified: false,
       });
       await storage.createAttendanceCheckpoint({
@@ -7270,6 +7353,8 @@ export async function registerRoutes(
         allowedRadiusMeters: Math.max(1, Number(body.allowedRadiusMeters ?? current.allowedRadiusMeters)),
         warehouseVerificationEnabled: body.warehouseVerificationEnabled == null ? current.warehouseVerificationEnabled : Boolean(body.warehouseVerificationEnabled),
         drivingStartEnabled: body.drivingStartEnabled == null ? current.drivingStartEnabled : Boolean(body.drivingStartEnabled),
+        routeStartEnabled: body.routeStartEnabled == null ? current.routeStartEnabled : Boolean(body.routeStartEnabled),
+        homeExclusionRadiusMeters: Math.max(1, Number(body.homeExclusionRadiusMeters ?? current.homeExclusionRadiusMeters)),
         hourlyCheckpointEnabled: body.hourlyCheckpointEnabled == null ? current.hourlyCheckpointEnabled : Boolean(body.hourlyCheckpointEnabled),
         checkpointIntervalMinutes: Math.max(15, Number(body.checkpointIntervalMinutes ?? current.checkpointIntervalMinutes)),
         firstFourHourValidationEnabled: body.firstFourHourValidationEnabled == null ? current.firstFourHourValidationEnabled : Boolean(body.firstFourHourValidationEnabled),
@@ -7283,6 +7368,15 @@ export async function registerRoutes(
       };
       await storage.setSetting("attendance_settings", next);
       res.json(next);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/users/:id/attendance-home-location/reset", requireAdmin, async (req, res) => {
+    try {
+      await storage.clearAttendanceHomeLocation(parseInt(req.params.id));
+      res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

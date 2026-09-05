@@ -30,6 +30,8 @@ export interface IStorage {
   updateUserStatus(id: number, is_enabled: boolean): Promise<void>;
   updateUserPermission(id: number, allow_bigcommerce_search: boolean): Promise<void>;
   updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User>;
+  setAttendanceHomeLocation(id: number, latitude: string, longitude: string): Promise<User>;
+  clearAttendanceHomeLocation(id: number): Promise<void>;
 
   // Product operations
   getAllProducts(): Promise<Product[]>;
@@ -402,6 +404,23 @@ export class DatabaseStorage implements IStorage {
   async updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User> {
     const result = await db.update(users).set(data).where(eq(users.id, id)).returning();
     return result[0];
+  }
+
+  async setAttendanceHomeLocation(id: number, latitude: string, longitude: string): Promise<User> {
+    const [updated] = await db.update(users).set({
+      attendance_home_latitude: latitude,
+      attendance_home_longitude: longitude,
+      attendance_home_set_at: new Date(),
+    }).where(eq(users.id, id)).returning();
+    return updated;
+  }
+
+  async clearAttendanceHomeLocation(id: number): Promise<void> {
+    await db.update(users).set({
+      attendance_home_latitude: null,
+      attendance_home_longitude: null,
+      attendance_home_set_at: null,
+    }).where(eq(users.id, id));
   }
 
   // Product operations

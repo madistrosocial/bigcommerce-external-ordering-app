@@ -1169,6 +1169,9 @@ export interface RbacUser {
   allow_bigcommerce_search: boolean;
   default_landing_page?: string;
   role_id?: number | null;
+  attendance_home_latitude?: string | null;
+  attendance_home_longitude?: string | null;
+  attendance_home_set_at?: string | null;
   permissions: RbacPermission[];
 }
 
@@ -1258,6 +1261,17 @@ export async function getAdminUsers(): Promise<RbacUser[]> {
   const res = await fetch(`${API_BASE}/admin/users`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch users');
   return res.json();
+}
+
+export async function resetAttendanceHomeLocation(userId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}/attendance-home-location/reset`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to reset home location');
+  }
 }
 
 export async function setUserRole(userId: number, roleId: number | null): Promise<void> {

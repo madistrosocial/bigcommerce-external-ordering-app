@@ -20,6 +20,8 @@ export type AttendanceSettings = {
   allowedRadiusMeters: number;
   warehouseVerificationEnabled: boolean;
   drivingStartEnabled: boolean;
+  routeStartEnabled: boolean;
+  homeExclusionRadiusMeters: number;
   hourlyCheckpointEnabled: boolean;
   checkpointIntervalMinutes: number;
   firstFourHourValidationEnabled: boolean;
@@ -39,6 +41,8 @@ export const DEFAULT_ATTENDANCE_SETTINGS: AttendanceSettings = {
   allowedRadiusMeters: 250,
   warehouseVerificationEnabled: true,
   drivingStartEnabled: true,
+  routeStartEnabled: true,
+  homeExclusionRadiusMeters: 250,
   hourlyCheckpointEnabled: true,
   checkpointIntervalMinutes: 60,
   firstFourHourValidationEnabled: true,
@@ -85,6 +89,22 @@ export function isInsideWarehouse(
     settings.warehouseLatitude,
     settings.warehouseLongitude,
   ) <= settings.allowedRadiusMeters;
+}
+
+export function isOutsideHome(
+  homeLatitude: number | null | undefined,
+  homeLongitude: number | null | undefined,
+  currentLatitude: number,
+  currentLongitude: number,
+  exclusionRadiusMeters: number,
+): boolean {
+  if (homeLatitude == null || homeLongitude == null) return false;
+  return haversineDistanceMeters(
+    currentLatitude,
+    currentLongitude,
+    homeLatitude,
+    homeLongitude,
+  ) > Math.max(1, Number(exclusionRadiusMeters) || 1);
 }
 
 function dateOnly(date: Date): string {

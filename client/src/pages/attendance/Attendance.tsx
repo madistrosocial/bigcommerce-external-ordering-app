@@ -128,6 +128,7 @@ export default function AttendancePage() {
   const [locationForStart, setLocationForStart] = useState<Coordinates | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [error, setError] = useState("");
+  const [settingHome, setSettingHome] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["attendance", "today", currentUser?.id],
@@ -145,6 +146,12 @@ export default function AttendancePage() {
     staleTime: 30_000,
   });
   const todos: any[] = (todosQuery.data ?? []).slice(0, 5);
+  const homeLocationQuery = useQuery({
+    queryKey: ["attendance", "home-location", currentUser?.id],
+    queryFn: () => apiJson("/api/attendance/home-location"),
+    enabled: !!currentUser,
+  });
+  const homeConfigured = Boolean(homeLocationQuery.data?.configured);
 
   useEffect(() => {
     if (!active) return;
@@ -184,13 +191,43 @@ export default function AttendancePage() {
     setError("");
     setValidationMethod("driving");
     setFlow("validating");
+    const coords = await captureLocation();
+    setLocationForStart(coords);
     try {
-      const result = await apiJson("/api/attendance/validate-driving", { method: "POST" });
+      const result = await apiJson("/api/attendance/validate-route-start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(coords ?? {}),
+      });
+      if (!result.valid) throw new Error(result.message);
       setValidationMessage(result.message);
-      setFlow("blocked");
+      setFlow("ready");
     } catch (e: any) {
       setValidationMessage(e.message);
       setFlow("blocked");
+    }
+  };
+
+  const setHomeLocation = async () => {
+    setError("");
+    setSettingHome(true);
+    const coords = await captureLocation();
+    if (!coords) {
+      setError("Your location could not be captured. Allow location access and try again.");
+      setSettingHome(false);
+      return;
+    }
+    try {
+      await apiJson("/api/attendance/home-location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(coords),
+      });
+      await homeLocationQuery.refetch();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSettingHome(false);
     }
   };
 
@@ -256,9 +293,24 @@ export default function AttendancePage() {
             </div>
             <div className="mt-8 space-y-3">
               <StartChoice icon={<MapPin className="h-6 w-6" />} title="Warehouse" subtitle="Start from here" onClick={startWarehouse} />
-              <StartChoice icon={<Car className="h-6 w-6" />} title="Driving to first stop" subtitle="Unavailable in this browser — choose Warehouse" onClick={startDriving} disabled />
+              <StartChoice icon={<Car className="h-6 w-6" />} title="Route start" subtitle={homeConfigured ? "Start from your first stop route" : "Set your home location first"} onClick={startDriving} disabled={!homeConfigured} />
             </div>
-            <div className="mt-6 flex items-start gap-2 rounded-xl bg-white p-3 text-xs leading-5 text-slate-500"><Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />Choose Warehouse to verify your current location against the configured warehouse. Driving validation requires a native device capability and is unavailable in this browser.</div>
+            {!homeConfigured && (
+              <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <div className="flex items-start gap-3">
+                  <Home className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-blue-900">Set your home location once</p>
+                    <p className="mt-1 text-xs leading-5 text-blue-700">Route start becomes available after you save your home location. You cannot clock in from within the admin-defined home area.</p>
+                    <Button variant="outline" className="mt-3 border-blue-300 bg-white text-blue-700 hover:bg-blue-100" onClick={setHomeLocation} disabled={settingHome}>
+                      {settingHome && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      {settingHome ? "Saving location..." : "Use current location as home"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="mt-6 flex items-start gap-2 rounded-xl bg-white p-3 text-xs leading-5 text-slate-500"><Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />Warehouse verifies the configured warehouse geofence. Route start verifies that you are outside your saved home area before allowing time in.</div>
           </div>
         )}
 
@@ -277,7 +329,7 @@ export default function AttendancePage() {
           <div className="mt-10 text-center">
             <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><CheckCircle2 className="h-12 w-12" /></div>
             <h2 className="mt-6 text-xl font-bold text-slate-900">{validationMessage}</h2>
-            <p className="mt-2 text-sm text-slate-500">Your location has been verified.</p>
+            <p className="mt-2 text-sm text-slate-500">{validationMethod === "driving" ? "You are outside your saved home area." : "Your location has been verified."}</p>
             <Button className="mt-8 h-12 w-full bg-red-600 hover:bg-red-700" onClick={() => startMutation.mutate()} disabled={startMutation.isPending}>
               {startMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}TIME IN
             </Button>

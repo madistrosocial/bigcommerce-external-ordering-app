@@ -42,6 +42,9 @@ export const users = pgTable("users", {
   allow_bigcommerce_search: boolean("allow_bigcommerce_search").notNull().default(false),
   role_id: integer("role_id"), // nullable FK to roles
   default_landing_page: text("default_landing_page").notNull().default("/dashboard"),
+  attendance_home_latitude: decimal("attendance_home_latitude", { precision: 10, scale: 7 }),
+  attendance_home_longitude: decimal("attendance_home_longitude", { precision: 10, scale: 7 }),
+  attendance_home_set_at: timestamp("attendance_home_set_at"),
 });
 
 export const products = pgTable("products", {

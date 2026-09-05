@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getAdminUsers, getPermissions, getRoles, createPermission,
   addPermissionToUser, removePermissionFromUser, updateUserDetails, setUserRole,
+  resetAttendanceHomeLocation,
   RbacUser, RbacPermission, RbacRole,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Users, ShieldCheck, ChevronRight, ArrowLeft, User, Lock, Shield, Eye, EyeOff, Save, Search, UsersRound } from "lucide-react";
+import { Loader2, Users, ShieldCheck, ChevronRight, ArrowLeft, User, Lock, Shield, Eye, EyeOff, Save, Search, UsersRound, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Landing page options ─────────────────────────────────────────────────────
@@ -170,6 +171,7 @@ function UserDetail({
   const [groupId, setGroupId] = useState<string>(user.role_id != null ? String(user.role_id) : "none");
   const [landingPage, setLandingPage] = useState(user.default_landing_page || "/dashboard");
   const [saving, setSaving] = useState(false);
+  const [resettingHome, setResettingHome] = useState(false);
 
   useEffect(() => {
     setName(user.name); setUsername(user.username); setRole(user.role);
@@ -206,6 +208,22 @@ function UserDetail({
     } catch (e: any) {
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
     } finally { setSaving(false); }
+  };
+
+  const handleResetHomeLocation = async () => {
+    if (!user.attendance_home_latitude && !user.attendance_home_longitude) return;
+    if (!window.confirm(`Reset ${user.name}'s saved home location? They will need to set it again before using Route Start.`)) return;
+    setResettingHome(true);
+    try {
+      await resetAttendanceHomeLocation(user.id);
+      await queryClient.invalidateQueries({ queryKey: ["admin-users-rbac"] });
+      toast({ title: "Home location reset." });
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Reset failed", description: e.message, variant: "destructive" });
+    } finally {
+      setResettingHome(false);
+    }
   };
 
   const hasModule = (key: string) => {
@@ -309,6 +327,22 @@ function UserDetail({
               </Select>
               <p className="text-[11px] text-slate-400">User inherits all permissions from the assigned group.</p>
             </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-slate-50 flex items-center gap-2">
+            <Home className="h-3.5 w-3.5 text-slate-500" />
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Attendance Route Start</span>
+          </div>
+          <div className="px-4 py-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-700">{user.attendance_home_latitude && user.attendance_home_longitude ? "Home location is configured" : "Home location is not configured"}</p>
+              <p className="text-xs text-slate-400">Reset this when the rep moves or needs to set a new home location.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={handleResetHomeLocation} disabled={resettingHome || (!user.attendance_home_latitude && !user.attendance_home_longitude)} className="border-red-200 text-red-600 hover:bg-red-50">
+              {resettingHome && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}Reset Home Location
+            </Button>
           </div>
         </div>
 
