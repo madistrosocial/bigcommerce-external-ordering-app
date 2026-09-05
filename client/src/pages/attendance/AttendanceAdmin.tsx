@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import {
-  AlertTriangle, BarChart3, CalendarDays, CheckCircle2, ChevronRight, Clock3,
+  AlertTriangle, BarChart3, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3,
   Download, FileClock, Filter, Loader2, MapPin, Settings2, Users, X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -39,7 +39,6 @@ function statusBadge(status: string) {
   return <Badge className={styles[status] ?? "border-0 bg-slate-100 text-slate-600"}>{status.replace(/_/g, " ")}</Badge>;
 }
 
-const MS_PER_DAY = 86_400_000;
 const EXPECTED_DAILY_SECONDS = 8 * 60 * 60;
 
 function dateOnly(date: Date) {
@@ -56,9 +55,31 @@ function addDays(value: string, amount: number) {
   return dateOnly(date);
 }
 
-function defaultLogRange() {
-  const today = dateOnly(new Date());
-  return { from: addDays(today, -13), to: today };
+function currentMonthKey() {
+  const today = new Date();
+  return `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthRange(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const start = new Date(Date.UTC(year, monthNumber - 1, 1));
+  const end = new Date(Date.UTC(year, monthNumber, 0));
+  return { from: dateOnly(start), to: dateOnly(end) };
+}
+
+function shiftMonth(month: string, amount: number) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const next = new Date(Date.UTC(year, monthNumber - 1 + amount, 1));
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthLabel(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, monthNumber - 1, 1)).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function nthWeekday(year: number, month: number, weekday: number, occurrence: number) {
@@ -236,14 +257,20 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
 }
 
 function Logs() {
-  const fmt = useTimeService();
   const [status, setStatus] = useState("all");
   const [startMethod, setStartMethod] = useState("all");
-  const initialRange = useMemo(defaultLogRange, []);
-  const [from, setFrom] = useState(initialRange.from);
-  const [to, setTo] = useState(initialRange.to);
+  const [month, setMonth] = useState(currentMonthKey);
+  const initialMonthRange = useMemo(() => monthRange(currentMonthKey()), []);
+  const [from, setFrom] = useState(initialMonthRange.from);
+  const [to, setTo] = useState(initialMonthRange.to);
   const [userId, setUserId] = useState("all");
+  const [showFilters, setShowFilters] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  useEffect(() => {
+    const range = monthRange(month);
+    setFrom(range.from);
+    setTo(range.to);
+  }, [month]);
   const usersQuery = useQuery({ queryKey: ["attendance", "team-members"], queryFn: () => apiJson("/api/users") });
   const params = new URLSearchParams({ status, startMethod, limit: "500" });
   if (from) params.set("from", from);
@@ -274,30 +301,22 @@ function Logs() {
   const daysWorked = new Set(workedRows.map((row: any) => `${row.user_id}:${row.work_date}`)).size;
   const absentDays = Math.max(0, businessDates.length * expectedTeamMembers - daysWorked);
   const lostSeconds = Math.max(0, expectedSeconds - totalSeconds);
-  const setQuickRange = (preset: "week" | "pay_period" | "month") => {
-    const today = dateOnly(new Date());
-    if (preset === "week") {
-      const start = dateFromOnly(today);
-      start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
-      setFrom(dateOnly(start));
-      setTo(addDays(dateOnly(start), 6));
-    } else if (preset === "month") {
-      const start = new Date(Date.UTC(dateFromOnly(today).getUTCFullYear(), dateFromOnly(today).getUTCMonth(), 1));
-      setFrom(dateOnly(start));
-      setTo(today);
-    } else {
-      setFrom(addDays(today, -13));
-      setTo(today);
-    }
-  };
   const clearFilters = () => {
-    const range = defaultLogRange();
+    const currentMonth = currentMonthKey();
+    const range = monthRange(currentMonth);
+    setMonth(currentMonth);
     setFrom(range.from);
     setTo(range.to);
     setUserId("all");
     setStatus("all");
     setStartMethod("all");
   };
+  const monthDefaultRange = monthRange(month);
+  const hasFilter = userId !== "all"
+    || status !== "all"
+    || startMethod !== "all"
+    || from !== monthDefaultRange.from
+    || to !== monthDefaultRange.to;
   const statusLabel: Record<string, string> = { worked: "Worked", active: "Working", absent: "Absent", weekend: "Weekend", holiday: "US holiday", team: "Team logged" };
   const statusClass: Record<string, string> = {
     worked: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -313,11 +332,19 @@ function Logs() {
         <h2 className="text-base font-bold text-slate-900">Attendance ledger</h2>
         <p className="mt-1 text-xs text-slate-500">A daily view for payroll review, absences, and time reconciliation.</p>
       </div>
-      <div className="flex flex-wrap gap-2">
-        {[["week", "This week"], ["pay_period", "Last 14 days"], ["month", "This month"]].map(([key, label]) => <Button key={key} size="sm" variant="outline" className="h-8 text-xs" onClick={() => setQuickRange(key as "week" | "pay_period" | "month")}>{label}</Button>)}
-      </div>
+      <Button
+        size="sm"
+        variant={showFilters ? "default" : "outline"}
+        className={`h-8 gap-1.5 text-xs ${showFilters ? "bg-red-600 hover:bg-red-700" : ""}`}
+        onClick={() => setShowFilters(value => !value)}
+        data-testid="btn-toggle-attendance-filters"
+      >
+        {showFilters ? <X className="h-3.5 w-3.5" /> : <Filter className="h-3.5 w-3.5" />}
+        {showFilters ? "Hide filters" : "Filters"}
+        {hasFilter && <span className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] text-white">●</span>}
+      </Button>
     </div>
-    <Card className="mt-4 rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4">
+    {showFilters && <Card className="mt-4 rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4">
       <div className="flex items-center gap-2 text-xs font-semibold text-slate-600"><Filter className="h-4 w-4 text-red-600" />Filter the ledger</div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <div><Label className="text-[11px] text-slate-500">Team member</Label><Select value={userId} onValueChange={setUserId}><SelectTrigger className="mt-1 h-9 text-xs"><SelectValue placeholder="All team members" /></SelectTrigger><SelectContent><SelectItem value="all">All team members</SelectItem>{teamMembers.map((user: any) => <SelectItem key={user.id} value={String(user.id)}>{user.name || user.username}</SelectItem>)}</SelectContent></Select></div>
@@ -327,15 +354,15 @@ function Logs() {
         <div><Label className="text-[11px] text-slate-500">Start method</Label><Select value={startMethod} onValueChange={setStartMethod}><SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All methods</SelectItem><SelectItem value="warehouse">Warehouse</SelectItem><SelectItem value="driving">Route start</SelectItem></SelectContent></Select></div>
         <div className="flex items-end"><Button variant="outline" className="h-9 w-full text-xs" onClick={clearFilters}><X className="mr-1.5 h-3.5 w-3.5" />Reset</Button></div>
       </div>
-    </CardContent></Card>
-    <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+    </CardContent></Card>}
+    <div className="mt-4 flex gap-3 overflow-x-auto px-0 pb-2 lg:grid lg:grid-cols-5 lg:overflow-visible">
       {[
         ["Hours worked", hours(totalSeconds), "Actual recorded time", "text-blue-600"],
         ["Hours lost / short", hours(lostSeconds), "Against 8h weekday expectation", "text-red-600"],
         ["Days worked", String(daysWorked), selectedMember ? "Days with a log" : "Team member-days", "text-emerald-600"],
         ["Absent days", String(absentDays), selectedMember ? "Weekdays with no log" : "Across selected team", "text-amber-600"],
         ["Business days", String(businessDates.length), `${expectedTeamMembers || 0} team member${expectedTeamMembers === 1 ? "" : "s"} selected`, "text-slate-600"],
-      ].map(([label, value, hint, color]) => <Card key={label} className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4"><p className={`text-xl font-bold ${color}`}>{value}</p><p className="mt-1 text-xs font-semibold text-slate-700">{label}</p><p className="mt-1 text-[10px] leading-4 text-slate-400">{hint}</p></CardContent></Card>)}
+      ].map(([label, value, hint, color]) => <Card key={label} className="min-w-[166px] shrink-0 rounded-xl border-slate-200 shadow-sm lg:min-w-0"><CardContent className="p-4"><p className={`text-xl font-bold ${color}`}>{value}</p><p className="mt-1 text-xs font-semibold text-slate-700">{label}</p><p className="mt-1 text-[10px] leading-4 text-slate-400">{hint}</p></CardContent></Card>)}
     </div>
     <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[11px] text-slate-500">
       <span className="font-semibold text-slate-700">{selectedMember ? selectedMember.name : "All team members"}</span>
@@ -374,6 +401,30 @@ function Logs() {
             </table>
           </div>
         )}
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1 text-xs"
+            onClick={() => setMonth(value => shiftMonth(value, -1))}
+            aria-label="View previous month"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />Previous month
+          </Button>
+          <div className="text-center">
+            <p className="text-xs font-semibold text-slate-700">{monthLabel(month)}</p>
+            {month !== currentMonthKey() && <Button variant="link" size="sm" className="h-5 p-0 text-[11px] text-red-600" onClick={() => setMonth(currentMonthKey())}>Return to current month</Button>}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1 text-xs"
+            onClick={() => setMonth(value => shiftMonth(value, 1))}
+            aria-label="View next month"
+          >
+            Next month<ChevronRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </CardContent>
     </Card>}
   </AdminShell>;
