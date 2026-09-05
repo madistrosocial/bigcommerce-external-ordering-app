@@ -180,7 +180,7 @@ export default function AttendancePage() {
       });
       if (!result.valid) throw new Error(result.message);
       setValidationMessage(result.message);
-      setFlow("ready");
+      startMutation.mutate(coords);
     } catch (e: any) {
       setValidationMessage(e.message);
       setFlow("blocked");
@@ -201,7 +201,7 @@ export default function AttendancePage() {
       });
       if (!result.valid) throw new Error(result.message);
       setValidationMessage(result.message);
-      setFlow("ready");
+      startMutation.mutate(coords);
     } catch (e: any) {
       setValidationMessage(e.message);
       setFlow("blocked");
@@ -232,16 +232,19 @@ export default function AttendancePage() {
   };
 
   const startMutation = useMutation({
-    mutationFn: () => apiJson("/api/attendance/start", {
+    mutationFn: (coords: Coordinates | null = null) => apiJson("/api/attendance/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ start_method: validationMethod, ...(locationForStart ?? {}) }),
+      body: JSON.stringify({ start_method: validationMethod, ...(coords ?? locationForStart ?? {}) }),
     }),
     onSuccess: () => {
       setFlow("start");
       queryClient.invalidateQueries({ queryKey: ["attendance", "today"] });
     },
-    onError: (e: any) => setError(e.message),
+    onError: (e: any) => {
+      setValidationMessage(e.message);
+      setFlow("blocked");
+    },
   });
 
   const endMutation = useMutation({
@@ -292,8 +295,8 @@ export default function AttendancePage() {
               <p className="mt-1 text-sm text-slate-500">Where are you starting?</p>
             </div>
             <div className="mt-8 space-y-3">
-              <StartChoice icon={<MapPin className="h-6 w-6" />} title="Warehouse" subtitle="Start from here" onClick={startWarehouse} />
-              <StartChoice icon={<Car className="h-6 w-6" />} title="Route start" subtitle={homeConfigured ? "Start from your first stop route" : "Set your home location first"} onClick={startDriving} disabled={!homeConfigured} />
+              <StartChoice icon={<MapPin className="h-6 w-6" />} title="Warehouse" subtitle="Login when you arrive at the location" onClick={startWarehouse} />
+              <StartChoice icon={<Car className="h-6 w-6" />} title="Route start" subtitle={homeConfigured ? "Login when you're on your way" : "Set your home location first"} onClick={startDriving} disabled={!homeConfigured} />
             </div>
             {!homeConfigured && (
               <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4">
@@ -310,7 +313,6 @@ export default function AttendancePage() {
                 </div>
               </div>
             )}
-            <div className="mt-6 flex items-start gap-2 rounded-xl bg-white p-3 text-xs leading-5 text-slate-500"><Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />Warehouse verifies the configured warehouse geofence. Route start verifies that you are outside your saved home area before allowing time in.</div>
           </div>
         )}
 
