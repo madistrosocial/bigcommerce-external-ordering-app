@@ -287,6 +287,65 @@ export const crmAuditLog = pgTable("crm_audit_log", {
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── Attendance ────────────────────────────────────────────────────────────────
+
+export const attendanceSessions = pgTable("attendance_sessions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").notNull().references(() => users.id),
+  work_date: text("work_date").notNull(),
+  time_in: timestamp("time_in"),
+  time_out: timestamp("time_out"),
+  start_method: text("start_method").notNull(), // warehouse | driving
+  status: text("status").notNull().default("active"), // active | completed | incomplete | exception
+  total_seconds: integer("total_seconds").notNull().default(0),
+  time_in_latitude: decimal("time_in_latitude", { precision: 10, scale: 7 }),
+  time_in_longitude: decimal("time_in_longitude", { precision: 10, scale: 7 }),
+  time_in_accuracy: decimal("time_in_accuracy", { precision: 10, scale: 2 }),
+  time_in_verification: text("time_in_verification"),
+  time_out_latitude: decimal("time_out_latitude", { precision: 10, scale: 7 }),
+  time_out_longitude: decimal("time_out_longitude", { precision: 10, scale: 7 }),
+  time_out_accuracy: decimal("time_out_accuracy", { precision: 10, scale: 2 }),
+  time_out_verification: text("time_out_verification"),
+  driving_verified: boolean("driving_verified").notNull().default(false),
+  driving_verified_at: timestamp("driving_verified_at"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  userDateIdx: index("attendance_sessions_user_date_idx").on(t.user_id, t.work_date),
+  statusIdx: index("attendance_sessions_status_idx").on(t.status),
+}));
+
+export const attendanceLocationCheckpoints = pgTable("attendance_location_checkpoints", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  attendance_id: integer("attendance_id").notNull().references(() => attendanceSessions.id, { onDelete: "cascade" }),
+  captured_at: timestamp("captured_at").notNull().defaultNow(),
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  accuracy: decimal("accuracy", { precision: 10, scale: 2 }),
+  checkpoint_type: text("checkpoint_type").notNull(), // hourly | time_in | time_out | validation
+  capture_status: text("capture_status").notNull().default("captured"), // captured | failed | unavailable
+  detail: jsonb("detail").notNull().default({}),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  attendanceCapturedIdx: index("attendance_checkpoints_attendance_captured_idx").on(t.attendance_id, t.captured_at),
+}));
+
+export const attendanceExceptions = pgTable("attendance_exceptions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  attendance_id: integer("attendance_id").references(() => attendanceSessions.id, { onDelete: "cascade" }),
+  user_id: integer("user_id").notNull().references(() => users.id),
+  exception_type: text("exception_type").notNull(),
+  details: text("details").notNull().default(""),
+  status: text("status").notNull().default("open"), // open | resolved
+  detected_at: timestamp("detected_at").notNull().defaultNow(),
+  reviewed_by: integer("reviewed_by").references(() => users.id),
+  reviewed_at: timestamp("reviewed_at"),
+  review_notes: text("review_notes"),
+}, (t) => ({
+  statusDetectedIdx: index("attendance_exceptions_status_detected_idx").on(t.status, t.detected_at),
+  userIdx: index("attendance_exceptions_user_idx").on(t.user_id),
+}));
+
 // ─── POS Enhancements (Price Protection / Store Credit) ───────────────────────
 
 export const posPriceOverrideAudit = pgTable("pos_price_override_audit", {
@@ -578,6 +637,9 @@ export const insertCrmOrderSchema = createInsertSchema(customerOrdersMirror).omi
 export const insertCrmSalesRepSchema = createInsertSchema(customerSalesRep).omit({ id: true, assigned_at: true });
 export const insertCrmNoteSchema = createInsertSchema(crmCustomerNotes).omit({ id: true, created_at: true, updated_at: true });
 export const insertCrmAuditLogSchema = createInsertSchema(crmAuditLog).omit({ id: true, created_at: true });
+export const insertAttendanceSessionSchema = createInsertSchema(attendanceSessions).omit({ id: true, created_at: true, updated_at: true });
+export const insertAttendanceCheckpointSchema = createInsertSchema(attendanceLocationCheckpoints).omit({ id: true, created_at: true });
+export const insertAttendanceExceptionSchema = createInsertSchema(attendanceExceptions).omit({ id: true });
 
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -642,6 +704,12 @@ export type InsertCrmNote = z.infer<typeof insertCrmNoteSchema>;
 export type CrmNote = typeof crmCustomerNotes.$inferSelect;
 export type InsertCrmAuditLog = z.infer<typeof insertCrmAuditLogSchema>;
 export type CrmAuditLogEntry = typeof crmAuditLog.$inferSelect;
+export type InsertAttendanceSession = z.infer<typeof insertAttendanceSessionSchema>;
+export type AttendanceSession = typeof attendanceSessions.$inferSelect;
+export type InsertAttendanceCheckpoint = z.infer<typeof insertAttendanceCheckpointSchema>;
+export type AttendanceCheckpoint = typeof attendanceLocationCheckpoints.$inferSelect;
+export type InsertAttendanceException = z.infer<typeof insertAttendanceExceptionSchema>;
+export type AttendanceException = typeof attendanceExceptions.$inferSelect;
 
 // ─── BigCommerce Order Line Items Mirror ──────────────────────────────────────
 

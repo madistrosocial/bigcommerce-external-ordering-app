@@ -28,6 +28,15 @@ import {
   saveZohoCampaignsCredentials,
 } from "./zoho-credentials";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
+import {
+  ATTENDANCE_PERMISSION_DEFINITIONS,
+  DEFAULT_ATTENDANCE_SETTINGS,
+  getAttendanceSettings,
+  getPayPeriod,
+  isInsideWarehouse,
+  parseAccuracy,
+  parseCoordinate,
+} from "./attendance";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
 const DEFAULT_INVOICE_TEMPLATE = `<!DOCTYPE html>
@@ -6108,6 +6117,19 @@ export async function registerRoutes(
     } catch (_) { /* non-fatal */ }
   })();
 
+  // ── Attendance permission auto-seed ───────────────────────────────────────────
+  await (async () => {
+    try {
+      const existing = await storage.getAllPermissions();
+      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+      for (const permission of ATTENDANCE_PERMISSION_DEFINITIONS) {
+        if (!existingSet.has(`${permission.module}:${permission.action}`)) {
+          await storage.createPermission(permission);
+        }
+      }
+    } catch (_) { /* non-fatal — permissions may already exist */ }
+  })();
+
   // ── CRM visibility scope helper ───────────────────────────────────────────────
   // Non-admin users without an explicit visibility permission default to ASSIGNED_ONLY
   // (least-privilege). Admins always get ALL_CUSTOMERS.
@@ -6901,6 +6923,369 @@ export async function registerRoutes(
       const metrics = await storage.getCrmMetrics({ search, group, state, primaryRep: primaryRepFilter, secondaryRep: secondaryRepFilter, customerType: customerType || undefined, addressType: addressType || undefined, assignedRep: repFilter, visibilityScope: visScope.scope, visibilityUserId: visScope.userId, accountType: accountType || undefined, status: status || "both" });
       res.json(metrics);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Attendance ──────────────────────────────────────────────────────────────────
+  app.get("/api/attendance/today", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const active = await storage.getActiveAttendanceForUser(user.id);
+      const history = await storage.getAttendanceHistoryForUser(user.id, 30);
+      res.json({ active: active ?? null, history });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/attendance/history", requirePermission("attendance", "view_own"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      res.json(await storage.getAttendanceHistoryForUser(user.id, 100));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/attendance/validate-warehouse", requirePermission("attendance", "clock"), async (req, res) => {
+    try {
+      const settings = await getAttendanceSettings(storage);
+      const latitude = parseCoordinate(req.body?.latitude);
+      const longitude = parseCoordinate(req.body?.longitude);
+      if (latitude == null || latitude < -90 || latitude > 90 || longitude == null) {
+        return res.status(400).json({ valid: false, code: "location_unavailable", message: "Your location could not be verified. Please allow location access and try again." });
+      }
+      const valid = isInsideWarehouse(settings, latitude, longitude);
+      res.json({
+        valid,
+        warehouseName: settings.warehouseName,
+        message: valid ? `You're at ${settings.warehouseName}` : "You have to be at the location to log in.",
+      });
+    } catch (e: any) {
+      res.status(500).json({ valid: false, error: e.message });
+    }
+  });
+
+  app.post("/api/attendance/validate-driving", requirePermission("attendance", "clock"), async (_req, res) => {
+    const settings = await getAttendanceSettings(storage);
+    if (!settings.drivingStartEnabled) {
+      return res.json({ verified: false, status: "disabled", message: "Driving start is not enabled in Attendance Settings." });
+    }
+    // A browser cannot reliably prove driving in the background. Keep this endpoint
+    // as the provider boundary for a future native capability; never fake it here.
+    return res.json({
+      verified: false,
+      status: "unavailable",
+      message: "Driving validation is not available in this browser. Please choose Warehouse when safely stopped.",
+    });
+  });
+
+  app.post("/api/attendance/start", requirePermission("attendance", "clock"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const existing = await storage.getActiveAttendanceForUser(user.id);
+      if (existing) return res.status(409).json({ error: "You already have an active attendance session.", attendance: existing });
+      const settings = await getAttendanceSettings(storage);
+      const startMethod = req.body?.start_method === "driving" ? "driving" : req.body?.start_method === "warehouse" ? "warehouse" : null;
+      if (!startMethod) return res.status(400).json({ error: "A valid start method is required." });
+      const latitude = parseCoordinate(req.body?.latitude);
+      const longitude = parseCoordinate(req.body?.longitude);
+      const accuracy = parseAccuracy(req.body?.accuracy);
+      if (startMethod === "driving") {
+        return res.status(409).json({ code: "driving_validation_unavailable", error: "Driving validation is not available in this browser. Choose Warehouse when safely stopped." });
+      }
+      if (settings.warehouseVerificationEnabled && (latitude == null || latitude < -90 || latitude > 90 || longitude == null)) {
+        return res.status(400).json({ code: "location_unavailable", error: "Your location could not be verified." });
+      }
+      if (latitude != null && longitude != null && !isInsideWarehouse(settings, latitude, longitude)) {
+        return res.status(403).json({ code: "outside_warehouse", error: "You have to be at the location to log in." });
+      }
+      const now = new Date();
+      const attendance = await storage.createAttendance({
+        user_id: user.id,
+        work_date: now.toISOString().slice(0, 10),
+        time_in: now,
+        start_method: "warehouse",
+        status: "active",
+        total_seconds: 0,
+        time_in_latitude: latitude?.toString() ?? null,
+        time_in_longitude: longitude?.toString() ?? null,
+        time_in_accuracy: accuracy?.toString() ?? null,
+        time_in_verification: settings.warehouseVerificationEnabled ? "warehouse_verified" : "warehouse_verification_disabled",
+        driving_verified: false,
+      });
+      await storage.createAttendanceCheckpoint({
+        attendance_id: attendance.id,
+        captured_at: now,
+        latitude: latitude?.toString() ?? null,
+        longitude: longitude?.toString() ?? null,
+        accuracy: accuracy?.toString() ?? null,
+        checkpoint_type: "time_in",
+        capture_status: latitude != null && longitude != null ? "captured" : "unavailable",
+        detail: { verification: attendance.time_in_verification },
+      });
+      res.status(201).json(attendance);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/attendance/end", requirePermission("attendance", "clock"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const active = await storage.getActiveAttendanceForUser(user.id);
+      if (!active) return res.status(404).json({ error: "No active attendance session found." });
+      const now = new Date();
+      const latitude = parseCoordinate(req.body?.latitude);
+      const longitude = parseCoordinate(req.body?.longitude);
+      const accuracy = parseAccuracy(req.body?.accuracy);
+      const totalSeconds = active.time_in ? Math.max(0, Math.floor((now.getTime() - new Date(active.time_in).getTime()) / 1000)) : 0;
+      const updated = await storage.updateAttendance(active.id, {
+        time_out: now,
+        status: "completed",
+        total_seconds: totalSeconds,
+        time_out_latitude: latitude?.toString() ?? null,
+        time_out_longitude: longitude?.toString() ?? null,
+        time_out_accuracy: accuracy?.toString() ?? null,
+        time_out_verification: latitude != null && longitude != null ? "captured" : "location_unavailable",
+      });
+      await storage.createAttendanceCheckpoint({
+        attendance_id: active.id,
+        captured_at: now,
+        latitude: latitude?.toString() ?? null,
+        longitude: longitude?.toString() ?? null,
+        accuracy: accuracy?.toString() ?? null,
+        checkpoint_type: "time_out",
+        capture_status: latitude != null && longitude != null ? "captured" : "unavailable",
+        detail: { verification: updated?.time_out_verification ?? "location_unavailable" },
+      });
+      if (latitude == null || longitude == null) {
+        await storage.createAttendanceException({
+          attendance_id: active.id,
+          user_id: user.id,
+          exception_type: "time_out_location_unavailable",
+          details: "Time out was recorded without browser location evidence.",
+          status: "open",
+        });
+      }
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/attendance/checkpoints", requirePermission("attendance", "clock"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const active = await storage.getActiveAttendanceForUser(user.id);
+      if (!active) return res.status(404).json({ error: "No active attendance session found." });
+      const latitude = parseCoordinate(req.body?.latitude);
+      const longitude = parseCoordinate(req.body?.longitude);
+      const accuracy = parseAccuracy(req.body?.accuracy);
+      const captured = latitude != null && latitude >= -90 && latitude <= 90 && longitude != null;
+      const checkpoint = await storage.createAttendanceCheckpoint({
+        attendance_id: active.id,
+        captured_at: new Date(),
+        latitude: captured ? latitude!.toString() : null,
+        longitude: captured ? longitude!.toString() : null,
+        accuracy: captured ? accuracy?.toString() ?? null : null,
+        checkpoint_type: "hourly",
+        capture_status: captured ? "captured" : "failed",
+        detail: captured ? {} : { reason: "Location was unavailable in the browser." },
+      });
+      if (!captured) {
+        await storage.createAttendanceException({
+          attendance_id: active.id,
+          user_id: user.id,
+          exception_type: "checkpoint_location_unavailable",
+          details: "An hourly location checkpoint could not be captured in the browser.",
+          status: "open",
+        });
+      }
+      res.status(201).json(checkpoint);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/attendance/admin/overview", requirePermission("attendance", "view_dashboard"), async (req, res) => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const period = String(req.query.period ?? "today");
+      let from = String(req.query.from ?? today);
+      let to = String(req.query.to ?? today);
+      if (period === "week") {
+        const date = new Date(`${today}T00:00:00Z`);
+        const mondayOffset = (date.getUTCDay() + 6) % 7;
+        date.setUTCDate(date.getUTCDate() - mondayOffset);
+        from = date.toISOString().slice(0, 10);
+      } else if (period === "pay_period") {
+        const settings = await getAttendanceSettings(storage);
+        const payPeriod = getPayPeriod(new Date(), settings);
+        from = payPeriod.start;
+        to = payPeriod.end;
+      }
+      const [recordResult, users, exceptionResult] = await Promise.all([
+        storage.getAttendanceRecords({ from, to, limit: 500, offset: 0 }),
+        storage.getAllUsers(),
+        storage.getAttendanceExceptions({ status: "open", from, to, limit: 1, offset: 0 }),
+      ]);
+      const activeCount = recordResult.rows.filter(row => row.status === "active").length;
+      const loggedIn = new Set(recordResult.rows.map(row => row.user_id));
+      const totalSeconds = recordResult.rows.reduce((sum, row) => sum + Number(row.total_seconds ?? 0), 0);
+      res.json({
+        period: { from, to, label: period },
+        kpis: {
+          totalSeconds,
+          salesReps: users.filter(user => user.is_enabled).length,
+          currentlyWorking: activeCount,
+          notLoggedIn: Math.max(0, users.filter(user => user.is_enabled).length - loggedIn.size),
+          exceptions: exceptionResult.total,
+        },
+        rows: recordResult.rows,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/attendance/admin/logs", requirePermission("attendance", "view_logs"), async (req, res) => {
+    try {
+      const q = req.query as Record<string, string>;
+      res.json(await storage.getAttendanceRecords({
+        from: q.from || undefined,
+        to: q.to || undefined,
+        userId: q.userId ? Number(q.userId) : undefined,
+        status: q.status || undefined,
+        startMethod: q.startMethod || undefined,
+        limit: q.limit ? Number(q.limit) : 100,
+        offset: q.offset ? Number(q.offset) : 0,
+      }));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/attendance/admin/logs/:id", requirePermission("attendance", "view_logs"), async (req, res) => {
+    try {
+      const attendance = await storage.getAttendanceById(Number(req.params.id));
+      if (!attendance) return res.status(404).json({ error: "Attendance record not found." });
+      const [employee, checkpoints] = await Promise.all([
+        storage.getUser(attendance.user_id),
+        storage.getAttendanceCheckpoints(attendance.id),
+      ]);
+      res.json({ attendance, employee: employee ? { id: employee.id, name: employee.name, username: employee.username } : null, checkpoints });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/attendance/admin/exceptions", requirePermission("attendance", "view_exceptions"), async (req, res) => {
+    try {
+      const q = req.query as Record<string, string>;
+      res.json(await storage.getAttendanceExceptions({
+        status: q.status || "open",
+        from: q.from || undefined,
+        to: q.to || undefined,
+        userId: q.userId ? Number(q.userId) : undefined,
+        limit: q.limit ? Number(q.limit) : 100,
+        offset: q.offset ? Number(q.offset) : 0,
+      }));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/attendance/admin/exceptions/:id", requirePermission("attendance", "review_exceptions"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const status = req.body?.status === "resolved" ? "resolved" : "open";
+      const exception = await storage.reviewAttendanceException(Number(req.params.id), {
+        status,
+        reviewed_by: user.id,
+        review_notes: req.body?.review_notes ? String(req.body.review_notes).slice(0, 2000) : null,
+      });
+      if (!exception) return res.status(404).json({ error: "Exception not found." });
+      res.json(exception);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/attendance/admin/reports", requirePermission("attendance", "view_reports"), async (req, res) => {
+    try {
+      const q = req.query as Record<string, string>;
+      let from = q.from;
+      let to = q.to;
+      if (q.period === "pay_period" || (!from && !to)) {
+        const settings = await getAttendanceSettings(storage);
+        const period = getPayPeriod(new Date(), settings);
+        from = from || period.start;
+        to = to || period.end;
+      }
+      const result = await storage.getAttendanceRecords({ from, to, limit: 500, offset: 0 });
+      const byEmployee = new Map<number, any>();
+      for (const row of result.rows) {
+        const current = byEmployee.get(row.user_id) ?? {
+          user_id: row.user_id,
+          employee_name: row.employee_name,
+          regular_seconds: 0,
+          overtime_seconds: 0,
+          total_seconds: 0,
+          days: 0,
+        };
+        const seconds = Number(row.total_seconds ?? 0);
+        current.total_seconds += seconds;
+        current.regular_seconds += Math.min(seconds, 8 * 3600);
+        current.overtime_seconds += Math.max(0, seconds - 8 * 3600);
+        current.days += 1;
+        byEmployee.set(row.user_id, current);
+      }
+      res.json({ from, to, rows: Array.from(byEmployee.values()), total: result.total });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/attendance/settings", requirePermission("attendance", "manage_settings"), async (_req, res) => {
+    try {
+      res.json(await getAttendanceSettings(storage));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/attendance/settings", requirePermission("attendance", "manage_settings"), async (req, res) => {
+    try {
+      const current = await getAttendanceSettings(storage);
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const latitude = body.warehouseLatitude === "" || body.warehouseLatitude == null ? null : Number(body.warehouseLatitude);
+      const longitude = body.warehouseLongitude === "" || body.warehouseLongitude == null ? null : Number(body.warehouseLongitude);
+      if (latitude != null && (!Number.isFinite(latitude) || latitude < -90 || latitude > 90)) return res.status(400).json({ error: "Warehouse latitude must be between -90 and 90." });
+      if (longitude != null && (!Number.isFinite(longitude) || longitude < -180 || longitude > 180)) return res.status(400).json({ error: "Warehouse longitude must be between -180 and 180." });
+      const next = {
+        ...current,
+        warehouseName: String(body.warehouseName ?? current.warehouseName).trim().slice(0, 120),
+        warehouseLatitude: latitude,
+        warehouseLongitude: longitude,
+        allowedRadiusMeters: Math.max(1, Number(body.allowedRadiusMeters ?? current.allowedRadiusMeters)),
+        warehouseVerificationEnabled: body.warehouseVerificationEnabled == null ? current.warehouseVerificationEnabled : Boolean(body.warehouseVerificationEnabled),
+        drivingStartEnabled: body.drivingStartEnabled == null ? current.drivingStartEnabled : Boolean(body.drivingStartEnabled),
+        hourlyCheckpointEnabled: body.hourlyCheckpointEnabled == null ? current.hourlyCheckpointEnabled : Boolean(body.hourlyCheckpointEnabled),
+        checkpointIntervalMinutes: Math.max(15, Number(body.checkpointIntervalMinutes ?? current.checkpointIntervalMinutes)),
+        firstFourHourValidationEnabled: body.firstFourHourValidationEnabled == null ? current.firstFourHourValidationEnabled : Boolean(body.firstFourHourValidationEnabled),
+        firstFourHourWindowHours: Math.max(1, Number(body.firstFourHourWindowHours ?? current.firstFourHourWindowHours)),
+        warehousePresenceThresholdMinutes: Math.max(1, Number(body.warehousePresenceThresholdMinutes ?? current.warehousePresenceThresholdMinutes)),
+        locationAccuracyRequired: body.locationAccuracyRequired == null ? current.locationAccuracyRequired : Boolean(body.locationAccuracyRequired),
+        payPeriodLengthDays: Math.max(1, Number(body.payPeriodLengthDays ?? current.payPeriodLengthDays)),
+        paydayWeekday: Math.min(6, Math.max(0, Number(body.paydayWeekday ?? current.paydayWeekday))),
+        payPeriodAnchorDate: String(body.payPeriodAnchorDate ?? current.payPeriodAnchorDate).slice(0, 10),
+        timezone: String(body.timezone ?? current.timezone).slice(0, 80),
+      };
+      await storage.setSetting("attendance_settings", next);
+      res.json(next);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // ── CRM Todos ──────────────────────────────────────────────────────────────────

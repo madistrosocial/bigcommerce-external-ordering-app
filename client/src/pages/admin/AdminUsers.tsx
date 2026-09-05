@@ -51,6 +51,7 @@ export const MODULES = [
   { key: "tools_bc_link",      label: "Tools › BC Product Link" },
   { key: "tools_bc_link_logs", label: "Tools › Product Link Logs" },
   { key: "promo_sku_tracker",  label: "Tools › Promo SKU Tracker" },
+  { key: "attendance",         label: "Attendance" },
   { key: "crm_customers",      label: "CRM › Customers" },
   { key: "crm_reactivation",   label: "CRM › Reactivation Opportunities" },
   { key: "crm_notes",          label: "CRM › Customer Notes" },
@@ -91,6 +92,19 @@ export const MARKETING_ACTION_PERMS = [
   { module: "marketing", action: "manage_templates", label: "Manage Marketing Templates", description: "Can create, edit, archive, and reuse marketing templates." },
   { module: "marketing", action: "manage_automations", label: "Manage Marketing Automations", description: "Can create and manage marketing automations." },
   { module: "marketing", action: "manage_suppressions", label: "Manage Marketing Suppressions", description: "Can manage customer marketing preferences and suppressions." },
+];
+
+export const ATTENDANCE_ACTION_PERMS = [
+  { module: "attendance", action: "clock", label: "Clock In / Out", description: "Can start and end their own attendance day." },
+  { module: "attendance", action: "view_own", label: "View Own History", description: "Can view their own attendance history." },
+  { module: "attendance", action: "view_dashboard", label: "View Overview", description: "Can view the Attendance management overview." },
+  { module: "attendance", action: "view_all", label: "View All Employees", description: "Can view attendance records for all employees." },
+  { module: "attendance", action: "view_logs", label: "View Attendance Logs", description: "Can view log details and location checkpoints." },
+  { module: "attendance", action: "view_exceptions", label: "View Exceptions", description: "Can view attendance exceptions." },
+  { module: "attendance", action: "view_reports", label: "View Reports", description: "Can view pay-period attendance reports." },
+  { module: "attendance", action: "review_exceptions", label: "Review Exceptions", description: "Can resolve attendance exceptions and add review notes." },
+  { module: "attendance", action: "manage_settings", label: "Manage Settings", description: "Can configure warehouse, checkpoints, and pay periods." },
+  { module: "attendance", action: "manage", label: "Manage Attendance", description: "Can perform administrative attendance actions." },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -559,6 +573,38 @@ function UserDetail({
                       onCheckedChange={v => onToggleModule(user.id, `marketing-${p.action}`, v, permId)}
                       data-testid={`toggle-marketing-${p.action}-${user.id}`}
                     />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Attendance-specific permissions */}
+        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Lock className="h-3.5 w-3.5 text-slate-500" />
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Attendance Permissions</span>
+            </div>
+            {groupId !== "none" && <span className="text-[10px] text-blue-600 flex items-center gap-1"><UsersRound className="h-3 w-3" /> (G) = from group</span>}
+          </div>
+          <div className="divide-y">
+            {ATTENDANCE_ACTION_PERMS.map(p => {
+              const perm = permMap.get(`${p.module}:${p.action}`);
+              const permId = perm?.id ?? null;
+              const isBusy = busyKey === `${user.id}-attendance-${p.action}`;
+              const directEnabled = perm ? userHasPerm(user, perm.id) : false;
+              const fromGroup = !directEnabled && perm ? groupPerms.has(perm.id) : false;
+              const effectiveEnabled = directEnabled || fromGroup;
+              return (
+                <div key={p.action} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex-1 min-w-0 pr-4">
+                    <p className="text-sm text-slate-700">{p.label}{fromGroup && <span className="ml-2 text-[10px] text-blue-500 font-medium">(G)</span>}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">{p.description}</p>
+                  </div>
+                  {permId === null ? <span className="text-[10px] text-slate-400 italic shrink-0">N/A</span> : isBusy ? <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" /> : (
+                    <Switch checked={effectiveEnabled} disabled={fromGroup} onCheckedChange={v => onToggleModule(user.id, `attendance-${p.action}`, v, permId)} data-testid={`toggle-attendance-${p.action}-${user.id}`} />
                   )}
                 </div>
               );

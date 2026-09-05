@@ -1,5 +1,5 @@
 import { db } from "../db";
- import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
+ import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, type AttendanceSession, type InsertAttendanceSession, type AttendanceCheckpoint, type InsertAttendanceCheckpoint, type AttendanceException, type InsertAttendanceException, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, attendanceSessions, attendanceLocationCheckpoints, attendanceExceptions, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
 import { eq, desc, and, inArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { normalizeMarketingProductDisplayOptions, DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS } from "@shared/marketing-products";
@@ -171,6 +171,19 @@ export interface IStorage {
   // CRM Table resets
   truncateCrmCustomers(): Promise<void>;
   truncateCrmOrders(): Promise<void>;
+
+  // Attendance
+  getAttendanceById(id: number): Promise<AttendanceSession | undefined>;
+  getActiveAttendanceForUser(userId: number): Promise<AttendanceSession | undefined>;
+  getAttendanceHistoryForUser(userId: number, limit?: number): Promise<AttendanceSession[]>;
+  createAttendance(data: InsertAttendanceSession): Promise<AttendanceSession>;
+  updateAttendance(id: number, data: Partial<InsertAttendanceSession>): Promise<AttendanceSession | undefined>;
+  createAttendanceCheckpoint(data: InsertAttendanceCheckpoint): Promise<AttendanceCheckpoint>;
+  getAttendanceCheckpoints(attendanceId: number): Promise<AttendanceCheckpoint[]>;
+  getAttendanceRecords(opts: { from?: string; to?: string; userId?: number; status?: string; startMethod?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+  createAttendanceException(data: InsertAttendanceException): Promise<AttendanceException>;
+  getAttendanceExceptions(opts: { status?: string; from?: string; to?: string; userId?: number; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+  reviewAttendanceException(id: number, data: { status: string; reviewed_by: number; review_notes?: string | null }): Promise<AttendanceException | undefined>;
 
   // POS Enhancements — Price Override Audit
   createPosPriceOverrideAudit(entry: InsertPosPriceOverrideAudit): Promise<PosPriceOverrideAudit>;
@@ -1979,6 +1992,139 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.is_enabled, true))
       .orderBy(asc(users.name));
     return rows.map(r => ({ id: r.id, name: r.name ?? '' }));
+  }
+
+  // ─── Attendance ──────────────────────────────────────────────────────────────
+
+  async getAttendanceById(id: number): Promise<AttendanceSession | undefined> {
+    const rows = await db.select().from(attendanceSessions).where(eq(attendanceSessions.id, id)).limit(1);
+    return rows[0];
+  }
+
+  async getActiveAttendanceForUser(userId: number): Promise<AttendanceSession | undefined> {
+    const rows = await db.select().from(attendanceSessions)
+      .where(and(eq(attendanceSessions.user_id, userId), eq(attendanceSessions.status, "active")))
+      .orderBy(desc(attendanceSessions.time_in))
+      .limit(1);
+    return rows[0];
+  }
+
+  async getAttendanceHistoryForUser(userId: number, limit = 30): Promise<AttendanceSession[]> {
+    return db.select().from(attendanceSessions)
+      .where(eq(attendanceSessions.user_id, userId))
+      .orderBy(desc(attendanceSessions.time_in), desc(attendanceSessions.created_at))
+      .limit(Math.min(Math.max(limit, 1), 100));
+  }
+
+  async createAttendance(data: InsertAttendanceSession): Promise<AttendanceSession> {
+    const rows = await db.insert(attendanceSessions).values(data as any).returning();
+    return rows[0];
+  }
+
+  async updateAttendance(id: number, data: Partial<InsertAttendanceSession>): Promise<AttendanceSession | undefined> {
+    const rows = await db.update(attendanceSessions)
+      .set({ ...data, updated_at: new Date() } as any)
+      .where(eq(attendanceSessions.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  async createAttendanceCheckpoint(data: InsertAttendanceCheckpoint): Promise<AttendanceCheckpoint> {
+    const rows = await db.insert(attendanceLocationCheckpoints).values(data as any).returning();
+    return rows[0];
+  }
+
+  async getAttendanceCheckpoints(attendanceId: number): Promise<AttendanceCheckpoint[]> {
+    return db.select().from(attendanceLocationCheckpoints)
+      .where(eq(attendanceLocationCheckpoints.attendance_id, attendanceId))
+      .orderBy(asc(attendanceLocationCheckpoints.captured_at));
+  }
+
+  async getAttendanceRecords(opts: { from?: string; to?: string; userId?: number; status?: string; startMethod?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }> {
+    const conditions: any[] = [];
+    if (opts.from) conditions.push(gte(attendanceSessions.work_date, opts.from));
+    if (opts.to) conditions.push(lte(attendanceSessions.work_date, opts.to));
+    if (opts.userId) conditions.push(eq(attendanceSessions.user_id, opts.userId));
+    if (opts.status && opts.status !== "all") conditions.push(eq(attendanceSessions.status, opts.status));
+    if (opts.startMethod && opts.startMethod !== "all") conditions.push(eq(attendanceSessions.start_method, opts.startMethod));
+    const where = conditions.length ? and(...conditions) : undefined;
+    const [rows, countRows] = await Promise.all([
+      db.select({
+        attendance: attendanceSessions,
+        employee_name: users.name,
+        employee_username: users.username,
+      })
+        .from(attendanceSessions)
+        .leftJoin(users, eq(users.id, attendanceSessions.user_id))
+        .where(where)
+        .orderBy(desc(attendanceSessions.work_date), desc(attendanceSessions.time_in))
+        .limit(Math.min(Math.max(opts.limit ?? 100, 1), 500))
+        .offset(Math.max(opts.offset ?? 0, 0)),
+      db.select({ count: sql<number>`count(*)` }).from(attendanceSessions).where(where),
+    ]);
+    return {
+      rows: rows.map(row => ({ ...row.attendance, employee_name: row.employee_name, employee_username: row.employee_username })),
+      total: Number(countRows[0]?.count ?? 0),
+    };
+  }
+
+  async createAttendanceException(data: InsertAttendanceException): Promise<AttendanceException> {
+    const rows = await db.insert(attendanceExceptions).values(data as any).returning();
+    return rows[0];
+  }
+
+  async getAttendanceExceptions(opts: { status?: string; from?: string; to?: string; userId?: number; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }> {
+    const conditions: any[] = [];
+    if (opts.status && opts.status !== "all") conditions.push(eq(attendanceExceptions.status, opts.status));
+    if (opts.from) conditions.push(gte(attendanceExceptions.detected_at, new Date(`${opts.from}T00:00:00Z`)));
+    if (opts.to) {
+      const end = new Date(`${opts.to}T00:00:00Z`);
+      end.setUTCDate(end.getUTCDate() + 1);
+      conditions.push(lt(attendanceExceptions.detected_at, end));
+    }
+    if (opts.userId) conditions.push(eq(attendanceExceptions.user_id, opts.userId));
+    const where = conditions.length ? and(...conditions) : undefined;
+    const [rows, countRows] = await Promise.all([
+      db.select({
+        exception: attendanceExceptions,
+        employee_name: users.name,
+        employee_username: users.username,
+        work_date: attendanceSessions.work_date,
+        start_method: attendanceSessions.start_method,
+        time_in: attendanceSessions.time_in,
+        time_out: attendanceSessions.time_out,
+      })
+        .from(attendanceExceptions)
+        .leftJoin(users, eq(users.id, attendanceExceptions.user_id))
+        .leftJoin(attendanceSessions, eq(attendanceSessions.id, attendanceExceptions.attendance_id))
+        .where(where)
+        .orderBy(desc(attendanceExceptions.detected_at))
+        .limit(Math.min(Math.max(opts.limit ?? 100, 1), 500))
+        .offset(Math.max(opts.offset ?? 0, 0)),
+      db.select({ count: sql<number>`count(*)` }).from(attendanceExceptions).where(where),
+    ]);
+    return {
+      rows: rows.map(row => ({
+        ...row.exception,
+        employee_name: row.employee_name,
+        employee_username: row.employee_username,
+        work_date: row.work_date,
+        start_method: row.start_method,
+        time_in: row.time_in,
+        time_out: row.time_out,
+      })),
+      total: Number(countRows[0]?.count ?? 0),
+    };
+  }
+
+  async reviewAttendanceException(id: number, data: { status: string; reviewed_by: number; review_notes?: string | null }): Promise<AttendanceException | undefined> {
+    const rows = await db.update(attendanceExceptions).set({
+      status: data.status,
+      reviewed_by: data.reviewed_by,
+      reviewed_at: new Date(),
+      review_notes: data.review_notes ?? null,
+    }).where(eq(attendanceExceptions.id, id)).returning();
+    return rows[0];
   }
 
   // ─── CRM Order Notes ──────────────────────────────────────────────────────────

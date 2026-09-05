@@ -54,6 +54,8 @@ import StoreCreditUsageReportPage from "@/pages/admin/reports/StoreCreditUsageRe
 import SalesReportPage from "@/pages/admin/reports/SalesReport";
 import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, MarketingAudiences, MarketingSettings } from "@/pages/marketing/Marketing";
 import { MarketingAnalytics, MarketingTemplates, MarketingAutomations } from "@/pages/marketing/MarketingPhase2";
+import AttendancePage from "@/pages/attendance/Attendance";
+import AttendanceAdminPage from "@/pages/attendance/AttendanceAdmin";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -153,6 +155,26 @@ function Router() {
       </Route>
       <Route path="/inventory/logs">
         {() => <Redirect to="/inventory-push-logs" />}
+      </Route>
+
+      {/* ── Attendance routes ── */}
+      <Route path="/attendance">
+        {() => <PermissionRoute component={AttendancePage} module="attendance" action="clock" />}
+      </Route>
+      <Route path="/attendance/overview">
+        {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_dashboard" />}
+      </Route>
+      <Route path="/attendance/logs">
+        {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_logs" />}
+      </Route>
+      <Route path="/attendance/exceptions">
+        {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_exceptions" />}
+      </Route>
+      <Route path="/attendance/reports">
+        {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_reports" />}
+      </Route>
+      <Route path="/attendance/settings">
+        {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="manage_settings" />}
       </Route>
 
       {/* ── Marketing routes ── */}

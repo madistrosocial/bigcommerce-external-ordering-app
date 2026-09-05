@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Monitor, ShoppingBag, Package, BookOpen,
   ShoppingCart, Settings, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, LogOut, Truck, Wifi, WifiOff, Menu, X,
-  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart, Mail, Megaphone, KeyRound,
+  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart, Mail, Megaphone, KeyRound, Clock3,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -143,6 +143,16 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("promo_sku_tracker") ? [{ label: "Promo SKU Tracker", path: "/tools/promo-sku-tracker" }] : []),
   ];
 
+  // Attendance children — employees see their own clock; managers see scoped admin views.
+  const attendanceChildren: NavLeaf[] = [
+    ...(hasPermission("attendance", "clock") ? [{ label: "My Attendance", path: "/attendance" }] : []),
+    ...(hasPermission("attendance", "view_dashboard") ? [{ label: "Overview", path: "/attendance/overview" }] : []),
+    ...(hasPermission("attendance", "view_logs") ? [{ label: "Attendance Logs", path: "/attendance/logs" }] : []),
+    ...(hasPermission("attendance", "view_exceptions") ? [{ label: "Exceptions", path: "/attendance/exceptions" }] : []),
+    ...(hasPermission("attendance", "view_reports") ? [{ label: "Reports", path: "/attendance/reports" }] : []),
+    ...(hasPermission("attendance", "manage_settings") ? [{ label: "Settings", path: "/attendance/settings" }] : []),
+  ];
+
   // CRM children
   const crmChildren: NavLeaf[] = [
     ...(hasPermission("crm_customers") ? [{ label: "CRM", path: "/crm/customers" }] : []),
@@ -172,6 +182,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("catalog") ? [{ id: "catalog", label: "Catalog", icon: BookOpen, path: "/catalog" }] : []),
     ...(hasPermission("cart") ? [{ id: "cart", label: "Cart", icon: ShoppingCart, path: "/cart" }] : []),
     ...(toolsChildren.length > 0 ? [{ id: "tools", label: "Tools", icon: Wrench, children: toolsChildren }] : []),
+    ...(attendanceChildren.length > 0 ? [{ id: "attendance", label: "Attendance", icon: Clock3, children: attendanceChildren }] : []),
     ...(reportingChildren.length > 0 ? [{ id: "reporting", label: "Reporting", icon: FileBarChart, children: reportingChildren }] : []),
   ];
 
