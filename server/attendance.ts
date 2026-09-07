@@ -11,6 +11,7 @@ export const ATTENDANCE_PERMISSION_DEFINITIONS = [
   { module: "attendance", action: "review_exceptions", description: "Attendance: resolve attendance exceptions" },
   { module: "attendance", action: "manage_settings", description: "Attendance: manage warehouse and payroll settings" },
   { module: "attendance", action: "manage", description: "Attendance: manage attendance records" },
+  { module: "attendance", action: "approve", description: "Attendance: approve and lock attendance records" },
 ] as const;
 
 export type AttendanceSettings = {

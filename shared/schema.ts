@@ -311,6 +311,10 @@ export const attendanceSessions = pgTable("attendance_sessions", {
   time_out_verification: text("time_out_verification"),
   driving_verified: boolean("driving_verified").notNull().default(false),
   driving_verified_at: timestamp("driving_verified_at"),
+  review_status: text("review_status").notNull().default("not_reviewed"), // not_reviewed | needs_review | approved | locked
+  approved_by: integer("approved_by").references(() => users.id),
+  approved_at: timestamp("approved_at"),
+  locked_at: timestamp("locked_at"),
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({
@@ -347,6 +351,20 @@ export const attendanceExceptions = pgTable("attendance_exceptions", {
 }, (t) => ({
   statusDetectedIdx: index("attendance_exceptions_status_detected_idx").on(t.status, t.detected_at),
   userIdx: index("attendance_exceptions_user_idx").on(t.user_id),
+}));
+
+export const attendanceAuditLog = pgTable("attendance_audit_log", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  attendance_id: integer("attendance_id").notNull().references(() => attendanceSessions.id, { onDelete: "cascade" }),
+  actor_user_id: integer("actor_user_id").notNull().references(() => users.id),
+  action: text("action").notNull(),
+  changed_field: text("changed_field"),
+  old_value: jsonb("old_value"),
+  new_value: jsonb("new_value"),
+  reason: text("reason"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  attendanceCreatedIdx: index("attendance_audit_attendance_created_idx").on(t.attendance_id, t.created_at),
 }));
 
 // ─── POS Enhancements (Price Protection / Store Credit) ───────────────────────
@@ -643,6 +661,7 @@ export const insertCrmAuditLogSchema = createInsertSchema(crmAuditLog).omit({ id
 export const insertAttendanceSessionSchema = createInsertSchema(attendanceSessions).omit({ id: true, created_at: true, updated_at: true });
 export const insertAttendanceCheckpointSchema = createInsertSchema(attendanceLocationCheckpoints).omit({ id: true, created_at: true });
 export const insertAttendanceExceptionSchema = createInsertSchema(attendanceExceptions).omit({ id: true });
+export const insertAttendanceAuditLogSchema = createInsertSchema(attendanceAuditLog).omit({ id: true, created_at: true });
 
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -713,6 +732,8 @@ export type InsertAttendanceCheckpoint = z.infer<typeof insertAttendanceCheckpoi
 export type AttendanceCheckpoint = typeof attendanceLocationCheckpoints.$inferSelect;
 export type InsertAttendanceException = z.infer<typeof insertAttendanceExceptionSchema>;
 export type AttendanceException = typeof attendanceExceptions.$inferSelect;
+export type InsertAttendanceAuditLog = z.infer<typeof insertAttendanceAuditLogSchema>;
+export type AttendanceAuditLog = typeof attendanceAuditLog.$inferSelect;
 
 // ─── BigCommerce Order Line Items Mirror ──────────────────────────────────────
 

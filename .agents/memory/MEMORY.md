@@ -20,3 +20,4 @@
 - [Zoho marketing delivery boundary](zoho-marketing-delivery.md) — ZeptoMail is transactional-only; compliant campaign delivery requires Zoho Campaigns/Email API access.
 - [Attendance accounting baseline](attendance-accounting-baseline.md) — ledger excludes weekends and observed US holidays; short hours use an 8-hour weekday expectation until schedules are configurable.
 - [Stale session recovery](stale-session-recovery.md) — invalid saved auth must fail safely and expose a cache-clearing force-logout path.
+- [Attendance review and audit](attendance-review-audit.md) — completion state stays separate from manager approval; corrections preserve reasoned old/new history.

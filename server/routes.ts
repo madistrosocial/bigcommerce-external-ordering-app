@@ -7196,6 +7196,7 @@ export async function registerRoutes(
       const period = String(req.query.period ?? "today");
       let from = String(req.query.from ?? today);
       let to = String(req.query.to ?? today);
+      let currentPayPeriod: { start: string; end: string; payday: string } | undefined;
       if (period === "week") {
         const date = new Date(`${today}T00:00:00Z`);
         const mondayOffset = (date.getUTCDay() + 6) % 7;
@@ -7203,26 +7204,65 @@ export async function registerRoutes(
         from = date.toISOString().slice(0, 10);
       } else if (period === "pay_period") {
         const settings = await getAttendanceSettings(storage);
-        const payPeriod = getPayPeriod(new Date(), settings);
-        from = payPeriod.start;
-        to = payPeriod.end;
+        currentPayPeriod = getPayPeriod(new Date(), settings);
+        from = currentPayPeriod.start;
+        to = currentPayPeriod.end;
       }
       const [recordResult, users, exceptionResult] = await Promise.all([
         storage.getAttendanceRecords({ from, to, limit: 500, offset: 0 }),
         storage.getAllUsers(),
-        storage.getAttendanceExceptions({ status: "open", from, to, limit: 1, offset: 0 }),
+        storage.getAttendanceExceptions({ status: "open", from, to, limit: 50, offset: 0 }),
       ]);
       const activeCount = recordResult.rows.filter(row => row.status === "active").length;
       const loggedIn = new Set(recordResult.rows.map(row => row.user_id));
       const totalSeconds = recordResult.rows.reduce((sum, row) => sum + Number(row.total_seconds ?? 0), 0);
+      const missingTimeOutRows = recordResult.rows.filter(row => row.time_in && !row.time_out && row.work_date < today);
+      const reviewRows = recordResult.rows.filter(row => row.review_status === "needs_review");
+      const attention = [
+        ...missingTimeOutRows.slice(0, 10).map(row => ({
+          type: "missing_time_out",
+          label: "Missing Time Out",
+          employee_name: row.employee_name,
+          work_date: row.work_date,
+          attendance_id: row.id,
+        })),
+        ...exceptionResult.rows.slice(0, 10).map((row: any) => ({
+          type: row.exception_type,
+          label: row.exception_type.replace(/_/g, " "),
+          employee_name: row.employee_name,
+          work_date: row.work_date,
+          attendance_id: row.attendance_id,
+          exception_id: row.id,
+          details: row.details,
+        })),
+        ...reviewRows.slice(0, 10).map(row => ({
+          type: "needs_review",
+          label: "Attendance Review",
+          employee_name: row.employee_name,
+          work_date: row.work_date,
+          attendance_id: row.id,
+        })),
+      ].slice(0, 10);
+      const readinessTotal = recordResult.rows.length;
+      const readinessReady = recordResult.rows.filter(row => row.review_status === "approved" || row.review_status === "locked").length;
       res.json({
         period: { from, to, label: period },
+        payPeriod: currentPayPeriod,
         kpis: {
           totalSeconds,
+          employees: users.filter(user => user.is_enabled).length,
           salesReps: users.filter(user => user.is_enabled).length,
           currentlyWorking: activeCount,
           notLoggedIn: Math.max(0, users.filter(user => user.is_enabled).length - loggedIn.size),
+          needsReview: reviewRows.length + exceptionResult.total,
+          missingTimeOut: missingTimeOutRows.length,
           exceptions: exceptionResult.total,
+        },
+        attention,
+        payrollReadiness: {
+          ready: readinessReady,
+          total: readinessTotal,
+          percent: readinessTotal ? Math.round((readinessReady / readinessTotal) * 100) : 100,
         },
         rows: recordResult.rows,
       });
@@ -7240,6 +7280,7 @@ export async function registerRoutes(
         userId: q.userId ? Number(q.userId) : undefined,
         status: q.status || undefined,
         startMethod: q.startMethod || undefined,
+        reviewStatus: q.reviewStatus || undefined,
         limit: q.limit ? Number(q.limit) : 100,
         offset: q.offset ? Number(q.offset) : 0,
       }));
@@ -7252,11 +7293,102 @@ export async function registerRoutes(
     try {
       const attendance = await storage.getAttendanceById(Number(req.params.id));
       if (!attendance) return res.status(404).json({ error: "Attendance record not found." });
-      const [employee, checkpoints] = await Promise.all([
+      const [employee, checkpoints, audit] = await Promise.all([
         storage.getUser(attendance.user_id),
         storage.getAttendanceCheckpoints(attendance.id),
+        storage.getAttendanceAuditHistory(attendance.id),
       ]);
-      res.json({ attendance, employee: employee ? { id: employee.id, name: employee.name, username: employee.username } : null, checkpoints });
+      res.json({ attendance, employee: employee ? { id: employee.id, name: employee.name, username: employee.username } : null, checkpoints, audit });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/attendance/admin/logs/:id/review", requirePermission("attendance", "approve"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const id = Number(req.params.id);
+      const attendance = await storage.getAttendanceById(id);
+      if (!attendance) return res.status(404).json({ error: "Attendance record not found." });
+      const nextStatus = String(req.body?.review_status ?? "");
+      if (!["not_reviewed", "needs_review", "approved", "locked"].includes(nextStatus)) {
+        return res.status(400).json({ error: "Invalid review status." });
+      }
+      if (attendance.review_status === "locked" && nextStatus !== "locked" && !(user.role === "admin" && nextStatus === "needs_review")) {
+        return res.status(409).json({ error: "Locked attendance records must be reopened by an authorized administrator." });
+      }
+      const reason = String(req.body?.reason ?? "").trim().slice(0, 2000);
+      if (nextStatus === "needs_review" && !reason) {
+        return res.status(400).json({ error: "A reason is required when marking a record for review." });
+      }
+      const now = new Date();
+      const updated = await storage.updateAttendanceReview(id, {
+        review_status: nextStatus,
+        approved_by: nextStatus === "approved" || nextStatus === "locked" ? user.id : null,
+        approved_at: nextStatus === "approved" || nextStatus === "locked" ? now : null,
+        locked_at: nextStatus === "locked" ? now : null,
+      });
+      if (!updated) return res.status(404).json({ error: "Attendance record not found." });
+      await storage.createAttendanceAuditLog({
+        attendance_id: id,
+        actor_user_id: user.id,
+        action: "review_status_changed",
+        changed_field: "review_status",
+        old_value: attendance.review_status,
+        new_value: nextStatus,
+        reason: reason || null,
+      });
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/attendance/admin/logs/:id/correction", requirePermission("attendance", "manage"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const id = Number(req.params.id);
+      const attendance = await storage.getAttendanceById(id);
+      if (!attendance) return res.status(404).json({ error: "Attendance record not found." });
+      if (attendance.review_status === "locked") return res.status(409).json({ error: "Locked attendance records cannot be edited." });
+      const reason = String(req.body?.reason ?? "").trim().slice(0, 2000);
+      if (!reason) return res.status(400).json({ error: "A reason is required for attendance corrections." });
+      const nextTimeIn = req.body?.time_in ? new Date(String(req.body.time_in)) : attendance.time_in;
+      const nextTimeOut = req.body?.time_out ? new Date(String(req.body.time_out)) : attendance.time_out;
+      if ((nextTimeIn && Number.isNaN(nextTimeIn.getTime())) || (nextTimeOut && Number.isNaN(nextTimeOut.getTime()))) {
+        return res.status(400).json({ error: "Enter valid time in and time out values." });
+      }
+      if (nextTimeIn && nextTimeOut && nextTimeOut < nextTimeIn) {
+        return res.status(400).json({ error: "Time out must be after time in." });
+      }
+      const nextTotal = nextTimeIn && nextTimeOut
+        ? Math.max(0, Math.floor((nextTimeOut.getTime() - nextTimeIn.getTime()) / 1000))
+        : 0;
+      const updated = await storage.updateAttendance(id, {
+        time_in: nextTimeIn ?? null,
+        time_out: nextTimeOut ?? null,
+        total_seconds: nextTotal,
+        status: nextTimeOut ? "completed" : "incomplete",
+        review_status: "needs_review",
+      });
+      if (!updated) return res.status(404).json({ error: "Attendance record not found." });
+      if (String(attendance.time_in) !== String(nextTimeIn)) {
+        await storage.createAttendanceAuditLog({
+          attendance_id: id, actor_user_id: user.id, action: "attendance_corrected",
+          changed_field: "time_in", old_value: attendance.time_in, new_value: nextTimeIn, reason,
+        });
+      }
+      if (String(attendance.time_out) !== String(nextTimeOut)) {
+        await storage.createAttendanceAuditLog({
+          attendance_id: id, actor_user_id: user.id, action: "attendance_corrected",
+          changed_field: "time_out", old_value: attendance.time_out, new_value: nextTimeOut, reason,
+        });
+      }
+      await storage.createAttendanceAuditLog({
+        attendance_id: id, actor_user_id: user.id, action: "attendance_corrected",
+        changed_field: "review_status", old_value: attendance.review_status, new_value: "needs_review", reason,
+      });
+      res.json(updated);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -7311,19 +7443,32 @@ export async function registerRoutes(
         const current = byEmployee.get(row.user_id) ?? {
           user_id: row.user_id,
           employee_name: row.employee_name,
-          regular_seconds: 0,
-          overtime_seconds: 0,
           total_seconds: 0,
           days: 0,
+          missing: 0,
+          review: 0,
         };
         const seconds = Number(row.total_seconds ?? 0);
         current.total_seconds += seconds;
-        current.regular_seconds += Math.min(seconds, 8 * 3600);
-        current.overtime_seconds += Math.max(0, seconds - 8 * 3600);
         current.days += 1;
+        if (!row.time_out) current.missing += 1;
+        if (row.review_status === "needs_review") current.review += 1;
         byEmployee.set(row.user_id, current);
       }
-      res.json({ from, to, rows: Array.from(byEmployee.values()), total: result.total });
+      const rows = Array.from(byEmployee.values());
+      res.json({
+        from,
+        to,
+        summary: {
+          employees: rows.length,
+          records: result.total,
+          totalSeconds: rows.reduce((sum, row) => sum + row.total_seconds, 0),
+          needsReview: rows.reduce((sum, row) => sum + row.review, 0),
+          missingTimeOut: rows.reduce((sum, row) => sum + row.missing, 0),
+        },
+        rows,
+        total: result.total,
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

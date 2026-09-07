@@ -3,6 +3,8 @@ import { db } from "../db";
 import { eq, desc, and, inArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { normalizeMarketingProductDisplayOptions, DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS } from "@shared/marketing-products";
+import { attendanceAuditLog } from "@shared/schema";
+import type { AttendanceAuditLog, InsertAttendanceAuditLog } from "@shared/schema";
 
 const MARKETING_US_STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -182,7 +184,10 @@ export interface IStorage {
   updateAttendance(id: number, data: Partial<InsertAttendanceSession>): Promise<AttendanceSession | undefined>;
   createAttendanceCheckpoint(data: InsertAttendanceCheckpoint): Promise<AttendanceCheckpoint>;
   getAttendanceCheckpoints(attendanceId: number): Promise<AttendanceCheckpoint[]>;
-  getAttendanceRecords(opts: { from?: string; to?: string; userId?: number; status?: string; startMethod?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+  getAttendanceRecords(opts: { from?: string; to?: string; userId?: number; status?: string; startMethod?: string; reviewStatus?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+  getAttendanceAuditHistory(attendanceId: number): Promise<AttendanceAuditLog[]>;
+  createAttendanceAuditLog(data: InsertAttendanceAuditLog): Promise<AttendanceAuditLog>;
+  updateAttendanceReview(id: number, data: { review_status: string; approved_by?: number | null; approved_at?: Date | null; locked_at?: Date | null }): Promise<AttendanceSession | undefined>;
   createAttendanceException(data: InsertAttendanceException): Promise<AttendanceException>;
   getAttendanceExceptions(opts: { status?: string; from?: string; to?: string; userId?: number; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
   reviewAttendanceException(id: number, data: { status: string; reviewed_by: number; review_notes?: string | null }): Promise<AttendanceException | undefined>;
@@ -2059,13 +2064,20 @@ export class DatabaseStorage implements IStorage {
       .orderBy(asc(attendanceLocationCheckpoints.captured_at));
   }
 
-  async getAttendanceRecords(opts: { from?: string; to?: string; userId?: number; status?: string; startMethod?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }> {
+  async getAttendanceRecords(opts: { from?: string; to?: string; userId?: number; status?: string; startMethod?: string; reviewStatus?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }> {
     const conditions: any[] = [];
     if (opts.from) conditions.push(gte(attendanceSessions.work_date, opts.from));
     if (opts.to) conditions.push(lte(attendanceSessions.work_date, opts.to));
     if (opts.userId) conditions.push(eq(attendanceSessions.user_id, opts.userId));
     if (opts.status && opts.status !== "all") conditions.push(eq(attendanceSessions.status, opts.status));
     if (opts.startMethod && opts.startMethod !== "all") conditions.push(eq(attendanceSessions.start_method, opts.startMethod));
+    if (opts.reviewStatus && opts.reviewStatus !== "all") {
+      if (opts.reviewStatus === "missing_time_out") {
+        conditions.push(and(isNotNull(attendanceSessions.time_in), isNull(attendanceSessions.time_out)));
+      } else {
+        conditions.push(eq(attendanceSessions.review_status, opts.reviewStatus));
+      }
+    }
     const where = conditions.length ? and(...conditions) : undefined;
     const [rows, countRows] = await Promise.all([
       db.select({
@@ -2085,6 +2097,25 @@ export class DatabaseStorage implements IStorage {
       rows: rows.map(row => ({ ...row.attendance, employee_name: row.employee_name, employee_username: row.employee_username })),
       total: Number(countRows[0]?.count ?? 0),
     };
+  }
+
+  async getAttendanceAuditHistory(attendanceId: number): Promise<AttendanceAuditLog[]> {
+    return db.select().from(attendanceAuditLog)
+      .where(eq(attendanceAuditLog.attendance_id, attendanceId))
+      .orderBy(desc(attendanceAuditLog.created_at));
+  }
+
+  async createAttendanceAuditLog(data: InsertAttendanceAuditLog): Promise<AttendanceAuditLog> {
+    const rows = await db.insert(attendanceAuditLog).values(data as any).returning();
+    return rows[0];
+  }
+
+  async updateAttendanceReview(id: number, data: { review_status: string; approved_by?: number | null; approved_at?: Date | null; locked_at?: Date | null }): Promise<AttendanceSession | undefined> {
+    const rows = await db.update(attendanceSessions)
+      .set({ ...data, updated_at: new Date() } as any)
+      .where(eq(attendanceSessions.id, id))
+      .returning();
+    return rows[0];
   }
 
   async createAttendanceException(data: InsertAttendanceException): Promise<AttendanceException> {
