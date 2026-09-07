@@ -179,7 +179,11 @@ function ledgerStatus(
   if (kind === "holiday") return "holiday";
   if (kind === "weekend") return "weekend";
   if (!selectedUserId && record?.loggedCount > 0) return "team";
-  return record ? (record.status === "active" ? "active" : "worked") : "absent";
+  if (record) return record.status === "active" ? "active" : "worked";
+  const today = dateOnly(new Date());
+  if (date > today) return "upcoming";
+  if (date === today) return "not_started";
+  return "absent";
 }
 
 const tabs = [
@@ -403,10 +407,14 @@ function Logs() {
   const expectedTeamMembers = selectedMember ? 1 : teamMembers.length;
   const businessDates = dates.filter(date => dayKind(date, holidayMap) === "weekday");
   const workedRows = rows.filter((row: any) => dayKind(row.work_date, holidayMap) === "weekday");
+  const today = dateOnly(new Date());
+  const elapsedBusinessDates = businessDates.filter(date => date < today);
+  const elapsedWorkedRows = workedRows.filter((row: any) => row.work_date < today);
   const totalSeconds = workedRows.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
-  const expectedSeconds = businessDates.length * expectedTeamMembers * EXPECTED_DAILY_SECONDS;
+  const expectedSeconds = elapsedBusinessDates.length * expectedTeamMembers * EXPECTED_DAILY_SECONDS;
   const daysWorked = new Set(workedRows.map((row: any) => `${row.user_id}:${row.work_date}`)).size;
-  const absentDays = Math.max(0, businessDates.length * expectedTeamMembers - daysWorked);
+  const elapsedDaysWorked = new Set(elapsedWorkedRows.map((row: any) => `${row.user_id}:${row.work_date}`)).size;
+  const absentDays = Math.max(0, elapsedBusinessDates.length * expectedTeamMembers - elapsedDaysWorked);
   const lostSeconds = Math.max(0, expectedSeconds - totalSeconds);
   const clearFilters = () => {
     const currentMonth = currentMonthKey();
@@ -426,11 +434,13 @@ function Logs() {
     || reviewStatus !== "all"
     || from !== monthDefaultRange.from
     || to !== monthDefaultRange.to;
-  const statusLabel: Record<string, string> = { worked: "Worked", active: "Working", absent: "Absent", weekend: "Weekend", holiday: "US holiday", team: "Team logged" };
+  const statusLabel: Record<string, string> = { worked: "Worked", active: "Working", absent: "Absent", not_started: "Not started", upcoming: "Upcoming", weekend: "Weekend", holiday: "US holiday", team: "Team logged" };
   const statusClass: Record<string, string> = {
     worked: "border-emerald-200 bg-emerald-50 text-emerald-700",
     active: "border-blue-200 bg-blue-50 text-blue-700",
     absent: "border-red-200 bg-red-50 text-red-700",
+    not_started: "border-slate-200 bg-slate-100 text-slate-600",
+    upcoming: "border-indigo-200 bg-indigo-50 text-indigo-700",
     weekend: "border-slate-200 bg-slate-100 text-slate-500",
     holiday: "border-amber-200 bg-amber-50 text-amber-700",
     team: "border-indigo-200 bg-indigo-50 text-indigo-700",
@@ -498,13 +508,14 @@ function Logs() {
                   const holiday = holidayMap.get(date);
                   const dateRecords = summary?.records ?? [];
                   const names = dateRecords.map((row: any) => row.employee_name || row.employee_username).filter(Boolean);
-                  const displayHours = selectedMember ? hours(record?.total_seconds) : hours(summary?.totalSeconds);
+                   const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
+                   const displayHours = noAttendance ? "—" : selectedMember ? hours(record?.total_seconds) : hours(summary?.totalSeconds);
                   return <tr key={date} className={`border-b border-slate-100 last:border-0 ${statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
                     <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold text-slate-800">{shortDate(date)}</span><span className="ml-2 text-[10px] text-slate-400">{date}</span></td>
                     <td className={`px-4 py-3 font-medium ${statusKey === "weekend" ? "text-slate-400" : "text-slate-600"}`}>{weekday(date)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span>{holiday && <span className="ml-2 text-[10px] text-amber-700">{holiday}</span>}</td>
-                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</td>
-                    <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? `${record.start_method === "warehouse" ? "Warehouse" : "Route start"} · ${record.status}` : statusKey === "absent" ? "No attendance log recorded" : "Not expected") : (names.length ? `${names.slice(0, 3).join(", ")}${names.length > 3 ? ` +${names.length - 3}` : ""}` : statusKey === "absent" ? "No team member logged time" : "Not expected")}</td>
+                     <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</td>
+                     <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? `${record.start_method === "warehouse" ? "Warehouse" : "Route start"} · ${record.status}` : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "Future workday" : "Not expected") : (names.length ? `${names.slice(0, 3).join(", ")}${names.length > 3 ? ` +${names.length - 3}` : ""}` : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "Future workday" : "Not expected")}</td>
                     <td className="px-4 py-3 text-right">{record && <Button variant="ghost" size="sm" className="h-7 text-[11px] text-red-600 hover:text-red-700" onClick={() => setSelectedId(record.id)}>Open log<ChevronRight className="ml-1 h-3 w-3" /></Button>}</td>
                   </tr>;
                 })}
@@ -517,10 +528,11 @@ function Logs() {
                const record = selectedMember ? summary?.records.find((row: any) => String(row.user_id) === userId) : undefined;
                const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, userId === "all" ? "" : userId);
                const holiday = holidayMap.get(date);
-               const displayHours = selectedMember ? hours(record?.total_seconds) : hours(summary?.totalSeconds);
+                const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
+                const displayHours = noAttendance ? "—" : selectedMember ? hours(record?.total_seconds) : hours(summary?.totalSeconds);
                return <div key={date} className="rounded-xl border border-slate-100 bg-white p-3">
                  <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{shortDate(date)} <span className="font-normal text-slate-400">{weekday(date)}</span></p><p className="mt-1 text-[11px] text-slate-400">{date}{holiday ? ` · ${holiday}` : ""}</p></div><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span></div>
-                 <div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">Hours</span><span className="font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</span></div>
+                  <div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">Hours</span><span className="font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</span></div>
                  {record && <Button variant="outline" size="sm" className="mt-3 h-8 w-full text-xs text-red-600" onClick={() => setSelectedId(record.id)}>Open log<ChevronRight className="ml-1 h-3 w-3" /></Button>}
                </div>;
              })}
