@@ -13,8 +13,15 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Users, ShieldCheck, ChevronRight, ArrowLeft, User, Lock, Shield, Eye, EyeOff, Save, Search, UsersRound, Home } from "lucide-react";
+import { Loader2, Users, ShieldCheck, ChevronRight, ArrowLeft, User, Lock, Shield, Eye, EyeOff, Save, Search, UsersRound, Home, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+function googleMapsUrl(latitude: unknown, longitude: unknown) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`;
+}
 
 // ─── Landing page options ─────────────────────────────────────────────────────
 
@@ -339,6 +346,7 @@ function UserDetail({
             <div>
               <p className="text-sm font-medium text-slate-700">{user.attendance_home_latitude && user.attendance_home_longitude ? "Home location is configured" : "Home location is not configured"}</p>
               <p className="text-xs text-slate-400">Reset this when the rep moves or needs to set a new home location.</p>
+              {(() => { const mapUrl = googleMapsUrl(user.attendance_home_latitude, user.attendance_home_longitude); return mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-600 underline"><ExternalLink className="h-3 w-3" />View saved location in Google Maps</a> : null; })()}
             </div>
             <Button variant="outline" size="sm" onClick={handleResetHomeLocation} disabled={resettingHome || (!user.attendance_home_latitude && !user.attendance_home_longitude)} className="border-red-200 text-red-600 hover:bg-red-50">
               {resettingHome && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}Reset Home Location

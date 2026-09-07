@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import {
   AlertTriangle, BarChart3, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3,
-  Download, FileClock, Filter, History, Loader2, LockKeyhole, MapPin, Pencil, Settings2, Users, X,
+  Download, ExternalLink, FileClock, Filter, History, Loader2, LockKeyhole, MapPin, Pencil, Settings2, Trash2, Users, X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,13 @@ function apiJson(path: string, init?: RequestInit) {
     if (!response.ok) throw new Error(body.error ?? "Attendance request failed");
     return body;
   });
+}
+
+function googleMapsUrl(latitude: unknown, longitude: unknown) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`;
 }
 
 function hours(seconds: number | null | undefined) {
@@ -178,6 +185,7 @@ const tabs = [
   { key: "logs", label: "Attendance Logs", icon: FileClock },
   { key: "exceptions", label: "Exceptions", icon: AlertTriangle },
   { key: "reports", label: "Reports", icon: BarChart3 },
+  { key: "locations", label: "Home Locations", icon: MapPin },
   { key: "settings", label: "Settings", icon: Settings2 },
 ];
 
@@ -312,8 +320,8 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   return <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader className="flex flex-row items-start justify-between gap-3 pb-3"><div><CardTitle className="text-sm">{employee?.name ?? "Employee"} · {attendance.work_date}</CardTitle><div className="mt-2 flex flex-wrap items-center gap-2">{statusBadge(attendance.status)}{statusBadge(attendance.review_status ?? "not_reviewed")}</div></div><Button variant="ghost" size="sm" onClick={onClose}>Close</Button></CardHeader><CardContent className="space-y-5">
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Time In", attendance.time_in ? fmt.dateTime(attendance.time_in) : "—"], ["Time Out", attendance.time_out ? fmt.dateTime(attendance.time_out) : "—"], ["Total Hours", hours(attendance.total_seconds)], ["Start Method", attendance.start_method === "warehouse" ? "Warehouse" : "Driving"]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] text-slate-400">{label}</p><p className="mt-1 text-xs font-semibold capitalize text-slate-700">{value}</p></div>)}</div>
     <div className="grid gap-3 md:grid-cols-2">
-      <Card className="rounded-xl border-slate-200 shadow-none"><CardHeader className="pb-2"><CardTitle className="text-xs">Time In Verification</CardTitle></CardHeader><CardContent className="space-y-1 text-xs text-slate-500"><p>{attendance.time_in ? fmt.dateTime(attendance.time_in) : "No time in"}</p><p className="font-medium text-emerald-700">{attendance.time_in_verification ?? "Not captured"}</p><p>Accuracy: {attendance.time_in_accuracy ? `${attendance.time_in_accuracy}m` : "—"}</p><p className="break-all text-[10px]">Coordinates: {attendance.time_in_latitude && attendance.time_in_longitude ? `${attendance.time_in_latitude}, ${attendance.time_in_longitude}` : "—"}</p></CardContent></Card>
-      <Card className="rounded-xl border-slate-200 shadow-none"><CardHeader className="pb-2"><CardTitle className="text-xs">Time Out Verification</CardTitle></CardHeader><CardContent className="space-y-1 text-xs text-slate-500"><p>{attendance.time_out ? fmt.dateTime(attendance.time_out) : "No time out"}</p><p className="font-medium text-emerald-700">{attendance.time_out_verification ?? "Not captured"}</p><p>Accuracy: {attendance.time_out_accuracy ? `${attendance.time_out_accuracy}m` : "—"}</p><p className="break-all text-[10px]">Coordinates: {attendance.time_out_latitude && attendance.time_out_longitude ? `${attendance.time_out_latitude}, ${attendance.time_out_longitude}` : "—"}</p></CardContent></Card>
+      <Card className="rounded-xl border-slate-200 shadow-none"><CardHeader className="pb-2"><CardTitle className="text-xs">Time In Verification</CardTitle></CardHeader><CardContent className="space-y-1 text-xs text-slate-500"><p>{attendance.time_in ? fmt.dateTime(attendance.time_in) : "No time in"}</p><p className="font-medium text-emerald-700">{attendance.time_in_verification ?? "Not captured"}</p><p>Accuracy: {attendance.time_in_accuracy ? `${attendance.time_in_accuracy}m` : "—"}</p>{(() => { const mapUrl = googleMapsUrl(attendance.time_in_latitude, attendance.time_in_longitude); return <p className="break-all text-[10px]">Coordinates: {mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">Open login location in Google Maps</a> : "—"}</p>; })()}</CardContent></Card>
+      <Card className="rounded-xl border-slate-200 shadow-none"><CardHeader className="pb-2"><CardTitle className="text-xs">Time Out Verification</CardTitle></CardHeader><CardContent className="space-y-1 text-xs text-slate-500"><p>{attendance.time_out ? fmt.dateTime(attendance.time_out) : "No time out"}</p><p className="font-medium text-emerald-700">{attendance.time_out_verification ?? "Not captured"}</p><p>Accuracy: {attendance.time_out_accuracy ? `${attendance.time_out_accuracy}m` : "—"}</p>{(() => { const mapUrl = googleMapsUrl(attendance.time_out_latitude, attendance.time_out_longitude); return <p className="break-all text-[10px]">Coordinates: {mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">Open logout location in Google Maps</a> : "—"}</p>; })()}</CardContent></Card>
     </div>
     <div className="flex flex-wrap gap-2 border-y border-slate-100 py-3">
       {attendance.review_status !== "needs_review" && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs text-orange-700" onClick={() => changeReview("needs_review")}><AlertTriangle className="mr-1.5 h-3.5 w-3.5" />Needs review</Button>}
@@ -322,7 +330,7 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
       {attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setTimeIn(toInput(attendance.time_in)); setTimeOut(toInput(attendance.time_out)); setEditing(value => !value); }}><Pencil className="mr-1.5 h-3.5 w-3.5" />Correct times</Button>}
     </div>
     {editing && <div className="rounded-xl border border-red-100 bg-red-50/50 p-4"><div className="grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px]">Time in</Label><Input type="datetime-local" value={timeIn} onChange={e => setTimeIn(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px]">Time out</Label><Input type="datetime-local" value={timeOut} onChange={e => setTimeOut(e.target.value)} className="mt-1 h-9 text-xs" /></div></div><Label className="mt-3 block text-[11px]">Reason required</Label><Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Forgot to clock out" className="mt-1 h-9 text-xs" /><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button><Button size="sm" className="bg-red-600 text-xs hover:bg-red-700" disabled={!reason.trim()} onClick={() => submitCorrection().catch((error: any) => window.alert(error.message))}>Save correction</Button></div></div>}
-    <div><h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><MapPin className="h-3.5 w-3.5" />Location History</h3><div className="space-y-2">{checkpoints.length ? checkpoints.map((checkpoint: any) => <div key={checkpoint.id} className="flex items-center justify-between rounded-lg border border-slate-100 p-3 text-xs"><div><p className="font-medium capitalize text-slate-700">{checkpoint.checkpoint_type.replace(/_/g, " ")}</p><p className="text-slate-400">{fmt.dateTime(checkpoint.captured_at)}</p></div><div className="text-right">{statusBadge(checkpoint.capture_status)}<p className="mt-1 text-slate-400">{checkpoint.accuracy ? `${checkpoint.accuracy}m accuracy` : "No location captured"}</p></div></div>) : <p className="text-sm text-slate-400">No checkpoints recorded.</p>}</div></div>
+    <div><h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><MapPin className="h-3.5 w-3.5" />Location History</h3><div className="space-y-2">{checkpoints.length ? checkpoints.map((checkpoint: any) => { const mapUrl = googleMapsUrl(checkpoint.latitude, checkpoint.longitude); return <div key={checkpoint.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 p-3 text-xs"><div><p className="font-medium capitalize text-slate-700">{checkpoint.checkpoint_type.replace(/_/g, " ")}</p><p className="text-slate-400">{fmt.dateTime(checkpoint.captured_at)}</p></div><div className="text-right">{statusBadge(checkpoint.capture_status)}<p className="mt-1 text-slate-400">{mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">Open in Google Maps</a> : "No location captured"}</p></div></div>; }) : <p className="text-sm text-slate-400">No checkpoints recorded.</p>}</div></div>
     <div><h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><History className="h-3.5 w-3.5" />Record History</h3><div className="space-y-2">{audit.length ? audit.map((entry: any) => <div key={entry.id} className="rounded-lg border border-slate-100 p-3 text-xs"><div className="flex justify-between gap-3"><span className="font-medium capitalize text-slate-700">{String(entry.action).replace(/_/g, " ")}</span><span className="text-slate-400">{fmt.dateTime(entry.created_at)}</span></div><p className="mt-1 text-slate-500">{entry.changed_field ? `${entry.changed_field} changed` : "Attendance event"}{entry.reason ? ` · ${entry.reason}` : ""}</p></div>) : <p className="text-sm text-slate-400">No administrative changes recorded.</p>}</div></div>
   </CardContent></Card>;
 }
@@ -530,6 +538,65 @@ function Logs() {
   </AdminShell>;
 }
 
+function HomeLocations() {
+  const client = useQueryClient();
+  const query = useQuery({
+    queryKey: ["attendance", "home-locations"],
+    queryFn: () => apiJson("/api/attendance/admin/home-locations"),
+  });
+  const [resettingId, setResettingId] = useState<number | null>(null);
+
+  const resetLocation = async (user: any) => {
+    if (!window.confirm(`Clear ${user.name}'s saved home location? They will need to set it again before using Route Start.`)) return;
+    setResettingId(user.id);
+    try {
+      await apiJson(`/api/admin/users/${user.id}/attendance-home-location/reset`, { method: "POST" });
+      await client.invalidateQueries({ queryKey: ["attendance", "home-locations"] });
+    } catch (error: any) {
+      window.alert(error.message);
+    } finally {
+      setResettingId(null);
+    }
+  };
+
+  return <AdminShell activeTab="locations">
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2 className="text-base font-bold text-slate-900">Saved Home Locations</h2>
+        <p className="mt-1 text-xs text-slate-500">View the saved Route Start location for each employee and open it directly in Google Maps.</p>
+      </div>
+      <span className="text-xs text-slate-400">{query.data?.length ?? 0} configured</span>
+    </div>
+    <Card className="mt-4 rounded-xl border-slate-200 shadow-sm">
+      <CardContent className="p-0">
+        {query.isLoading ? <div className="p-10 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></div>
+          : query.isError ? <div className="p-10 text-center text-sm text-red-600">Home locations could not be loaded.</div>
+          : query.data?.length ? <div className="divide-y divide-slate-100">
+            {query.data.map((user: any) => {
+              const mapUrl = googleMapsUrl(user.attendance_home_latitude, user.attendance_home_longitude);
+              return <div key={user.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-50 text-xs font-bold text-red-600">{String(user.name ?? "?").slice(0, 2).toUpperCase()}</div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-800">{user.name}</p>
+                    <p className="text-xs text-slate-400">@{user.username} · {user.is_enabled ? "Active" : "Disabled"}</p>
+                    <p className="mt-1 break-all font-mono text-[11px] text-slate-500">{user.attendance_home_latitude}, {user.attendance_home_longitude}</p>
+                    {user.attendance_home_set_at && <p className="mt-1 text-[11px] text-slate-400">Saved {new Date(user.attendance_home_set_at).toLocaleString()}</p>}
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {mapUrl && <a href={mapUrl} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-md border border-slate-200 px-3 text-xs font-medium text-slate-700 hover:border-red-200 hover:text-red-600"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />View in Google Maps</a>}
+                  <Button variant="outline" size="sm" className="h-8 border-red-200 text-xs text-red-600 hover:bg-red-50" onClick={() => resetLocation(user)} disabled={resettingId === user.id}><Trash2 className="mr-1.5 h-3.5 w-3.5" />{resettingId === user.id ? "Clearing..." : "Clear location"}</Button>
+                </div>
+              </div>;
+            })}
+          </div>
+          : <div className="p-10 text-center text-sm text-slate-400">No employees have saved a home location yet.</div>}
+      </CardContent>
+    </Card>
+  </AdminShell>;
+}
+
 function Exceptions() {
   const fmt = useTimeService();
   const client = useQueryClient();
@@ -606,6 +673,7 @@ export default function AttendanceAdminPage() {
   if (tab === "logs") return <Logs />;
   if (tab === "exceptions") return <Exceptions />;
   if (tab === "reports") return <Reports />;
+  if (tab === "locations") return <HomeLocations />;
   if (tab === "settings") return <AttendanceSettingsPage />;
   return <Overview />;
 }

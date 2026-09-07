@@ -7518,7 +7518,27 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/users/:id/attendance-home-location/reset", requireAdmin, async (req, res) => {
+  app.get("/api/attendance/admin/home-locations", requirePermission("attendance", "view_dashboard"), async (_req, res) => {
+    try {
+      const users = await storage.getAllUsers();
+      res.json(users
+        .filter(user => user.attendance_home_latitude != null && user.attendance_home_longitude != null)
+        .map(user => ({
+          id: user.id,
+          name: user.name,
+          username: user.username,
+          role: user.role,
+          is_enabled: user.is_enabled,
+          attendance_home_latitude: user.attendance_home_latitude,
+          attendance_home_longitude: user.attendance_home_longitude,
+          attendance_home_set_at: user.attendance_home_set_at,
+        })));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/users/:id/attendance-home-location/reset", requirePermission("attendance", "manage"), async (req, res) => {
     try {
       await storage.clearAttendanceHomeLocation(parseInt(req.params.id));
       res.json({ success: true });

@@ -174,6 +174,9 @@ function Router() {
       <Route path="/attendance/reports">
         {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_reports" />}
       </Route>
+      <Route path="/attendance/locations">
+        {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_dashboard" />}
+      </Route>
       <Route path="/attendance/settings">
         {() => <Redirect to="/admin/attendance" />}
       </Route>
