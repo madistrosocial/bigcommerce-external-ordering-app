@@ -51,8 +51,8 @@ function LocationMapPreview({ latitude, longitude, label }: { latitude: unknown;
   const embedUrl = googleMapsEmbedUrl(latitude, longitude);
   if (!mapUrl || !embedUrl) return <p className="text-[10px] text-slate-400">Location unavailable</p>;
   return (
-    <a href={mapUrl} target="_blank" rel="noreferrer" className="group mt-3 block overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
-      <div className="relative h-28 w-full overflow-hidden">
+    <a href={mapUrl} target="_blank" rel="noreferrer" className="group block h-full overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+      <div className="relative h-40 w-full overflow-hidden">
         <iframe title={`${label} location map`} src={embedUrl} loading="lazy" className="pointer-events-none h-full w-full border-0" />
         <span className="absolute inset-x-0 bottom-0 bg-slate-900/70 px-2 py-1 text-[10px] font-medium text-white transition group-hover:bg-blue-700/80">Open in Google Maps</span>
       </div>
@@ -368,20 +368,32 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
      <div className="grid gap-3 md:grid-cols-2">
        <Card className="rounded-xl border-slate-200 shadow-none">
          <CardHeader className="pb-2"><CardTitle className="text-xs">Time In Verification</CardTitle></CardHeader>
-         <CardContent className="space-y-1 text-xs text-slate-500">
-           <p>{attendance.time_in ? fmt.dateTime(attendance.time_in) : "No time in"}</p>
-           <p className="font-medium text-emerald-700">{attendance.time_in_verification ?? "Not captured"}</p>
-           <p>Accuracy: {attendance.time_in_accuracy ? `${attendance.time_in_accuracy}m` : "—"}</p>
-           <LocationMapPreview latitude={attendance.time_in_latitude} longitude={attendance.time_in_longitude} label="Time in" />
+         <CardContent className="text-xs text-slate-500">
+           <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+             <div className="min-w-0 flex-1 space-y-1">
+               <p>{attendance.time_in ? fmt.dateTime(attendance.time_in) : "No time in"}</p>
+               <p className="font-medium text-emerald-700">{attendance.time_in_verification ?? "Not captured"}</p>
+               <p>Accuracy: {attendance.time_in_accuracy ? `${attendance.time_in_accuracy}m` : "—"}</p>
+             </div>
+             <div className="w-full sm:w-[58%] sm:min-w-[220px]">
+               <LocationMapPreview latitude={attendance.time_in_latitude} longitude={attendance.time_in_longitude} label="Time in" />
+             </div>
+           </div>
          </CardContent>
        </Card>
        <Card className="rounded-xl border-slate-200 shadow-none">
          <CardHeader className="pb-2"><CardTitle className="text-xs">Time Out Verification</CardTitle></CardHeader>
-         <CardContent className="space-y-1 text-xs text-slate-500">
-           <p>{attendance.time_out ? fmt.dateTime(attendance.time_out) : "No time out"}</p>
-           <p className="font-medium text-emerald-700">{attendance.time_out_verification ?? "Not captured"}</p>
-           <p>Accuracy: {attendance.time_out_accuracy ? `${attendance.time_out_accuracy}m` : "—"}</p>
-           <LocationMapPreview latitude={attendance.time_out_latitude} longitude={attendance.time_out_longitude} label="Time out" />
+         <CardContent className="text-xs text-slate-500">
+           <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+             <div className="min-w-0 flex-1 space-y-1">
+               <p>{attendance.time_out ? fmt.dateTime(attendance.time_out) : "No time out"}</p>
+               <p className="font-medium text-emerald-700">{attendance.time_out_verification ?? "Not captured"}</p>
+               <p>Accuracy: {attendance.time_out_accuracy ? `${attendance.time_out_accuracy}m` : "—"}</p>
+             </div>
+             <div className="w-full sm:w-[58%] sm:min-w-[220px]">
+               <LocationMapPreview latitude={attendance.time_out_latitude} longitude={attendance.time_out_longitude} label="Time out" />
+             </div>
+           </div>
          </CardContent>
        </Card>
      </div>
