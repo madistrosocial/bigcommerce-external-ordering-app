@@ -111,6 +111,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   if (isChromeless) return <>{children}</>;
 
   const role = currentUser.role as "admin" | "agent";
+  const canViewAllAttendance = hasPermission("attendance", "view_all");
 
   // ── Build nav items based on permissions ────────────────────────────────────
 
@@ -146,10 +147,10 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   // Attendance children — employees see their own clock; managers see scoped admin views.
   const attendanceChildren: NavLeaf[] = [
     ...(hasPermission("attendance", "clock") ? [{ label: "My Attendance", path: "/attendance" }] : []),
-    ...(hasPermission("attendance", "view_dashboard") ? [{ label: "Overview", path: "/attendance/overview" }] : []),
+    ...(canViewAllAttendance && hasPermission("attendance", "view_dashboard") ? [{ label: "Overview", path: "/attendance/overview" }] : []),
     ...(hasPermission("attendance", "view_logs") ? [{ label: "Attendance Logs", path: "/attendance/logs" }] : []),
-    ...(hasPermission("attendance", "view_exceptions") ? [{ label: "Exceptions", path: "/attendance/exceptions" }] : []),
-    ...(hasPermission("attendance", "view_reports") ? [{ label: "Reports", path: "/attendance/reports" }] : []),
+    ...(canViewAllAttendance && hasPermission("attendance", "view_exceptions") ? [{ label: "Exceptions", path: "/attendance/exceptions" }] : []),
+    ...(canViewAllAttendance && hasPermission("attendance", "view_reports") ? [{ label: "Reports", path: "/attendance/reports" }] : []),
   ];
 
   // CRM children

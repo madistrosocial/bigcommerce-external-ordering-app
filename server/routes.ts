@@ -509,6 +509,10 @@ export async function registerRoutes(
       next();
     };
 
+  const canViewAllAttendance = async (user: any) =>
+    user?.role === "admin"
+    || (await storage.getUserPermissionStrings(user.id)).includes("attendance:view_all");
+
   // ===== PRODUCT ROUTES =====
 
   // Get all products (for admin view)
@@ -7192,6 +7196,10 @@ export async function registerRoutes(
 
   app.get("/api/attendance/admin/overview", requirePermission("attendance", "view_dashboard"), async (req, res) => {
     try {
+      const user = (req as any).authUser;
+      if (!(await canViewAllAttendance(user))) {
+        return res.status(403).json({ error: "Full attendance access is required." });
+      }
       const today = new Date().toISOString().slice(0, 10);
       const period = String(req.query.period ?? "today");
       let from = String(req.query.from ?? today);
@@ -7273,17 +7281,20 @@ export async function registerRoutes(
 
   app.get("/api/attendance/admin/logs", requirePermission("attendance", "view_logs"), async (req, res) => {
     try {
+      const user = (req as any).authUser;
+      const canViewAll = await canViewAllAttendance(user);
       const q = req.query as Record<string, string>;
-      res.json(await storage.getAttendanceRecords({
+      const result = await storage.getAttendanceRecords({
         from: q.from || undefined,
         to: q.to || undefined,
-        userId: q.userId ? Number(q.userId) : undefined,
+        userId: canViewAll ? (q.userId ? Number(q.userId) : undefined) : user.id,
         status: q.status || undefined,
         startMethod: q.startMethod || undefined,
         reviewStatus: q.reviewStatus || undefined,
         limit: q.limit ? Number(q.limit) : 100,
         offset: q.offset ? Number(q.offset) : 0,
-      }));
+      });
+      res.json({ ...result, can_view_all: canViewAll });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -7291,14 +7302,19 @@ export async function registerRoutes(
 
   app.get("/api/attendance/admin/logs/:id", requirePermission("attendance", "view_logs"), async (req, res) => {
     try {
+      const user = (req as any).authUser;
+      const canViewAll = await canViewAllAttendance(user);
       const attendance = await storage.getAttendanceById(Number(req.params.id));
       if (!attendance) return res.status(404).json({ error: "Attendance record not found." });
+      if (!canViewAll && attendance.user_id !== user.id) {
+        return res.status(404).json({ error: "Attendance record not found." });
+      }
       const [employee, checkpoints, audit] = await Promise.all([
         storage.getUser(attendance.user_id),
         storage.getAttendanceCheckpoints(attendance.id),
         storage.getAttendanceAuditHistory(attendance.id),
       ]);
-      res.json({ attendance, employee: employee ? { id: employee.id, name: employee.name, username: employee.username } : null, checkpoints, audit });
+      res.json({ attendance, employee: employee ? { id: employee.id, name: employee.name, username: employee.username } : null, checkpoints, audit, can_view_all: canViewAll });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -7310,6 +7326,9 @@ export async function registerRoutes(
       const id = Number(req.params.id);
       const attendance = await storage.getAttendanceById(id);
       if (!attendance) return res.status(404).json({ error: "Attendance record not found." });
+      if (!(await canViewAllAttendance(user))) {
+        return res.status(403).json({ error: "Full attendance access is required." });
+      }
       const nextStatus = String(req.body?.review_status ?? "");
       if (!["not_reviewed", "needs_review", "approved", "locked"].includes(nextStatus)) {
         return res.status(400).json({ error: "Invalid review status." });
@@ -7350,6 +7369,9 @@ export async function registerRoutes(
       const id = Number(req.params.id);
       const attendance = await storage.getAttendanceById(id);
       if (!attendance) return res.status(404).json({ error: "Attendance record not found." });
+      if (!(await canViewAllAttendance(user))) {
+        return res.status(403).json({ error: "Full attendance access is required." });
+      }
       if (attendance.review_status === "locked") return res.status(409).json({ error: "Locked attendance records cannot be edited." });
       const reason = String(req.body?.reason ?? "").trim().slice(0, 2000);
       if (!reason) return res.status(400).json({ error: "A reason is required for attendance corrections." });
@@ -7396,6 +7418,9 @@ export async function registerRoutes(
 
   app.get("/api/attendance/admin/exceptions", requirePermission("attendance", "view_exceptions"), async (req, res) => {
     try {
+      if (!(await canViewAllAttendance((req as any).authUser))) {
+        return res.status(403).json({ error: "Full attendance access is required." });
+      }
       const q = req.query as Record<string, string>;
       res.json(await storage.getAttendanceExceptions({
         status: q.status || "open",
@@ -7428,6 +7453,9 @@ export async function registerRoutes(
 
   app.get("/api/attendance/admin/reports", requirePermission("attendance", "view_reports"), async (req, res) => {
     try {
+      if (!(await canViewAllAttendance((req as any).authUser))) {
+        return res.status(403).json({ error: "Full attendance access is required." });
+      }
       const q = req.query as Record<string, string>;
       let from = q.from;
       let to = q.to;
@@ -7520,6 +7548,9 @@ export async function registerRoutes(
 
   app.get("/api/attendance/admin/home-locations", requirePermission("attendance", "view_dashboard"), async (_req, res) => {
     try {
+      if (!(await canViewAllAttendance((_req as any).authUser))) {
+        return res.status(403).json({ error: "Full attendance access is required." });
+      }
       const users = await storage.getAllUsers();
       res.json(users
         .filter(user => user.attendance_home_latitude != null && user.attendance_home_longitude != null)

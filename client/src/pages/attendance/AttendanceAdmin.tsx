@@ -183,11 +183,11 @@ function ledgerStatus(
 }
 
 const tabs = [
-  { key: "overview", label: "Overview", icon: BarChart3, module: "attendance", action: "view_dashboard" },
+  { key: "overview", label: "Overview", icon: BarChart3, module: "attendance", action: "view_dashboard", fullAccess: true },
   { key: "logs", label: "Attendance Logs", icon: FileClock, module: "attendance", action: "view_logs" },
-  { key: "exceptions", label: "Exceptions", icon: AlertTriangle, module: "attendance", action: "view_exceptions" },
-  { key: "reports", label: "Reports", icon: BarChart3, module: "attendance", action: "view_reports" },
-  { key: "locations", label: "Home Locations", icon: MapPin, module: "attendance", action: "view_dashboard" },
+  { key: "exceptions", label: "Exceptions", icon: AlertTriangle, module: "attendance", action: "view_exceptions", fullAccess: true },
+  { key: "reports", label: "Reports", icon: BarChart3, module: "attendance", action: "view_reports", fullAccess: true },
+  { key: "locations", label: "Home Locations", icon: MapPin, module: "attendance", action: "view_dashboard", fullAccess: true },
   { key: "settings", label: "Settings", icon: Settings2, adminOnly: true },
 ];
 
@@ -197,6 +197,7 @@ function AdminShell({ activeTab, children }: { activeTab: string; children: Reac
   const visibleTabs = tabs.filter(tab => {
     if (tab.adminOnly) return currentUser?.role === "admin";
     if (isLoading) return false;
+    if (tab.fullAccess && !hasPermission("attendance", "view_all")) return false;
     return hasPermission(tab.module, tab.action);
   });
 
@@ -293,8 +294,11 @@ function Overview() {
 
 function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   const fmt = useTimeService();
+  const { hasPermission } = usePermissions();
   const query = useQuery({ queryKey: ["attendance", "log", id], queryFn: () => apiJson(`/api/attendance/admin/logs/${id}`) });
   const client = useQueryClient();
+  const canReview = hasPermission("attendance", "approve");
+  const canManage = hasPermission("attendance", "manage");
   const [editing, setEditing] = useState(false);
   const [reason, setReason] = useState("");
   const [timeIn, setTimeIn] = useState("");
@@ -333,13 +337,13 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
       <Card className="rounded-xl border-slate-200 shadow-none"><CardHeader className="pb-2"><CardTitle className="text-xs">Time In Verification</CardTitle></CardHeader><CardContent className="space-y-1 text-xs text-slate-500"><p>{attendance.time_in ? fmt.dateTime(attendance.time_in) : "No time in"}</p><p className="font-medium text-emerald-700">{attendance.time_in_verification ?? "Not captured"}</p><p>Accuracy: {attendance.time_in_accuracy ? `${attendance.time_in_accuracy}m` : "—"}</p>{(() => { const mapUrl = googleMapsUrl(attendance.time_in_latitude, attendance.time_in_longitude); return <p className="break-all text-[10px]">Coordinates: {mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">Open login location in Google Maps</a> : "—"}</p>; })()}</CardContent></Card>
       <Card className="rounded-xl border-slate-200 shadow-none"><CardHeader className="pb-2"><CardTitle className="text-xs">Time Out Verification</CardTitle></CardHeader><CardContent className="space-y-1 text-xs text-slate-500"><p>{attendance.time_out ? fmt.dateTime(attendance.time_out) : "No time out"}</p><p className="font-medium text-emerald-700">{attendance.time_out_verification ?? "Not captured"}</p><p>Accuracy: {attendance.time_out_accuracy ? `${attendance.time_out_accuracy}m` : "—"}</p>{(() => { const mapUrl = googleMapsUrl(attendance.time_out_latitude, attendance.time_out_longitude); return <p className="break-all text-[10px]">Coordinates: {mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">Open logout location in Google Maps</a> : "—"}</p>; })()}</CardContent></Card>
     </div>
-    <div className="flex flex-wrap gap-2 border-y border-slate-100 py-3">
-      {attendance.review_status !== "needs_review" && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs text-orange-700" onClick={() => changeReview("needs_review")}><AlertTriangle className="mr-1.5 h-3.5 w-3.5" />Needs review</Button>}
-      {attendance.review_status !== "approved" && attendance.review_status !== "locked" && <Button size="sm" className="h-8 bg-emerald-600 text-xs hover:bg-emerald-700" onClick={() => changeReview("approved")}><Check className="mr-1.5 h-3.5 w-3.5" />Approve</Button>}
-      {attendance.review_status === "approved" && <Button size="sm" className="h-8 bg-blue-700 text-xs hover:bg-blue-800" onClick={() => changeReview("locked")}><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Lock record</Button>}
-      {attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setTimeIn(toInput(attendance.time_in)); setTimeOut(toInput(attendance.time_out)); setEditing(value => !value); }}><Pencil className="mr-1.5 h-3.5 w-3.5" />Correct times</Button>}
-    </div>
-    {editing && <div className="rounded-xl border border-red-100 bg-red-50/50 p-4"><div className="grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px]">Time in</Label><Input type="datetime-local" value={timeIn} onChange={e => setTimeIn(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px]">Time out</Label><Input type="datetime-local" value={timeOut} onChange={e => setTimeOut(e.target.value)} className="mt-1 h-9 text-xs" /></div></div><Label className="mt-3 block text-[11px]">Reason required</Label><Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Forgot to clock out" className="mt-1 h-9 text-xs" /><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button><Button size="sm" className="bg-red-600 text-xs hover:bg-red-700" disabled={!reason.trim()} onClick={() => submitCorrection().catch((error: any) => window.alert(error.message))}>Save correction</Button></div></div>}
+     {(canReview || canManage) && <div className="flex flex-wrap gap-2 border-y border-slate-100 py-3">
+       {canReview && attendance.review_status !== "needs_review" && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs text-orange-700" onClick={() => changeReview("needs_review")}><AlertTriangle className="mr-1.5 h-3.5 w-3.5" />Needs review</Button>}
+       {canReview && attendance.review_status !== "approved" && attendance.review_status !== "locked" && <Button size="sm" className="h-8 bg-emerald-600 text-xs hover:bg-emerald-700" onClick={() => changeReview("approved")}><Check className="mr-1.5 h-3.5 w-3.5" />Approve</Button>}
+       {canReview && attendance.review_status === "approved" && <Button size="sm" className="h-8 bg-blue-700 text-xs hover:bg-blue-800" onClick={() => changeReview("locked")}><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Lock record</Button>}
+       {canManage && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setTimeIn(toInput(attendance.time_in)); setTimeOut(toInput(attendance.time_out)); setEditing(value => !value); }}><Pencil className="mr-1.5 h-3.5 w-3.5" />Correct times</Button>}
+     </div>}
+     {editing && canManage && <div className="rounded-xl border border-red-100 bg-red-50/50 p-4"><div className="grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px]">Time in</Label><Input type="datetime-local" value={timeIn} onChange={e => setTimeIn(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px]">Time out</Label><Input type="datetime-local" value={timeOut} onChange={e => setTimeOut(e.target.value)} className="mt-1 h-9 text-xs" /></div></div><Label className="mt-3 block text-[11px]">Reason required</Label><Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Forgot to clock out" className="mt-1 h-9 text-xs" /><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button><Button size="sm" className="bg-red-600 text-xs hover:bg-red-700" disabled={!reason.trim()} onClick={() => submitCorrection().catch((error: any) => window.alert(error.message))}>Save correction</Button></div></div>}
     <div><h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><MapPin className="h-3.5 w-3.5" />Location History</h3><div className="space-y-2">{checkpoints.length ? checkpoints.map((checkpoint: any) => { const mapUrl = googleMapsUrl(checkpoint.latitude, checkpoint.longitude); return <div key={checkpoint.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 p-3 text-xs"><div><p className="font-medium capitalize text-slate-700">{checkpoint.checkpoint_type.replace(/_/g, " ")}</p><p className="text-slate-400">{fmt.dateTime(checkpoint.captured_at)}</p></div><div className="text-right">{statusBadge(checkpoint.capture_status)}<p className="mt-1 text-slate-400">{mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">Open in Google Maps</a> : "No location captured"}</p></div></div>; }) : <p className="text-sm text-slate-400">No checkpoints recorded.</p>}</div></div>
     <div><h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><History className="h-3.5 w-3.5" />Record History</h3><div className="space-y-2">{audit.length ? audit.map((entry: any) => <div key={entry.id} className="rounded-lg border border-slate-100 p-3 text-xs"><div className="flex justify-between gap-3"><span className="font-medium capitalize text-slate-700">{String(entry.action).replace(/_/g, " ")}</span><span className="text-slate-400">{fmt.dateTime(entry.created_at)}</span></div><p className="mt-1 text-slate-500">{entry.changed_field ? `${entry.changed_field} changed` : "Attendance event"}{entry.reason ? ` · ${entry.reason}` : ""}</p></div>) : <p className="text-sm text-slate-400">No administrative changes recorded.</p>}</div></div>
   </CardContent></Card>;
@@ -347,6 +351,9 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
 
 function Logs() {
   const [location] = useLocation();
+  const currentUser = useStore(s => s.currentUser);
+  const { hasPermission, isLoading: permissionsLoading } = usePermissions();
+  const canViewAll = hasPermission("attendance", "view_all");
   const [status, setStatus] = useState("all");
   const [startMethod, setStartMethod] = useState("all");
   const [reviewStatus, setReviewStatus] = useState(() => new URLSearchParams(location.split("?")[1] ?? "").get("reviewStatus") ?? "all");
@@ -370,14 +377,15 @@ function Logs() {
     setFrom(range.from);
     setTo(range.to);
   }, [month]);
-  const usersQuery = useQuery({ queryKey: ["attendance", "team-members"], queryFn: () => apiJson("/api/users") });
+  const scopedUserId = canViewAll ? userId : String(currentUser?.id ?? "");
+  const usersQuery = useQuery({ queryKey: ["attendance", "team-members"], queryFn: () => apiJson("/api/users"), enabled: canViewAll && !permissionsLoading });
   const params = new URLSearchParams({ status, startMethod, reviewStatus, limit: "500" });
   if (from) params.set("from", from);
   if (to) params.set("to", to);
-  if (userId !== "all") params.set("userId", userId);
-  const query = useQuery({ queryKey: ["attendance", "logs", status, startMethod, reviewStatus, from, to, userId], queryFn: () => apiJson(`/api/attendance/admin/logs?${params}`), enabled: Boolean(from && to && from <= to) });
-  const teamMembers = (usersQuery.data ?? []).filter((user: any) => user.is_enabled);
-  const selectedMember = teamMembers.find((user: any) => String(user.id) === userId);
+  if (scopedUserId && scopedUserId !== "all") params.set("userId", scopedUserId);
+  const query = useQuery({ queryKey: ["attendance", "logs", status, startMethod, reviewStatus, from, to, scopedUserId, canViewAll], queryFn: () => apiJson(`/api/attendance/admin/logs?${params}`), enabled: Boolean(from && to && from <= to && !permissionsLoading && scopedUserId) });
+  const teamMembers = canViewAll ? (usersQuery.data ?? []).filter((user: any) => user.is_enabled) : [];
+  const selectedMember = canViewAll ? teamMembers.find((user: any) => String(user.id) === userId) : currentUser;
   const dates = useMemo(() => from && to && from <= to ? datesBetween(from, to) : [], [from, to]);
   const holidayMap = useMemo(() => from && to && from <= to ? getUsHolidayMap(from, to) : new Map<string, string>(), [from, to]);
   const rows = query.data?.rows ?? [];
@@ -429,10 +437,10 @@ function Logs() {
   };
   return <AdminShell activeTab="logs">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h2 className="text-base font-bold text-slate-900">Attendance ledger</h2>
-        <p className="mt-1 text-xs text-slate-500">A daily view for payroll review, absences, and time reconciliation.</p>
-      </div>
+       <div>
+         <h2 className="text-base font-bold text-slate-900">{canViewAll ? "Attendance ledger" : "My attendance ledger"}</h2>
+         <p className="mt-1 text-xs text-slate-500">{canViewAll ? "A daily view for payroll review, absences, and time reconciliation." : "Your attendance records and time reconciliation."}</p>
+       </div>
       <Button
         size="sm"
         variant={showFilters ? "default" : "outline"}
@@ -447,8 +455,8 @@ function Logs() {
     </div>
     {showFilters && <Card className="mt-4 rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4">
       <div className="flex items-center gap-2 text-xs font-semibold text-slate-600"><Filter className="h-4 w-4 text-red-600" />Filter the ledger</div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <div className="min-w-0"><Label className="text-[11px] text-slate-500">Team member</Label><Select value={userId} onValueChange={setUserId}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue placeholder="All team members" /></SelectTrigger><SelectContent><SelectItem value="all">All team members</SelectItem>{teamMembers.map((user: any) => <SelectItem key={user.id} value={String(user.id)}>{user.name || user.username}</SelectItem>)}</SelectContent></Select></div>
+       <div className={`mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 ${canViewAll ? "2xl:grid-cols-6" : ""}`}>
+         {canViewAll && <div className="min-w-0"><Label className="text-[11px] text-slate-500">Team member</Label><Select value={userId} onValueChange={setUserId}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue placeholder="All team members" /></SelectTrigger><SelectContent><SelectItem value="all">All team members</SelectItem>{teamMembers.map((user: any) => <SelectItem key={user.id} value={String(user.id)}>{user.name || user.username}</SelectItem>)}</SelectContent></Select></div>}
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">Log status</Label><Select value={status} onValueChange={setStatus}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="active">Working</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="exception">Exception</SelectItem></SelectContent></Select></div>
