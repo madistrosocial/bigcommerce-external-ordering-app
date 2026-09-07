@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Truck, ShieldCheck, UserCircle } from "lucide-react";
 import { login as apiLogin, getMyPermissions } from "@/lib/api";
 import { LANDING_OPTIONS } from "@/pages/admin/AdminUsers";
+import { queryClient } from "@/lib/queryClient";
 
 const FALLBACK_ORDER = [
   "crm_customers",
@@ -54,7 +55,7 @@ async function fetchBusinessLogo(): Promise<string | null> {
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const { login, currentUser } = useStore();
+  const { login, logout, currentUser } = useStore();
   const [, setLocation] = useLocation();
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -108,6 +109,12 @@ export default function Login() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleForceLogout = () => {
+    logout();
+    queryClient.clear();
+    window.location.replace("/");
   };
 
   const demoLogin = async (demoRole: 'admin' | 'agent') => {
@@ -193,6 +200,16 @@ export default function Login() {
             </Button>
           </form>
         </CardContent>
+        <CardFooter className="justify-center pt-0">
+          <button
+            type="button"
+            onClick={handleForceLogout}
+            className="text-xs text-slate-500 underline underline-offset-2 hover:text-red-600"
+            data-testid="button-login-force-logout"
+          >
+            Clear saved session
+          </button>
+        </CardFooter>
       </Card>
     </div>
   );

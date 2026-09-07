@@ -8,6 +8,7 @@ import { useStore } from "@/lib/store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { SaaSLayout } from "@/components/layout/SaaSLayout";
 import { TimezoneProvider } from "@/contexts/TimezoneContext";
+import { LogOut } from "lucide-react";
 
 import Login from "@/pages/Login";
 import DashboardPage from "@/pages/Dashboard";
@@ -335,6 +336,31 @@ function Router() {
   return <SaaSLayout>{routes}</SaaSLayout>;
 }
 
+function ForceLogoutControl() {
+  const { currentUser, logout } = useStore();
+
+  const handleForceLogout = () => {
+    logout();
+    queryClient.clear();
+    window.location.replace("/");
+  };
+
+  if (!currentUser) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={handleForceLogout}
+      aria-label="Force logout and return to the sign in page"
+      data-testid="button-force-logout"
+      className="fixed bottom-4 right-4 z-[100] inline-flex items-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 shadow-lg transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:border-red-900 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
+    >
+      <LogOut className="h-4 w-4" />
+      Force logout
+    </button>
+  );
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -347,6 +373,7 @@ function App() {
       <TimezoneProvider>
         <TooltipProvider>
           <Router />
+          <ForceLogoutControl />
           <Toaster />
         </TooltipProvider>
       </TimezoneProvider>

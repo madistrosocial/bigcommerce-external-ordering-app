@@ -68,8 +68,22 @@ function loadPersistedCart(): CartItem[] {
   }
 }
 
+function loadPersistedUser(): User | null {
+  try {
+    const raw = localStorage.getItem('vansales_user');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed as User;
+  } catch {
+    // A damaged saved session must not prevent the app from rendering.
+    try { localStorage.removeItem('vansales_user'); } catch {}
+    return null;
+  }
+}
+
 export const useStore = create<AppState>((set, get) => ({
-  currentUser: JSON.parse(localStorage.getItem('vansales_user') || 'null'),
+  currentUser: loadPersistedUser(),
   isOfflineMode: !navigator.onLine,
   cart: loadPersistedCart(),
 
