@@ -699,7 +699,7 @@ export function AttendanceSettingsPage() {
 
 export default function AttendanceAdminPage() {
   const [location] = useLocation();
-  const tab = location.split("/")[2] || "overview";
+  const tab = (location.split("/")[2] || "overview").split("?")[0];
   if (tab === "logs") return <Logs />;
   if (tab === "exceptions") return <Exceptions />;
   if (tab === "reports") return <Reports />;
