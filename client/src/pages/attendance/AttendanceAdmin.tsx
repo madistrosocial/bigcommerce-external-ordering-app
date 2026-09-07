@@ -25,11 +25,39 @@ function apiJson(path: string, init?: RequestInit) {
   });
 }
 
+function attendanceSearchParams(location: string) {
+  const queryIndex = location.indexOf("?");
+  if (queryIndex >= 0) return new URLSearchParams(location.slice(queryIndex + 1));
+  if (typeof window !== "undefined") return new URLSearchParams(window.location.search);
+  return new URLSearchParams();
+}
+
 function googleMapsUrl(latitude: unknown, longitude: unknown) {
   const lat = Number(latitude);
   const lng = Number(longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`;
+}
+
+function googleMapsEmbedUrl(latitude: unknown, longitude: unknown) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}&z=15&output=embed`;
+}
+
+function LocationMapPreview({ latitude, longitude, label }: { latitude: unknown; longitude: unknown; label: string }) {
+  const mapUrl = googleMapsUrl(latitude, longitude);
+  const embedUrl = googleMapsEmbedUrl(latitude, longitude);
+  if (!mapUrl || !embedUrl) return <p className="text-[10px] text-slate-400">Location unavailable</p>;
+  return (
+    <a href={mapUrl} target="_blank" rel="noreferrer" className="group mt-3 block overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+      <div className="relative h-28 w-full overflow-hidden">
+        <iframe title={`${label} location map`} src={embedUrl} loading="lazy" className="pointer-events-none h-full w-full border-0" />
+        <span className="absolute inset-x-0 bottom-0 bg-slate-900/70 px-2 py-1 text-[10px] font-medium text-white transition group-hover:bg-blue-700/80">Open in Google Maps</span>
+      </div>
+    </a>
+  );
 }
 
 function hours(seconds: number | null | undefined) {
@@ -310,7 +338,7 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   if (query.isLoading) return <Card className="rounded-xl border-slate-200"><CardContent className="p-6 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></CardContent></Card>;
   const data = query.data;
   if (!data) return null;
-  const { attendance, employee, checkpoints = [], audit = [] } = data;
+  const { attendance, employee, audit = [] } = data;
   const toInput = (value: string | Date | null | undefined) => value ? new Date(value).toISOString().slice(0, 16) : "";
   const submitCorrection = async () => {
     await apiJson(`/api/attendance/admin/logs/${id}/correction`, {
@@ -337,10 +365,26 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   };
   return <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader className="flex flex-row items-start justify-between gap-3 pb-3"><div><CardTitle className="text-sm">{employee?.name ?? "Employee"} · {attendance.work_date}</CardTitle><div className="mt-2 flex flex-wrap items-center gap-2">{statusBadge(attendance.status)}{statusBadge(attendance.review_status ?? "not_reviewed")}</div></div><Button variant="ghost" size="sm" onClick={onClose}>Close</Button></CardHeader><CardContent className="space-y-5">
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Time In", attendance.time_in ? fmt.dateTime(attendance.time_in) : "—"], ["Time Out", attendance.time_out ? fmt.dateTime(attendance.time_out) : "—"], ["Total Hours", hours(attendance.total_seconds)], ["Start Method", attendance.start_method === "warehouse" ? "Warehouse" : "Driving"]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] text-slate-400">{label}</p><p className="mt-1 text-xs font-semibold capitalize text-slate-700">{value}</p></div>)}</div>
-    <div className="grid gap-3 md:grid-cols-2">
-      <Card className="rounded-xl border-slate-200 shadow-none"><CardHeader className="pb-2"><CardTitle className="text-xs">Time In Verification</CardTitle></CardHeader><CardContent className="space-y-1 text-xs text-slate-500"><p>{attendance.time_in ? fmt.dateTime(attendance.time_in) : "No time in"}</p><p className="font-medium text-emerald-700">{attendance.time_in_verification ?? "Not captured"}</p><p>Accuracy: {attendance.time_in_accuracy ? `${attendance.time_in_accuracy}m` : "—"}</p>{(() => { const mapUrl = googleMapsUrl(attendance.time_in_latitude, attendance.time_in_longitude); return <p className="break-all text-[10px]">Coordinates: {mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">Open login location in Google Maps</a> : "—"}</p>; })()}</CardContent></Card>
-      <Card className="rounded-xl border-slate-200 shadow-none"><CardHeader className="pb-2"><CardTitle className="text-xs">Time Out Verification</CardTitle></CardHeader><CardContent className="space-y-1 text-xs text-slate-500"><p>{attendance.time_out ? fmt.dateTime(attendance.time_out) : "No time out"}</p><p className="font-medium text-emerald-700">{attendance.time_out_verification ?? "Not captured"}</p><p>Accuracy: {attendance.time_out_accuracy ? `${attendance.time_out_accuracy}m` : "—"}</p>{(() => { const mapUrl = googleMapsUrl(attendance.time_out_latitude, attendance.time_out_longitude); return <p className="break-all text-[10px]">Coordinates: {mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">Open logout location in Google Maps</a> : "—"}</p>; })()}</CardContent></Card>
-    </div>
+     <div className="grid gap-3 md:grid-cols-2">
+       <Card className="rounded-xl border-slate-200 shadow-none">
+         <CardHeader className="pb-2"><CardTitle className="text-xs">Time In Verification</CardTitle></CardHeader>
+         <CardContent className="space-y-1 text-xs text-slate-500">
+           <p>{attendance.time_in ? fmt.dateTime(attendance.time_in) : "No time in"}</p>
+           <p className="font-medium text-emerald-700">{attendance.time_in_verification ?? "Not captured"}</p>
+           <p>Accuracy: {attendance.time_in_accuracy ? `${attendance.time_in_accuracy}m` : "—"}</p>
+           <LocationMapPreview latitude={attendance.time_in_latitude} longitude={attendance.time_in_longitude} label="Time in" />
+         </CardContent>
+       </Card>
+       <Card className="rounded-xl border-slate-200 shadow-none">
+         <CardHeader className="pb-2"><CardTitle className="text-xs">Time Out Verification</CardTitle></CardHeader>
+         <CardContent className="space-y-1 text-xs text-slate-500">
+           <p>{attendance.time_out ? fmt.dateTime(attendance.time_out) : "No time out"}</p>
+           <p className="font-medium text-emerald-700">{attendance.time_out_verification ?? "Not captured"}</p>
+           <p>Accuracy: {attendance.time_out_accuracy ? `${attendance.time_out_accuracy}m` : "—"}</p>
+           <LocationMapPreview latitude={attendance.time_out_latitude} longitude={attendance.time_out_longitude} label="Time out" />
+         </CardContent>
+       </Card>
+     </div>
      {(canReview || canManage) && <div className="flex flex-wrap gap-2 border-y border-slate-100 py-3">
        {canReview && attendance.review_status !== "needs_review" && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs text-orange-700" onClick={() => changeReview("needs_review")}><AlertTriangle className="mr-1.5 h-3.5 w-3.5" />Needs review</Button>}
        {canReview && attendance.review_status !== "approved" && attendance.review_status !== "locked" && <Button size="sm" className="h-8 bg-emerald-600 text-xs hover:bg-emerald-700" onClick={() => changeReview("approved")}><Check className="mr-1.5 h-3.5 w-3.5" />Approve</Button>}
@@ -348,7 +392,6 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
        {canManage && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setTimeIn(toInput(attendance.time_in)); setTimeOut(toInput(attendance.time_out)); setEditing(value => !value); }}><Pencil className="mr-1.5 h-3.5 w-3.5" />Correct times</Button>}
      </div>}
      {editing && canManage && <div className="rounded-xl border border-red-100 bg-red-50/50 p-4"><div className="grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px]">Time in</Label><Input type="datetime-local" value={timeIn} onChange={e => setTimeIn(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px]">Time out</Label><Input type="datetime-local" value={timeOut} onChange={e => setTimeOut(e.target.value)} className="mt-1 h-9 text-xs" /></div></div><Label className="mt-3 block text-[11px]">Reason required</Label><Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Forgot to clock out" className="mt-1 h-9 text-xs" /><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button><Button size="sm" className="bg-red-600 text-xs hover:bg-red-700" disabled={!reason.trim()} onClick={() => submitCorrection().catch((error: any) => window.alert(error.message))}>Save correction</Button></div></div>}
-    <div><h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><MapPin className="h-3.5 w-3.5" />Location History</h3><div className="space-y-2">{checkpoints.length ? checkpoints.map((checkpoint: any) => { const mapUrl = googleMapsUrl(checkpoint.latitude, checkpoint.longitude); return <div key={checkpoint.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 p-3 text-xs"><div><p className="font-medium capitalize text-slate-700">{checkpoint.checkpoint_type.replace(/_/g, " ")}</p><p className="text-slate-400">{fmt.dateTime(checkpoint.captured_at)}</p></div><div className="text-right">{statusBadge(checkpoint.capture_status)}<p className="mt-1 text-slate-400">{mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">Open in Google Maps</a> : "No location captured"}</p></div></div>; }) : <p className="text-sm text-slate-400">No checkpoints recorded.</p>}</div></div>
     <div><h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><History className="h-3.5 w-3.5" />Record History</h3><div className="space-y-2">{audit.length ? audit.map((entry: any) => <div key={entry.id} className="rounded-lg border border-slate-100 p-3 text-xs"><div className="flex justify-between gap-3"><span className="font-medium capitalize text-slate-700">{String(entry.action).replace(/_/g, " ")}</span><span className="text-slate-400">{fmt.dateTime(entry.created_at)}</span></div><p className="mt-1 text-slate-500">{entry.changed_field ? `${entry.changed_field} changed` : "Attendance event"}{entry.reason ? ` · ${entry.reason}` : ""}</p></div>) : <p className="text-sm text-slate-400">No administrative changes recorded.</p>}</div></div>
   </CardContent></Card>;
 }
@@ -360,7 +403,7 @@ function Logs() {
   const canViewAll = hasPermission("attendance", "view_all");
   const [status, setStatus] = useState("all");
   const [startMethod, setStartMethod] = useState("all");
-  const [reviewStatus, setReviewStatus] = useState(() => new URLSearchParams(location.split("?")[1] ?? "").get("reviewStatus") ?? "all");
+  const [reviewStatus, setReviewStatus] = useState(() => attendanceSearchParams(location).get("reviewStatus") ?? "all");
   const [month, setMonth] = useState(currentMonthKey);
   const initialMonthRange = useMemo(() => monthRange(currentMonthKey()), []);
   const [from, setFrom] = useState(initialMonthRange.from);
@@ -368,11 +411,11 @@ function Logs() {
   const [userId, setUserId] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(() => {
-    const value = new URLSearchParams(location.split("?")[1] ?? "").get("record");
+    const value = attendanceSearchParams(location).get("record");
     return value ? Number(value) : null;
   });
   useEffect(() => {
-    const params = new URLSearchParams(location.split("?")[1] ?? "");
+    const params = attendanceSearchParams(location);
     const value = params.get("record");
     setSelectedId(value ? Number(value) : null);
   }, [location]);
