@@ -304,7 +304,6 @@ export default function AttendancePage() {
                   <Home className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-blue-900">Set your home location once</p>
-                    <p className="mt-1 text-xs leading-5 text-blue-700">Route start becomes available after you save your home location. You cannot clock in from within the admin-defined home area.</p>
                     <Button variant="outline" className="mt-3 border-blue-300 bg-white text-blue-700 hover:bg-blue-100" onClick={setHomeLocation} disabled={settingHome}>
                       {settingHome && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       {settingHome ? "Saving location..." : "Use current location as home"}
