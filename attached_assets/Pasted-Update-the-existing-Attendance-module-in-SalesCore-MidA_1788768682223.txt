@@ -1,0 +1,1500 @@
+Update the existing Attendance module in SalesCore / MidAtlantic Sales.
+
+IMPORTANT:
+Use the attached Attendance UI reference image as the PRIMARY visual design reference for the updated Attendance module.
+
+Do NOT redesign unrelated modules.
+Do NOT replace the existing application architecture.
+Do NOT create a separate attendance application.
+Extend the existing Attendance implementation cleanly and reuse existing components, authentication, RBAC, database patterns, filters, exports, audit logging, and styling wherever possible.
+
+The goal is to make Attendance feel like a professional employee timekeeping, attendance audit, exception review, and payroll preparation system.
+
+The existing Attendance functionality should continue working unless specifically changed below.
+
+==================================================
+1. CORE DESIGN PRINCIPLE
+==================================================
+
+Structure Attendance around four layers:
+
+RAW ATTENDANCE EVIDENCE
+        ↓
+ATTENDANCE RECORD
+        ↓
+REVIEW / APPROVAL
+        ↓
+REPORTING / PAYROLL PREPARATION
+
+Raw evidence must never be silently overwritten.
+
+The attendance record should present the clean operational result.
+
+Managers should be able to drill into the underlying evidence when needed.
+
+Corrections must create an audit trail.
+
+Do not build a Payroll module.
+
+Pay Period is a reusable attendance/reporting concept.
+
+==================================================
+2. SIDEBAR / NAVIGATION
+==================================================
+
+Keep Attendance as a top-level expandable module positioned between Tools and Reporting:
+
+Dashboard
+POS
+Customers
+Orders
+Inventory
+Marketing
+Catalog
+Cart
+Tools
+Attendance
+  My Attendance
+  Overview
+  Attendance Logs
+  Exceptions
+  Reports
+  Settings
+Reporting
+
+Employee users should only see the Attendance functions allowed by their permissions.
+
+Managers/Admins can see the administrative Attendance sections according to RBAC.
+
+Do not hardcode access based only on role names.
+
+Use the existing permission system.
+
+Recommended permissions if they do not already exist:
+
+attendance:clock
+attendance:view_own
+attendance:view_dashboard
+attendance:view_all
+attendance:view_logs
+attendance:view_exceptions
+attendance:view_reports
+attendance:review_exceptions
+attendance:manage_settings
+attendance:manage
+attendance:approve
+
+Reuse the existing RBAC implementation if equivalent permissions already exist.
+
+==================================================
+3. VISUAL DESIGN
+==================================================
+
+Use the attached image as the visual source of truth.
+
+Preserve the existing MidAtlantic application design language:
+
+• dark navy sidebar
+• white content background
+• black/dark navy text
+• red primary action color
+• subtle green success states
+• subtle orange warning states
+• light gray borders
+• rounded cards
+• compact enterprise density
+• clean typography
+• Lucide icons
+• restrained shadows
+• minimal animation
+• responsive layouts
+
+Do not make the interface overly colorful.
+
+Do not make it look like a consumer time tracking application.
+
+It should feel like an internal ERP/business operations application.
+
+Desktop should be information dense without feeling cluttered.
+
+Mobile must use responsive cards and stacked layouts rather than simply shrinking desktop tables.
+
+Avoid unnecessary horizontal scrolling.
+
+==================================================
+4. EMPLOYEE ATTENDANCE EXPERIENCE
+==================================================
+
+Preserve the existing employee Attendance flow.
+
+Employee can start their day using:
+
+1. Warehouse
+2. Driving to First Stop
+
+----------------------------------------
+WAREHOUSE
+----------------------------------------
+
+When Warehouse is selected:
+
+Request current device location.
+
+Validate the employee's current location against the configured warehouse geofence.
+
+The Geolocation API can be used when the browser/PWA supports it and permission is granted.
+
+While checking:
+
+Use a subtle Apple-like loading/validation animation.
+
+Keep text minimal.
+
+Do NOT display:
+
+• latitude
+• longitude
+• GPS coordinates
+• distance from warehouse
+• GPS accuracy
+• technical location information
+• maps
+
+If verified:
+
+Show the Time In action.
+
+After successful Time In, show the active attendance screen.
+
+If not verified:
+
+Show only a concise message:
+
+"You have to be at the location to log in."
+
+Provide:
+
+Try Again
+
+Do not expose technical GPS information to employees.
+
+----------------------------------------
+DRIVING TO FIRST STOP
+----------------------------------------
+
+Keep the Driving to First Stop option and existing intended workflow.
+
+However, DO NOT fake automatic driving detection.
+
+Do not implement unsafe GPS-speed-only logic as a substitute for actual driving detection.
+
+Do not add a checkbox saying "I'm driving."
+
+Do not require the employee to interact with the phone while driving.
+
+The system should use a validation abstraction for driving verification.
+
+If the current browser/PWA environment cannot reliably perform automatic driving detection or background validation, document that limitation in the implementation rather than pretending the feature is reliable.
+
+Do not fabricate driving verification data.
+
+When reliable driving verification is available:
+
+Automatically create the attendance record after validation.
+
+Show:
+
+You're clocked in
+[time]
+Started while driving to your first stop.
+
+Drive safely. No further action is required.
+
+Both Warehouse and Driving flows must lead to the same active Attendance screen.
+
+----------------------------------------
+ACTIVE ATTENDANCE
+----------------------------------------
+
+Show:
+
+• current attendance status
+• Time In
+• start method
+• current duration
+• Today's Activity
+• End Day
+
+Today's Activity should use the existing CRM > To Do records assigned to the logged-in employee.
+
+Do not add View Route unless the existing RouteIQ / Zoho CRM route integration is actually connected.
+
+----------------------------------------
+END DAY
+----------------------------------------
+
+Employee selects End Day.
+
+Capture:
+
+• timestamp
+• latitude
+• longitude
+• accuracy
+• verification result
+
+Do not require the employee to be at the warehouse to end the day unless that rule is explicitly configured later.
+
+Show a simple confirmation screen before ending the day.
+
+==================================================
+5. LOCATION DATA COLLECTION
+==================================================
+
+Location is audit evidence, not a surveillance UI.
+
+At Time In collect:
+
+• timestamp
+• latitude
+• longitude
+• accuracy
+• start method
+• verification result
+
+At Time Out collect:
+
+• timestamp
+• latitude
+• longitude
+• accuracy
+• verification result
+
+While clocked in:
+
+Attempt an attendance location checkpoint approximately every 1 hour.
+
+IMPORTANT PLATFORM LIMITATION:
+
+Normal iOS/Android browser/PWA environments cannot guarantee background geolocation while the page is backgrounded, minimized, or closed.
+
+Therefore:
+
+• implement hourly checkpoints as best effort
+• do not claim guaranteed background tracking
+• do not fabricate missing coordinates
+• if a checkpoint cannot be collected, record it as missing/failed
+• do not continuously collect GPS every few seconds
+• do not expose hourly tracking to the employee UI
+
+Only collect attendance-relevant location events.
+
+==================================================
+6. DATA MODEL
+==================================================
+
+Use the existing database architecture if equivalent tables already exist.
+
+Do not duplicate existing tables.
+
+Attendance should conceptually contain:
+
+attendance
+
+id
+user_id
+work_date
+time_in
+time_out
+start_method
+status
+total_seconds
+
+time_in_latitude
+time_in_longitude
+time_in_accuracy
+time_in_verification
+
+time_out_latitude
+time_out_longitude
+time_out_accuracy
+time_out_verification
+
+driving_verified
+driving_verified_at
+
+review_status
+approved_by
+approved_at
+locked_at
+
+created_at
+updated_at
+
+Use appropriate existing PostgreSQL/Prisma types and conventions.
+
+Create a child table for location checkpoints:
+
+attendance_location_checkpoints
+
+id
+attendance_id
+captured_at
+latitude
+longitude
+accuracy
+checkpoint_type
+capture_status
+created_at
+
+checkpoint_type examples:
+
+time_in
+hourly
+time_out
+
+capture_status examples:
+
+captured
+missing
+failed
+
+Do not put unlimited checkpoint history directly into the main attendance row.
+
+==================================================
+7. ATTENDANCE RECORD STATUS
+==================================================
+
+Separate attendance completion status from review status.
+
+Attendance status may include:
+
+open
+completed
+missing_time_out
+incomplete
+
+Review status should include:
+
+not_reviewed
+needs_review
+approved
+locked
+
+Do not automatically classify every unusual record as misconduct.
+
+Exceptions are review flags.
+
+Preserve the underlying evidence.
+
+==================================================
+8. ATTENDANCE OVERVIEW
+==================================================
+
+Improve the existing Overview page using the attached reference image.
+
+Top:
+
+Attendance
+
+Employee time, validation, and location audit
+
+Period selector:
+
+Today
+This Week
+Pay Period
+Custom
+
+When Pay Period is selected, clearly display:
+
+Current Pay Period
+Aug 27, 2026 → Sep 9, 2026
+
+and the configured payday.
+
+Do not hardcode this example.
+
+Use the actual configured pay period calculation service.
+
+----------------------------------------
+KPI CARDS
+----------------------------------------
+
+Use:
+
+Total Hours
+Employees
+Currently Working
+Needs Review
+Missing Time Out
+
+Do not use "Exceptions" as the only actionable KPI.
+
+The Needs Review and Missing Time Out KPIs should be clickable.
+
+----------------------------------------
+NEEDS ATTENTION
+----------------------------------------
+
+Add a prominent but compact Needs Attention section.
+
+Examples:
+
+Missing Time Out
+Admin · Sep 5
+
+Location Checkpoint Missing
+Test Agent · Sep 5
+
+Driving Validation Review
+Employee · Sep 5
+
+Each item should open the relevant attendance record or exception.
+
+Add:
+
+View All
+
+Do not show this section if there are no items requiring attention.
+
+----------------------------------------
+TODAY'S ATTENDANCE
+----------------------------------------
+
+Keep the employee attendance list/cards.
+
+Show:
+
+Employee
+Status
+Time In
+Hours
+Start Method
+Verification
+
+Make each record clickable.
+
+Use compact cards on mobile.
+
+----------------------------------------
+PAYROLL READINESS
+----------------------------------------
+
+Add a compact Payroll Readiness component.
+
+Example:
+
+85% Ready
+
+Approved
+Needs Review
+Missing Time Out
+Not Yet Started
+
+The percentage must be calculated from actual attendance data.
+
+Do not invent payroll calculations.
+
+The purpose is simply to indicate whether attendance records are ready for review/approval.
+
+==================================================
+9. ATTENDANCE LOGS
+==================================================
+
+Improve the existing Attendance Logs page.
+
+The page should function as the attendance ledger for managers.
+
+Header:
+
+Attendance Logs
+
+Filters:
+
+Employee
+From Date
+To Date
+Status
+Start Method
+Review Status
+Pay Period
+
+Include:
+
+Search
+Clear Filters
+
+Show a compact result summary:
+
+10 employees · 86 records · 4 need review
+
+Do not hardcode these values.
+
+----------------------------------------
+LOG TABLE
+----------------------------------------
+
+Desktop columns:
+
+Date
+Employee
+Time In
+Time Out
+Total Hours
+Start Method
+Status
+Review
+Details
+
+Clicking a record opens Attendance Log Details.
+
+Mobile should display responsive cards instead of a horizontally overflowing desktop table.
+
+==================================================
+10. ABSENCE / DAILY LEDGER LOGIC
+==================================================
+
+Improve the current daily ledger.
+
+Do not use "Absent" for every day with no attendance record.
+
+Differentiate:
+
+No Attendance
+Leave
+Not Scheduled
+Weekend
+Holiday
+Completed
+Incomplete
+Needs Review
+
+For example:
+
+No Attendance
+Employee was expected to work but no attendance record exists.
+
+Leave
+Approved leave exists.
+
+Not Scheduled
+Employee was not expected to work.
+
+Weekend
+Not an expected workday.
+
+Holiday
+Configured company holiday.
+
+Do not infer approved leave if the existing system does not contain leave data.
+
+If leave functionality does not exist, use the appropriate "No Attendance" state instead.
+
+==================================================
+11. ATTENDANCE LOG DETAILS
+==================================================
+
+Create or improve the Attendance Log Details page.
+
+This is a detailed audit view.
+
+Header:
+
+Employee
+Work Date
+Status
+Review Status
+
+Show a clean Attendance Record summary:
+
+Time In
+Time Out
+Total Hours
+Start Method
+Status
+Review Status
+
+----------------------------------------
+TIME IN VERIFICATION
+----------------------------------------
+
+Show:
+
+timestamp
+verification status
+start method
+latitude
+longitude
+accuracy
+
+Coordinates are visible to authorized managers/admins only.
+
+----------------------------------------
+TIME OUT VERIFICATION
+----------------------------------------
+
+Show:
+
+timestamp
+verification status
+latitude
+longitude
+accuracy
+
+----------------------------------------
+LOCATION HISTORY
+----------------------------------------
+
+Show hourly checkpoints chronologically.
+
+Columns:
+
+Time
+Type
+Accuracy
+Status
+
+Example:
+
+7:52 AM
+Time In
+14m
+Verified
+
+8:52 AM
+Checkpoint
+21m
+Captured
+
+9:52 AM
+Checkpoint
+17m
+Captured
+
+10:52 AM
+Checkpoint
+—
+Missing
+
+4:48 PM
+Time Out
+18m
+Captured
+
+Never fabricate a checkpoint.
+
+If map functionality already exists or can be safely implemented, provide an optional admin-only map view.
+
+Do not require a map for the record to work.
+
+Employees should not see technical location history unless explicitly permitted by RBAC.
+
+==================================================
+12. RECORD HISTORY / AUDIT TIMELINE
+==================================================
+
+Add a Record History section.
+
+Example:
+
+7:52 AM
+Attendance started
+Driving
+
+8:52 AM
+Location checkpoint captured
+
+9:52 AM
+Location checkpoint captured
+
+4:48 PM
+Attendance ended
+
+Sep 7, 2026 3:14 PM
+Time Out corrected by Admin
+
+Every important attendance change should be auditable.
+
+Record:
+
+who performed the action
+what changed
+old value
+new value
+reason
+timestamp
+
+Reuse the existing audit logging architecture where possible.
+
+==================================================
+13. ATTENDANCE CORRECTIONS
+==================================================
+
+Add a proper correction workflow.
+
+Managers/Admins should be able to correct attendance when authorized.
+
+Do NOT simply overwrite the original evidence without history.
+
+Example:
+
+Original Time Out:
+5:42 PM
+
+Corrected Time Out:
+6:12 PM
+
+Reason:
+Forgot to clock out
+
+Changed By:
+Admin
+
+Changed At:
+timestamp
+
+Show:
+
+Modified · View Change History
+
+The original value must remain recoverable through the audit history.
+
+Require a reason for material attendance corrections.
+
+Do not allow ordinary employees to modify historical attendance unless an explicit permission exists.
+
+==================================================
+14. APPROVAL / LOCKING
+==================================================
+
+Add an attendance review workflow:
+
+Open
+↓
+Needs Review
+↓
+Approved
+↓
+Locked
+
+Clean records may move directly to Approved according to the existing workflow.
+
+Records with unresolved issues should remain Needs Review.
+
+Once locked, ordinary users cannot modify the attendance record.
+
+If a locked record needs modification:
+
+require an authorized user to reopen it.
+
+Record the reopening and subsequent change in the audit trail.
+
+Do not create a Payroll module.
+
+This approval/locking mechanism is for attendance record integrity and payroll preparation.
+
+==================================================
+15. EXCEPTIONS
+==================================================
+
+Improve the existing Exceptions page.
+
+Tabs:
+
+Open
+Resolved
+All
+
+Exception types:
+
+Driving Start + Warehouse Presence
+Missing Time Out
+Missing Location Checkpoint
+Invalid Warehouse Start
+Driving Not Verified
+Location Accuracy Issue
+
+Add:
+
+Date
+Employee
+Exception Type
+Details
+Status
+Action
+
+Managers/Admins can review and resolve exceptions.
+
+Resolution should store:
+
+reviewed_by
+reviewed_at
+resolution_status
+resolution_notes
+
+Do not overwrite the underlying attendance evidence.
+
+An exception is a review flag, not an accusation of misconduct.
+
+==================================================
+16. FIRST FOUR HOUR VALIDATION
+==================================================
+
+Preserve the existing planned validation.
+
+For employees who start using Driving to First Stop:
+
+Review the first 4 hours after their attendance start.
+
+If the system has sufficient location checkpoint evidence showing significant warehouse presence, create an admin exception:
+
+Driving Start + Warehouse Presence
+
+Default:
+
+validation window = 4 hours
+warehouse presence review threshold = 60 minutes
+
+These must be configurable in Settings.
+
+Do not notify the employee.
+
+Do not automatically change their attendance record.
+
+Do not automatically mark them as dishonest or invalid.
+
+Preserve the underlying evidence.
+
+Because hourly browser/PWA location checkpoints are best effort, this validation must be treated as evidence-based and best effort.
+
+Do not fabricate missing location data.
+
+==================================================
+17. REPORTS
+==================================================
+
+Improve Reports.
+
+Period options:
+
+Daily
+Weekly
+Pay Period
+Custom
+
+Use the same reusable pay period calculation service used by Overview and Logs.
+
+Do not hardcode pay period dates.
+
+Default payroll configuration:
+
+Frequency:
+Every 2 weeks
+
+Payday:
+Friday
+
+Allow the actual payroll schedule to be configured.
+
+----------------------------------------
+REPORT SUMMARY
+----------------------------------------
+
+Show:
+
+Employees
+Attendance Records
+Total Hours
+Needs Review
+Missing Time Out
+
+Then employee totals:
+
+Employee
+Days Worked
+Total Hours
+Missing
+Review
+
+Example:
+
+Test Agent
+5 days
+40h 12m
+0 missing
+0 review
+
+Admin
+8 days
+63h 41m
+1 missing
+2 review
+
+Values must come from real data.
+
+----------------------------------------
+OVERTIME
+----------------------------------------
+
+Do NOT invent overtime rules.
+
+Only show Regular Hours / Overtime Hours if an actual overtime rule already exists in the system or has been explicitly configured.
+
+Otherwise use Total Hours.
+
+Do not assume that every hour over 8 hours is overtime.
+
+----------------------------------------
+EXPORT
+----------------------------------------
+
+Keep Export CSV.
+
+Use the existing export architecture if available.
+
+Exports should respect the selected:
+
+date range
+pay period
+employee
+filters
+
+If export logging already exists, log attendance exports.
+
+==================================================
+18. EMPLOYEE SUMMARY
+==================================================
+
+Add a compact employee attendance summary accessible from Overview/Logs.
+
+Example:
+
+Test Agent
+
+Current Pay Period
+
+40h 12m
+5 days worked
+
+Attendance:
+
+5 completed
+0 missing
+0 exceptions
+
+Recent Records:
+
+Sep 5 — 8h 02m
+Sep 4 — 8h 11m
+Sep 3 — 7h 58m
+
+View Full Attendance
+
+This can be a drawer, modal, or detail view depending on the existing UI architecture.
+
+Do not create unnecessary navigation.
+
+==================================================
+19. SCHEDULE VS ACTUAL
+==================================================
+
+If the existing application has employee schedules/work schedules available, prepare Attendance to support:
+
+Scheduled
+Actual
+Variance
+
+Example:
+
+Scheduled:
+8:00 AM → 5:00 PM
+
+Actual:
+7:52 AM → 5:14 PM
+
+Variance:
++14 minutes
+
+Do not invent employee schedules if no schedule data exists.
+
+If scheduling is not currently available, structure the Attendance data model so this can be added later without a redesign.
+
+==================================================
+20. SETTINGS
+==================================================
+
+Keep Attendance Settings restricted by RBAC.
+
+----------------------------------------
+WAREHOUSE LOCATION
+----------------------------------------
+
+Fields:
+
+Location Name
+Latitude
+Longitude
+Allowed Radius
+
+Use the existing "Use current location as home" functionality if already implemented.
+
+Do not remove existing working settings unless specifically replaced.
+
+----------------------------------------
+ATTENDANCE RULES
+----------------------------------------
+
+Warehouse verification
+ON/OFF
+
+Driving start
+ON/OFF
+
+Hourly location checkpoint
+ON/OFF
+
+Checkpoint interval
+Default: 1 hour
+
+First 4 hour validation
+ON/OFF
+
+Validation window
+Default: 4 hours
+
+Warehouse presence review threshold
+Default: 60 minutes
+
+Location accuracy requirement if supported
+
+All values should be stored in settings rather than hardcoded.
+
+----------------------------------------
+PAYROLL SETTINGS
+----------------------------------------
+
+Pay period frequency:
+Every 2 weeks
+
+Payday:
+Friday
+
+Pay period start
+
+Pay period end
+
+Next payday
+
+Build this as reusable configuration used by:
+
+Overview
+Attendance Logs
+Reports
+
+Do not create a separate Payroll module.
+
+==================================================
+21. MOBILE RESPONSIVENESS
+==================================================
+
+Every Attendance submodule must be mobile friendly.
+
+Employee:
+
+My Attendance
+Start Day
+Location Validation
+Clocked In
+End Day
+History
+
+Admin:
+
+Overview
+Attendance Logs
+Attendance Log Details
+Exceptions
+Reports
+Settings
+
+Mobile requirements:
+
+• no unnecessary horizontal scrolling
+• KPI cards stack
+• employee records become cards
+• filters can collapse into a filter drawer/sheet
+• details become stacked sections
+• exceptions become cards
+• reports become stacked employee rows
+• settings use grouped full-width cards
+• maps, if used, remain optional
+• buttons remain touch friendly
+
+Follow the attached image for visual direction.
+
+==================================================
+22. LOCATION PRIVACY / EMPLOYEE UX
+==================================================
+
+Keep employee-facing location UX minimal.
+
+Employees should not see:
+
+GPS coordinates
+technical accuracy
+location history
+hourly checkpoint records
+admin exception logic
+internal validation rules
+
+Employees should see only what they need to complete attendance.
+
+Admin/Manager views may expose the underlying evidence according to permission.
+
+Do not build a surveillance-style map or live employee tracking dashboard.
+
+==================================================
+23. DATA INTEGRITY
+==================================================
+
+Attendance records are important business records.
+
+Do not delete historical attendance records as a normal user action.
+
+Do not silently rewrite historical timestamps.
+
+Do not fabricate location data.
+
+Do not fabricate driving validation.
+
+Do not silently change status based on assumptions.
+
+Every administrative correction should be traceable.
+
+Preserve original evidence.
+
+Use database transactions where needed for clock in/out and corrections.
+
+Prevent duplicate active attendance sessions for the same employee.
+
+Prevent duplicate Time Out operations.
+
+Handle browser refreshes safely.
+
+Handle stale sessions safely.
+
+Reuse the existing session recovery behavior already implemented in the application.
+
+==================================================
+24. PAY PERIOD CALCULATION
+==================================================
+
+Create or reuse one centralized pay period calculation service.
+
+Do not implement separate date logic in Overview, Logs, and Reports.
+
+Configuration:
+
+frequency = every 2 weeks
+payday = Friday
+period start/end based on configured payroll schedule
+
+The service should return:
+
+current period start
+current period end
+next payday
+previous period
+next period
+
+Support manual Custom date ranges independently of pay periods.
+
+==================================================
+25. PERFORMANCE
+==================================================
+
+Attendance Overview and Logs should remain performant with increasing attendance records.
+
+Use server-side filtering and pagination where appropriate.
+
+Do not load every historical location checkpoint into the Overview page.
+
+Only load detailed checkpoint history when opening an attendance record.
+
+Do not perform expensive geolocation calculations for records that are not being viewed.
+
+Use appropriate database indexes for:
+
+user_id
+work_date
+time_in
+status
+review_status
+attendance_id
+captured_at
+
+Inspect the existing schema before adding indexes so duplicates are not created.
+
+==================================================
+26. BACKEND / API
+==================================================
+
+Before coding:
+
+Inspect the existing Attendance implementation.
+
+Identify:
+
+existing routes
+existing Prisma models
+existing database tables
+existing permissions
+existing attendance calculations
+existing location logic
+existing settings
+existing audit logging
+existing export functionality
+existing employee To Do integration
+
+Extend existing functionality rather than duplicating it.
+
+Create clean reusable services for:
+
+attendance calculation
+pay period calculation
+location verification
+location checkpoint capture
+exception detection
+attendance review
+attendance corrections
+attendance audit history
+
+Do not duplicate business logic between frontend and backend.
+
+Server remains authoritative for attendance records and review status.
+
+==================================================
+27. DATABASE MIGRATION SAFETY
+==================================================
+
+Before modifying the schema:
+
+Inspect the current Replit database schema.
+
+Do not recreate existing tables.
+
+Do not drop production data.
+
+Do not rename existing fields unless absolutely necessary.
+
+Use additive migrations wherever possible.
+
+Preserve existing attendance records.
+
+If an existing table already contains equivalent fields, reuse them rather than creating duplicates.
+
+==================================================
+28. EXISTING ATTENDANCE FUNCTIONALITY TO PRESERVE
+==================================================
+
+Preserve:
+
+Warehouse start
+Driving to First Stop flow
+Current location verification
+Time In
+Time Out
+Attendance history
+CRM To Do activity
+Attendance Overview
+Attendance Logs
+Exceptions
+Reports
+Settings
+Pay Period filtering
+RBAC
+Location evidence
+Hourly checkpoint concept
+First four hour validation concept
+Session recovery
+Force logout / Clear saved session behavior
+
+The recent removal of this Attendance explanatory copy must remain removed:
+
+"Route start becomes available after you save your home location. You cannot clock in from within the admin-defined home area."
+
+Do not reintroduce it.
+
+==================================================
+29. IMPORTANT PLATFORM LIMITATIONS
+==================================================
+
+Do not claim that browser/PWA background location is guaranteed on Android or iOS.
+
+Current browser/PWA implementation can reliably request current location during an active user interaction on supported modern browsers when permission is granted and HTTPS is used.
+
+Hourly background location while the app is minimized/closed is not guaranteed.
+
+Automatic driving detection is not guaranteed in a normal browser/PWA.
+
+Therefore:
+
+Implement what the platform reliably supports.
+
+Create abstractions for functionality that may later use native capabilities.
+
+Do not create fake detection.
+
+Do not create unsafe employee interaction while driving.
+
+==================================================
+30. UI DETAILS FROM REFERENCE IMAGE
+==================================================
+
+Use the attached reference image to guide:
+
+spacing
+card sizes
+typography
+navigation
+KPI hierarchy
+filters
+table density
+status badges
+red accent usage
+green verification states
+orange review states
+mobile layouts
+detail page hierarchy
+settings grouping
+
+The image is a design reference, not a reason to replace existing application components.
+
+Reuse existing shadcn/ui/Tailwind components where possible.
+
+Use consistent existing design tokens.
+
+Use Lucide icons.
+
+Do not introduce a new visual framework.
+
+==================================================
+31. IMPLEMENTATION PROCESS
+==================================================
+
+Do not immediately start changing code.
+
+First inspect the existing Attendance implementation and determine:
+
+1. Current Attendance database schema
+2. Current API routes
+3. Current frontend routes/components
+4. Existing RBAC permissions
+5. Existing audit logging
+6. Existing settings architecture
+7. Existing pay period logic
+8. Existing location verification
+9. Existing checkpoint implementation
+10. Existing exception implementation
+11. Existing report/export implementation
+
+Then implement the smallest clean set of changes required.
+
+Do not rewrite working functionality unnecessarily.
+
+Do not touch unrelated modules.
+
+==================================================
+32. VALIDATION
+==================================================
+
+After implementation:
+
+Run the project build.
+
+Run relevant type checks.
+
+Verify all Attendance routes.
+
+Verify employee permissions.
+
+Verify manager/admin permissions.
+
+Verify:
+
+Warehouse start
+Warehouse geofence failure
+Warehouse retry
+Time In
+Time Out
+Driving flow
+Missing Time Out
+Hourly checkpoint
+Missing checkpoint
+Exception creation
+Exception resolution
+Attendance correction
+Correction audit trail
+Approval
+Locking
+Pay Period calculation
+Custom date filtering
+Reports
+CSV export
+Mobile layouts
+
+Verify no duplicate active attendance records can be created.
+
+Verify historical attendance records remain intact.
+
+Verify the existing login/session recovery still works.
+
+Restart the workflow and verify the live preview.
+
+Do not make unrelated fixes.
+
+==================================================
+33. FINAL RESULT
+==================================================
+
+The finished Attendance module should feel like a professional:
+
+Employee Timekeeping
++
+Attendance Audit
++
+Exception Review
++
+Payroll Preparation
+
+system.
+
+The manager should be able to answer quickly:
+
+Who is working?
+Who has not logged in?
+Who has incomplete attendance?
+Which records need review?
+What evidence supports the attendance record?
+Who changed a record?
+Are the current pay period records ready?
+What should be exported?
+
+The employee should experience something much simpler:
+
+Start Day
+→
+Verify / Validate
+→
+Clocked In
+→
+Work
+→
+End Day
+
+Keep the employee experience minimal.
+
+Keep the administrative record keeping detailed.
+
+Use the attached image as the visual source of truth for the final UI.

@@ -14,6 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { getAuthHeaders } from "@/lib/api";
 import { useTimeService } from "@/hooks/useTimeService";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useStore } from "@/lib/store";
 
 function apiJson(path: string, init?: RequestInit) {
   return fetch(path, { ...init, headers: { ...getAuthHeaders(), ...(init?.headers ?? {}) } }).then(async response => {
@@ -181,15 +183,23 @@ function ledgerStatus(
 }
 
 const tabs = [
-  { key: "overview", label: "Overview", icon: BarChart3 },
-  { key: "logs", label: "Attendance Logs", icon: FileClock },
-  { key: "exceptions", label: "Exceptions", icon: AlertTriangle },
-  { key: "reports", label: "Reports", icon: BarChart3 },
-  { key: "locations", label: "Home Locations", icon: MapPin },
-  { key: "settings", label: "Settings", icon: Settings2 },
+  { key: "overview", label: "Overview", icon: BarChart3, module: "attendance", action: "view_dashboard" },
+  { key: "logs", label: "Attendance Logs", icon: FileClock, module: "attendance", action: "view_logs" },
+  { key: "exceptions", label: "Exceptions", icon: AlertTriangle, module: "attendance", action: "view_exceptions" },
+  { key: "reports", label: "Reports", icon: BarChart3, module: "attendance", action: "view_reports" },
+  { key: "locations", label: "Home Locations", icon: MapPin, module: "attendance", action: "view_dashboard" },
+  { key: "settings", label: "Settings", icon: Settings2, adminOnly: true },
 ];
 
 function AdminShell({ activeTab, children }: { activeTab: string; children: React.ReactNode }) {
+  const { currentUser } = useStore();
+  const { hasPermission, isLoading } = usePermissions();
+  const visibleTabs = tabs.filter(tab => {
+    if (tab.adminOnly) return currentUser?.role === "admin";
+    if (isLoading) return false;
+    return hasPermission(tab.module, tab.action);
+  });
+
   return (
     <div className="min-h-full bg-slate-50 px-4 py-5 md:px-6">
       <div className="mx-auto max-w-7xl">
@@ -200,7 +210,7 @@ function AdminShell({ activeTab, children }: { activeTab: string; children: Reac
           </div>
         </div>
         <div className="mt-5 flex gap-1 overflow-x-auto border-b border-slate-200">
-          {tabs.map(tab => {
+           {visibleTabs.map(tab => {
             const Icon = tab.icon;
             return <Link key={tab.key} href={`/attendance/${tab.key}`} className={`flex shrink-0 items-center gap-2 border-b-2 px-3 py-2.5 text-xs font-medium transition ${activeTab === tab.key ? "border-red-600 text-red-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}><Icon className="h-3.5 w-3.5" />{tab.label}</Link>;
           })}
