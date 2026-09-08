@@ -28,3 +28,17 @@ mtime_ms = 1788857004743
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/1c45253a-a102-4899-bd44-19e5db50cf86/fc025320-85e0-403d-9274-00470c6f1fdd"
 storage_version_token = "1788857026361296"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "R2eSbeT85DbNyRP00bUOY"
+uri = "file://database-staging-baseline-drift-fix.sql"
+type = "unspecified"
+title = "Staging baseline drift fix SQL"
+description = "Standalone read-only-to-generate PostgreSQL correction file containing exactly five CREATE INDEX statements. It was validated but not executed."
+logical_id = "4be1396e-0b9c-4a93-9701-8e37d4eaee30"
+content_hash = "sha256:4ffc55b1c5ec112383b80178beee91889b68367351c83e16ea883e8c7a53f748"
+size = 918
+mtime_ms = 1788858572071
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/4be1396e-0b9c-4a93-9701-8e37d4eaee30/a0e052ef-72df-4fae-99b1-5ba74d5b4fbf"
+storage_version_token = "1788858587742091"
+content_type = "application/octet-stream"
