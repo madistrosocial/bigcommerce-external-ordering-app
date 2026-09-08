@@ -14,8 +14,13 @@ import {
   DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   FileText, ChevronDown, ChevronUp, Send, Mail, Loader2,
-  ShoppingCart, Edit, Trash2, User, Search, AlertCircle, UsersRound,
+  ShoppingCart, Edit, Trash2, User, Search, UsersRound,
+  MoreHorizontal, Eye, Download,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -34,6 +39,8 @@ interface DraftRowProps {
   onLoadToCart: (order: api.Order) => void;
   onEdit: (order: api.Order) => void;
   onSendDraftInvoice: (order: api.Order) => void;
+  onViewDraftInvoice: (order: api.Order) => void;
+  onDownloadDraftInvoice: (order: api.Order) => void;
   onDelete: (order: api.Order) => void;
   isSubmitting: boolean;
 }
@@ -53,7 +60,18 @@ function draftCustomerName(order: api.Order): string {
   return addressName || order.customer_email || "Unnamed customer";
 }
 
-function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onSendDraftInvoice, onDelete, isSubmitting }: DraftRowProps) {
+function DraftRow({
+  order,
+  isOfflineMode,
+  onSubmit,
+  onLoadToCart,
+  onEdit,
+  onSendDraftInvoice,
+  onViewDraftInvoice,
+  onDownloadDraftInvoice,
+  onDelete,
+  isSubmitting,
+}: DraftRowProps) {
   const [open, setOpen] = useState(false);
   const fmt = useTimeService();
   const toggle = () => setOpen((v) => !v);
@@ -71,7 +89,7 @@ function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onSend
           }
         }}
         className={cn(
-          "w-full flex items-center sm:grid sm:grid-cols-[24px_72px_minmax(180px,1fr)_120px_110px_55px_100px_24px] sm:items-center gap-3 px-4 py-3 text-left transition-colors cursor-pointer",
+          "w-full flex items-center sm:grid sm:grid-cols-[24px_72px_minmax(180px,1fr)_120px_110px_55px_100px_72px_24px] sm:items-center gap-3 px-4 py-3 text-left transition-colors cursor-pointer",
           open ? "bg-slate-50" : "hover:bg-slate-50",
         )}
         data-testid={`draft-toggle-${order.id}`}
@@ -106,6 +124,94 @@ function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onSend
           <Badge className="sm:hidden bg-slate-500 text-[10px] h-4 px-1.5 font-medium mt-0.5">
             <FileText className="h-2.5 w-2.5 mr-0.5" />Draft
           </Badge>
+        </div>
+        <div
+          className="hidden sm:flex items-center justify-center"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="h-7 w-7 rounded flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors"
+                title="Draft actions"
+                data-testid={`button-draft-actions-${order.id}`}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem
+                className="gap-2 cursor-pointer"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onViewDraftInvoice(order);
+                }}
+              >
+                <Eye className="h-3.5 w-3.5" /> View Draft Invoice
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2 cursor-pointer"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDownloadDraftInvoice(order);
+                }}
+              >
+                <Download className="h-3.5 w-3.5" /> Download Draft Invoice
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2 cursor-pointer"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSendDraftInvoice(order);
+                }}
+              >
+                <Mail className="h-3.5 w-3.5" /> Send Draft Invoice
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="gap-2 cursor-pointer"
+                disabled={isOfflineMode || isSubmitting}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSubmit(order);
+                }}
+              >
+                {isSubmitting
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <Send className="h-3.5 w-3.5" />}
+                {isOfflineMode ? "Go Online to Submit" : "Submit to BigCommerce"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2 cursor-pointer"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onLoadToCart(order);
+                }}
+              >
+                <ShoppingCart className="h-3.5 w-3.5" /> Load to Cart
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2 cursor-pointer"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onEdit(order);
+                }}
+              >
+                <Edit className="h-3.5 w-3.5" /> Edit Customer
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="gap-2 cursor-pointer text-red-600 focus:text-red-700"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete(order);
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Delete Draft
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         {open
           ? <ChevronUp className="h-4 w-4 text-slate-400 shrink-0" />
@@ -143,63 +249,6 @@ function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onSend
             </div>
           </div>
 
-          <div className="border-t pt-3 space-y-2">
-            {!isOfflineMode ? (
-              <>
-                <Button
-                  className="w-full h-9 text-sm"
-                  onClick={() => onSubmit(order)}
-                  disabled={isSubmitting}
-                  data-testid={`btn-submit-draft-${order.id}`}
-                >
-                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-                  Submit to BigCommerce
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full h-9 text-sm"
-                  onClick={() => onSendDraftInvoice(order)}
-                  data-testid={`btn-send-draft-invoice-${order.id}`}
-                >
-                  <Mail className="h-4 w-4 mr-2" />
-                  Send Draft Invoice
-                </Button>
-                <div className="grid grid-cols-3 gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full h-8 text-xs"
-                    onClick={() => onLoadToCart(order)}
-                    data-testid={`btn-load-cart-${order.id}`}
-                  >
-                    <ShoppingCart className="h-3.5 w-3.5 mr-1" /> Load to Cart
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full h-8 text-xs"
-                    onClick={() => onEdit(order)}
-                    data-testid={`btn-edit-draft-${order.id}`}
-                  >
-                    <Edit className="h-3.5 w-3.5 mr-1" /> Edit Customer
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full h-8 text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
-                    onClick={() => onDelete(order)}
-                    data-testid={`btn-delete-draft-${order.id}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <p className="text-xs text-orange-600 text-center py-1">
-                Go online to submit this draft order.
-              </p>
-            )}
-          </div>
         </div>
       )}
     </div>
@@ -238,6 +287,8 @@ export default function DraftOrders() {
   const [draftInvoiceLoading, setDraftInvoiceLoading] = useState(false);
   const [draftInvoiceSending, setDraftInvoiceSending] = useState(false);
   const [draftInvoiceFrameReady, setDraftInvoiceFrameReady] = useState(false);
+  const [draftInvoiceMode, setDraftInvoiceMode] = useState<"send" | "view" | "download">("send");
+  const draftInvoiceDownloadStarted = useRef(false);
   const draftInvoiceFrameRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -398,8 +449,25 @@ export default function DraftOrders() {
     }
   };
 
-  const openDraftInvoice = async (order: api.Order) => {
+  const downloadPdfDataUri = (dataUri: string, draftId: number) => {
+    const base64 = dataUri.split(",")[1] || "";
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = `Draft-Invoice-${draftId}.pdf`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(blobUrl);
+  };
+
+  const openDraftInvoice = async (order: api.Order, mode: "send" | "view" | "download") => {
     if (!order.id) return;
+    setDraftInvoiceMode(mode);
+    draftInvoiceDownloadStarted.current = false;
     setDraftInvoiceOpen(true);
     setDraftInvoiceOrder(order);
     setDraftInvoiceTo(order.customer_email || "");
@@ -445,6 +513,29 @@ export default function DraftOrders() {
     setDraftInvoiceOrder(null);
     setDraftInvoiceHtml("");
     setDraftInvoiceFrameReady(false);
+    setDraftInvoiceMode("send");
+    draftInvoiceDownloadStarted.current = false;
+  };
+
+  const handleDraftInvoiceFrameLoad = async () => {
+    setDraftInvoiceFrameReady(true);
+    if (draftInvoiceMode !== "download" || draftInvoiceDownloadStarted.current || !draftInvoiceOrder?.id) return;
+    draftInvoiceDownloadStarted.current = true;
+    setDraftInvoiceLoading(true);
+    try {
+      const pdfDataUri = await generatePdfBase64(draftInvoiceFrameRef.current);
+      downloadPdfDataUri(pdfDataUri, draftInvoiceOrder.id);
+      toast({
+        title: "Draft invoice downloaded",
+        description: `Draft-Invoice-${draftInvoiceOrder.id}.pdf`,
+      });
+      closeDraftInvoice();
+    } catch (error: any) {
+      draftInvoiceDownloadStarted.current = false;
+      toast({ title: "Download failed", description: error.message, variant: "destructive" });
+    } finally {
+      setDraftInvoiceLoading(false);
+    }
   };
 
   const handleSendDraftInvoice = async () => {
@@ -546,7 +637,9 @@ export default function DraftOrders() {
       onSubmit={tryAutoSubmit}
       onLoadToCart={loadDraftToCart}
       onEdit={openDraftEdit}
-      onSendDraftInvoice={openDraftInvoice}
+      onSendDraftInvoice={(order) => openDraftInvoice(order, "send")}
+      onViewDraftInvoice={(order) => openDraftInvoice(order, "view")}
+      onDownloadDraftInvoice={(order) => openDraftInvoice(order, "download")}
       onDelete={deleteDraft}
       isSubmitting={submittingId === order.id}
     />
@@ -621,7 +714,7 @@ export default function DraftOrders() {
           </div>
         ) : (
           <div className="w-full">
-            <div className="hidden sm:grid grid-cols-[24px_72px_minmax(180px,1fr)_120px_110px_55px_100px_24px] items-center border-b bg-slate-50 px-4 py-2.5 sticky top-0 z-10 text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+            <div className="hidden sm:grid grid-cols-[24px_72px_minmax(180px,1fr)_120px_110px_55px_100px_72px_24px] items-center border-b bg-slate-50 px-4 py-2.5 sticky top-0 z-10 text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
               <span />
               <span>Draft #</span>
               <span>Customer</span>
@@ -629,6 +722,7 @@ export default function DraftOrders() {
               <span>Date</span>
               <span className="text-right">Items</span>
               <span className="text-right">Total</span>
+              <span className="text-center">Actions</span>
               <span />
             </div>
             <div className="bg-white border-b">
@@ -731,59 +825,94 @@ export default function DraftOrders() {
       </Dialog>
 
       <Dialog open={draftInvoiceOpen} onOpenChange={(open) => !open && closeDraftInvoice()}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className={draftInvoiceMode === "view" ? "max-w-5xl w-[calc(100%-2rem)] h-[90vh] flex flex-col" : "sm:max-w-md"}>
           <DialogHeader>
-            <DialogTitle>Send Draft Invoice</DialogTitle>
+            <DialogTitle>
+              {draftInvoiceMode === "view"
+                ? `Draft Invoice #${draftInvoiceOrder?.id ?? ""}`
+                : draftInvoiceMode === "download"
+                  ? "Download Draft Invoice"
+                  : "Send Draft Invoice"}
+            </DialogTitle>
             <DialogDescription>
-              A PDF marked “DRAFT INVOICE” will be attached. The saved draft will not be submitted or changed.
+              {draftInvoiceMode === "view"
+                ? "Preview the draft invoice before sharing it."
+                : draftInvoiceMode === "download"
+                  ? "Preparing a PDF marked “DRAFT INVOICE”."
+                  : "A PDF marked “DRAFT INVOICE” will be attached. The saved draft will not be submitted or changed."}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="draft-invoice-email">To</Label>
-              <Input
-                id="draft-invoice-email"
-                type="email"
-                placeholder="customer@example.com"
-                value={draftInvoiceTo}
-                onChange={(event) => setDraftInvoiceTo(event.target.value)}
-                disabled={draftInvoiceLoading || draftInvoiceSending}
-                data-testid="input-draft-invoice-email"
-              />
-            </div>
-            {draftInvoiceLoading && (
-              <div className="flex items-center text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                Preparing draft invoice…
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={closeDraftInvoice} disabled={draftInvoiceSending}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSendDraftInvoice}
-              disabled={draftInvoiceLoading || draftInvoiceSending || !draftInvoiceFrameReady}
-              data-testid="btn-confirm-send-draft-invoice"
-            >
-              {draftInvoiceSending ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Mail className="h-4 w-4 mr-2" />
+          {draftInvoiceMode === "view" ? (
+            <div className="flex-1 min-h-0 rounded-md border bg-slate-100 overflow-hidden">
+              {draftInvoiceLoading && (
+                <div className="flex items-center justify-center h-full text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> Preparing preview…
+                </div>
               )}
-              Send Draft Invoice
-            </Button>
-          </DialogFooter>
+              {draftInvoiceHtml && (
+                <iframe
+                  ref={draftInvoiceFrameRef}
+                  srcDoc={draftInvoiceHtml}
+                  title="Draft Invoice Preview"
+                  onLoad={handleDraftInvoiceFrameLoad}
+                  className="w-full h-full border-0 bg-white"
+                />
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="space-y-3 py-2">
+                {draftInvoiceMode === "send" && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="draft-invoice-email">To</Label>
+                    <Input
+                      id="draft-invoice-email"
+                      type="email"
+                      placeholder="customer@example.com"
+                      value={draftInvoiceTo}
+                      onChange={(event) => setDraftInvoiceTo(event.target.value)}
+                      disabled={draftInvoiceLoading || draftInvoiceSending}
+                      data-testid="input-draft-invoice-email"
+                    />
+                  </div>
+                )}
+                {draftInvoiceLoading && (
+                  <div className="flex items-center text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    {draftInvoiceMode === "download" ? "Generating PDF…" : "Preparing draft invoice…"}
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={closeDraftInvoice} disabled={draftInvoiceSending}>
+                  Cancel
+                </Button>
+                {draftInvoiceMode === "send" && (
+                  <Button
+                    onClick={handleSendDraftInvoice}
+                    disabled={draftInvoiceLoading || draftInvoiceSending || !draftInvoiceFrameReady}
+                    data-testid="btn-confirm-send-draft-invoice"
+                  >
+                    {draftInvoiceSending ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Mail className="h-4 w-4 mr-2" />
+                    )}
+                    Send Draft Invoice
+                  </Button>
+                )}
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 
-      {draftInvoiceHtml && (
+      {draftInvoiceHtml && draftInvoiceMode !== "view" && (
         <iframe
           ref={draftInvoiceFrameRef}
           srcDoc={draftInvoiceHtml}
           title="Draft Invoice PDF Source"
-          onLoad={() => setDraftInvoiceFrameReady(true)}
+          onLoad={handleDraftInvoiceFrameLoad}
           aria-hidden="true"
           tabIndex={-1}
           style={{
