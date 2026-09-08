@@ -411,6 +411,7 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
 function Logs() {
   const [location] = useLocation();
   const currentUser = useStore(s => s.currentUser);
+  const fmt = useTimeService();
   const { hasPermission, isLoading: permissionsLoading } = usePermissions();
   const canViewAll = hasPermission("attendance", "view_all");
   const [status, setStatus] = useState("all");
@@ -461,6 +462,14 @@ function Logs() {
   }, [rows]);
   const expectedTeamMembers = selectedMember ? 1 : teamMembers.length;
   const selectedUserId = canViewAll ? userId : String(currentUser?.id ?? "");
+  const formatDailyTime = (records: any[], field: "time_in" | "time_out") => {
+    const values = records
+      .map(row => row[field])
+      .filter(Boolean)
+      .map(value => fmt.time(value));
+    if (values.length <= 1) return values[0] ?? "—";
+    return `${values.slice(0, 3).join(", ")}${values.length > 3 ? ` +${values.length - 3}` : ""}`;
+  };
   const businessDates = dates.filter(date => dayKind(date, holidayMap) === "weekday");
   const workedRows = rows.filter((row: any) => dayKind(row.work_date, holidayMap) === "weekday");
   const today = dateOnly(new Date());
@@ -554,8 +563,8 @@ function Logs() {
          {query.isLoading || usersQuery.isLoading ? <div className="p-12 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /><p className="mt-2">Loading attendance ledger…</p></div> : query.isError || usersQuery.isError ? <div className="p-10 text-center text-sm text-red-600">Attendance logs could not be loaded. Try refreshing the page.</div> : !dates.length ? <div className="p-10 text-center text-sm text-slate-400">Choose a valid date range to view the ledger.</div> : (
            <>
           <div className="hidden overflow-x-auto md:block">
-            <table className="w-full min-w-[760px] text-left text-xs">
-              <thead><tr className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Day</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Hours</th><th className="px-4 py-3 font-semibold">Team / note</th><th className="px-4 py-3 text-right font-semibold">Details</th></tr></thead>
+             <table className="w-full min-w-[980px] text-left text-xs">
+               <thead><tr className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Day</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Time In</th><th className="px-4 py-3 font-semibold">Time Out</th><th className="px-4 py-3 font-semibold">Hours</th><th className="px-4 py-3 font-semibold">Team / note</th><th className="px-4 py-3 text-right font-semibold">Details</th></tr></thead>
               <tbody>
                 {dates.map(date => {
                   const summary = recordsByDate.get(date);
@@ -570,9 +579,11 @@ function Logs() {
                     <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold text-slate-800">{shortDate(date)}</span><span className="ml-2 text-[10px] text-slate-400">{date}</span></td>
                     <td className={`px-4 py-3 font-medium ${statusKey === "weekend" ? "text-slate-400" : "text-slate-600"}`}>{weekday(date)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span>{holiday && <span className="ml-2 text-[10px] text-amber-700">{holiday}</span>}</td>
+                     <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? (record?.time_in ? fmt.time(record.time_in) : "—") : formatDailyTime(dateRecords, "time_in")}</td>
+                     <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? (record?.time_out ? fmt.time(record.time_out) : "—") : formatDailyTime(dateRecords, "time_out")}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</td>
                      <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? `${record.start_method === "warehouse" ? "Warehouse" : "Route start"} · ${record.status}` : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "Future workday" : "Not expected") : (names.length ? `${names.slice(0, 3).join(", ")}${names.length > 3 ? ` +${names.length - 3}` : ""}` : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "Future workday" : "Not expected")}</td>
-                    <td className="px-4 py-3 text-right">{record && <Button variant="ghost" size="sm" className="h-7 text-[11px] text-red-600 hover:text-red-700" onClick={() => setSelectedId(record.id)}>Open log<ChevronRight className="ml-1 h-3 w-3" /></Button>}</td>
+                     <td className="px-4 py-3 text-right">{canViewAll && record && <Button variant="ghost" size="sm" className="h-7 text-[11px] text-red-600 hover:text-red-700" onClick={() => setSelectedId(record.id)}>Open log<ChevronRight className="ml-1 h-3 w-3" /></Button>}</td>
                   </tr>;
                 })}
               </tbody>
@@ -588,8 +599,12 @@ function Logs() {
                 const displayHours = noAttendance ? "—" : selectedMember ? hours(record?.total_seconds) : hours(summary?.totalSeconds);
                return <div key={date} className="rounded-xl border border-slate-100 bg-white p-3">
                  <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{shortDate(date)} <span className="font-normal text-slate-400">{weekday(date)}</span></p><p className="mt-1 text-[11px] text-slate-400">{date}{holiday ? ` · ${holiday}` : ""}</p></div><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span></div>
-                  <div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">Hours</span><span className="font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</span></div>
-                 {record && <Button variant="outline" size="sm" className="mt-3 h-8 w-full text-xs text-red-600" onClick={() => setSelectedId(record.id)}>Open log<ChevronRight className="ml-1 h-3 w-3" /></Button>}
+                   <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                     <div><span className="block text-slate-500">Time in</span><span className="font-medium text-slate-700">{selectedMember ? (record?.time_in ? fmt.time(record.time_in) : "—") : formatDailyTime(summary?.records ?? [], "time_in")}</span></div>
+                     <div><span className="block text-slate-500">Time out</span><span className="font-medium text-slate-700">{selectedMember ? (record?.time_out ? fmt.time(record.time_out) : "—") : formatDailyTime(summary?.records ?? [], "time_out")}</span></div>
+                     <div><span className="block text-slate-500">Hours</span><span className="font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</span></div>
+                   </div>
+                  {canViewAll && record && <Button variant="outline" size="sm" className="mt-3 h-8 w-full text-xs text-red-600" onClick={() => setSelectedId(record.id)}>Open log<ChevronRight className="ml-1 h-3 w-3" /></Button>}
                </div>;
              })}
            </div>
