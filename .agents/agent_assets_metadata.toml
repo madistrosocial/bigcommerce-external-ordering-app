@@ -42,3 +42,17 @@ mtime_ms = 1788858572071
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/4be1396e-0b9c-4a93-9701-8e37d4eaee30/a0e052ef-72df-4fae-99b1-5ba74d5b4fbf"
 storage_version_token = "1788858587742091"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Q6ZQ6ojeECzwHdgZzzxwV"
+uri = "file://database-staging-schema-drift-correction.sql"
+type = "unspecified"
+title = "External Staging schema-drift correction SQL"
+description = "Standalone SQL for the five confirmed Staging corrections: one foreign key, three unique constraints, and permissions.id GENERATED ALWAYS. It was statically validated and not executed."
+logical_id = "55b3818e-0726-4007-aa52-82e6729a5540"
+content_hash = "sha256:1200722d4b63dee3c35a1cdc7938745ec8bd774d38624f6a4f08996b42446d2f"
+size = 1004
+mtime_ms = 1788861598096
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/55b3818e-0726-4007-aa52-82e6729a5540/d1da1883-17b8-45d6-b34e-746fa74a4196"
+storage_version_token = "1788861638779096"
+content_type = "application/octet-stream"
