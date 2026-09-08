@@ -165,6 +165,7 @@ type Suggestion = SuggestionVariant | SuggestionProduct;
 interface VariantPopupProps {
   product: api.Product;
   onClose: () => void;
+  onInventoryLimitReached: (product: api.Product, variant: any) => void;
   allowOverselling: boolean;
   selectedCustomer: api.BigCommerceCustomer | null;
   onFetchPriceHistory: (variantId?: number) => Promise<api.PriceHistoryEntry[]>;
@@ -188,6 +189,7 @@ interface VariantPopupProps {
 function VariantPopupDialog({
   product,
   onClose,
+  onInventoryLimitReached,
   onAdd,
   allowOverselling,
   selectedCustomer,
@@ -230,6 +232,10 @@ function VariantPopupDialog({
   const setQty = (v: any, q: number) => {
     const stock = getStock(v);
     const max = allowOverselling ? Infinity : stock > 0 ? stock : 0;
+    if (!allowOverselling && q > max) {
+      onInventoryLimitReached(product, v);
+      return;
+    }
     const clamped = allowOverselling ? q : Math.min(q, max);
     // min is 0
     setQtys((p) => ({ ...p, [key(v)]: Math.max(0, clamped) }));
@@ -572,7 +578,6 @@ function VariantPopupDialog({
                       <button
                         className="w-7 h-7 flex items-center justify-center rounded bg-red-500 hover:bg-red-600 text-white disabled:opacity-40"
                         onClick={() => setQty(v, qty + 1)}
-                        disabled={outOfStock}
                         data-testid={`popup-plus-${k}`}
                       >
                         <Plus className="h-3 w-3" />
@@ -1302,6 +1307,12 @@ export default function POSPage() {
 
   // ── Push inventory modal ───────────────────────────────────────────────────
   const [showPushInventoryModal, setShowPushInventoryModal] = useState(false);
+  const [pushInventoryTarget, setPushInventoryTarget] = useState<{
+    sku: string;
+    product: api.Product;
+    variant: any;
+    source: "selector" | "cart";
+  } | null>(null);
 
   // ── Invoice ───────────────────────────────────────────────────────────────
 
@@ -1389,6 +1400,58 @@ export default function POSPage() {
     },
     [cart],
   );
+
+  const openInventoryPush = useCallback(
+    (
+      product: api.Product,
+      variant: any,
+      source: "selector" | "cart",
+    ) => {
+      const sku = variant?.sku || product.sku;
+      if (!sku) {
+        toast({
+          title: "Unable to open inventory push",
+          description: "This item does not have a SKU.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setPushInventoryTarget({ sku, product, variant, source });
+      setShowPushInventoryModal(true);
+    },
+    [toast],
+  );
+
+  const handleInventoryPushSuccess = useCallback(async () => {
+    const target = pushInventoryTarget;
+    if (!target) return;
+
+    if (target.source === "cart") {
+      await refreshStockAndHighlight(false);
+    } else if (target.product.bigcommerce_id) {
+      try {
+        const [stockInfo] = await api.refreshProductStock([
+          target.product.bigcommerce_id,
+        ]);
+        if (stockInfo) {
+          const freshVariantStock = new Map<number, number>();
+          stockInfo.variants.forEach((variant) => {
+            freshVariantStock.set(variant.id, variant.stock_level);
+          });
+          setPopupFreshVariantStock(freshVariantStock);
+          setPopupProduct({
+            ...target.product,
+            stock_level: stockInfo.stock_level,
+          });
+        }
+      } catch {
+        // The push succeeded; a later normal POS refresh can still update stock.
+      }
+    }
+
+    setShowPushInventoryModal(false);
+    setPushInventoryTarget(null);
+  }, [pushInventoryTarget, refreshStockAndHighlight]);
 
   // Auto-refresh inventory when POS loads or cart items change
   useEffect(() => {
@@ -3466,7 +3529,19 @@ export default function POSPage() {
                                   }}
                                   data-testid={`input-ws-qty-${item.lineId}`}
                                 />
-                                <button className="h-7 w-7 rounded border border-slate-200 flex items-center justify-center text-slate-500 hover:border-slate-400 disabled:opacity-40 transition-colors" disabled={wsAtMax} onClick={() => updateCartQuantityAtIndex(index, 1)} data-testid={`button-ws-plus-${item.lineId}`}><Plus className="h-3 w-3" /></button>
+                                <button
+                                  className="h-7 w-7 rounded border border-slate-200 flex items-center justify-center text-slate-500 hover:border-slate-400 transition-colors"
+                                  onClick={() => {
+                                    if (wsAtMax) {
+                                      openInventoryPush(item.product, item.variant, "cart");
+                                      return;
+                                    }
+                                    updateCartQuantityAtIndex(index, 1);
+                                  }}
+                                  data-testid={`button-ws-plus-${item.lineId}`}
+                                >
+                                  <Plus className="h-3 w-3" />
+                                </button>
                               </div>
                             </td>
                             <td className="px-3 py-1.5 text-right">
@@ -3784,8 +3859,11 @@ export default function POSPage() {
                             variant="outline"
                             size="icon"
                             className="h-9 w-9 shrink-0"
-                            disabled={atMax}
                             onClick={() => {
+                              if (atMax) {
+                                openInventoryPush(item.product, item.variant, "cart");
+                                return;
+                              }
                               updateCartQuantityAtIndex(index, 1);
                               focusSearch();
                             }}
@@ -4571,6 +4649,10 @@ export default function POSPage() {
             if (suggestions.length > 0) setShowSuggestions(true);
           }}
           onAdd={handlePopupAdd}
+          onInventoryLimitReached={(product, variant) => {
+            setPopupProduct(null);
+            openInventoryPush(product, variant, "selector");
+          }}
           allowOverselling={allowOverselling}
           selectedCustomer={selectedCustomer}
           onFetchPriceHistory={fetchPopupPriceHistory}
@@ -4732,7 +4814,15 @@ export default function POSPage() {
 
       {/* ── Push Inventory Modal ── */}
       {showPushInventoryModal && (
-        <PushInventoryModal onClose={() => setShowPushInventoryModal(false)} />
+        <PushInventoryModal
+          initialSku={pushInventoryTarget?.sku}
+          fromInventoryLimit={!!pushInventoryTarget}
+          onSuccess={handleInventoryPushSuccess}
+          onClose={() => {
+            setShowPushInventoryModal(false);
+            setPushInventoryTarget(null);
+          }}
+        />
       )}
 
       <Toaster />
@@ -4742,7 +4832,17 @@ export default function POSPage() {
 
 // ─── Push Inventory Modal ─────────────────────────────────────────────────────
 
-function PushInventoryModal({ onClose }: { onClose: () => void }) {
+function PushInventoryModal({
+  onClose,
+  initialSku,
+  fromInventoryLimit = false,
+  onSuccess,
+}: {
+  onClose: () => void;
+  initialSku?: string;
+  fromInventoryLimit?: boolean;
+  onSuccess?: () => void | Promise<void>;
+}) {
   const { toast } = useToast();
   const { currentUser } = useStore();
   const [search, setSearch] = useState("");
@@ -4811,10 +4911,15 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
     [currentUser?.id, selectProduct],
   );
 
-  const quantity = parseInt(quantityInput) || 0;
+  useEffect(() => {
+    if (initialSku) handleSearch(initialSku);
+  }, [handleSearch, initialSku]);
+
+  const quantity = Number(quantityInput);
+  const hasValidQuantity = Number.isInteger(quantity) && quantity > 0;
 
   const handleSubmit = async () => {
-    if (!selectedProduct || !selectedVariant || quantity <= 0) return;
+    if (!selectedProduct || !selectedVariant || !hasValidQuantity) return;
     setIsSubmitting(true);
     try {
       const result = await api.pushInventory({
@@ -4826,6 +4931,8 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
         product_name: selectedProduct.name,
         variant_name:
           variantLabel(selectedVariant) || selectedVariant.sku || "",
+        push_to_bigcommerce: true,
+        push_to_skuvault: fromInventoryLimit,
       });
       toast({
         title: "Inventory Updated",
@@ -4836,6 +4943,7 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
       setQuantityInput("1");
       setReason("");
       setShowConfirm(false);
+      await onSuccess?.();
       // Refocus search for next push
       setTimeout(() => searchRef.current?.focus(), 80);
     } catch (e: any) {
@@ -4867,8 +4975,9 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
             <Package className="h-5 w-5" /> Push Inventory
           </DialogTitle>
           <p className="text-xs text-slate-500 mt-0.5">
-            Search the full catalog by product name, SKU, or UPC to manually
-            increment stock.
+            {fromInventoryLimit
+              ? "Available inventory has been reached. Add inventory to continue."
+              : "Search the full catalog by product name, SKU, or UPC to manually increment stock."}
           </p>
         </DialogHeader>
 
@@ -5055,6 +5164,7 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
                       <Input
                         type="number"
                         min="1"
+                          step="1"
                         value={quantityInput}
                         onChange={(e) => setQuantityInput(e.target.value)}
                         className="text-center w-28 font-bold text-xl h-12"
@@ -5097,13 +5207,13 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
                   {!showConfirm ? (
                     <Button
                       className="w-full h-12 text-base font-semibold"
-                      disabled={quantity <= 0}
+                      disabled={!hasValidQuantity}
                       onClick={() => setShowConfirm(true)}
                       data-testid="button-push-inv-confirm-open"
                     >
                       <Package className="h-4 w-4 mr-2" />
                       Push {quantity} Unit{quantity !== 1 ? "s" : ""} to
-                      BigCommerce
+                      {fromInventoryLimit ? "BigCommerce + SKUVault" : "BigCommerce"}
                     </Button>
                   ) : (
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
@@ -5116,7 +5226,7 @@ function PushInventoryModal({ onClose }: { onClose: () => void }) {
                         <strong>
                           {variantLabel(selectedVariant) || selectedVariant.sku}
                         </strong>{" "}
-                        on BigCommerce.
+                        on {fromInventoryLimit ? "BigCommerce + SKUVault" : "BigCommerce"}.
                         <br />
                         Stock:{" "}
                         <strong>

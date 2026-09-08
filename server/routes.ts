@@ -2915,8 +2915,8 @@ export async function registerRoutes(
       };
       const authUser = (req as any).authUser;
 
-      if (!product_id || !variant_id || !quantity_added || quantity_added <= 0) {
-        return res.status(400).json({ error: "product_id, variant_id, and quantity_added (>0) are required" });
+      if (!product_id || !variant_id || !Number.isInteger(quantity_added) || quantity_added <= 0) {
+        return res.status(400).json({ error: "product_id, variant_id, and a positive whole-number quantity_added are required" });
       }
       if (!push_to_bigcommerce && !push_to_skuvault) {
         return res.status(400).json({ error: "At least one destination must be selected" });
