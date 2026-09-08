@@ -4,3 +4,8 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Replit Chat uploads and temporary attachments (keep files in workspace, do not track)
+attached_assets/*
+!attached_assets/stock_images/
+!attached_assets/stock_images/**
