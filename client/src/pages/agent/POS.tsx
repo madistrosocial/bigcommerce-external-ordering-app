@@ -1471,16 +1471,23 @@ export default function POSPage() {
     if (!raw) return;
     localStorage.removeItem("vansales_restore_customer");
     try {
-      const { bcId } = JSON.parse(raw) as { bcId: number };
+      const { bcId, name, email } = JSON.parse(raw) as {
+        bcId: number;
+        name?: string;
+        email?: string;
+      };
       if (!bcId) return;
       api
         .getCustomerByBcId(bcId)
         .then((customer) => {
           setSelectedAddress(null);
           setSelectedCustomer(customer);
-          setCustomerSearch(`${customer.first_name} ${customer.last_name}`);
+          const loadedName = `${customer.first_name || ""} ${customer.last_name || ""}`.trim();
+          setCustomerSearch(loadedName || name || email || "");
         })
-        .catch(() => {});
+        .catch(() => {
+          setCustomerSearch(name || email || "");
+        });
     } catch {}
   }, []);
 

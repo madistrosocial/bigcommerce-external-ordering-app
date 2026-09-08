@@ -88,17 +88,28 @@ export default function Cart() {
     if (!raw) return;
     localStorage.removeItem('vansales_restore_customer');
     try {
-      const { bcId } = JSON.parse(raw) as { bcId: number };
+      const { bcId, name, email } = JSON.parse(raw) as {
+        bcId: number;
+        name?: string;
+        email?: string;
+      };
       if (!bcId) return;
       api.getCustomerByBcId(bcId).then(async (customer) => {
         setSelectedCustomer(customer);
-        setCustomerSearch(`${customer.first_name} ${customer.last_name}`);
+        const loadedName = `${customer.first_name || ""} ${customer.last_name || ""}`.trim();
+        setCustomerSearch(loadedName || name || email || "");
         try {
           const addresses = await api.getCustomerAddresses(customer.id);
           setCustomerAddresses(addresses);
           if (addresses.length > 0) setSelectedAddress(addresses[0]);
         } catch {}
-      }).catch(() => {});
+      }).catch(() => {
+        // Keep the name from the draft visible even if the customer lookup is
+        // temporarily unavailable. The user can retry the customer search.
+        setCustomerSearch(name || email || "");
+        setManualCustomerName(name || "");
+        setManualCustomerEmail(email || "");
+      });
     } catch {}
   }, []);
 

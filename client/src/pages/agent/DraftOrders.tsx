@@ -32,6 +32,21 @@ interface DraftRowProps {
   isSubmitting: boolean;
 }
 
+function draftCustomerName(order: api.Order): string {
+  const storedName = order.customer_name?.trim();
+  if (storedName) return storedName;
+
+  const billingAddress = order.billing_address as
+    | { first_name?: string; last_name?: string }
+    | undefined;
+  const addressName = [billingAddress?.first_name, billingAddress?.last_name]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
+  return addressName || order.customer_email || "Unnamed customer";
+}
+
 function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onDelete, isSubmitting }: DraftRowProps) {
   const [open, setOpen] = useState(false);
   const fmt = useTimeService();
@@ -48,7 +63,7 @@ function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onDele
       >
         <div className="w-2 h-2 rounded-full shrink-0 bg-slate-400" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-slate-800 truncate">{order.customer_name}</p>
+          <p className="text-sm font-semibold text-slate-800 truncate">{draftCustomerName(order)}</p>
           <p className="text-xs text-slate-400">
             {order.date && fmt.dateTime(order.date)}
             {order.customer_email && (
@@ -207,7 +222,7 @@ export default function DraftOrders() {
 
   const openDraftEdit = (order: api.Order) => {
     setEditingDraft(order);
-    setCustomerName(order.customer_name);
+    setCustomerName(draftCustomerName(order));
     setCustomerEmail(order.customer_email || "");
     setCustomerSearchQuery("");
     setSearchResults([]);
@@ -364,7 +379,11 @@ export default function DraftOrders() {
       addToCart(product, item.quantity, variant, parseFloat(item.price_at_sale), parseFloat(item.price_at_sale), null, null);
     });
     if (order.bigcommerce_customer_id) {
-      localStorage.setItem("vansales_restore_customer", JSON.stringify({ bcId: order.bigcommerce_customer_id, name: order.customer_name, email: order.customer_email }));
+      localStorage.setItem("vansales_restore_customer", JSON.stringify({
+        bcId: order.bigcommerce_customer_id,
+        name: draftCustomerName(order),
+        email: order.customer_email,
+      }));
     }
     try {
       const posDraftIds = JSON.parse(localStorage.getItem("vansales_pos_draft_ids") || "[]") as number[];
