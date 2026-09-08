@@ -1,0 +1,222 @@
+2026-09-08T10:07:51.19967427Z npm http fetch GET 200 https://registry.npmjs.org/@rollup%2frollup-linux-riscv64-musl 28ms (cache updated)
+2026-09-08T10:07:51.231183122Z npm http fetch GET 200 https://registry.npmjs.org/@rollup%2frollup-linux-s390x-gnu 29ms (cache updated)
+2026-09-08T10:07:51.259035363Z npm http fetch GET 200 https://registry.npmjs.org/@rollup%2frollup-openbsd-x64 25ms (cache updated)
+2026-09-08T10:07:51.286906086Z npm http fetch GET 200 https://registry.npmjs.org/@rollup%2frollup-openharmony-arm64 27ms (cache updated)
+2026-09-08T10:07:51.320974066Z npm http fetch GET 200 https://registry.npmjs.org/@rollup%2frollup-win32-arm64-msvc 33ms (cache updated)
+2026-09-08T10:07:51.354842193Z npm http fetch GET 200 https://registry.npmjs.org/@rollup%2frollup-win32-ia32-msvc 32ms (cache updated)
+2026-09-08T10:07:51.383052246Z npm http fetch GET 200 https://registry.npmjs.org/@rollup%2frollup-win32-x64-gnu 25ms (cache updated)
+2026-09-08T10:07:51.416174386Z npm http fetch GET 200 https://registry.npmjs.org/@rollup%2frollup-win32-x64-msvc 32ms (cache updated)
+2026-09-08T10:07:51.434175247Z npm http fetch GET 200 https://registry.npmjs.org/fsevents 15ms (cache revalidated)
+2026-09-08T10:07:51.544770313Z npm http cache @tiptap/extension-text-align@http://package-firewall.replit.local/npm/@tiptap/extension-text-align/-/extension-text-align-3.29.2.tgz 0ms (cache hit)
+2026-09-08T10:07:51.545973026Z npm http cache @tiptap/extension-image@http://package-firewall.replit.local/npm/@tiptap/extension-image/-/extension-image-3.29.2.tgz 0ms (cache hit)
+2026-09-08T10:07:51.557881249Z npm http fetch GET http://package-firewall.replit.local/npm/@tiptap/extension-text-align/-/extension-text-align-3.29.2.tgz attempt 1 failed with ENOTFOUND
+2026-09-08T10:07:51.558448973Z npm http fetch GET http://package-firewall.replit.local/npm/@tiptap/extension-image/-/extension-image-3.29.2.tgz attempt 1 failed with ENOTFOUND
+2026-09-08T10:07:51.57346528Z npm http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 34ms
+2026-09-08T10:07:51.604242359Z npm http fetch GET 200 https://registry.npmjs.org/esbuild 25ms (cache revalidated)
+2026-09-08T10:07:51.646253168Z npm http fetch GET 200 https://registry.npmjs.org/nanoid 65ms (cache revalidated)
+2026-09-08T10:07:51.650794563Z npm http fetch GET 200 https://registry.npmjs.org/drizzle-orm 70ms (cache revalidated)
+2026-09-08T10:07:51.671298369Z npm http fetch GET 200 https://registry.npmjs.org/body-parser 91ms (cache revalidated)
+2026-09-08T10:07:51.686798067Z npm http fetch GET 200 https://registry.npmjs.org/qs 105ms (cache updated)
+2026-09-08T10:07:51.693741883Z npm http fetch GET 200 https://registry.npmjs.org/dompurify 114ms (cache updated)
+2026-09-08T10:07:51.698793663Z npm http fetch GET 200 https://registry.npmjs.org/nodemailer 118ms (cache updated)
+2026-09-08T10:07:51.704178793Z npm http fetch GET 200 https://registry.npmjs.org/browserslist 124ms (cache updated)
+2026-09-08T10:07:51.71179921Z npm http fetch GET 200 https://registry.npmjs.org/postcss 131ms (cache updated)
+2026-09-08T10:07:51.717708788Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fcore 138ms (cache updated)
+2026-09-08T10:07:51.752841072Z npm http fetch GET 200 https://registry.npmjs.org/@esbuild-kit%2fcore-utils 23ms (cache revalidated)
+2026-09-08T10:07:51.778875833Z npm http fetch GET 200 https://registry.npmjs.org/tsx 25ms (cache updated)
+2026-09-08T10:07:51.822474242Z npm http fetch GET 200 https://registry.npmjs.org/vite 69ms (cache updated)
+2026-09-08T10:07:51.938776598Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-document 95ms (cache updated)
+2026-09-08T10:07:52.121460798Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-floating-menu 278ms (cache updated)
+2026-09-08T10:07:52.148806962Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-bubble-menu 305ms (cache updated)
+2026-09-08T10:07:52.175585589Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-image 331ms (cache miss)
+2026-09-08T10:07:52.186452898Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-blockquote 344ms (cache updated)
+2026-09-08T10:07:52.19544985Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-bold 353ms (cache updated)
+2026-09-08T10:07:52.208058547Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-code 364ms (cache updated)
+2026-09-08T10:07:52.220629691Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextensions 374ms (cache updated)
+2026-09-08T10:07:52.233315958Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-hard-break 390ms (cache updated)
+2026-09-08T10:07:52.248431957Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-list 403ms (cache updated)
+2026-09-08T10:07:52.25631916Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-code-block 413ms (cache updated)
+2026-09-08T10:07:52.269415414Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-underline 423ms (cache updated)
+2026-09-08T10:07:52.280274749Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-text 435ms (cache updated)
+2026-09-08T10:07:52.291870795Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-italic 447ms (cache updated)
+2026-09-08T10:07:52.300928908Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-text-align 455ms (cache miss)
+2026-09-08T10:07:52.311433294Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-strike 466ms (cache updated)
+2026-09-08T10:07:52.323596514Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-text-style 478ms (cache updated)
+2026-09-08T10:07:52.337751121Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2freact 491ms (cache updated)
+2026-09-08T10:07:52.354346159Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-paragraph 509ms (cache updated)
+2026-09-08T10:07:52.363282992Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-link 519ms (cache updated)
+2026-09-08T10:07:52.376992621Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-heading 532ms (cache updated)
+2026-09-08T10:07:52.386724484Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-horizontal-rule 542ms (cache updated)
+2026-09-08T10:07:52.397286046Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fstarter-kit 551ms (cache updated)
+2026-09-08T10:07:52.508684756Z npm http fetch GET 200 https://registry.npmjs.org/express 22ms (cache revalidated)
+2026-09-08T10:07:52.533243363Z npm http fetch GET 200 https://registry.npmjs.org/@babel%2fhelper-compilation-targets 20ms (cache revalidated)
+2026-09-08T10:07:52.541733016Z npm http fetch GET 200 https://registry.npmjs.org/update-browserslist-db 29ms (cache updated)
+2026-09-08T10:07:52.548004926Z npm http fetch GET 200 https://registry.npmjs.org/autoprefixer 35ms (cache updated)
+2026-09-08T10:07:52.598910789Z npm http fetch GET 200 https://registry.npmjs.org/jspdf 17ms (cache revalidated)
+2026-09-08T10:07:52.627010899Z npm http fetch GET 200 https://registry.npmjs.org/drizzle-zod 17ms (cache revalidated)
+2026-09-08T10:07:52.748607667Z npm http fetch GET 200 https://registry.npmjs.org/@esbuild-kit%2fesm-loader 26ms (cache revalidated)
+2026-09-08T10:07:53.527309106Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-dropcursor 66ms (cache updated)
+2026-09-08T10:07:53.537333647Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-gapcursor 76ms (cache updated)
+2026-09-08T10:07:53.728187793Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-list-keymap 68ms (cache updated)
+2026-09-08T10:07:53.740490269Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-list-item 81ms (cache updated)
+2026-09-08T10:07:53.747754862Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-bullet-list 88ms (cache updated)
+2026-09-08T10:07:53.755797095Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-ordered-list 95ms (cache updated)
+2026-09-08T10:07:54.398728568Z npm http fetch GET 200 https://registry.npmjs.org/@tiptap%2fextension-font-family 99ms (cache updated)
+2026-09-08T10:07:54.908577315Z npm http fetch GET 200 https://registry.npmjs.org/drizzle-kit 20ms (cache revalidated)
+2026-09-08T10:08:01.565389503Z npm http fetch GET http://package-firewall.replit.local/npm/@tiptap/extension-text-align/-/extension-text-align-3.29.2.tgz attempt 2 failed with ENOTFOUND
+2026-09-08T10:08:01.56574701Z npm http fetch GET http://package-firewall.replit.local/npm/@tiptap/extension-image/-/extension-image-3.29.2.tgz attempt 2 failed with ENOTFOUND
+2026-09-08T10:09:01.570092872Z npm http fetch GET http://package-firewall.replit.local/npm/@tiptap/extension-text-align/-/extension-text-align-3.29.2.tgz attempt 3 failed with ENOTFOUND
+2026-09-08T10:09:01.57064826Z npm http fetch GET http://package-firewall.replit.local/npm/@tiptap/extension-image/-/extension-image-3.29.2.tgz attempt 3 failed with ENOTFOUND
+2026-09-08T10:09:01.573302442Z npm verbose type system
+2026-09-08T10:09:01.573792454Z npm verbose stack FetchError: request to http://package-firewall.replit.local/npm/@tiptap/extension-text-align/-/extension-text-align-3.29.2.tgz failed, reason: getaddrinfo ENOTFOUND package-firewall.replit.local
+2026-09-08T10:09:01.57381192Z npm verbose stack     at ClientRequest.<anonymous> (/usr/lib/node_modules/npm/node_modules/minipass-fetch/lib/index.js:130:14)
+2026-09-08T10:09:01.573813918Z npm verbose stack     at ClientRequest.emit (node:events:508:28)
+2026-09-08T10:09:01.573815574Z npm verbose stack     at emitErrorEvent (node:_http_client:108:11)
+2026-09-08T10:09:01.573816894Z npm verbose stack     at _destroy (node:_http_client:963:9)
+2026-09-08T10:09:01.573818527Z npm verbose stack     at onSocketNT (node:_http_client:983:5)
+2026-09-08T10:09:01.573820327Z npm verbose stack     at process.processTicksAndRejections (node:internal/process/task_queues:91:21)
+2026-09-08T10:09:01.573870808Z npm error code ENOTFOUND
+2026-09-08T10:09:01.573896827Z npm error syscall getaddrinfo
+2026-09-08T10:09:01.57393472Z npm error errno ENOTFOUND
+2026-09-08T10:09:01.574100936Z npm error network request to http://package-firewall.replit.local/npm/@tiptap/extension-text-align/-/extension-text-align-3.29.2.tgz failed, reason: getaddrinfo ENOTFOUND package-firewall.replit.local
+2026-09-08T10:09:01.574764243Z npm error network This is a problem related to network connectivity.
+2026-09-08T10:09:01.57476676Z npm error network In most cases you are behind a proxy or have bad network settings.
+2026-09-08T10:09:01.574768461Z npm error network
+2026-09-08T10:09:01.574770052Z npm error network If you are behind a proxy, please make sure that the
+2026-09-08T10:09:01.574771412Z npm error network 'proxy' config is set properly.  See: 'npm help config'
+2026-09-08T10:09:01.575614935Z npm verbose cwd /opt/render/project/src
+2026-09-08T10:09:01.575709728Z npm verbose os Linux 7.0.0-1009-aws
+2026-09-08T10:09:01.575750427Z npm verbose node v24.14.1
+2026-09-08T10:09:01.575794888Z npm verbose npm  v11.11.0
+2026-09-08T10:09:01.575854658Z npm verbose exit 1
+2026-09-08T10:09:01.575899433Z npm verbose code 1
+2026-09-08T10:09:01.576219147Z npm error A complete log of this run can be found in: /opt/render/.cache/_logs/2026-09-08T10_07_48_475Z-debug-0.log
+2026-09-08T10:09:01.724237634Z 
+2026-09-08T10:09:01.724254977Z > rest-express@1.0.0 build
+2026-09-08T10:09:01.724258323Z > tsx script/build.ts
+2026-09-08T10:09:01.724260102Z 
+2026-09-08T10:09:02.306377799Z building client...
+2026-09-08T10:09:02.471527667Z vite v7.3.5 building client environment for production...
+2026-09-08T10:09:02.662433652Z transforming...
+2026-09-08T10:09:05.427055028Z ✓ 2529 modules transformed.
+2026-09-08T10:09:05.597837849Z ✗ Build failed in 2.96s
+2026-09-08T10:09:05.598642663Z [vite]: Rollup failed to resolve import "@tiptap/extension-image" from "/opt/render/project/src/client/src/components/editor/RichTextEditor.tsx".
+2026-09-08T10:09:05.598646847Z This is most likely unintended because it can break your application at runtime.
+2026-09-08T10:09:05.598648736Z If you do want to externalize this module explicitly add it to
+2026-09-08T10:09:05.598650492Z `build.rollupOptions.external`
+2026-09-08T10:09:05.598652301Z     at viteLog (/opt/render/project/src/node_modules/vite/dist/node/chunks/config.js:33715:57)
+2026-09-08T10:09:05.598654359Z     at <anonymous> (/opt/render/project/src/node_modules/vite/dist/node/chunks/config.js:33749:73)
+2026-09-08T10:09:05.598655694Z     at onwarn (/opt/render/project/src/node_modules/@vitejs/plugin-react/dist/index.js:76:7)
+2026-09-08T10:09:05.598657045Z     at <anonymous> (/opt/render/project/src/node_modules/vite/dist/node/chunks/config.js:33749:28)
+2026-09-08T10:09:05.598658368Z     at onRollupLog (/opt/render/project/src/node_modules/vite/dist/node/chunks/config.js:33744:63)
+2026-09-08T10:09:05.598659702Z     at onLog (/opt/render/project/src/node_modules/vite/dist/node/chunks/config.js:33547:4)
+2026-09-08T10:09:05.598679145Z     at <anonymous> (/opt/render/project/src/node_modules/rollup/dist/es/shared/node-entry.js:21390:32)
+2026-09-08T10:09:05.598680603Z     at Object.logger (/opt/render/project/src/node_modules/rollup/dist/es/shared/node-entry.js:23374:9)
+2026-09-08T10:09:05.598682232Z     at ModuleLoader.handleInvalidResolvedId (/opt/render/project/src/node_modules/rollup/dist/es/shared/node-entry.js:22121:26)
+2026-09-08T10:09:05.598683617Z     at <anonymous> (/opt/render/project/src/node_modules/rollup/dist/es/shared/node-entry.js:22079:26) {
+2026-09-08T10:09:05.598684918Z   watchFiles: [
+2026-09-08T10:09:05.598686659Z     '/opt/render/project/src/client/index.html',
+2026-09-08T10:09:05.59868801Z     '/opt/render/project/src/client/src/main.tsx',
+2026-09-08T10:09:05.598689314Z     '/opt/render/project/src/package.json',
+2026-09-08T10:09:05.598690629Z     '/opt/render/project/src/node_modules/react-dom/client.js',
+2026-09-08T10:09:05.598691961Z     '/opt/render/project/src/node_modules/react/jsx-runtime.js',
+2026-09-08T10:09:05.598693327Z     '/opt/render/project/src/client/src/App.tsx',
+2026-09-08T10:09:05.598694637Z     '/opt/render/project/src/client/src/lib/viewportHeight.ts',
+2026-09-08T10:09:05.598695941Z     '/opt/render/project/src/client/src/index.css',
+2026-09-08T10:09:05.598699956Z     '/opt/render/project/src/node_modules/tailwindcss/index.css',
+2026-09-08T10:09:05.598701376Z     '/opt/render/project/src/node_modules/tw-animate-css/dist/tw-animate.css',
+2026-09-08T10:09:05.598702738Z     '/opt/render/project/src/node_modules/react/cjs/react-jsx-runtime.production.js',
+2026-09-08T10:09:05.598704237Z     '/opt/render/project/src/client/src/pages/admin/reports/engine/ReportEngine.tsx',
+2026-09-08T10:09:05.598705561Z     '/opt/render/project/src/client/src/components/ui/radio-group.tsx',
+2026-09-08T10:09:05.598706856Z     '/opt/render/project/src/client/src/pages/admin/ShipStationExport.tsx',
+2026-09-08T10:09:05.59870817Z     '/opt/render/project/src/client/src/pages/admin/AdminUsers.tsx',
+2026-09-08T10:09:05.598709512Z     '/opt/render/project/src/client/src/pages/agent/InventoryPush.tsx',
+2026-09-08T10:09:05.598710886Z     '/opt/render/project/src/client/src/pages/admin/InvoiceSettings.tsx',
+2026-09-08T10:09:05.598712171Z     '/opt/render/project/src/client/src/components/ui/spinner.tsx',
+2026-09-08T10:09:05.598713413Z     '/opt/render/project/src/client/src/hooks/useTimeService.ts',
+2026-09-08T10:09:05.59871471Z     '/opt/render/project/src/client/src/pages/agent/BCOrders.tsx',
+2026-09-08T10:09:05.598716022Z     '/opt/render/project/src/client/src/pages/orders/OrdersList.tsx',
+2026-09-08T10:09:05.598717412Z     '/opt/render/project/src/client/src/components/ui/hover-card.tsx',
+2026-09-08T10:09:05.598718792Z     '/opt/render/project/src/client/src/pages/crm/CustomerProfile.tsx',
+2026-09-08T10:09:05.598720039Z     '/opt/render/project/src/client/src/components/ui/kbd.tsx',
+2026-09-08T10:09:05.598721374Z     '/opt/render/project/src/client/src/components/ui/button.tsx',
+2026-09-08T10:09:05.598722681Z     '/opt/render/project/src/client/src/lib/mock-data.ts',
+2026-09-08T10:09:05.598724166Z     '/opt/render/project/src/client/src/components/orders/CustomerOrdersPanel.tsx',
+2026-09-08T10:09:05.598725427Z     '/opt/render/project/src/client/src/components/ui/drawer.tsx',
+2026-09-08T10:09:05.598726692Z     '/opt/render/project/src/client/src/pages/agent/MyOrders.tsx',
+2026-09-08T10:09:05.598728168Z     '/opt/render/project/src/client/src/pages/admin/reports/PriceOverrideAudit.tsx',
+2026-09-08T10:09:05.598729485Z     '/opt/render/project/src/client/src/lib/api.ts',
+2026-09-08T10:09:05.598730765Z     '/opt/render/project/src/client/src/pages/agent/Catalog.tsx',
+2026-09-08T10:09:05.598734004Z     '/opt/render/project/src/client/src/lib/bigcommerce.ts',
+2026-09-08T10:09:05.598735328Z     '/opt/render/project/src/client/src/pages/crm/ToDo.tsx',
+2026-09-08T10:09:05.598736672Z     '/opt/render/project/src/client/src/components/ui/progress.tsx',
+2026-09-08T10:09:05.598738187Z     '/opt/render/project/src/client/src/components/ui/tooltip.tsx',
+2026-09-08T10:09:05.598739508Z     '/opt/render/project/src/client/src/components/orders/BcOrderExpandedRow.tsx',
+2026-09-08T10:09:05.598740812Z     '/opt/render/project/src/client/src/components/ui/context-menu.tsx',
+2026-09-08T10:09:05.598742136Z     '/opt/render/project/src/client/src/components/ui/accordion.tsx',
+2026-09-08T10:09:05.598743455Z     '/opt/render/project/src/client/src/pages/admin/PriceTiers.tsx',
+2026-09-08T10:09:05.598750775Z     '/opt/render/project/src/client/src/components/ui/card.tsx',
+2026-09-08T10:09:05.598752199Z     '/opt/render/project/src/client/src/contexts/TimezoneContext.tsx',
+2026-09-08T10:09:05.598753512Z     '/opt/render/project/src/client/src/pages/admin/AdminZoho.tsx',
+2026-09-08T10:09:05.598754831Z     '/opt/render/project/src/client/src/lib/utils.ts',
+2026-09-08T10:09:05.598756265Z     '/opt/render/project/src/client/src/pages/agent/InventoryPushLogs.tsx',
+2026-09-08T10:09:05.598757529Z     '/opt/render/project/src/client/src/pages/tools/PromoSkuTracker.tsx',
+2026-09-08T10:09:05.598758798Z     '/opt/render/project/src/client/src/components/ui/scroll-area.tsx',
+2026-09-08T10:09:05.598760018Z     '/opt/render/project/src/client/src/hooks/use-mobile.tsx',
+2026-09-08T10:09:05.598761245Z     '/opt/render/project/src/client/src/pages/admin/EmailTemplates.tsx',
+2026-09-08T10:09:05.598762476Z     '/opt/render/project/src/client/src/pages/admin/RBAC.tsx',
+2026-09-08T10:09:05.598763818Z     '/opt/render/project/src/client/src/pages/agent/POS.tsx',
+2026-09-08T10:09:05.598765125Z     '/opt/render/project/src/client/src/pages/crm/Customers.tsx',
+2026-09-08T10:09:05.598766441Z     '/opt/render/project/src/client/src/components/ui/command.tsx',
+2026-09-08T10:09:05.598767727Z     '/opt/render/project/src/client/src/components/ui/field.tsx',
+2026-09-08T10:09:05.598768993Z     '/opt/render/project/src/client/src/components/ui/slider.tsx',
+2026-09-08T10:09:05.598770288Z     '/opt/render/project/src/client/src/components/ui/navigation-menu.tsx',
+2026-09-08T10:09:05.598771556Z     '/opt/render/project/src/client/src/pages/attendance/AttendanceAdmin.tsx',
+2026-09-08T10:09:05.598772843Z     '/opt/render/project/src/client/src/components/ui/switch.tsx',
+2026-09-08T10:09:05.598774105Z     '/opt/render/project/src/client/src/components/ui/avatar.tsx',
+2026-09-08T10:09:05.598775365Z     '/opt/render/project/src/client/src/pages/admin/AdminIntegration.tsx',
+2026-09-08T10:09:05.598776685Z     '/opt/render/project/src/client/src/pages/crm/StoreCreditLedger.tsx',
+2026-09-08T10:09:05.598777946Z     '/opt/render/project/src/client/src/components/ui/alert.tsx',
+2026-09-08T10:09:05.598779212Z     '/opt/render/project/src/client/src/components/ui/pagination.tsx',
+2026-09-08T10:09:05.598780506Z     '/opt/render/project/src/client/src/components/orders/StoreCreditDialog.tsx',
+2026-09-08T10:09:05.598781776Z     '/opt/render/project/src/client/src/pages/crm/Reactivation.tsx',
+2026-09-08T10:09:05.598783043Z     '/opt/render/project/src/client/src/components/ui/dialog.tsx',
+2026-09-08T10:09:05.598784309Z     '/opt/render/project/src/client/src/components/orders/EmailComposeDialog.tsx',
+2026-09-08T10:09:05.598785569Z     '/opt/render/project/src/client/src/components/ui/separator.tsx',
+2026-09-08T10:09:05.598786816Z     '/opt/render/project/src/client/src/components/ui/textarea.tsx',
+2026-09-08T10:09:05.598788126Z     '/opt/render/project/src/client/public/manifest.json',
+2026-09-08T10:09:05.598791233Z     '/opt/render/project/src/client/src/components/layout/SaaSLayout.tsx',
+2026-09-08T10:09:05.598792543Z     '/opt/render/project/src/client/src/components/ui/select.tsx',
+2026-09-08T10:09:05.598793829Z     '/opt/render/project/src/client/src/lib/queryClient.ts',
+2026-09-08T10:09:05.598795159Z     '/opt/render/project/src/client/src/components/ui/item.tsx',
+2026-09-08T10:09:05.598796469Z     '/opt/render/project/src/client/src/components/ui/sidebar.tsx',
+2026-09-08T10:09:05.598797769Z     '/opt/render/project/src/client/src/hooks/use-toast.ts',
+2026-09-08T10:09:05.598799067Z     '/opt/render/project/src/client/src/pages/admin/reports/engine/ReportTable.tsx',
+2026-09-08T10:09:05.598800332Z     '/opt/render/project/src/client/src/components/layout/MobileShell.tsx',
+2026-09-08T10:09:05.598801603Z     '/opt/render/project/src/client/src/components/ui/resizable.tsx',
+2026-09-08T10:09:05.598802865Z     '/opt/render/project/src/client/src/components/ui/toggle-group.tsx',
+2026-09-08T10:09:05.598804132Z     '/opt/render/project/src/client/src/components/ui/input-group.tsx',
+2026-09-08T10:09:05.598805437Z     '/opt/render/project/src/client/src/components/ui/tabs.tsx',
+2026-09-08T10:09:05.598806649Z     '/opt/render/project/src/client/src/pages/marketing/MarketingPhase2.tsx',
+2026-09-08T10:09:05.598807907Z     '/opt/render/project/src/client/src/pages/admin/AdminGroups.tsx',
+2026-09-08T10:09:05.598809215Z     '/opt/render/project/src/client/src/pages/Login.tsx',
+2026-09-08T10:09:05.598810485Z     '/opt/render/project/src/client/src/pages/crm/CRMNotes.tsx',
+2026-09-08T10:09:05.598811714Z     '/opt/render/project/src/client/src/pages/admin/AdminSkuvault.tsx',
+2026-09-08T10:09:05.598812972Z     '/opt/render/project/src/client/src/components/ui/toast.tsx',
+2026-09-08T10:09:05.598814234Z     '/opt/render/project/src/client/src/components/ui/popover.tsx',
+2026-09-08T10:09:05.598815492Z     '/opt/render/project/src/client/src/components/ui/sheet.tsx',
+2026-09-08T10:09:05.598816789Z     '/opt/render/project/src/client/src/components/ui/calendar.tsx',
+2026-09-08T10:09:05.598818057Z     '/opt/render/project/src/client/src/pages/admin/reports/StoreCreditUsageReport.tsx',
+2026-09-08T10:09:05.598819374Z     '/opt/render/project/src/client/src/pages/admin/reports/SalesReport.tsx',
+2026-09-08T10:09:05.59882064Z     '/opt/render/project/src/client/src/pages/agent/InventoryAudit.tsx',
+2026-09-08T10:09:05.598821869Z     '/opt/render/project/src/client/src/pages/agent/SignupList.tsx',
+2026-09-08T10:09:05.598823116Z     '/opt/render/project/src/client/src/components/ui/carousel.tsx',
+2026-09-08T10:09:05.598824435Z     '/opt/render/project/src/client/src/pages/admin/Dashboard.tsx',
+2026-09-08T10:09:05.598825747Z     '/opt/render/project/src/client/src/pages/admin/reports/engine/ReportFilters.tsx',
+2026-09-08T10:09:05.598832001Z     '/opt/render/project/src/client/src/components/ui/toggle.tsx',
+2026-09-08T10:09:05.598833434Z     '/opt/render/project/src/client/src/pages/agent/Cart.tsx',
+2026-09-08T10:09:05.598835068Z     ... 2570 more items
+2026-09-08T10:09:05.598836383Z   ]
+2026-09-08T10:09:05.598837816Z }
+2026-09-08T10:09:05.691335021Z ==> Build failed 😞
+2026-09-08T10:09:05.691341296Z ==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
