@@ -6973,10 +6973,10 @@ export async function registerRoutes(
   app.get("/api/attendance/home-location", requirePermission("attendance", "clock"), async (req, res) => {
     try {
       const user = (req as any).authUser;
-      const employee = await storage.getUser(user.id);
+      const homeLocation = await storage.getAttendanceHomeLocation(user.id);
       res.json({
-        configured: employee?.attendance_home_latitude != null && employee?.attendance_home_longitude != null,
-        setAt: employee?.attendance_home_set_at ?? null,
+        configured: homeLocation.latitude != null && homeLocation.longitude != null,
+        setAt: homeLocation.setAt,
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

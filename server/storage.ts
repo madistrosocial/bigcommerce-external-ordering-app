@@ -177,6 +177,7 @@ export interface IStorage {
   truncateCrmOrders(): Promise<void>;
 
   // Attendance
+  getAttendanceHomeLocation(userId: number): Promise<{ latitude: string | null; longitude: string | null; setAt: Date | null }>;
   getAttendanceById(id: number): Promise<AttendanceSession | undefined>;
   getActiveAttendanceForUser(userId: number): Promise<AttendanceSession | undefined>;
   getAttendanceHistoryForUser(userId: number, limit?: number): Promise<AttendanceSession[]>;
@@ -2019,6 +2020,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ─── Attendance ──────────────────────────────────────────────────────────────
+
+  async getAttendanceHomeLocation(userId: number): Promise<{ latitude: string | null; longitude: string | null; setAt: Date | null }> {
+    const [row] = await db.select({
+      latitude: users.attendance_home_latitude,
+      longitude: users.attendance_home_longitude,
+      setAt: users.attendance_home_set_at,
+    }).from(users).where(eq(users.id, userId)).limit(1);
+    return {
+      latitude: row?.latitude ?? null,
+      longitude: row?.longitude ?? null,
+      setAt: row?.setAt ?? null,
+    };
+  }
 
   async getAttendanceById(id: number): Promise<AttendanceSession | undefined> {
     const rows = await db.select().from(attendanceSessions).where(eq(attendanceSessions.id, id)).limit(1);

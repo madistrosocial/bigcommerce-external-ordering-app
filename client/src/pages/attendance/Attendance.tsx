@@ -150,8 +150,11 @@ export default function AttendancePage() {
     queryKey: ["attendance", "home-location", currentUser?.id],
     queryFn: () => apiJson("/api/attendance/home-location"),
     enabled: !!currentUser,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
-  const homeConfigured = Boolean(homeLocationQuery.data?.configured);
+  const homeConfigured = homeLocationQuery.data?.configured === true;
 
   useEffect(() => {
     if (!active) return;
@@ -298,7 +301,21 @@ export default function AttendancePage() {
               <StartChoice icon={<MapPin className="h-6 w-6" />} title="Warehouse" subtitle="Login when you arrive at the location" onClick={startWarehouse} />
               <StartChoice icon={<Car className="h-6 w-6" />} title="Route start" subtitle={homeConfigured ? "Login when you're on your way" : "Set your home location first"} onClick={startDriving} disabled={!homeConfigured} />
             </div>
-            {!homeConfigured && (
+            {homeLocationQuery.isError ? (
+              <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-amber-900">Could not verify your saved home location</p>
+                    <p className="mt-1 text-xs text-amber-800">Your saved location was not changed. Check your connection and try again.</p>
+                    <Button variant="outline" className="mt-3 border-amber-300 bg-white text-amber-800 hover:bg-amber-100" onClick={() => homeLocationQuery.refetch()} disabled={homeLocationQuery.isFetching}>
+                      {homeLocationQuery.isFetching && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Try again
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : !homeConfigured && (
               <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4">
                 <div className="flex items-start gap-3">
                   <Home className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
