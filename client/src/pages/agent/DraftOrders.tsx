@@ -56,37 +56,61 @@ function draftCustomerName(order: api.Order): string {
 function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onSendDraftInvoice, onDelete, isSubmitting }: DraftRowProps) {
   const [open, setOpen] = useState(false);
   const fmt = useTimeService();
+  const toggle = () => setOpen((v) => !v);
 
   return (
     <div className="border-b last:border-b-0" data-testid={`draft-row-${order.id}`}>
-      <button
-        onClick={() => setOpen((v) => !v)}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={toggle}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            toggle();
+          }
+        }}
         className={cn(
-          "w-full flex items-center gap-3 px-4 py-3 text-left transition-colors",
+          "w-full flex items-center sm:grid sm:grid-cols-[24px_72px_minmax(180px,1fr)_120px_110px_55px_100px_24px] sm:items-center gap-3 px-4 py-3 text-left transition-colors cursor-pointer",
           open ? "bg-slate-50" : "hover:bg-slate-50",
         )}
         data-testid={`draft-toggle-${order.id}`}
       >
-        <div className="w-2 h-2 rounded-full shrink-0 bg-slate-400" />
-        <div className="flex-1 min-w-0">
+        <div className="w-2 h-2 rounded-full shrink-0 bg-slate-400 sm:justify-self-center" />
+        <div className="hidden sm:block min-w-0 text-[13px] font-semibold text-blue-600">
+          #{order.id}
+          <Badge className="block w-fit bg-slate-500 text-[9px] h-4 px-1.5 font-medium mt-1">
+            Draft
+          </Badge>
+        </div>
+        <div className="flex-1 min-w-0 sm:flex-none">
           <p className="text-sm font-semibold text-slate-800 truncate">{draftCustomerName(order)}</p>
           <p className="text-xs text-slate-400">
-            {order.date && fmt.dateTime(order.date)}
+            <span className="sm:hidden">{order.date && fmt.dateTime(order.date)}</span>
             {order.customer_email && (
-              <span className="ml-2 text-slate-400">{order.customer_email}</span>
+              <span className="sm:ml-0 ml-2 text-slate-400">{order.customer_email}</span>
             )}
           </p>
         </div>
-        <div className="text-right shrink-0 mr-1">
+        <div className="hidden sm:block min-w-0 truncate text-[13px] text-slate-600">
+          {order.created_by_name || "—"}
+        </div>
+        <div className="hidden sm:block text-[13px] text-slate-700 whitespace-nowrap">
+          {order.date ? fmt.relative(order.date) : "—"}
+        </div>
+        <div className="hidden sm:block text-right text-[13px] font-medium text-slate-700 tabular-nums">
+          {order.items.length}
+        </div>
+        <div className="text-right shrink-0 sm:mr-0 mr-1 sm:justify-self-end">
           <p className="text-sm font-semibold text-slate-900">${parseFloat(order.total).toFixed(2)}</p>
-          <Badge className="bg-slate-500 text-[10px] h-4 px-1.5 font-medium mt-0.5">
+          <Badge className="sm:hidden bg-slate-500 text-[10px] h-4 px-1.5 font-medium mt-0.5">
             <FileText className="h-2.5 w-2.5 mr-0.5" />Draft
           </Badge>
         </div>
         {open
           ? <ChevronUp className="h-4 w-4 text-slate-400 shrink-0" />
           : <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />}
-      </button>
+      </div>
 
       {open && (
         <div className="bg-slate-50 border-t px-4 py-3 space-y-3">
@@ -193,6 +217,7 @@ export default function DraftOrders() {
   const timeFmt = useTimeService();
   const canViewAllDrafts = hasPermission("orders", "view_all_drafts");
   const [showAllDrafts, setShowAllDrafts] = useState(false);
+  const [draftSearch, setDraftSearch] = useState("");
 
   // Draft edit dialog state
   const [editingDraft, setEditingDraft] = useState<api.Order | null>(null);
@@ -225,22 +250,23 @@ export default function DraftOrders() {
     enabled: !!currentUser,
   });
 
-  const groupedDrafts = useMemo(() => {
-    const groups = new Map<number, { id: number; name: string; drafts: api.Order[] }>();
-    drafts.forEach((order) => {
-      const id = order.created_by_user_id;
-      const name =
-        order.created_by_name ||
-        (id === currentUser?.id ? currentUser.name : `User ${id}`);
-      const group = groups.get(id);
-      if (group) {
-        group.drafts.push(order);
-      } else {
-        groups.set(id, { id, name, drafts: [order] });
-      }
+  const visibleDrafts = useMemo(() => {
+    const query = draftSearch.trim().toLowerCase();
+    if (!query) return drafts;
+    return drafts.filter((order) => {
+      const searchable = [
+        order.id,
+        draftCustomerName(order),
+        order.customer_email,
+        order.created_by_name,
+        ...order.items.map((item) => `${item.name} ${item.sku}`),
+      ].filter(Boolean).join(" ").toLowerCase();
+      return searchable.includes(query);
     });
-    return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [currentUser?.id, currentUser?.name, drafts]);
+  }, [draftSearch, drafts]);
+
+  const draftValue = visibleDrafts.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0);
+  const draftItemCount = visibleDrafts.reduce((sum, order) => sum + order.items.length, 0);
 
   // ── Draft actions ───────────────────────────────────────────────────────────
 
@@ -527,64 +553,88 @@ export default function DraftOrders() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0">
-        <FileText className="h-5 w-5 text-slate-600" />
-        <h1 className="text-base font-bold text-slate-800">Drafts</h1>
-        {!isLoading && (
-          <div className="ml-auto flex items-center gap-3">
+    <div className="flex flex-col h-full bg-slate-50">
+      {!isLoading && (
+        <div className="border-b bg-white px-3 sm:px-4 py-2 sm:py-3 shrink-0">
+          <div className="flex gap-1.5 sm:gap-2 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            {[
+              { label: "Drafts", value: visibleDrafts.length.toLocaleString(), color: "text-slate-500" },
+              { label: "Draft Value", value: `$${draftValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: "text-blue-500" },
+              { label: "Customers", value: new Set(visibleDrafts.map((order) => draftCustomerName(order))).size.toLocaleString(), color: "text-green-500" },
+              { label: "Items", value: draftItemCount.toLocaleString(), color: "text-amber-500" },
+            ].map((card) => (
+              <div key={card.label} className="min-w-[108px] sm:min-w-[132px] rounded-md border border-slate-100 bg-slate-50/70 px-2.5 py-1.5">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{card.label}</p>
+                <p className={cn("text-base sm:text-lg font-bold leading-tight tabular-nums", card.color)}>{card.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <header className="border-b bg-white px-4 py-3 shrink-0">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold text-slate-800">Drafts</h1>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {visibleDrafts.length.toLocaleString()} draft{visibleDrafts.length !== 1 ? "s" : ""}
+              {draftSearch && drafts.length !== visibleDrafts.length ? ` of ${drafts.length}` : ""}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
             {canViewAllDrafts && (
               <Button
                 variant={showAllDrafts ? "default" : "outline"}
                 size="sm"
-                className="h-8 text-xs"
+                className="h-8 text-xs gap-1"
                 onClick={() => setShowAllDrafts((value) => !value)}
                 data-testid="button-toggle-all-drafts"
               >
-                <UsersRound className="h-3.5 w-3.5 mr-1.5" />
-                {showAllDrafts ? "My Drafts" : "All Users"}
+                <UsersRound className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{showAllDrafts ? "My Drafts" : "All Users"}</span>
               </Button>
             )}
-            <span className="text-xs text-slate-400">
-              {drafts.length} draft{drafts.length !== 1 ? "s" : ""}
-            </span>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input
+                value={draftSearch}
+                onChange={(event) => setDraftSearch(event.target.value)}
+                placeholder="Search drafts…"
+                className="pl-8 h-8 text-sm w-40 sm:w-56"
+                data-testid="input-draft-search"
+              />
+            </div>
           </div>
-        )}
+        </div>
       </header>
 
-      <div className="flex-1 overflow-auto px-4 py-4">
+      <div className="flex-1 overflow-auto">
         {isLoading ? (
-          <div className="flex items-center justify-center py-20 text-slate-400">
+          <div className="flex items-center justify-center h-32 text-slate-400 text-sm">
             <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading…
           </div>
-        ) : drafts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-            <FileText className="h-12 w-12 mb-3 opacity-30" />
-            <p className="text-sm">No draft orders.</p>
+        ) : visibleDrafts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-48 text-slate-400">
+            <FileText className="h-10 w-10 mb-3 opacity-30" />
+            <p className="text-sm font-medium">{draftSearch ? "No drafts found" : "No draft orders"}</p>
+            <p className="text-xs mt-1">{draftSearch ? "Try a different search." : "Saved draft orders will appear here."}</p>
           </div>
         ) : (
-          showAllDrafts && canViewAllDrafts ? (
-            <div className="space-y-4">
-              {groupedDrafts.map((group) => (
-                <section key={group.id} className="bg-white rounded-lg border shadow-sm overflow-hidden">
-                  <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <User className="h-4 w-4 text-slate-500 shrink-0" />
-                      <h2 className="text-sm font-semibold text-slate-700 truncate">{group.name}</h2>
-                    </div>
-                    <span className="text-xs text-slate-400 shrink-0">
-                      {group.drafts.length} draft{group.drafts.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                  {group.drafts.map(renderDraftRow)}
-                </section>
-              ))}
+          <div className="w-full">
+            <div className="hidden sm:grid grid-cols-[24px_72px_minmax(180px,1fr)_120px_110px_55px_100px_24px] items-center border-b bg-slate-50 px-4 py-2.5 sticky top-0 z-10 text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+              <span />
+              <span>Draft #</span>
+              <span>Customer</span>
+              <span>Created By</span>
+              <span>Date</span>
+              <span className="text-right">Items</span>
+              <span className="text-right">Total</span>
+              <span />
             </div>
-          ) : (
-            <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-              {drafts.map(renderDraftRow)}
+            <div className="bg-white border-b">
+              {visibleDrafts.map(renderDraftRow)}
             </div>
-          )
+          </div>
         )}
       </div>
 
