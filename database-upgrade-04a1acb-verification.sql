@@ -627,72 +627,87 @@ LEFT JOIN pg_index ix ON ix.indexrelid = i.oid
 WHERE i.oid IS NULL
 ORDER BY e.table_name, e.index_name;
 
--- 5. Required foreign-key constraints missing from public schema (expected: zero rows).
-WITH expected(table_name, constraint_name) AS (VALUES
-  ('attendance_audit_log', 'attendance_audit_log_attendance_id_attendance_sessions_id_fk'),
-  ('attendance_audit_log', 'attendance_audit_log_actor_user_id_users_id_fk'),
-  ('attendance_exceptions', 'attendance_exceptions_attendance_id_attendance_sessions_id_fk'),
-  ('attendance_exceptions', 'attendance_exceptions_user_id_users_id_fk'),
-  ('attendance_exceptions', 'attendance_exceptions_reviewed_by_users_id_fk'),
-  ('attendance_location_checkpoints', 'attendance_location_checkpoints_attendance_id_attendance_sessions_id_fk'),
-  ('attendance_sessions', 'attendance_sessions_user_id_users_id_fk'),
-  ('attendance_sessions', 'attendance_sessions_approved_by_users_id_fk'),
-  ('crm_audit_log', 'crm_audit_log_user_id_users_id_fk'),
-  ('crm_audit_log', 'crm_audit_log_customer_id_customers_mirror_id_fk'),
-  ('crm_customer_notes', 'crm_customer_notes_customer_id_customers_mirror_id_fk'),
-  ('crm_customer_notes', 'crm_customer_notes_created_by_users_id_fk'),
-  ('crm_customer_notes', 'crm_customer_notes_assigned_to_user_id_users_id_fk'),
-  ('customer_sales_rep', 'customer_sales_rep_customer_id_customers_mirror_id_fk'),
-  ('customer_sales_rep', 'customer_sales_rep_assigned_user_id_users_id_fk'),
-  ('customer_signup_attempts', 'customer_signup_attempts_created_by_user_id_users_id_fk'),
-  ('customer_signups', 'customer_signups_signed_up_by_user_id_users_id_fk'),
-  ('customer_signups', 'customer_signups_primary_rep_id_users_id_fk'),
-  ('email_templates', 'email_templates_updated_by_users_id_fk'),
-  ('inventory_audit_tasks', 'inventory_audit_tasks_created_by_users_id_fk'),
-  ('inventory_audit_tasks', 'inventory_audit_tasks_completed_by_users_id_fk'),
-  ('inventory_push_logs', 'inventory_push_logs_user_id_users_id_fk'),
-  ('marketing_audience_members', 'marketing_audience_members_audience_id_marketing_audiences_id_fk'),
-  ('marketing_audience_members', 'marketing_audience_members_customer_id_customers_mirror_id_fk'),
-  ('marketing_audience_members', 'marketing_audience_members_marketing_contact_id_marketing_contacts_id_fk'),
-  ('marketing_audiences', 'marketing_audiences_created_by_users_id_fk'),
-  ('marketing_automation_executions', 'marketing_automation_executions_automation_id_marketing_automations_id_fk'),
-  ('marketing_automation_executions', 'marketing_automation_executions_customer_id_customers_mirror_id_fk'),
-  ('marketing_automation_steps', 'marketing_automation_steps_automation_id_marketing_automations_id_fk'),
-  ('marketing_automations', 'marketing_automations_created_by_users_id_fk'),
-  ('marketing_campaign_activity', 'marketing_campaign_activity_campaign_id_marketing_campaigns_id_fk'),
-  ('marketing_campaign_activity', 'marketing_campaign_activity_user_id_users_id_fk'),
-  ('marketing_campaign_events', 'marketing_campaign_events_campaign_id_marketing_campaigns_id_fk'),
-  ('marketing_campaign_events', 'marketing_campaign_events_recipient_id_marketing_campaign_recipients_id_fk'),
-  ('marketing_campaign_recipients', 'marketing_campaign_recipients_campaign_id_marketing_campaigns_id_fk'),
-  ('marketing_campaign_recipients', 'marketing_campaign_recipients_customer_id_customers_mirror_id_fk'),
-  ('marketing_campaign_recipients', 'marketing_campaign_recipients_marketing_contact_id_marketing_contacts_id_fk'),
-  ('marketing_campaigns', 'marketing_campaigns_template_id_email_templates_id_fk'),
-  ('marketing_campaigns', 'marketing_campaigns_created_by_users_id_fk'),
-  ('marketing_contacts', 'marketing_contacts_created_by_users_id_fk'),
-  ('marketing_customer_preferences', 'marketing_customer_preferences_customer_id_customers_mirror_id_fk'),
-  ('marketing_customer_preferences', 'marketing_customer_preferences_updated_by_users_id_fk'),
-  ('marketing_suppressions', 'marketing_suppressions_customer_id_customers_mirror_id_fk'),
-  ('marketing_suppressions', 'marketing_suppressions_created_by_users_id_fk'),
-  ('marketing_suppressions', 'marketing_suppressions_revoked_by_users_id_fk'),
-  ('notifications', 'notifications_user_id_users_id_fk'),
-  ('notifications', 'notifications_customer_id_customers_mirror_id_fk'),
-  ('orders', 'orders_created_by_user_id_users_id_fk'),
-  ('pos_price_override_audit', 'pos_price_override_audit_user_id_users_id_fk'),
-  ('pos_store_credit_usage', 'pos_store_credit_usage_cashier_id_users_id_fk'),
-  ('product_link_logs', 'product_link_logs_created_by_user_id_users_id_fk'),
-  ('role_permissions', 'role_permissions_role_id_roles_id_fk'),
-  ('role_permissions', 'role_permissions_permission_id_permissions_id_fk'),
-  ('store_credit_ledger', 'store_credit_ledger_customer_id_customers_mirror_id_fk'),
-  ('store_credit_ledger', 'store_credit_ledger_issued_by_users_id_fk'),
-  ('user_permissions', 'user_permissions_permission_id_permissions_id_fk')
+-- 5. Required foreign-key relationships missing from public schema (expected: zero rows).
+-- Constraint names are not matched because PostgreSQL truncates identifiers to 63 characters.
+WITH expected(table_name, constraint_name, column_name, foreign_table_name, foreign_column_name) AS (VALUES
+  ('attendance_audit_log', 'attendance_audit_log_attendance_id_attendance_sessions_id_fk', 'attendance_id', 'attendance_sessions', 'id'),
+  ('attendance_audit_log', 'attendance_audit_log_actor_user_id_users_id_fk', 'actor_user_id', 'users', 'id'),
+  ('attendance_exceptions', 'attendance_exceptions_attendance_id_attendance_sessions_id_fk', 'attendance_id', 'attendance_sessions', 'id'),
+  ('attendance_exceptions', 'attendance_exceptions_user_id_users_id_fk', 'user_id', 'users', 'id'),
+  ('attendance_exceptions', 'attendance_exceptions_reviewed_by_users_id_fk', 'reviewed_by', 'users', 'id'),
+  ('attendance_location_checkpoints', 'attendance_location_checkpoints_attendance_id_attendance_sessions_id_fk', 'attendance_id', 'attendance_sessions', 'id'),
+  ('attendance_sessions', 'attendance_sessions_user_id_users_id_fk', 'user_id', 'users', 'id'),
+  ('attendance_sessions', 'attendance_sessions_approved_by_users_id_fk', 'approved_by', 'users', 'id'),
+  ('crm_audit_log', 'crm_audit_log_user_id_users_id_fk', 'user_id', 'users', 'id'),
+  ('crm_audit_log', 'crm_audit_log_customer_id_customers_mirror_id_fk', 'customer_id', 'customers_mirror', 'id'),
+  ('crm_customer_notes', 'crm_customer_notes_customer_id_customers_mirror_id_fk', 'customer_id', 'customers_mirror', 'id'),
+  ('crm_customer_notes', 'crm_customer_notes_created_by_users_id_fk', 'created_by', 'users', 'id'),
+  ('crm_customer_notes', 'crm_customer_notes_assigned_to_user_id_users_id_fk', 'assigned_to_user_id', 'users', 'id'),
+  ('customer_sales_rep', 'customer_sales_rep_customer_id_customers_mirror_id_fk', 'customer_id', 'customers_mirror', 'id'),
+  ('customer_sales_rep', 'customer_sales_rep_assigned_user_id_users_id_fk', 'assigned_user_id', 'users', 'id'),
+  ('customer_signup_attempts', 'customer_signup_attempts_created_by_user_id_users_id_fk', 'created_by_user_id', 'users', 'id'),
+  ('customer_signups', 'customer_signups_signed_up_by_user_id_users_id_fk', 'signed_up_by_user_id', 'users', 'id'),
+  ('customer_signups', 'customer_signups_primary_rep_id_users_id_fk', 'primary_rep_id', 'users', 'id'),
+  ('email_templates', 'email_templates_updated_by_users_id_fk', 'updated_by', 'users', 'id'),
+  ('inventory_audit_tasks', 'inventory_audit_tasks_created_by_users_id_fk', 'created_by', 'users', 'id'),
+  ('inventory_audit_tasks', 'inventory_audit_tasks_completed_by_users_id_fk', 'completed_by', 'users', 'id'),
+  ('inventory_push_logs', 'inventory_push_logs_user_id_users_id_fk', 'user_id', 'users', 'id'),
+  ('marketing_audience_members', 'marketing_audience_members_audience_id_marketing_audiences_id_fk', 'audience_id', 'marketing_audiences', 'id'),
+  ('marketing_audience_members', 'marketing_audience_members_customer_id_customers_mirror_id_fk', 'customer_id', 'customers_mirror', 'id'),
+  ('marketing_audience_members', 'marketing_audience_members_marketing_contact_id_marketing_contacts_id_fk', 'marketing_contact_id', 'marketing_contacts', 'id'),
+  ('marketing_audiences', 'marketing_audiences_created_by_users_id_fk', 'created_by', 'users', 'id'),
+  ('marketing_automation_executions', 'marketing_automation_executions_automation_id_marketing_automations_id_fk', 'automation_id', 'marketing_automations', 'id'),
+  ('marketing_automation_executions', 'marketing_automation_executions_customer_id_customers_mirror_id_fk', 'customer_id', 'customers_mirror', 'id'),
+  ('marketing_automation_steps', 'marketing_automation_steps_automation_id_marketing_automations_id_fk', 'automation_id', 'marketing_automations', 'id'),
+  ('marketing_automations', 'marketing_automations_created_by_users_id_fk', 'created_by', 'users', 'id'),
+  ('marketing_campaign_activity', 'marketing_campaign_activity_campaign_id_marketing_campaigns_id_fk', 'campaign_id', 'marketing_campaigns', 'id'),
+  ('marketing_campaign_activity', 'marketing_campaign_activity_user_id_users_id_fk', 'user_id', 'users', 'id'),
+  ('marketing_campaign_events', 'marketing_campaign_events_campaign_id_marketing_campaigns_id_fk', 'campaign_id', 'marketing_campaigns', 'id'),
+  ('marketing_campaign_events', 'marketing_campaign_events_recipient_id_marketing_campaign_recipients_id_fk', 'recipient_id', 'marketing_campaign_recipients', 'id'),
+  ('marketing_campaign_recipients', 'marketing_campaign_recipients_campaign_id_marketing_campaigns_id_fk', 'campaign_id', 'marketing_campaigns', 'id'),
+  ('marketing_campaign_recipients', 'marketing_campaign_recipients_customer_id_customers_mirror_id_fk', 'customer_id', 'customers_mirror', 'id'),
+  ('marketing_campaign_recipients', 'marketing_campaign_recipients_marketing_contact_id_marketing_contacts_id_fk', 'marketing_contact_id', 'marketing_contacts', 'id'),
+  ('marketing_campaigns', 'marketing_campaigns_template_id_email_templates_id_fk', 'template_id', 'email_templates', 'id'),
+  ('marketing_campaigns', 'marketing_campaigns_created_by_users_id_fk', 'created_by', 'users', 'id'),
+  ('marketing_contacts', 'marketing_contacts_created_by_users_id_fk', 'created_by', 'users', 'id'),
+  ('marketing_customer_preferences', 'marketing_customer_preferences_customer_id_customers_mirror_id_fk', 'customer_id', 'customers_mirror', 'id'),
+  ('marketing_customer_preferences', 'marketing_customer_preferences_updated_by_users_id_fk', 'updated_by', 'users', 'id'),
+  ('marketing_suppressions', 'marketing_suppressions_customer_id_customers_mirror_id_fk', 'customer_id', 'customers_mirror', 'id'),
+  ('marketing_suppressions', 'marketing_suppressions_created_by_users_id_fk', 'created_by', 'users', 'id'),
+  ('marketing_suppressions', 'marketing_suppressions_revoked_by_users_id_fk', 'revoked_by', 'users', 'id'),
+  ('notifications', 'notifications_user_id_users_id_fk', 'user_id', 'users', 'id'),
+  ('notifications', 'notifications_customer_id_customers_mirror_id_fk', 'customer_id', 'customers_mirror', 'id'),
+  ('orders', 'orders_created_by_user_id_users_id_fk', 'created_by_user_id', 'users', 'id'),
+  ('pos_price_override_audit', 'pos_price_override_audit_user_id_users_id_fk', 'user_id', 'users', 'id'),
+  ('pos_store_credit_usage', 'pos_store_credit_usage_cashier_id_users_id_fk', 'cashier_id', 'users', 'id'),
+  ('product_link_logs', 'product_link_logs_created_by_user_id_users_id_fk', 'created_by_user_id', 'users', 'id'),
+  ('role_permissions', 'role_permissions_role_id_roles_id_fk', 'role_id', 'roles', 'id'),
+  ('role_permissions', 'role_permissions_permission_id_permissions_id_fk', 'permission_id', 'permissions', 'id'),
+  ('store_credit_ledger', 'store_credit_ledger_customer_id_customers_mirror_id_fk', 'customer_id', 'customers_mirror', 'id'),
+  ('store_credit_ledger', 'store_credit_ledger_issued_by_users_id_fk', 'issued_by', 'users', 'id'),
+  ('user_permissions', 'user_permissions_permission_id_permissions_id_fk', 'permission_id', 'permissions', 'id')
 )
 SELECT e.table_name, e.constraint_name AS missing_foreign_key
 FROM expected e
-LEFT JOIN pg_constraint c
-  ON c.conname = e.constraint_name
- AND c.conrelid = to_regclass('public.' || e.table_name)
- AND c.contype = 'f'
-WHERE c.oid IS NULL
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM pg_constraint c
+  JOIN pg_attribute local_col
+    ON local_col.attrelid = c.conrelid
+   AND local_col.attnum > 0
+   AND NOT local_col.attisdropped
+   AND local_col.attname = e.column_name
+  JOIN pg_attribute foreign_col
+    ON foreign_col.attrelid = c.confrelid
+   AND foreign_col.attnum > 0
+   AND NOT foreign_col.attisdropped
+   AND foreign_col.attname = e.foreign_column_name
+  WHERE c.conrelid = to_regclass('public.' || e.table_name)
+    AND c.confrelid = to_regclass('public.' || e.foreign_table_name)
+    AND c.contype = 'f'
+    AND c.conkey = ARRAY[local_col.attnum]::smallint[]
+    AND c.confkey = ARRAY[foreign_col.attnum]::smallint[]
+)
 ORDER BY e.table_name, e.constraint_name;
 
 -- 6. Required unique constraints missing from public schema (expected: zero rows).
