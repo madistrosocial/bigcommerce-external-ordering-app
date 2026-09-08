@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
-import { useStore } from "@/lib/store";
+import {
+  useStore,
+  POS_SELECTED_ADDRESS_STORAGE_KEY,
+  POS_SELECTED_CUSTOMER_STORAGE_KEY,
+} from "@/lib/store";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -106,6 +110,40 @@ function variantLabel(variant: any): string {
     return variant.option_values.map((ov: any) => ov.label).join(" / ");
   }
   return variant.sku || "";
+}
+
+function loadPersistedPosCustomer(): api.BigCommerceCustomer | null {
+  try {
+    const raw = localStorage.getItem(POS_SELECTED_CUSTOMER_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !Number.isFinite(Number(parsed.id)) ||
+      typeof parsed.first_name !== "string" ||
+      typeof parsed.last_name !== "string"
+    ) {
+      return null;
+    }
+    return parsed as api.BigCommerceCustomer;
+  } catch {
+    return null;
+  }
+}
+
+function loadPersistedPosAddress(): api.BigCommerceAddress | null {
+  try {
+    const raw = localStorage.getItem(POS_SELECTED_ADDRESS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !Number.isFinite(Number(parsed.id))) {
+      return null;
+    }
+    return parsed as api.BigCommerceAddress;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Price formatter (comma-separated) ────────────────────────────────────────
@@ -1161,21 +1199,54 @@ export default function POSPage() {
   >({});
 
   // ── Customer ──────────────────────────────────────────────────────────────
-  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerSearch, setCustomerSearch] = useState(() => {
+    const customer = loadPersistedPosCustomer();
+    return customer ? `${customer.first_name} ${customer.last_name}` : "";
+  });
   const [customerResults, setCustomerResults] = useState<
     api.BigCommerceCustomer[]
   >([]);
   const [selectedCustomer, setSelectedCustomer] =
-    useState<api.BigCommerceCustomer | null>(null);
+    useState<api.BigCommerceCustomer | null>(loadPersistedPosCustomer);
   const [customerAddresses, setCustomerAddresses] = useState<
     api.BigCommerceAddress[]
   >([]);
   const [selectedAddress, setSelectedAddress] =
-    useState<api.BigCommerceAddress | null>(null);
+    useState<api.BigCommerceAddress | null>(loadPersistedPosAddress);
   const [showCustomerDrop, setShowCustomerDrop] = useState(false);
   const [showAddressDrop, setShowAddressDrop] = useState(false);
   const [isCustomerSearching, setIsCustomerSearching] = useState(false);
   const customerDebRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keep the active POS customer and address alongside the persisted cart.
+  // This survives route changes and full page reloads without storing anything
+  // in the application database.
+  useEffect(() => {
+    try {
+      if (selectedCustomer) {
+        localStorage.setItem(
+          POS_SELECTED_CUSTOMER_STORAGE_KEY,
+          JSON.stringify(selectedCustomer),
+        );
+      } else {
+        localStorage.removeItem(POS_SELECTED_CUSTOMER_STORAGE_KEY);
+        localStorage.removeItem(POS_SELECTED_ADDRESS_STORAGE_KEY);
+      }
+    } catch {}
+  }, [selectedCustomer]);
+
+  useEffect(() => {
+    try {
+      if (selectedAddress) {
+        localStorage.setItem(
+          POS_SELECTED_ADDRESS_STORAGE_KEY,
+          JSON.stringify(selectedAddress),
+        );
+      } else {
+        localStorage.removeItem(POS_SELECTED_ADDRESS_STORAGE_KEY);
+      }
+    } catch {}
+  }, [selectedAddress]);
 
   const [orderNote, setOrderNote] = useState("");
   const [staffNote, setStaffNote] = useState("");
@@ -1404,18 +1475,43 @@ export default function POSPage() {
       if (!bcId) return;
       api
         .getCustomerByBcId(bcId)
-        .then(async (customer) => {
+        .then((customer) => {
+          setSelectedAddress(null);
           setSelectedCustomer(customer);
           setCustomerSearch(`${customer.first_name} ${customer.last_name}`);
-          try {
-            const addresses = await api.getCustomerAddresses(customer.id);
-            setCustomerAddresses(addresses);
-            if (addresses.length > 0) setSelectedAddress(addresses[0]);
-          } catch {}
         })
         .catch(() => {});
     } catch {}
   }, []);
+
+  // Refresh the address list for a persisted or restored customer while
+  // retaining the previously selected address when it still exists.
+  useEffect(() => {
+    if (!selectedCustomer) {
+      setCustomerAddresses([]);
+      setSelectedAddress(null);
+      return;
+    }
+
+    let active = true;
+    api
+      .getCustomerAddresses(selectedCustomer.id)
+      .then((addresses) => {
+        if (!active) return;
+        setCustomerAddresses(addresses);
+        setSelectedAddress((current) => {
+          if (current && addresses.some((address) => address.id === current.id)) {
+            return current;
+          }
+          return addresses[0] ?? null;
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, [selectedCustomer?.id]);
 
   // Guarded navigation: prompts if cart has items
   const guardedNavigate = useCallback(
@@ -2080,18 +2176,15 @@ export default function POSPage() {
     };
   }, [customerSearch, isOfflineMode, selectedCustomer]);
 
-  const handleSelectCustomer = async (c: api.BigCommerceCustomer) => {
+  const handleSelectCustomer = (c: api.BigCommerceCustomer) => {
     setSelectedCustomer(c);
     setCustomerSearch(`${c.first_name} ${c.last_name}`);
+    setSelectedAddress(null);
+    setCustomerAddresses([]);
     setShowCustomerDrop(false);
     setCustomerResults([]);
     setCartDiscount(null);
     setDiscountTabInput("");
-    try {
-      const addrs = await api.getCustomerAddresses(c.id);
-      setCustomerAddresses(addrs);
-      if (addrs.length > 0) setSelectedAddress(addrs[0]);
-    } catch {}
     focusSearch();
   };
 

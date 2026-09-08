@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import type { User, Product } from './api';
 
+export const POS_SELECTED_CUSTOMER_STORAGE_KEY = 'vansales_pos_selected_customer';
+export const POS_SELECTED_ADDRESS_STORAGE_KEY = 'vansales_pos_selected_address';
+
 export interface CartItem {
   lineId: string;
   product: Product;
@@ -95,6 +98,8 @@ export const useStore = create<AppState>((set, get) => ({
   logout: () => {
     localStorage.removeItem('vansales_user');
     localStorage.removeItem('vansales_cart');
+    localStorage.removeItem(POS_SELECTED_CUSTOMER_STORAGE_KEY);
+    localStorage.removeItem(POS_SELECTED_ADDRESS_STORAGE_KEY);
     set({ currentUser: null, cart: [] });
   },
 
