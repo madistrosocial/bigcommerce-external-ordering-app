@@ -1,0 +1,30 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "TmtKWvTkq1p5Fa7FhTi-1"
+uri = "file://database-upgrade-04a1acb-to-current.sql"
+type = "unspecified"
+title = "Database upgrade SQL: 04a1acb to current"
+description = "Standalone PostgreSQL DDL for manual DBeaver execution. It was generated from a Drizzle snapshot diff and was not executed."
+logical_id = "44cfa6ae-f79c-4451-a096-bc5ae958a0ac"
+content_hash = "sha256:746ab4e0614185d092941a0dc0558f40737ad48521dc79002f18b984834e07fb"
+size = 26650
+mtime_ms = 1788856056584
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/44cfa6ae-f79c-4451-a096-bc5ae958a0ac/19facdf0-af89-4e8a-a67e-e38d03b6fdae"
+storage_version_token = "1788856105735896"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Nt_9OBcwMqIXlXLMwPzck"
+uri = "file://database-upgrade-04a1acb-verification.sql"
+type = "unspecified"
+title = "Database upgrade verification SQL"
+description = "Read-only PostgreSQL checks for tables, columns, indexes, foreign keys, unique constraints, identities, and preserved legacy tables."
+logical_id = "1c45253a-a102-4899-bd44-19e5db50cf86"
+content_hash = "sha256:9a0c004aa632451a98b1dc21a36a6a1e7a167b50e617893ce8d9839adaf08e4f"
+size = 35828
+mtime_ms = 1788856056715
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/1c45253a-a102-4899-bd44-19e5db50cf86/b9e3d0d5-eb17-4386-b1ad-6e53bc1156d7"
+storage_version_token = "1788856106970555"
+content_type = "application/octet-stream"
