@@ -162,6 +162,8 @@ export default function InvoiceSettingsPage() {
       customer_phone: "555-1234",
       company_address: (companyAddress || "").split("\n").join("<br>"),
       invoice_number: "CNC0007573",
+      document_title: "TAX INVOICE/RECEIPT",
+      document_reference_label: "Invoice# ",
       order_date: fmt.dateLong(new Date()),
       items_rows: `
         <tr>
@@ -456,7 +458,7 @@ export default function InvoiceSettingsPage() {
                 "{{company_name}}", "{{logo_html}}", "{{company_address}}",
                 "{{customer_name}}", "{{customer_company}}", "{{customer_street}}",
                 "{{customer_city_state}}", "{{customer_email}}", "{{customer_phone}}",
-                "{{invoice_number}}", "{{order_date}}", "{{items_rows}}",
+                "{{document_title}}", "{{document_reference_label}}", "{{invoice_number}}", "{{order_date}}", "{{items_rows}}",
                 "{{subtotal}}", "{{discount}}", "{{tax}}", "{{total}}", "{{unpaid}}",
                 "{{outstanding}}", "{{total_items}}", "{{notes_html}}",
                 "{{barcode_svg}}", "{{served_by}}", "{{timestamp}}", "{{terms}}",

@@ -425,6 +425,47 @@ export async function getDraftOrders(viewAll = false): Promise<Order[]> {
   return res.json();
 }
 
+export async function getDraftInvoiceData(id: number): Promise<{
+  order: Order;
+  served_by: string;
+}> {
+  const res = await fetch(`${API_BASE}/orders/drafts/${id}/invoice-data`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: "Failed to load draft invoice" }));
+    throw new Error(error.error || "Failed to load draft invoice");
+  }
+  return res.json();
+}
+
+export async function sendDraftInvoiceEmail(
+  id: number,
+  data: { to: string; pdf_base64: string },
+): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 90_000);
+  try {
+    const res = await fetch(`${API_BASE}/orders/drafts/${id}/send-invoice-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify(data),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to send draft invoice" }));
+      throw new Error(error.error || "Failed to send draft invoice");
+    }
+  } catch (error: any) {
+    if (error.name === "AbortError") {
+      throw new Error("Email request timed out. Delivery status may be uncertain; check the recipient before sending again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function deleteOrder(id: number): Promise<void> {
   const res = await fetch(`${API_BASE}/orders/${id}`, {
     method: 'DELETE',
@@ -1324,9 +1365,21 @@ export interface InvoiceSettings {
   email_body: string;
 }
 
+export type InvoiceRenderSettings = Pick<
+  InvoiceSettings,
+  "company_name" | "company_address" | "company_phone" | "company_email" |
+  "logo_base64" | "terms" | "html_template"
+>;
+
 export async function getInvoiceSettings(): Promise<InvoiceSettings> {
   const res = await fetch(`${API_BASE}/invoice/settings`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch invoice settings');
+  return res.json();
+}
+
+export async function getInvoiceRenderSettings(): Promise<InvoiceRenderSettings> {
+  const res = await fetch(`${API_BASE}/invoice/render-settings`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error("Failed to fetch invoice render settings");
   return res.json();
 }
 

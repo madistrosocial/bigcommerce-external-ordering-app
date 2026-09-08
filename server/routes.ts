@@ -1290,6 +1290,94 @@ export async function registerRoutes(
     }
   });
 
+  const canAccessDraft = async (order: any, authUser: any): Promise<boolean> => {
+    if (order.created_by_user_id === authUser.id || authUser.role === "admin") return true;
+    const permissions = await storage.getUserPermissionStrings(authUser.id);
+    return permissions.includes("orders:view_all_drafts");
+  };
+
+  app.get("/api/orders/drafts/:id/invoice-data", requireAuth, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Invalid draft identifier" });
+      }
+      const order = await storage.getOrder(id);
+      if (!order || order.status !== "draft") {
+        return res.status(404).json({ error: "Draft not found" });
+      }
+      const authUser = (req as any).authUser;
+      if (!(await canAccessDraft(order, authUser))) {
+        return res.status(403).json({ error: "You do not have permission to view this draft" });
+      }
+      const creator = await storage.getUser(order.created_by_user_id).catch(() => null);
+      res.json({
+        order,
+        served_by: creator?.name || creator?.username || "",
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/orders/drafts/:id/send-invoice-email", requireAuth, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Invalid draft identifier" });
+      }
+      const order = await storage.getOrder(id);
+      if (!order || order.status !== "draft") {
+        return res.status(404).json({ error: "Draft not found" });
+      }
+      const authUser = (req as any).authUser;
+      if (!(await canAccessDraft(order, authUser))) {
+        return res.status(403).json({ error: "You do not have permission to send this draft" });
+      }
+
+      const { to, pdf_base64 } = req.body as { to?: string; pdf_base64?: string };
+      const recipient = String(to || "").trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient) || recipient.length > 320) {
+        return res.status(400).json({ error: "A valid recipient email address is required" });
+      }
+      if (!pdf_base64 || pdf_base64.length > 9_000_000) {
+        return res.status(400).json({ error: "A valid draft invoice PDF is required" });
+      }
+      const base64Data = pdf_base64.includes(",") ? pdf_base64.split(",")[1] : pdf_base64;
+      const pdfBuffer = Buffer.from(base64Data, "base64");
+      if (pdfBuffer.length === 0 || pdfBuffer.subarray(0, 5).toString("ascii") !== "%PDF-") {
+        return res.status(400).json({ error: "The attachment is not a valid PDF" });
+      }
+
+      await sendInvoicePdfAttachment({
+        to: recipient,
+        subject: `Draft Invoice #${id}`,
+        pdfBuffer,
+        filename: `Draft-Invoice-${id}.pdf`,
+        textBody: "Please find the attached draft invoice for your review.",
+      });
+
+      const crmCustomer = order.bigcommerce_customer_id
+        ? await storage.getCrmCustomerByBcId(order.bigcommerce_customer_id).catch(() => undefined)
+        : undefined;
+      await storage.createCrmAuditLog({
+        user_id: authUser.id,
+        customer_id: crmCustomer?.id,
+        action: "draft_invoice_sent",
+        detail: {
+          draft_order_id: id,
+          recipient,
+        },
+      }).catch((auditError: any) => {
+        console.warn("[draft invoice] Failed to write CRM audit log:", auditError.message);
+      });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Delete order (draft only)
   app.delete("/api/orders/:id", requireAuth, async (req, res) => {
     try {
@@ -2701,7 +2789,12 @@ export async function registerRoutes(
       if (req.params.key === "zoho_credentials") {
         return res.status(403).json({ error: "Use the Admin → Zoho page to manage this protected setting." });
       }
-      const sensitiveSettingKeys = new Set(["bigcommerce_config", "skuvault_config", "google_sheets_webhook"]);
+      const sensitiveSettingKeys = new Set([
+        "bigcommerce_config",
+        "skuvault_config",
+        "google_sheets_webhook",
+        "invoice_settings",
+      ]);
       const authUser = (req as any).authUser;
       if (sensitiveSettingKeys.has(req.params.key) && authUser?.role !== "admin") {
         return res.status(403).json({ error: "Only administrators can access this setting" });
@@ -4616,30 +4709,61 @@ export async function registerRoutes(
     res.json({ template: DEFAULT_INVOICE_TEMPLATE });
   });
 
-  app.get("/api/invoice/settings", requireAuth, async (_req, res) => {
+  const getInvoiceSettingsWithDefaults = async () => {
+    const setting = await storage.getSetting("invoice_settings").catch(() => null);
+    const defaults = {
+      company_name: "MA Distro, Inc.",
+      company_address: "1000 Parliament Ct Ste. #300,\nDurham, NC, 27703",
+      company_phone: "",
+      company_email: "",
+      logo_base64: "",
+      terms: "By purchasing products from MID Atlantic Distribution, you acknowledge and agree that you are solely responsible for paying all applicable sales taxes, including, but not limited to, state, county, and municipal sales taxes, associated with your purchase",
+      html_template: DEFAULT_INVOICE_TEMPLATE,
+      smtp_host: "",
+      smtp_port: 587,
+      smtp_user: "",
+      smtp_pass: "",
+      smtp_from: "",
+      email_body: "",
+    };
+    return { ...defaults, ...(setting?.value ?? {}) };
+  };
+
+  app.get("/api/invoice/render-settings", requireAuth, async (_req, res) => {
     try {
-      const setting = await storage.getSetting("invoice_settings").catch(() => null);
-      const defaults = {
-        company_name: "MA Distro, Inc.",
-        company_address: "1000 Parliament Ct Ste. #300,\nDurham, NC, 27703",
-        company_phone: "",
-        company_email: "",
-        logo_base64: "",
-        terms: "By purchasing products from MID Atlantic Distribution, you acknowledge and agree that you are solely responsible for paying all applicable sales taxes, including, but not limited to, state, county, and municipal sales taxes, associated with your purchase",
-        html_template: DEFAULT_INVOICE_TEMPLATE,
-        smtp_host: "",
-        smtp_port: 587,
-        smtp_user: "",
-        smtp_pass: "",
-        smtp_from: "",
-      };
-      res.json({ ...defaults, ...(setting?.value ?? {}) });
+      const settings = await getInvoiceSettingsWithDefaults();
+      const {
+        company_name,
+        company_address,
+        company_phone,
+        company_email,
+        logo_base64,
+        terms,
+        html_template,
+      } = settings;
+      res.json({
+        company_name,
+        company_address,
+        company_phone,
+        company_email,
+        logo_base64,
+        terms,
+        html_template,
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.post("/api/invoice/settings", requireAuth, async (req, res) => {
+  app.get("/api/invoice/settings", requireAdmin, async (_req, res) => {
+    try {
+      res.json(await getInvoiceSettingsWithDefaults());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/invoice/settings", requireAdmin, async (req, res) => {
     try {
       await storage.setSetting("invoice_settings", req.body);
       res.json({ success: true });
@@ -4650,55 +4774,66 @@ export async function registerRoutes(
 
   // ─── Invoice Email ────────────────────────────────────────────────────────────
 
+  async function sendInvoicePdfAttachment(input: {
+    to: string;
+    subject: string;
+    pdfBuffer: Buffer;
+    filename: string;
+    textBody?: string;
+  }): Promise<void> {
+    const setting = await storage.getSetting("invoice_settings").catch(() => null);
+    const cfg = setting?.value ?? {};
+    const smtpHost = cfg.smtp_host || "";
+    const smtpPort = Number(cfg.smtp_port) || 587;
+    const smtpUser = cfg.smtp_user || "";
+    const smtpPass = cfg.smtp_pass || "";
+    const smtpFrom = cfg.smtp_from || smtpUser;
+    const companyName: string = cfg.company_name || "";
+
+    if (!smtpHost || !smtpUser) {
+      throw new Error("SMTP is not configured. Please set SMTP settings in Invoice Settings.");
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: { user: smtpUser, pass: smtpPass },
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
+    });
+    await transporter.verify();
+    const configuredBody: string = cfg.email_body || "Please find your invoice attached as a PDF.";
+    const body = input.textBody || configuredBody;
+    const signedBody = [body, companyName ? `\n— ${companyName}` : ""].filter(Boolean).join("\n");
+    await transporter.sendMail({
+      from: smtpFrom,
+      to: input.to,
+      subject: input.subject,
+      text: signedBody,
+      attachments: [{
+        filename: input.filename,
+        content: input.pdfBuffer,
+        contentType: "application/pdf",
+      }],
+    });
+  }
+
   app.post("/api/invoice/send-email", requireAuth, async (req, res) => {
     try {
       const { to, subject, pdf_base64 } = req.body as { to: string; subject: string; pdf_base64: string };
       if (!to || !subject || !pdf_base64) return res.status(400).json({ error: "Missing required fields: to, subject, pdf_base64" });
 
-      const setting = await storage.getSetting("invoice_settings").catch(() => null);
-      const cfg = setting?.value ?? {};
-
-      const smtpHost = cfg.smtp_host || "";
-      const smtpPort = Number(cfg.smtp_port) || 587;
-      const smtpUser = cfg.smtp_user || "";
-      const smtpPass = cfg.smtp_pass || "";
-      const smtpFrom = cfg.smtp_from || smtpUser;
-      const emailBody: string = cfg.email_body || "Please find your invoice attached as a PDF.";
-      const companyName: string = cfg.company_name || "";
-
-      if (!smtpHost || !smtpUser) {
-        return res.status(400).json({ error: "SMTP is not configured. Please set SMTP settings in Invoice Settings." });
-      }
-
       // Convert data URI to buffer
       const base64Data = pdf_base64.includes(",") ? pdf_base64.split(",")[1] : pdf_base64;
       const pdfBuffer = Buffer.from(base64Data, "base64");
-
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: { user: smtpUser, pass: smtpPass },
-        // Explicit timeouts so a blocked/unreachable SMTP server fails fast
-        // instead of hanging the request indefinitely (common in cloud hosts).
-        connectionTimeout: 15000,
-        greetingTimeout: 10000,
-        socketTimeout: 20000,
-      });
-
-      // Verify connectivity before attempting to send — gives a clear error message
-      // if SMTP credentials or host are wrong in this environment.
-      await transporter.verify();
-
       const filename = `${subject.replace(/[^a-zA-Z0-9-]/g, "_")}.pdf`;
-      const textBody = [emailBody, companyName ? `\n— ${companyName}` : ""].filter(Boolean).join("\n");
-
-      await transporter.sendMail({
-        from: smtpFrom,
+      await sendInvoicePdfAttachment({
         to,
         subject,
-        text: textBody,
-        attachments: [{ filename, content: pdfBuffer, contentType: "application/pdf" }],
+        pdfBuffer,
+        filename,
       });
       res.json({ success: true });
     } catch (e: any) {

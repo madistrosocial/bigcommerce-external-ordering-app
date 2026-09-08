@@ -1773,6 +1773,7 @@ export class DatabaseStorage implements IStorage {
       'customer_type_changed', 'address_type_updated',
       'note_created', 'note_edited', 'note_deleted',
       'order_note_created', 'staff_note_updated', 'customer_note_updated',
+      'draft_invoice_sent',
     ];
 
     const [orders, notes, auditRows] = await Promise.all([

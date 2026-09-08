@@ -14,11 +14,16 @@ import {
   DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  FileText, ChevronDown, ChevronUp, Send, Loader2,
+  FileText, ChevronDown, ChevronUp, Send, Mail, Loader2,
   ShoppingCart, Edit, Trash2, User, Search, AlertCircle, UsersRound,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import {
+  buildDraftInvoiceOrderData,
+  buildInvoiceHtml,
+  generatePdfBase64,
+} from "@/lib/invoice-renderer";
 
 // ─── Draft row ────────────────────────────────────────────────────────────────
 
@@ -28,6 +33,7 @@ interface DraftRowProps {
   onSubmit: (order: api.Order) => void;
   onLoadToCart: (order: api.Order) => void;
   onEdit: (order: api.Order) => void;
+  onSendDraftInvoice: (order: api.Order) => void;
   onDelete: (order: api.Order) => void;
   isSubmitting: boolean;
 }
@@ -47,7 +53,7 @@ function draftCustomerName(order: api.Order): string {
   return addressName || order.customer_email || "Unnamed customer";
 }
 
-function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onDelete, isSubmitting }: DraftRowProps) {
+function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onSendDraftInvoice, onDelete, isSubmitting }: DraftRowProps) {
   const [open, setOpen] = useState(false);
   const fmt = useTimeService();
 
@@ -125,6 +131,15 @@ function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onDele
                   {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
                   Submit to BigCommerce
                 </Button>
+                <Button
+                  variant="outline"
+                  className="w-full h-9 text-sm"
+                  onClick={() => onSendDraftInvoice(order)}
+                  data-testid={`btn-send-draft-invoice-${order.id}`}
+                >
+                  <Mail className="h-4 w-4 mr-2" />
+                  Send Draft Invoice
+                </Button>
                 <div className="grid grid-cols-3 gap-2">
                   <Button
                     variant="outline"
@@ -175,6 +190,7 @@ export default function DraftOrders() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
+  const timeFmt = useTimeService();
   const canViewAllDrafts = hasPermission("orders", "view_all_drafts");
   const [showAllDrafts, setShowAllDrafts] = useState(false);
 
@@ -190,6 +206,14 @@ export default function DraftOrders() {
   const [isSearching, setIsSearching] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittingId, setSubmittingId] = useState<number | null>(null);
+  const [draftInvoiceOpen, setDraftInvoiceOpen] = useState(false);
+  const [draftInvoiceOrder, setDraftInvoiceOrder] = useState<api.Order | null>(null);
+  const [draftInvoiceHtml, setDraftInvoiceHtml] = useState("");
+  const [draftInvoiceTo, setDraftInvoiceTo] = useState("");
+  const [draftInvoiceLoading, setDraftInvoiceLoading] = useState(false);
+  const [draftInvoiceSending, setDraftInvoiceSending] = useState(false);
+  const [draftInvoiceFrameReady, setDraftInvoiceFrameReady] = useState(false);
+  const draftInvoiceFrameRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     if (!canViewAllDrafts) setShowAllDrafts(false);
@@ -348,6 +372,97 @@ export default function DraftOrders() {
     }
   };
 
+  const openDraftInvoice = async (order: api.Order) => {
+    if (!order.id) return;
+    setDraftInvoiceOpen(true);
+    setDraftInvoiceOrder(order);
+    setDraftInvoiceTo(order.customer_email || "");
+    setDraftInvoiceHtml("");
+    setDraftInvoiceFrameReady(false);
+    setDraftInvoiceLoading(true);
+    try {
+      const [draftData, settings] = await Promise.all([
+        api.getDraftInvoiceData(order.id),
+        api.getInvoiceRenderSettings(),
+      ]);
+      const referenceNumber = String(draftData.order.id);
+      setDraftInvoiceOrder(draftData.order);
+      setDraftInvoiceTo(draftData.order.customer_email || "");
+      setDraftInvoiceHtml(
+        buildInvoiceHtml(
+          buildDraftInvoiceOrderData(draftData.order),
+          settings,
+          timeFmt,
+          {
+            referenceNumber,
+            documentTitle: "DRAFT INVOICE",
+            referenceLabel: "Draft #",
+            servedByFallback: draftData.served_by || currentUser?.name || "Agent",
+          },
+        ),
+      );
+    } catch (error: any) {
+      toast({
+        title: "Unable to prepare draft invoice",
+        description: error.message,
+        variant: "destructive",
+      });
+      setDraftInvoiceOpen(false);
+    } finally {
+      setDraftInvoiceLoading(false);
+    }
+  };
+
+  const closeDraftInvoice = () => {
+    if (draftInvoiceSending) return;
+    setDraftInvoiceOpen(false);
+    setDraftInvoiceOrder(null);
+    setDraftInvoiceHtml("");
+    setDraftInvoiceFrameReady(false);
+  };
+
+  const handleSendDraftInvoice = async () => {
+    const recipient = draftInvoiceTo.trim();
+    if (!draftInvoiceOrder?.id) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+      toast({
+        title: "Valid email required",
+        description: "Enter a valid recipient email address.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!draftInvoiceFrameReady) {
+      toast({
+        title: "Draft invoice is still loading",
+        description: "Please wait a moment and try again.",
+      });
+      return;
+    }
+
+    setDraftInvoiceSending(true);
+    try {
+      const pdfBase64 = await generatePdfBase64(draftInvoiceFrameRef.current);
+      await api.sendDraftInvoiceEmail(draftInvoiceOrder.id, {
+        to: recipient,
+        pdf_base64: pdfBase64,
+      });
+      toast({
+        title: "Draft invoice sent",
+        description: `Draft #${draftInvoiceOrder.id} was sent to ${recipient}.`,
+      });
+      setDraftInvoiceOpen(false);
+    } catch (error: any) {
+      toast({
+        title: "Draft invoice email failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setDraftInvoiceSending(false);
+    }
+  };
+
   const loadDraftToCart = async (order: api.Order) => {
     clearCart();
     // Fetch fresh stock so max_purchase_quantity is populated on every item —
@@ -405,6 +520,7 @@ export default function DraftOrders() {
       onSubmit={tryAutoSubmit}
       onLoadToCart={loadDraftToCart}
       onEdit={openDraftEdit}
+      onSendDraftInvoice={openDraftInvoice}
       onDelete={deleteDraft}
       isSubmitting={submittingId === order.id}
     />
@@ -563,6 +679,74 @@ export default function DraftOrders() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={draftInvoiceOpen} onOpenChange={(open) => !open && closeDraftInvoice()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Send Draft Invoice</DialogTitle>
+            <DialogDescription>
+              A PDF marked “DRAFT INVOICE” will be attached. The saved draft will not be submitted or changed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="draft-invoice-email">To</Label>
+              <Input
+                id="draft-invoice-email"
+                type="email"
+                placeholder="customer@example.com"
+                value={draftInvoiceTo}
+                onChange={(event) => setDraftInvoiceTo(event.target.value)}
+                disabled={draftInvoiceLoading || draftInvoiceSending}
+                data-testid="input-draft-invoice-email"
+              />
+            </div>
+            {draftInvoiceLoading && (
+              <div className="flex items-center text-sm text-slate-500">
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Preparing draft invoice…
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeDraftInvoice} disabled={draftInvoiceSending}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendDraftInvoice}
+              disabled={draftInvoiceLoading || draftInvoiceSending || !draftInvoiceFrameReady}
+              data-testid="btn-confirm-send-draft-invoice"
+            >
+              {draftInvoiceSending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Mail className="h-4 w-4 mr-2" />
+              )}
+              Send Draft Invoice
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {draftInvoiceHtml && (
+        <iframe
+          ref={draftInvoiceFrameRef}
+          srcDoc={draftInvoiceHtml}
+          title="Draft Invoice PDF Source"
+          onLoad={() => setDraftInvoiceFrameReady(true)}
+          aria-hidden="true"
+          tabIndex={-1}
+          style={{
+            position: "fixed",
+            left: "-10000px",
+            top: 0,
+            width: "850px",
+            height: "1200px",
+            border: 0,
+            pointerEvents: "none",
+          }}
+        />
+      )}
     </div>
   );
 }

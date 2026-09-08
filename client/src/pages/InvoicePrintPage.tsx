@@ -14,96 +14,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Loader2, Printer, Mail, X, AlertCircle } from "lucide-react";
-import JsBarcode from "jsbarcode";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
 import * as api from "@/lib/api";
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-function escHtml(str: string): string {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function fmt(amount: string | number | null | undefined): string {
-  const n = parseFloat(String(amount ?? "0"));
-  return `$${isNaN(n) ? "0.00" : n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function generateBarcodeSvg(text: string): string {
-  try {
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    (JsBarcode as any)(svg, text, {
-      format: "CODE128",
-      displayValue: false,
-      height: 55,
-      width: 2,
-      margin: 0,
-    });
-    return svg.outerHTML;
-  } catch {
-    return `<svg width="200" height="55"><text x="10" y="30" font-size="12" fill="#aaa">Barcode N/A</text></svg>`;
-  }
-}
-
-function buildItemsRows(products: any[]): string {
-  if (!products || products.length === 0) {
-    return `<tr><td colspan="4" style="text-align:center;color:#aaa;padding:20px">No items</td></tr>`;
-  }
-  return products
-    .map((p) => {
-      const qty = Number(p.quantity) || 1;
-      const name = escHtml(p.name || "");
-      const sku = escHtml(p.sku || "");
-      const upc = p.upc || "";
-      // BC overwrites base_price with any manually-adjusted price, so we use
-      // catalogue_price (fetched from the product catalogue) as the true original.
-      // Fall back to base_price if catalogue_price wasn't available.
-      const salePrice = parseFloat(p.price_ex_tax ?? p.base_price ?? "0");
-      const origPrice = p.catalogue_price != null
-        ? parseFloat(p.catalogue_price)
-        : parseFloat(p.base_price ?? "0");
-      const lineTotal = salePrice * qty;
-      const hasDiscount = origPrice > salePrice + 0.005;
-
-      const origLineTotal = origPrice * qty;
-      const barcodeText = upc ? ` , Barcode: ${escHtml(upc)}` : "";
-      const lineTotalHtml = hasDiscount
-        ? `<span class="price-original">${fmt(origLineTotal)}</span><span class="price-sale">${fmt(lineTotal)}</span>`
-        : fmt(lineTotal);
-
-      // Build display name: append variant label(s) from product_options if present
-      const optionValues = Array.isArray(p.product_options)
-        ? (p.product_options as any[]).map((o) => o.display_value).filter(Boolean)
-        : [];
-      const displayName = optionValues.length > 0
-        ? `${name} | ${optionValues.map(escHtml).join(", ")}`
-        : name;
-
-      return `<tr>
-  <td>
-    <div class="item-name"><strong>${displayName}</strong></div>
-    <div class="item-meta">SKU: ${sku}${barcodeText}</div>
-  </td>
-  <td>${qty}</td>
-  <td>${fmt(salePrice)}</td>
-  <td>${lineTotalHtml}</td>
-</tr>`;
-    })
-    .join("\n");
-}
-
-function substituteVars(template: string, vars: Record<string, string>): string {
-  let result = template;
-  for (const [key, value] of Object.entries(vars)) {
-    result = result.split(`{{${key}}}`).join(value);
-  }
-  return result;
-}
+import { buildInvoiceHtml, generatePdfBase64 } from "@/lib/invoice-renderer";
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
@@ -146,11 +58,14 @@ export default function InvoicePrintPage() {
           }
           return r.json();
         }),
-        api.getInvoiceSettings(),
+        api.getInvoiceRenderSettings(),
       ]);
 
-      const html = buildInvoiceHtml(orderData, settings);
       const invNum = `CNC${orderData.order.id}`;
+      const html = buildInvoiceHtml(orderData, settings, timeFmt, {
+        referenceNumber: invNum,
+        servedByFallback: (currentUser as any)?.name || currentUser?.username || "Agent",
+      });
       setInvoiceNumber(invNum);
       setInvoiceHtml(html);
 
@@ -164,142 +79,12 @@ export default function InvoicePrintPage() {
     }
   }
 
-  function buildInvoiceHtml(orderData: any, settings: api.InvoiceSettings): string {
-    const order = orderData.order;
-    const products = orderData.products || [];
-
-    const invNum = `CNC${order.id}`;
-    const barcodeSvg = generateBarcodeSvg(invNum);
-
-    const billing = order.billing_address || {};
-    const customerName = `${billing.first_name || ""} ${billing.last_name || ""}`.trim();
-    const customerCompany = billing.company || "";
-    const streetParts = [billing.street_1, billing.street_2].filter(Boolean);
-    const customerStreet = streetParts.join(", ");
-    const cityParts = [billing.city, billing.state, billing.zip].filter(Boolean);
-    const customerCityState = cityParts.join(", ");
-    const custEmail = billing.email || "";
-    const custPhone = billing.phone || "";
-
-    const companyAddr = (settings.company_address || "")
-      .split("\n")
-      .map(escHtml)
-      .join("<br>");
-
-    const logoHtml = settings.logo_base64
-      ? `<img src="${settings.logo_base64}" alt="Logo" style="max-height:75px;max-width:180px;object-fit:contain" />`
-      : "";
-
-    const orderDate = order.date_created ? timeFmt.dateLong(order.date_created) : "";
-
-    const itemsRows = buildItemsRows(products);
-    const totalItems = products.reduce(
-      (sum: number, p: any) => sum + (Number(p.quantity) || 0),
-      0
-    );
-
-    const subtotal = fmt(order.subtotal_ex_tax ?? order.subtotal_inc_tax);
-    const discount = fmt(order.discount_amount);
-    const tax = fmt(order.total_tax);
-    const total = fmt(order.total_ex_tax ?? order.total_inc_tax);
-    const storeCreditAmt = parseFloat(order.store_credit_amount ?? "0");
-    const storeCreditRow = storeCreditAmt > 0
-      ? `<tr class="store-credit-row"><td>Store Credit</td><td>-${fmt(storeCreditAmt)}</td></tr>`
-      : "";
-    const unpaidAmt = order.payment_status !== "paid" ? fmt(order.total_inc_tax) : "$0.00";
-    const outstanding = order.payment_status !== "paid" ? fmt(order.total_inc_tax) : "$0.00";
-
-    // Use the customer note (customer_message) — the note the agent typed in the
-    // "Customer Note" field at checkout, not the internal staff note.
-    const notesText = (order.customer_message || "").trim();
-    const notesHtml = notesText
-      ? `<div class="notes-section">Notes: ${escHtml(notesText)}</div>`
-      : "";
-
-    // Extract the original checkout agent from staff_notes ("Checkout by: {name}").
-    // Falls back to the current viewer only if the field is absent (e.g. legacy orders).
-    const rawStaffNotes: string = order.staff_notes || "";
-    const checkoutLine = rawStaffNotes.split("\n").find((l: string) => l.startsWith("Checkout by: "));
-    const servedBy = checkoutLine
-      ? checkoutLine.replace(/^Checkout by:\s*/, "").trim()
-      : ((currentUser as any)?.name || currentUser?.username || "Agent");
-    const timestamp = timeFmt.timestamp(new Date());
-
-    const vars: Record<string, string> = {
-      company_name: escHtml(settings.company_name || ""),
-      logo_html: logoHtml,
-      customer_name: escHtml(customerName),
-      customer_company: escHtml(customerCompany),
-      customer_street: escHtml(customerStreet),
-      customer_city_state: escHtml(customerCityState),
-      customer_email: escHtml(custEmail),
-      customer_phone: escHtml(custPhone),
-      company_address: companyAddr,
-      invoice_number: invNum,
-      order_date: orderDate,
-      items_rows: itemsRows,
-      subtotal,
-      discount,
-      tax,
-      total,
-      store_credit_row: storeCreditRow,
-      unpaid: unpaidAmt,
-      outstanding,
-      total_items: String(totalItems),
-      notes_html: notesHtml,
-      barcode_svg: barcodeSvg,
-      served_by: escHtml(servedBy),
-      timestamp,
-      terms: escHtml(settings.terms || ""),
-    };
-
-    return substituteVars(settings.html_template, vars);
-  }
-
   function handlePrint() {
     if (iframeRef.current?.contentWindow) {
       iframeRef.current.contentWindow.print();
     } else {
       window.print();
     }
-  }
-
-  async function generatePdfBase64(): Promise<string> {
-    const iframe = iframeRef.current;
-    if (!iframe?.contentDocument?.body) throw new Error("Invoice not ready");
-    const body = iframe.contentDocument.body;
-    const canvas = await html2canvas(body, {
-      scale: 2,
-      backgroundColor: "#ffffff",
-      useCORS: true,
-      logging: false,
-    });
-    // A4 width = 210mm; add 10mm margin each side → 190mm content
-    const A4_W = 210;
-    const A4_H = 297;
-    const MARGIN = 10;
-    const contentW = A4_W - MARGIN * 2;
-    const mmPerPx = contentW / canvas.width;
-    const contentH = A4_H - MARGIN * 2;
-    const pxPerPage = contentH / mmPerPx;
-    const pages = Math.ceil(canvas.height / pxPerPage);
-
-    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    for (let i = 0; i < pages; i++) {
-      if (i > 0) pdf.addPage();
-      const sy = Math.floor(i * pxPerPage);
-      const sh = Math.min(Math.ceil(pxPerPage), canvas.height - sy);
-      const pageCanvas = document.createElement("canvas");
-      pageCanvas.width = canvas.width;
-      pageCanvas.height = sh;
-      const ctx = pageCanvas.getContext("2d")!;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-      ctx.drawImage(canvas, 0, sy, canvas.width, sh, 0, 0, canvas.width, sh);
-      const pageImg = pageCanvas.toDataURL("image/jpeg", 0.92);
-      pdf.addImage(pageImg, "JPEG", MARGIN, MARGIN, contentW, sh * mmPerPx);
-    }
-    return pdf.output("datauristring");
   }
 
   async function handleSendEmail() {
@@ -314,7 +99,7 @@ export default function InvoicePrintPage() {
     setIsSending(true);
     try {
       toast({ title: "Generating PDF…", description: "Please wait a moment." });
-      const pdfDataUri = await generatePdfBase64();
+      const pdfDataUri = await generatePdfBase64(iframeRef.current);
       await api.sendInvoiceEmail({
         to: emailTo.trim(),
         subject: `Invoice ${invoiceNumber}`,
