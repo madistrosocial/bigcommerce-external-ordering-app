@@ -586,7 +586,8 @@ LEFT JOIN pg_attribute a
  AND a.attnum > 0
  AND NOT a.attisdropped
 WHERE c.column_name IS NULL
-   OR (format_type(a.atttypid, a.atttypmod) <> e.expected_type)
+   OR (regexp_replace(format_type(a.atttypid, a.atttypmod), '\s+', '', 'g')
+       <> regexp_replace(e.expected_type, '\s+', '', 'g'))
    OR (e.expected_nullable <> c.is_nullable)
    OR (e.expected_default IS NOT NULL AND c.column_default IS NULL)
 ORDER BY e.table_name, e.column_name;
