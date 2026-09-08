@@ -304,6 +304,7 @@ function PermissionsTab() {
     { module: "pos",         action: "view", description: "Access Point of Sale" },
     { module: "orders",      action: "view",   description: "View ALL orders — without this permission users only see their own Sales App orders" },
     { module: "orders",      action: "export", description: "Export Sales History to CSV or Excel" },
+    { module: "orders",      action: "view_all_drafts", description: "View draft orders created by all users" },
     { module: "crm",         action: "notes_edit", description: "Edit staff and customer notes on orders" },
     { module: "reporting_sales",                  action: "view", description: "Access Sales Report in Reporting" },
     { module: "reporting_price_override_audit",   action: "view", description: "Access Price Override Audit report" },

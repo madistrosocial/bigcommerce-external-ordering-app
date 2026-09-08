@@ -82,8 +82,9 @@ export const CRM_ACTION_PERMS = [
 ];
 
 export const ORDERS_ACTION_PERMS = [
-  { module: "orders", action: "view",   label: "View All Orders",       description: "Can see all orders from all channels and users. Without this, only their own Sales App orders are visible." },
-  { module: "orders", action: "export", label: "Export Sales History",  description: "Can export the Sales History report to CSV or Excel." },
+  { module: "orders", action: "view",            label: "View All Orders",        description: "Can see all orders from all channels and users. Without this, only their own Sales App orders are visible." },
+  { module: "orders", action: "export",          label: "Export Sales History",   description: "Can export the Sales History report to CSV or Excel." },
+  { module: "orders", action: "view_all_drafts", label: "View All Drafts",        description: "Can see draft orders created by every user. Without this, only their own drafts are visible." },
 ];
 
 export const INVENTORY_AUDIT_ACTION_PERMS = [

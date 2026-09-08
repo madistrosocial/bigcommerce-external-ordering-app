@@ -51,7 +51,7 @@ export interface IStorage {
   getOrder(id: number): Promise<Order | undefined>;
   getOrdersByUser(userId: number): Promise<Order[]>;
   getPendingSyncOrders(): Promise<Order[]>;
-  getDraftOrders(): Promise<Order[]>;
+  getDraftOrders(userId?: number): Promise<Order[]>;
   updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void>;
   updateOrderNote(id: number, note: string): Promise<void>;
   updateOrderCustomerNote(id: number, customerNote: string): Promise<void>;
@@ -487,8 +487,26 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(orders).where(eq(orders.status, 'pending_sync'));
   }
 
-  async getDraftOrders(): Promise<Order[]> {
-    return db.select().from(orders).where(eq(orders.status, 'draft')).orderBy(desc(orders.date));
+  async getDraftOrders(userId?: number): Promise<Order[]> {
+    const whereClause = userId == null
+      ? eq(orders.status, "draft")
+      : and(eq(orders.status, "draft"), eq(orders.created_by_user_id, userId));
+    const rows = await db
+      .select({
+        order: orders,
+        created_by_name: users.name,
+        created_by_username: users.username,
+      })
+      .from(orders)
+      .leftJoin(users, eq(orders.created_by_user_id, users.id))
+      .where(whereClause)
+      .orderBy(desc(orders.date));
+
+    return rows.map(({ order, created_by_name, created_by_username }) => ({
+      ...order,
+      created_by_name: created_by_name ?? undefined,
+      created_by_username: created_by_username ?? undefined,
+    }));
   }
 
   async updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void> {

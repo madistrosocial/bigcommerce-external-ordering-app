@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useStore } from "@/lib/store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useTimeService } from "@/hooks/useTimeService";
@@ -14,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   FileText, ChevronDown, ChevronUp, Send, Loader2,
-  ShoppingCart, Edit, Trash2, User, Search, AlertCircle,
+  ShoppingCart, Edit, Trash2, User, Search, AlertCircle, UsersRound,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -155,9 +156,12 @@ function DraftRow({ order, isOfflineMode, onSubmit, onLoadToCart, onEdit, onDele
 
 export default function DraftOrders() {
   const { currentUser, isOfflineMode, addToCart, clearCart } = useStore();
+  const { hasPermission } = usePermissions();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
+  const canViewAllDrafts = hasPermission("orders", "view_all_drafts");
+  const [showAllDrafts, setShowAllDrafts] = useState(false);
 
   // Draft edit dialog state
   const [editingDraft, setEditingDraft] = useState<api.Order | null>(null);
@@ -172,13 +176,32 @@ export default function DraftOrders() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittingId, setSubmittingId] = useState<number | null>(null);
 
-  const { data: allOrders = [], isLoading } = useQuery({
-    queryKey: ["orders", currentUser?.id],
-    queryFn: () => api.getOrdersByUser(currentUser?.id || 0),
+  useEffect(() => {
+    if (!canViewAllDrafts) setShowAllDrafts(false);
+  }, [canViewAllDrafts]);
+
+  const { data: drafts = [], isLoading } = useQuery<api.Order[]>({
+    queryKey: ["orders", "drafts", currentUser?.id, showAllDrafts && canViewAllDrafts ? "all" : "own"],
+    queryFn: () => api.getDraftOrders(showAllDrafts && canViewAllDrafts),
     enabled: !!currentUser,
   });
 
-  const drafts = allOrders.filter((o) => o.status === "draft");
+  const groupedDrafts = useMemo(() => {
+    const groups = new Map<number, { id: number; name: string; drafts: api.Order[] }>();
+    drafts.forEach((order) => {
+      const id = order.created_by_user_id;
+      const name =
+        order.created_by_name ||
+        (id === currentUser?.id ? currentUser.name : `User ${id}`);
+      const group = groups.get(id);
+      if (group) {
+        group.drafts.push(order);
+      } else {
+        groups.set(id, { id, name, drafts: [order] });
+      }
+    });
+    return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [currentUser?.id, currentUser?.name, drafts]);
 
   // ── Draft actions ───────────────────────────────────────────────────────────
 
@@ -355,15 +378,42 @@ export default function DraftOrders() {
     setLocation("/cart");
   };
 
+  const renderDraftRow = (order: api.Order) => (
+    <DraftRow
+      key={order.id}
+      order={order}
+      isOfflineMode={isOfflineMode}
+      onSubmit={tryAutoSubmit}
+      onLoadToCart={loadDraftToCart}
+      onEdit={openDraftEdit}
+      onDelete={deleteDraft}
+      isSubmitting={submittingId === order.id}
+    />
+  );
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0">
         <FileText className="h-5 w-5 text-slate-600" />
         <h1 className="text-base font-bold text-slate-800">Drafts</h1>
         {!isLoading && (
-          <span className="ml-auto text-xs text-slate-400">
-            {drafts.length} draft{drafts.length !== 1 ? "s" : ""}
-          </span>
+          <div className="ml-auto flex items-center gap-3">
+            {canViewAllDrafts && (
+              <Button
+                variant={showAllDrafts ? "default" : "outline"}
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setShowAllDrafts((value) => !value)}
+                data-testid="button-toggle-all-drafts"
+              >
+                <UsersRound className="h-3.5 w-3.5 mr-1.5" />
+                {showAllDrafts ? "My Drafts" : "All Users"}
+              </Button>
+            )}
+            <span className="text-xs text-slate-400">
+              {drafts.length} draft{drafts.length !== 1 ? "s" : ""}
+            </span>
+          </div>
         )}
       </header>
 
@@ -378,20 +428,28 @@ export default function DraftOrders() {
             <p className="text-sm">No draft orders.</p>
           </div>
         ) : (
-          <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-            {drafts.map((order) => (
-              <DraftRow
-                key={order.id}
-                order={order}
-                isOfflineMode={isOfflineMode}
-                onSubmit={tryAutoSubmit}
-                onLoadToCart={loadDraftToCart}
-                onEdit={openDraftEdit}
-                onDelete={deleteDraft}
-                isSubmitting={submittingId === order.id}
-              />
-            ))}
-          </div>
+          showAllDrafts && canViewAllDrafts ? (
+            <div className="space-y-4">
+              {groupedDrafts.map((group) => (
+                <section key={group.id} className="bg-white rounded-lg border shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <User className="h-4 w-4 text-slate-500 shrink-0" />
+                      <h2 className="text-sm font-semibold text-slate-700 truncate">{group.name}</h2>
+                    </div>
+                    <span className="text-xs text-slate-400 shrink-0">
+                      {group.drafts.length} draft{group.drafts.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  {group.drafts.map(renderDraftRow)}
+                </section>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+              {drafts.map(renderDraftRow)}
+            </div>
+          )
         )}
       </div>
 

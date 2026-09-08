@@ -51,6 +51,8 @@ export interface Order {
   total: string;
   date?: string;
   created_by_user_id: number;
+  created_by_name?: string;
+  created_by_username?: string;
   bigcommerce_order_id?: number;
   bigcommerce_customer_id?: number;
   billing_address?: any;
@@ -415,8 +417,8 @@ export async function submitDraftOrder(orderId: number, customerData: {
   return res.json();
 }
 
-export async function getDraftOrders(): Promise<Order[]> {
-  const res = await fetch(`${API_BASE}/orders/drafts`, {
+export async function getDraftOrders(viewAll = false): Promise<Order[]> {
+  const res = await fetch(`${API_BASE}/orders/drafts${viewAll ? "?scope=all" : ""}`, {
     headers: getAuthHeaders()
   });
   if (!res.ok) throw new Error('Failed to fetch draft orders');

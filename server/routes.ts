@@ -1272,7 +1272,18 @@ export async function registerRoutes(
 
   app.get("/api/orders/drafts", requireAuth, async (req, res) => {
     try {
-      const drafts = await storage.getDraftOrders();
+      const authUser = (req as any).authUser;
+      const requestedAll = req.query.scope === "all";
+      const permissions = authUser.role === "admin"
+        ? []
+        : await storage.getUserPermissionStrings(authUser.id);
+      const canViewAll = authUser.role === "admin" || permissions.includes("orders:view_all_drafts");
+
+      if (requestedAll && !canViewAll) {
+        return res.status(403).json({ error: "View all drafts permission is required" });
+      }
+
+      const drafts = await storage.getDraftOrders(requestedAll ? undefined : authUser.id);
       res.json(drafts);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
