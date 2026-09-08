@@ -460,6 +460,7 @@ function Logs() {
     return map;
   }, [rows]);
   const expectedTeamMembers = selectedMember ? 1 : teamMembers.length;
+  const selectedUserId = canViewAll ? userId : String(currentUser?.id ?? "");
   const businessDates = dates.filter(date => dayKind(date, holidayMap) === "weekday");
   const workedRows = rows.filter((row: any) => dayKind(row.work_date, holidayMap) === "weekday");
   const today = dateOnly(new Date());
@@ -558,8 +559,8 @@ function Logs() {
               <tbody>
                 {dates.map(date => {
                   const summary = recordsByDate.get(date);
-                  const record = selectedMember ? summary?.records.find((row: any) => String(row.user_id) === userId) : undefined;
-                  const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, userId === "all" ? "" : userId);
+                  const record = selectedMember ? summary?.records.find((row: any) => String(row.user_id) === selectedUserId) : undefined;
+                  const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, selectedMember ? selectedUserId : "");
                   const holiday = holidayMap.get(date);
                   const dateRecords = summary?.records ?? [];
                   const names = dateRecords.map((row: any) => row.employee_name || row.employee_username).filter(Boolean);
@@ -580,8 +581,8 @@ function Logs() {
            <div className="space-y-2 p-3 md:hidden">
              {dates.map(date => {
                const summary = recordsByDate.get(date);
-               const record = selectedMember ? summary?.records.find((row: any) => String(row.user_id) === userId) : undefined;
-               const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, userId === "all" ? "" : userId);
+                const record = selectedMember ? summary?.records.find((row: any) => String(row.user_id) === selectedUserId) : undefined;
+                const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, selectedMember ? selectedUserId : "");
                const holiday = holidayMap.get(date);
                 const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
                 const displayHours = noAttendance ? "—" : selectedMember ? hours(record?.total_seconds) : hours(summary?.totalSeconds);
