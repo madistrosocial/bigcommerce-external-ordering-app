@@ -123,21 +123,16 @@
   /* Keep the app shell pinned to the full standalone-PWA viewport. */
   #root {
     position: fixed;
-    top: 0;
-    right: 0;
-    left: 0;
-    height: 100%;
-    min-height: 100%;
+    inset: 0;
     overflow: hidden;
   }
 
-  /* In standalone iOS/iPadOS PWAs, innerHeight/visualViewport can stop
-     above the bottom safe area. Use the full layout viewport so the app
-     background and fixed drawers cover that region too. */
+  /* Standalone iOS/iPadOS PWAs can keep the bottom safe area outside the
+     visual viewport. Extend the app root into it so the shell and overlays
+     draw over the entire screen instead of exposing the body background. */
   @media (display-mode: standalone) {
     #root {
-      height: 100vh;
-      min-height: 100vh;
+      bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
     }
   }
 
