@@ -965,7 +965,7 @@ const PinnedProductRow = memo(function PinnedProductRow({
           </div>
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-slate-800 truncate leading-snug">
+          <p className="text-xs font-medium text-slate-800 truncate leading-snug">
             {product.name}
           </p>
           <p className="text-xs text-slate-400">
