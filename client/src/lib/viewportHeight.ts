@@ -5,7 +5,12 @@
 // layouts can use instead of `100dvh`.
 export function initViewportHeightVar() {
   const setAppHeight = () => {
-    const height = window.visualViewport?.height ?? window.innerHeight;
+    const isStandalonePwa =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+    const height = isStandalonePwa
+      ? window.innerHeight
+      : (window.visualViewport?.height ?? window.innerHeight);
     document.documentElement.style.setProperty("--app-height", `${height}px`);
   };
 

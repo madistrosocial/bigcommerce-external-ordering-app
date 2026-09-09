@@ -412,8 +412,9 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
           mobileOpen ? "translate-x-0" : "-translate-x-full")}
         style={{
           top: "env(safe-area-inset-top)",
-          bottom: "env(safe-area-inset-bottom)",
+          bottom: 0,
           height: "auto",
+          paddingBottom: "env(safe-area-inset-bottom)",
         }}
       >
         <SidebarContent />
