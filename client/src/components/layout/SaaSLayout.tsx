@@ -421,16 +421,16 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <header
-          className="flex items-center justify-between px-3 md:px-4 h-14 bg-white border-b shrink-0 shadow-sm"
+          className="flex items-center justify-between px-3 md:px-4 h-14 bg-slate-900 border-b border-slate-800 shrink-0 shadow-sm"
           style={{
             paddingTop: "env(safe-area-inset-top)",
             height: "calc(3.5rem + env(safe-area-inset-top))",
           }}
         >
-          <button onClick={() => setMobileOpen(true)} className="md:hidden p-1.5 rounded-md text-slate-500 hover:bg-slate-100 mr-2" data-testid="btn-mobile-menu">
+          <button onClick={() => setMobileOpen(true)} className="md:hidden p-1.5 rounded-md text-slate-300 hover:bg-slate-800 mr-2" data-testid="btn-mobile-menu">
             <Menu className="h-5 w-5" />
           </button>
-          <h1 className="text-sm font-semibold text-slate-700 tracking-wide uppercase truncate">Sales | Midatlantic Distribution</h1>
+          <h1 className="text-sm font-semibold text-slate-100 tracking-wide uppercase truncate">Sales | Midatlantic Distribution</h1>
           {isOfflineMode && (
             <span className="hidden sm:inline ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-600 uppercase tracking-wide whitespace-nowrap">Offline</span>
           )}
