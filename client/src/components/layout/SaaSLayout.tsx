@@ -357,10 +357,6 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
       className="flex bg-white overflow-hidden"
       style={{
         height: "100%",
-        paddingTop: "env(safe-area-inset-top)",
-        paddingBottom: "env(safe-area-inset-bottom)",
-        paddingLeft: "env(safe-area-inset-left)",
-        paddingRight: "env(safe-area-inset-right)",
       }}
     >
       {mobileOpen && <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setMobileOpen(false)} />}
@@ -373,13 +369,23 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
       <aside
         className={cn("fixed left-0 h-full w-[240px] bg-slate-900 text-slate-100 z-40 flex flex-col transition-transform duration-200 border-r border-slate-800 md:hidden",
           mobileOpen ? "translate-x-0" : "-translate-x-full")}
-        style={{ top: "env(safe-area-inset-top)" }}
+        style={{
+          top: "env(safe-area-inset-top)",
+          bottom: "env(safe-area-inset-bottom)",
+          height: "auto",
+        }}
       >
         <SidebarContent />
       </aside>
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <header className="flex items-center justify-between px-3 md:px-4 h-14 bg-white border-b shrink-0 shadow-sm">
+        <header
+          className="flex items-center justify-between px-3 md:px-4 h-14 bg-white border-b shrink-0 shadow-sm"
+          style={{
+            paddingTop: "env(safe-area-inset-top)",
+            height: "calc(3.5rem + env(safe-area-inset-top))",
+          }}
+        >
           <button onClick={() => setMobileOpen(true)} className="md:hidden p-1.5 rounded-md text-slate-500 hover:bg-slate-100 mr-2" data-testid="btn-mobile-menu">
             <Menu className="h-5 w-5" />
           </button>
