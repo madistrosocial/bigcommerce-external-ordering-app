@@ -101,7 +101,18 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
       return new Set([id]);
     });
   };
-  const navigate = (path: string) => { setLocation(path); setMobileOpen(false); };
+  const navigate = (path: string) => {
+    setLocation(path);
+    setMobileOpen(false);
+    if (!path.startsWith("/admin/")) {
+      setOpenGroups((prev) => {
+        if (!prev.has("settings")) return prev;
+        const next = new Set(prev);
+        next.delete("settings");
+        return next;
+      });
+    }
+  };
 
   const isChromeless = CHROMELESS_PATHS.includes(location) || !currentUser;
 
@@ -312,24 +323,41 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
         {showSettings && (
           <>
             <div className="my-2 border-t border-slate-700" />
-            {!collapsed && (
-              <p className="px-2 pb-1 text-[10px] font-bold tracking-widest text-slate-500 uppercase flex items-center gap-1.5">
-                <Settings className="h-3 w-3" /> Settings
-              </p>
-            )}
-            {settingsLinks.map((link) => {
-              const active = isActive(link.path);
-              return (
-                <button key={link.path} onClick={() => navigate(link.path)} title={collapsed ? link.label : undefined}
-                  data-testid={`nav-${link.path.replace(/\//g, "-")}`}
-                  className={cn("w-full flex items-center gap-2.5 rounded-md px-2 py-2 text-[13px] transition-colors",
-                    collapsed && "justify-center px-0",
-                    active ? "bg-amber-600/30 text-amber-300 font-medium" : "text-amber-500/70 hover:bg-slate-800 hover:text-amber-300")}>
-                  <link.icon className="h-4 w-4 shrink-0" />
-                  {!collapsed && <span className="truncate">{link.label}</span>}
-                </button>
-              );
-            })}
+            <div>
+              <button
+                onClick={() => {
+                  if (collapsed) { setCollapsedPersist(false); setOpenGroups((p) => { const n = new Set(p); n.add("settings"); return n; }); }
+                  else toggleGroup("settings");
+                }}
+                title={collapsed ? "Settings" : undefined}
+                data-testid="nav-group-settings"
+                className={cn("w-full flex items-center gap-2.5 rounded-md px-2 py-2 text-[13px] transition-colors",
+                  collapsed && "justify-center px-0",
+                  settingsLinks.some((link) => isActive(link.path)) ? "text-blue-400 font-medium" : "text-slate-400 hover:bg-slate-800 hover:text-slate-100")}
+              >
+                <Settings className="h-4 w-4 shrink-0" />
+                {!collapsed && (
+                  <>
+                    <span className="flex-1 truncate text-left">Settings</span>
+                    {openGroups.has("settings") ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </>
+                )}
+              </button>
+              {!collapsed && openGroups.has("settings") && (
+                <div className="ml-3 mt-0.5 space-y-0.5 border-l border-slate-700 pl-3">
+                  {settingsLinks.map((link) => (
+                    <button key={link.path} onClick={() => navigate(link.path)}
+                      data-testid={`nav-${link.path.replace(/\//g, "-")}`}
+                      className={cn("w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors truncate",
+                        isActive(link.path) ? "bg-amber-600/30 text-amber-300 font-medium" : "text-amber-500/70 hover:bg-slate-800 hover:text-amber-300")}
+                    >
+                      <link.icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{link.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </>
         )}
       </nav>
