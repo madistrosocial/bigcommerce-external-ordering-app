@@ -2494,6 +2494,13 @@ export class DatabaseStorage implements IStorage {
   async getStoreCreditLedger(opts: { customerId?: number; issuedBy?: number; dateFrom?: string; dateTo?: string; search?: string; type?: string; limit?: number; offset?: number }): Promise<{ rows: StoreCreditLedgerEntry[]; total: number }> {
     const { customerId, issuedBy, dateFrom, dateTo, search, type, limit = 50, offset = 0 } = opts;
     const conditions: any[] = [];
+    const customerDisplayName = sql<string | null>`
+      COALESCE(
+        NULLIF(BTRIM(${customersMirror.company}), ''),
+        NULLIF(BTRIM(CONCAT_WS(' ', ${customersMirror.first_name}, ${customersMirror.last_name})), ''),
+        NULLIF(BTRIM(${customersMirror.email}), '')
+      )
+    `;
     if (customerId) conditions.push(eq(storeCreditLedger.customer_id, customerId));
     if (issuedBy) conditions.push(eq(storeCreditLedger.issued_by, issuedBy));
     if (dateFrom) conditions.push(sql`${storeCreditLedger.created_at} >= ${dateFrom}::timestamptz`);
@@ -2505,12 +2512,41 @@ export class DatabaseStorage implements IStorage {
         ilike(storeCreditLedger.issued_by_name, s),
         ilike(storeCreditLedger.reason, s),
         sql`${storeCreditLedger.bigcommerce_order_id}::text ilike ${s}`,
+        ilike(customersMirror.company, s),
+        ilike(customersMirror.first_name, s),
+        ilike(customersMirror.last_name, s),
+        ilike(customersMirror.email, s),
+        sql`CONCAT_WS(' ', ${customersMirror.first_name}, ${customersMirror.last_name}) ilike ${s}`,
       ));
     }
     const where = conditions.length > 0 ? and(...conditions) : undefined;
     const [countRows, rows] = await Promise.all([
-      db.select({ count: sql<number>`count(*)::int` }).from(storeCreditLedger).where(where),
-      db.select().from(storeCreditLedger).where(where).orderBy(desc(storeCreditLedger.created_at)).limit(limit).offset(offset),
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(storeCreditLedger)
+        .leftJoin(customersMirror, eq(storeCreditLedger.customer_id, customersMirror.id))
+        .where(where),
+      db.select({
+        id: storeCreditLedger.id,
+        customer_id: storeCreditLedger.customer_id,
+        bigcommerce_customer_id: storeCreditLedger.bigcommerce_customer_id,
+        bigcommerce_order_id: storeCreditLedger.bigcommerce_order_id,
+        order_id: storeCreditLedger.order_id,
+        type: storeCreditLedger.type,
+        amount: storeCreditLedger.amount,
+        tax: storeCreditLedger.tax,
+        reason: storeCreditLedger.reason,
+        products: storeCreditLedger.products,
+        issued_by: storeCreditLedger.issued_by,
+        issued_by_name: storeCreditLedger.issued_by_name,
+        created_at: storeCreditLedger.created_at,
+        customer_name: customerDisplayName,
+      })
+        .from(storeCreditLedger)
+        .leftJoin(customersMirror, eq(storeCreditLedger.customer_id, customersMirror.id))
+        .where(where)
+        .orderBy(desc(storeCreditLedger.created_at))
+        .limit(limit)
+        .offset(offset),
     ]);
     return { rows, total: countRows[0]?.count ?? 0 };
   }
