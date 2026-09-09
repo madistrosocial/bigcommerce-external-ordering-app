@@ -740,15 +740,15 @@ export default function CustomerProfile() {
       ═══════════════════════════════════════════════════════════════════════ */}
       <div className="px-3 sm:px-4 md:px-6 pt-3 sm:pt-4">
         <div className="bg-white border rounded-xl p-4 sm:p-5 shadow-sm">
-          <div className="flex gap-3 sm:gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
 
             {/* Avatar */}
-            <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-0.5">
+            <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-blue-100 flex items-center justify-center shrink-0 self-center sm:self-start mt-0.5">
               <User className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
             </div>
 
             {/* Main info — grows */}
-            <div className="flex-1 min-w-0">
+            <div className="order-3 w-full min-w-0 sm:order-2 sm:flex-1">
 
               {/* Company name */}
               {customer.company && (
@@ -939,7 +939,7 @@ export default function CustomerProfile() {
             </div>
 
             {/* Right column: status badge + days counter */}
-            <div className="shrink-0 flex flex-col items-end gap-2 sm:border-l sm:pl-4 min-w-[72px]">
+            <div className="order-2 shrink-0 flex flex-col items-center gap-1 sm:order-3 sm:items-end sm:gap-2 sm:border-l sm:pl-4 sm:min-w-[72px]">
 
               {/* Active / Inactive status badge */}
               {canManageInactive ? (
@@ -984,8 +984,8 @@ export default function CustomerProfile() {
 
               {/* Days since last order */}
               {daysSince != null && (
-                <div className="text-right mt-1">
-                  <p className={`text-3xl sm:text-4xl font-extrabold leading-none ${daysSince > 90 ? "text-red-500" : daysSince > 30 ? "text-amber-500" : "text-green-600"}`}>
+                <div className="text-center sm:text-right mt-1">
+                  <p className={`text-base sm:text-4xl font-extrabold leading-none ${daysSince > 90 ? "text-red-500" : daysSince > 30 ? "text-amber-500" : "text-green-600"}`}>
                     {daysSince}d
                   </p>
                   <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5">since last order</p>
