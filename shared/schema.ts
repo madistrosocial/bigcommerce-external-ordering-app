@@ -89,6 +89,62 @@ export const settings = pgTable("settings", {
   value: jsonb("value").notNull(),
 });
 
+// ─── Dropshipping ────────────────────────────────────────────────────────────
+// Vendor credentials remain in the existing server-side settings store. These
+// tables only contain catalog data and operational sync history.
+export const dropshipVendors = pgTable("dropship_vendors", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  code: text("code").notNull().unique(),
+  name: text("name").notNull(),
+  provider: text("provider").notNull(),
+  is_enabled: boolean("is_enabled").notNull().default(true),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const dropshipProducts = pgTable("dropship_products", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  vendor_id: integer("vendor_id").notNull().references(() => dropshipVendors.id, { onDelete: "cascade" }),
+  vendor_sku: text("vendor_sku").notNull(),
+  vendor_product_id: text("vendor_product_id"),
+  title: text("title").notNull().default(""),
+  description: text("description").notNull().default(""),
+  brand: text("brand"),
+  upc: text("upc"),
+  inventory: integer("inventory").notNull().default(0),
+  cost: decimal("cost", { precision: 14, scale: 4 }),
+  tier_data: jsonb("tier_data").notNull().default([]),
+  image_data: jsonb("image_data").notNull().default([]),
+  vendor_category: text("vendor_category"),
+  vendor_subcategory: text("vendor_subcategory"),
+  is_closeout: boolean("is_closeout").notNull().default(false),
+  vendor_modified_at: timestamp("vendor_modified_at"),
+  bigcommerce_product_id: integer("bigcommerce_product_id"),
+  status: text("status").notNull().default("available"), // available | queued | mapped | unavailable | error
+  raw_data: jsonb("raw_data").notNull().default({}),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  vendorSkuUnique: uniqueIndex("dropship_products_vendor_sku_idx").on(t.vendor_id, t.vendor_sku),
+  vendorStatusIdx: index("dropship_products_vendor_status_idx").on(t.vendor_id, t.status),
+  vendorCategoryIdx: index("dropship_products_vendor_category_idx").on(t.vendor_id, t.vendor_category),
+}));
+
+export const dropshipSyncLogs = pgTable("dropship_sync_logs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  vendor_id: integer("vendor_id").notNull().references(() => dropshipVendors.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("running"), // running | completed | failed
+  started_at: timestamp("started_at").notNull().defaultNow(),
+  completed_at: timestamp("completed_at"),
+  duration_ms: integer("duration_ms"),
+  products_processed: integer("products_processed").notNull().default(0),
+  products_created: integer("products_created").notNull().default(0),
+  products_updated: integer("products_updated").notNull().default(0),
+  error_count: integer("error_count").notNull().default(0),
+  error_summary: text("error_summary"),
+  detail: jsonb("detail").notNull().default({}),
+});
+
 export const priceHistoryCache = pgTable("price_history_cache", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   customer_id: integer("customer_id").notNull(),
@@ -415,6 +471,9 @@ export const insertInventoryPushLogSchema = createInsertSchema(inventoryPushLogs
 export const insertProductLinkLogSchema = createInsertSchema(productLinkLogs).omit({ id: true, created_at: true });
 export const insertPromoFreeSkuTrackerSchema = createInsertSchema(promoFreeSkuTracker).omit({ id: true, created_at: true, updated_at: true });
 export const insertShipstationExportHistorySchema = createInsertSchema(shipstationExportHistory).omit({ id: true, created_at: true, export_date: true });
+export const insertDropshipVendorSchema = createInsertSchema(dropshipVendors).omit({ id: true, created_at: true, updated_at: true });
+export const insertDropshipProductSchema = createInsertSchema(dropshipProducts).omit({ id: true, created_at: true, updated_at: true });
+export const insertDropshipSyncLogSchema = createInsertSchema(dropshipSyncLogs).omit({ id: true });
 
 // ─── Store Credit Ledger ──────────────────────────────────────────────────────
 export const storeCreditLedger = pgTable("store_credit_ledger", {
@@ -687,6 +746,12 @@ export type PromoFreeSkuTracker = typeof promoFreeSkuTracker.$inferSelect;
 
 export type InsertShipstationExportHistory = z.infer<typeof insertShipstationExportHistorySchema>;
 export type ShipstationExportHistory = typeof shipstationExportHistory.$inferSelect;
+export type InsertDropshipVendor = typeof dropshipVendors.$inferInsert;
+export type DropshipVendor = typeof dropshipVendors.$inferSelect;
+export type InsertDropshipProduct = typeof dropshipProducts.$inferInsert;
+export type DropshipProduct = typeof dropshipProducts.$inferSelect;
+export type InsertDropshipSyncLog = typeof dropshipSyncLogs.$inferInsert;
+export type DropshipSyncLog = typeof dropshipSyncLogs.$inferSelect;
 
 // POS Enhancement types
 export type InsertPosPriceOverrideAudit = z.infer<typeof insertPosPriceOverrideAuditSchema>;

@@ -58,6 +58,45 @@ export interface Order {
   billing_address?: any;
 }
 
+export interface DropshipProduct {
+  id: number;
+  vendor_id: number;
+  vendor_sku: string;
+  vendor_product_id?: string | null;
+  title: string;
+  description: string;
+  brand?: string | null;
+  upc?: string | null;
+  inventory: number;
+  cost?: string | null;
+  tier_data: unknown[];
+  image_data: unknown[];
+  vendor_category?: string | null;
+  vendor_subcategory?: string | null;
+  is_closeout: boolean;
+  vendor_modified_at?: string | null;
+  bigcommerce_product_id?: number | null;
+  status: "available" | "queued" | "mapped" | "unavailable" | "error" | string;
+  raw_data: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DropshipSyncLog {
+  id: number;
+  vendor_id: number;
+  status: "running" | "completed" | "failed" | string;
+  started_at: string;
+  completed_at?: string | null;
+  duration_ms?: number | null;
+  products_processed: number;
+  products_created: number;
+  products_updated: number;
+  error_count: number;
+  error_summary?: string | null;
+  detail: Record<string, unknown>;
+}
+
 const API_BASE = '/api';
 
 /**
@@ -77,6 +116,80 @@ export function getAuthHeaders(): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+async function dropshipRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...getAuthHeaders(), ...(init.headers || {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || body.message || "Dropshipping request failed");
+  return body as T;
+}
+
+export function getKoleConnection() {
+  return dropshipRequest<{
+    vendor: { id: number; code: string; name: string; provider: string };
+    hasCredentials: boolean;
+    lastTestedAt: string | null;
+    lastTestOk: boolean | null;
+  }>("/dropshipping/kole/connection");
+}
+
+export function saveKoleConnection(data: { accountId?: string; apiKey?: string }) {
+  return dropshipRequest<{ ok: boolean; hasCredentials: boolean }>("/dropshipping/kole/connection", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export function testKoleConnection() {
+  return dropshipRequest<{ ok: boolean; message: string }>("/dropshipping/kole/connection/test", { method: "POST" });
+}
+
+export function getKoleProducts(params: {
+  page?: number; limit?: number; search?: string; category?: string; subcategory?: string;
+  inStock?: boolean; closeout?: boolean; imported?: boolean; status?: string;
+}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "" && value !== false) query.set(key, String(value));
+  }
+  return dropshipRequest<{
+    rows: DropshipProduct[];
+    total: number;
+    page: number;
+    limit: number;
+    categories: string[];
+    subcategories: string[];
+  }>(`/dropshipping/kole/products?${query.toString()}`);
+}
+
+export function getKoleProduct(id: number) {
+  return dropshipRequest<DropshipProduct>(`/dropshipping/kole/products/${id}`);
+}
+
+export function updateKoleProductStatus(id: number, status: string) {
+  return dropshipRequest<DropshipProduct>(`/dropshipping/kole/products/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function syncKoleCatalog() {
+  return dropshipRequest<{
+    ok: boolean;
+    productsProcessed: number;
+    productsCreated: number;
+    productsUpdated: number;
+    errorCount: number;
+    log: DropshipSyncLog;
+  }>("/dropshipping/kole/sync", { method: "POST" });
+}
+
+export function getKoleSyncLogs() {
+  return dropshipRequest<DropshipSyncLog[]>("/dropshipping/kole/sync-logs");
 }
 
 // ─── Marketing ────────────────────────────────────────────────────────────────

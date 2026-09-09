@@ -1,6 +1,6 @@
 import { db } from "../db";
- import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, type AttendanceSession, type InsertAttendanceSession, type AttendanceCheckpoint, type InsertAttendanceCheckpoint, type AttendanceException, type InsertAttendanceException, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, attendanceSessions, attendanceLocationCheckpoints, attendanceExceptions, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
-import { eq, desc, and, inArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
+ import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, type AttendanceSession, type InsertAttendanceSession, type AttendanceCheckpoint, type InsertAttendanceCheckpoint, type AttendanceException, type InsertAttendanceException, type InsertDropshipProduct, type DropshipProduct, type DropshipSyncLog, type DropshipVendor, type InsertDropshipSyncLog, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, attendanceSessions, attendanceLocationCheckpoints, attendanceExceptions, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, dropshipVendors, dropshipProducts, dropshipSyncLogs, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
+import { eq, desc, and, inArray, notInArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { normalizeMarketingProductDisplayOptions, DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS } from "@shared/marketing-products";
 import { attendanceAuditLog } from "@shared/schema";
@@ -66,6 +66,19 @@ export interface IStorage {
   // Setting operations
   getSetting(key: string): Promise<any>;
   setSetting(key: string, value: any): Promise<void>;
+
+  // Dropshipping operations
+  getDropshipVendorByCode(code: string): Promise<DropshipVendor | undefined>;
+  ensureDropshipVendor(data: { code: string; name: string; provider: string }): Promise<DropshipVendor>;
+  getDropshipProducts(opts: { vendorId: number; page: number; limit: number; search?: string; category?: string; subcategory?: string; inStock?: boolean; closeout?: boolean; imported?: boolean; status?: string }): Promise<{ rows: DropshipProduct[]; total: number }>;
+  getDropshipProductFacets(vendorId: number): Promise<{ categories: string[]; subcategories: string[] }>;
+  getDropshipProduct(id: number): Promise<DropshipProduct | undefined>;
+  upsertDropshipProducts(entries: InsertDropshipProduct[]): Promise<{ created: number; updated: number }>;
+  markDropshipProductsUnavailable(vendorId: number, seenSkus: string[]): Promise<void>;
+  updateDropshipProductStatus(id: number, status: string): Promise<DropshipProduct | undefined>;
+  createDropshipSyncLog(data: { vendor_id: number }): Promise<DropshipSyncLog>;
+  finishDropshipSyncLog(id: number, data: Partial<InsertDropshipSyncLog>): Promise<DropshipSyncLog | undefined>;
+  getDropshipSyncLogs(vendorId: number, limit?: number): Promise<DropshipSyncLog[]>;
 
   // Price history cache operations
   getCachedPriceHistory(customerId: number, bcProductId: number): Promise<PriceHistoryCacheEntry[]>;
@@ -765,6 +778,144 @@ export class DatabaseStorage implements IStorage {
   async setSetting(key: string, value: any): Promise<void> {
     await db.insert(settings).values({ key, value })
       .onConflictDoUpdate({ target: settings.key, set: { value } });
+  }
+
+  // ── Dropshipping ─────────────────────────────────────────────────────────
+
+  async getDropshipVendorByCode(code: string): Promise<DropshipVendor | undefined> {
+    const rows = await db.select().from(dropshipVendors).where(eq(dropshipVendors.code, code)).limit(1);
+    return rows[0];
+  }
+
+  async ensureDropshipVendor(data: { code: string; name: string; provider: string }): Promise<DropshipVendor> {
+    const existing = await this.getDropshipVendorByCode(data.code);
+    if (existing) return existing;
+    const rows = await db.insert(dropshipVendors).values(data).returning();
+    return rows[0];
+  }
+
+  async getDropshipProducts(opts: {
+    vendorId: number; page: number; limit: number; search?: string; category?: string;
+    subcategory?: string; inStock?: boolean; closeout?: boolean; imported?: boolean; status?: string;
+  }): Promise<{ rows: DropshipProduct[]; total: number }> {
+    const conditions = [eq(dropshipProducts.vendor_id, opts.vendorId)];
+    if (opts.search?.trim()) {
+      const term = `%${opts.search.trim()}%`;
+      conditions.push(or(
+        ilike(dropshipProducts.vendor_sku, term),
+        ilike(dropshipProducts.title, term),
+        ilike(dropshipProducts.upc, term),
+      )!);
+    }
+    if (opts.category) conditions.push(eq(dropshipProducts.vendor_category, opts.category));
+    if (opts.subcategory) conditions.push(eq(dropshipProducts.vendor_subcategory, opts.subcategory));
+    if (opts.inStock) conditions.push(gt(dropshipProducts.inventory, 0));
+    if (opts.closeout) conditions.push(eq(dropshipProducts.is_closeout, true));
+    if (opts.imported) conditions.push(isNotNull(dropshipProducts.bigcommerce_product_id));
+    if (opts.status) conditions.push(eq(dropshipProducts.status, opts.status));
+    const where = and(...conditions);
+    const limit = Math.min(Math.max(opts.limit || 25, 1), 100);
+    const offset = Math.max(opts.page - 1, 0) * limit;
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(dropshipProducts).where(where),
+      db.select().from(dropshipProducts).where(where)
+        .orderBy(asc(dropshipProducts.title), asc(dropshipProducts.vendor_sku))
+        .limit(limit).offset(offset),
+    ]);
+    return { rows, total: Number(countRows[0]?.count ?? 0) };
+  }
+
+  async getDropshipProductFacets(vendorId: number): Promise<{ categories: string[]; subcategories: string[] }> {
+    const [categoryRows, subcategoryRows] = await Promise.all([
+      db.selectDistinct({ value: dropshipProducts.vendor_category })
+        .from(dropshipProducts)
+        .where(and(eq(dropshipProducts.vendor_id, vendorId), isNotNull(dropshipProducts.vendor_category)))
+        .orderBy(asc(dropshipProducts.vendor_category)),
+      db.selectDistinct({ value: dropshipProducts.vendor_subcategory })
+        .from(dropshipProducts)
+        .where(and(eq(dropshipProducts.vendor_id, vendorId), isNotNull(dropshipProducts.vendor_subcategory)))
+        .orderBy(asc(dropshipProducts.vendor_subcategory)),
+    ]);
+    return {
+      categories: categoryRows.map((row) => row.value).filter((value): value is string => Boolean(value)),
+      subcategories: subcategoryRows.map((row) => row.value).filter((value): value is string => Boolean(value)),
+    };
+  }
+
+  async getDropshipProduct(id: number): Promise<DropshipProduct | undefined> {
+    const rows = await db.select().from(dropshipProducts).where(eq(dropshipProducts.id, id)).limit(1);
+    return rows[0];
+  }
+
+  async upsertDropshipProducts(entries: InsertDropshipProduct[]): Promise<{ created: number; updated: number }> {
+    let created = 0;
+    let updated = 0;
+    for (const entry of entries) {
+      const existing = await db.select({ id: dropshipProducts.id })
+        .from(dropshipProducts)
+        .where(and(eq(dropshipProducts.vendor_id, entry.vendor_id), eq(dropshipProducts.vendor_sku, entry.vendor_sku)))
+        .limit(1);
+      await db.insert(dropshipProducts).values(entry).onConflictDoUpdate({
+        target: [dropshipProducts.vendor_id, dropshipProducts.vendor_sku],
+        set: {
+          vendor_product_id: entry.vendor_product_id,
+          title: entry.title,
+          description: entry.description,
+          brand: entry.brand,
+          upc: entry.upc,
+          inventory: entry.inventory,
+          cost: entry.cost,
+          tier_data: entry.tier_data,
+          image_data: entry.image_data,
+          vendor_category: entry.vendor_category,
+          vendor_subcategory: entry.vendor_subcategory,
+          is_closeout: entry.is_closeout,
+          vendor_modified_at: entry.vendor_modified_at,
+          raw_data: entry.raw_data,
+          updated_at: new Date(),
+          status: sql`CASE WHEN ${dropshipProducts.status} IN ('queued', 'mapped') THEN ${dropshipProducts.status} ELSE 'available' END`,
+        },
+      });
+      if (existing.length > 0) updated++;
+      else created++;
+    }
+    return { created, updated };
+  }
+
+  async markDropshipProductsUnavailable(vendorId: number, seenSkus: string[]): Promise<void> {
+    const conditions = [eq(dropshipProducts.vendor_id, vendorId)];
+    if (seenSkus.length > 0) conditions.push(notInArray(dropshipProducts.vendor_sku, seenSkus));
+    await db.update(dropshipProducts)
+      .set({ status: "unavailable", inventory: 0, updated_at: new Date() })
+      .where(and(...conditions));
+  }
+
+  async updateDropshipProductStatus(id: number, status: string): Promise<DropshipProduct | undefined> {
+    const rows = await db.update(dropshipProducts)
+      .set({ status, updated_at: new Date() })
+      .where(eq(dropshipProducts.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  async createDropshipSyncLog(data: { vendor_id: number }): Promise<DropshipSyncLog> {
+    const rows = await db.insert(dropshipSyncLogs).values(data).returning();
+    return rows[0];
+  }
+
+  async finishDropshipSyncLog(id: number, data: Partial<InsertDropshipSyncLog>): Promise<DropshipSyncLog | undefined> {
+    const rows = await db.update(dropshipSyncLogs)
+      .set(data)
+      .where(eq(dropshipSyncLogs.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  async getDropshipSyncLogs(vendorId: number, limit = 50): Promise<DropshipSyncLog[]> {
+    return db.select().from(dropshipSyncLogs)
+      .where(eq(dropshipSyncLogs.vendor_id, vendorId))
+      .orderBy(desc(dropshipSyncLogs.started_at))
+      .limit(Math.min(Math.max(limit, 1), 100));
   }
 
   async getCachedPriceHistory(customerId: number, bcProductId: number): Promise<PriceHistoryCacheEntry[]> {

@@ -56,6 +56,9 @@ import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, Marketi
 import { MarketingAnalytics, MarketingTemplates, MarketingAutomations } from "@/pages/marketing/MarketingPhase2";
 import AttendancePage from "@/pages/attendance/Attendance";
 import AttendanceAdminPage, { AttendanceSettingsPage } from "@/pages/attendance/AttendanceAdmin";
+import KoleImportsPage from "@/pages/dropshipping/KoleImports";
+import DropshipCatalogPage from "@/pages/dropshipping/DropshipCatalog";
+import DropshipSyncLogsPage from "@/pages/dropshipping/DropshipSyncLogs";
 import NotFound from "@/pages/not-found";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
@@ -287,6 +290,17 @@ function Router() {
       </Route>
       <Route path="/tools/promo-sku-tracker">
         {() => <ProtectedRoute component={PromoSkuTracker} />}
+      </Route>
+
+      {/* ── Dropshipping ── */}
+      <Route path="/dropshipping/kole">
+        {() => <PermissionRoute component={KoleImportsPage} module="dropshipping" />}
+      </Route>
+      <Route path="/dropshipping/products">
+        {() => <PermissionRoute component={DropshipCatalogPage} module="dropshipping" />}
+      </Route>
+      <Route path="/dropshipping/sync-logs">
+        {() => <PermissionRoute component={DropshipSyncLogsPage} module="dropshipping" />}
       </Route>
 
       {/* ── CRM routes ── */}

@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Monitor, ShoppingBag, Package, BookOpen,
   ShoppingCart, Settings, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, LogOut, Truck, Wifi, WifiOff, Menu, X,
-  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart, Mail, Megaphone, KeyRound, Clock3,
+  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart, Mail, Megaphone, KeyRound, Clock3, PackageOpen,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -144,6 +144,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("promo_sku_tracker") ? [{ label: "Promo SKU Tracker", path: "/tools/promo-sku-tracker" }] : []),
   ];
 
+  const dropshippingChildren: NavLeaf[] = [
+    ...(hasPermission("dropshipping") ? [{ label: "Kole Imports", path: "/dropshipping/kole" }] : []),
+    ...(hasPermission("dropshipping") ? [{ label: "Product Catalog", path: "/dropshipping/products" }] : []),
+    ...(hasPermission("dropshipping") ? [{ label: "Sync Logs", path: "/dropshipping/sync-logs" }] : []),
+  ];
+
   // Attendance children — employees see their own clock; managers see scoped admin views.
   const attendanceChildren: NavLeaf[] = [
     ...(hasPermission("attendance", "clock") ? [{ label: "My Attendance", path: "/attendance" }] : []),
@@ -181,6 +187,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(marketingChildren.length > 0 ? [{ id: "marketing", label: "Marketing", icon: Megaphone, children: marketingChildren }] : []),
     ...(hasPermission("catalog") ? [{ id: "catalog", label: "Catalog", icon: BookOpen, path: "/catalog" }] : []),
     ...(hasPermission("cart") ? [{ id: "cart", label: "Cart", icon: ShoppingCart, path: "/cart" }] : []),
+    ...(dropshippingChildren.length > 0 ? [{ id: "dropshipping", label: "Dropshipping", icon: PackageOpen, children: dropshippingChildren }] : []),
     ...(toolsChildren.length > 0 ? [{ id: "tools", label: "Tools", icon: Wrench, children: toolsChildren }] : []),
     ...(attendanceChildren.length > 0 ? [{ id: "attendance", label: "Attendance", icon: Clock3, children: attendanceChildren }] : []),
     ...(reportingChildren.length > 0 ? [{ id: "reporting", label: "Reporting", icon: FileBarChart, children: reportingChildren }] : []),

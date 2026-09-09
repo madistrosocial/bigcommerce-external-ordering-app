@@ -27,6 +27,7 @@ import {
   getZohoCampaignsCredentialStatus,
   saveZohoCampaignsCredentials,
 } from "./zoho-credentials";
+import { KOLE_VENDOR, KoleImportsAdapter, toDropshipProductInsert, type KoleCredentials } from "./vendors/kole-imports";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 import {
   ATTENDANCE_PERMISSION_DEFINITIONS,
@@ -427,6 +428,55 @@ export async function registerRoutes(
       created_at timestamp NOT NULL DEFAULT now(),
       updated_at timestamp NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS dropship_vendors (
+      id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      code text NOT NULL UNIQUE,
+      name text NOT NULL,
+      provider text NOT NULL,
+      is_enabled boolean NOT NULL DEFAULT true,
+      created_at timestamp NOT NULL DEFAULT now(),
+      updated_at timestamp NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS dropship_products (
+      id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      vendor_id integer NOT NULL REFERENCES dropship_vendors(id) ON DELETE CASCADE,
+      vendor_sku text NOT NULL,
+      vendor_product_id text,
+      title text NOT NULL DEFAULT '',
+      description text NOT NULL DEFAULT '',
+      brand text,
+      upc text,
+      inventory integer NOT NULL DEFAULT 0,
+      cost decimal(14,4),
+      tier_data jsonb NOT NULL DEFAULT '[]'::jsonb,
+      image_data jsonb NOT NULL DEFAULT '[]'::jsonb,
+      vendor_category text,
+      vendor_subcategory text,
+      is_closeout boolean NOT NULL DEFAULT false,
+      vendor_modified_at timestamp,
+      bigcommerce_product_id integer,
+      status text NOT NULL DEFAULT 'available',
+      raw_data jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_at timestamp NOT NULL DEFAULT now(),
+      updated_at timestamp NOT NULL DEFAULT now(),
+      CONSTRAINT dropship_products_vendor_sku_unique UNIQUE (vendor_id, vendor_sku)
+    );
+    CREATE INDEX IF NOT EXISTS dropship_products_vendor_status_idx ON dropship_products (vendor_id, status);
+    CREATE INDEX IF NOT EXISTS dropship_products_vendor_category_idx ON dropship_products (vendor_id, vendor_category);
+    CREATE TABLE IF NOT EXISTS dropship_sync_logs (
+      id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      vendor_id integer NOT NULL REFERENCES dropship_vendors(id) ON DELETE CASCADE,
+      status text NOT NULL DEFAULT 'running',
+      started_at timestamp NOT NULL DEFAULT now(),
+      completed_at timestamp,
+      duration_ms integer,
+      products_processed integer NOT NULL DEFAULT 0,
+      products_created integer NOT NULL DEFAULT 0,
+      products_updated integer NOT NULL DEFAULT 0,
+      error_count integer NOT NULL DEFAULT 0,
+      error_summary text,
+      detail jsonb NOT NULL DEFAULT '{}'::jsonb
+    );
   `));
 
   // ===== AUTH MIDDLEWARE =====
@@ -512,6 +562,191 @@ export async function registerRoutes(
   const canViewAllAttendance = async (user: any) =>
     user?.role === "admin"
     || (await storage.getUserPermissionStrings(user.id)).includes("attendance:view_all");
+
+  // ===== KOLE IMPORTS DROPSHIPPING (PHASE 1) =====
+  const getKoleConfig = async (): Promise<KoleCredentials | null> => {
+    const saved = await storage.getSetting("kole_imports_config").catch(() => null);
+    const value = saved?.value && typeof saved.value === "string" ? JSON.parse(saved.value) : saved?.value;
+    const accountId = String(process.env.KOLE_ACCOUNT_ID || value?.accountId || "").trim();
+    const apiKey = String(process.env.KOLE_API_KEY || value?.apiKey || "").trim();
+    return accountId && apiKey ? { accountId, apiKey } : null;
+  };
+
+  const getKoleVendor = () => storage.ensureDropshipVendor(KOLE_VENDOR);
+
+  app.get("/api/dropshipping/kole/connection", requirePermission("dropshipping", "view"), async (_req, res) => {
+    try {
+      const vendor = await getKoleVendor();
+      const saved = await storage.getSetting("kole_imports_config").catch(() => null);
+      const value = saved?.value && typeof saved.value === "string" ? JSON.parse(saved.value) : saved?.value;
+      res.json({
+        vendor: { id: vendor.id, code: vendor.code, name: vendor.name, provider: vendor.provider },
+        hasCredentials: Boolean(await getKoleConfig()),
+        lastTestedAt: value?.lastTestedAt ?? null,
+        lastTestOk: value?.lastTestOk ?? null,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to load Kole Imports connection status" });
+    }
+  });
+
+  app.put("/api/dropshipping/kole/connection", requirePermission("dropshipping", "manage"), async (req, res) => {
+    try {
+      const current = await storage.getSetting("kole_imports_config").catch(() => null);
+      const currentValue = current?.value && typeof current.value === "string" ? JSON.parse(current.value) : current?.value;
+      const accountId = String(req.body?.accountId ?? "").trim() || String(currentValue?.accountId ?? "").trim();
+      const apiKey = String(req.body?.apiKey ?? "").trim() || String(currentValue?.apiKey ?? "").trim();
+      if (!accountId || !apiKey) return res.status(400).json({ error: "Kole account ID and API key are required." });
+      await storage.setSetting("kole_imports_config", {
+        accountId,
+        apiKey,
+        lastTestedAt: currentValue?.lastTestedAt ?? null,
+        lastTestOk: currentValue?.lastTestOk ?? null,
+      });
+      res.json({ ok: true, hasCredentials: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to save Kole Imports connection" });
+    }
+  });
+
+  app.post("/api/dropshipping/kole/connection/test", requirePermission("dropshipping", "manage"), async (_req, res) => {
+    const testedAt = new Date().toISOString();
+    try {
+      const credentials = await getKoleConfig();
+      if (!credentials) return res.status(400).json({ ok: false, message: "Kole Imports credentials are not configured." });
+      const adapter = new KoleImportsAdapter(credentials);
+      await adapter.getProducts({ limit: 1, offset: 0 });
+      const setting = await storage.getSetting("kole_imports_config").catch(() => null);
+      const value = setting?.value && typeof setting.value === "string" ? JSON.parse(setting.value) : setting?.value;
+      if (value && !process.env.KOLE_ACCOUNT_ID && !process.env.KOLE_API_KEY) {
+        await storage.setSetting("kole_imports_config", { ...value, lastTestedAt: testedAt, lastTestOk: true });
+      }
+      res.json({ ok: true, message: "Kole Imports connection succeeded." });
+    } catch (error: any) {
+      const setting = await storage.getSetting("kole_imports_config").catch(() => null);
+      const value = setting?.value && typeof setting.value === "string" ? JSON.parse(setting.value) : setting?.value;
+      if (value && !process.env.KOLE_ACCOUNT_ID && !process.env.KOLE_API_KEY) {
+        await storage.setSetting("kole_imports_config", { ...value, lastTestedAt: testedAt, lastTestOk: false });
+      }
+      res.status(502).json({ ok: false, message: error?.message || "Kole Imports connection failed." });
+    }
+  });
+
+  app.get("/api/dropshipping/kole/products", requirePermission("dropshipping", "view"), async (req, res) => {
+    try {
+      const vendor = await getKoleVendor();
+      const page = Math.max(Number(req.query.page) || 1, 1);
+      const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+      const result = await storage.getDropshipProducts({
+        vendorId: vendor.id,
+        page,
+        limit,
+        search: typeof req.query.search === "string" ? req.query.search : undefined,
+        category: typeof req.query.category === "string" ? req.query.category : undefined,
+        subcategory: typeof req.query.subcategory === "string" ? req.query.subcategory : undefined,
+        inStock: req.query.inStock === "true",
+        closeout: req.query.closeout === "true",
+        imported: req.query.imported === "true",
+        status: typeof req.query.status === "string" ? req.query.status : undefined,
+      });
+      const facets = await storage.getDropshipProductFacets(vendor.id);
+      res.json({ ...result, page, limit, ...facets });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to load vendor catalog" });
+    }
+  });
+
+  app.get("/api/dropshipping/kole/products/:id", requirePermission("dropshipping", "view"), async (req, res) => {
+    try {
+      const product = await storage.getDropshipProduct(Number(req.params.id));
+      if (!product) return res.status(404).json({ error: "Vendor product not found" });
+      res.json(product);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to load vendor product" });
+    }
+  });
+
+  app.patch("/api/dropshipping/kole/products/:id/status", requirePermission("dropshipping", "manage"), async (req, res) => {
+    try {
+      const status = String(req.body?.status || "").trim();
+      if (!["available", "queued", "mapped", "unavailable", "error"].includes(status)) {
+        return res.status(400).json({ error: "Invalid vendor product status." });
+      }
+      const product = await storage.updateDropshipProductStatus(Number(req.params.id), status);
+      if (!product) return res.status(404).json({ error: "Vendor product not found" });
+      res.json(product);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to update vendor product status" });
+    }
+  });
+
+  app.get("/api/dropshipping/kole/sync-logs", requirePermission("dropshipping", "view"), async (_req, res) => {
+    try {
+      const vendor = await getKoleVendor();
+      res.json(await storage.getDropshipSyncLogs(vendor.id));
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to load vendor sync logs" });
+    }
+  });
+
+  app.post("/api/dropshipping/kole/sync", requirePermission("dropshipping", "sync"), async (_req, res) => {
+    const startedAt = Date.now();
+    let log: any;
+    try {
+      const credentials = await getKoleConfig();
+      if (!credentials) return res.status(400).json({ error: "Kole Imports credentials are not configured." });
+      const vendor = await getKoleVendor();
+      log = await storage.createDropshipSyncLog({ vendor_id: vendor.id });
+      const adapter = new KoleImportsAdapter(credentials);
+      const seenSkus: string[] = [];
+      let offset = 0;
+      let processed = 0;
+      let created = 0;
+      let updated = 0;
+      let errorCount = 0;
+      const errors: string[] = [];
+
+      while (true) {
+        const page = await adapter.getProducts({ limit: 25, offset });
+        errorCount += page.errors.length;
+        errors.push(...page.errors.slice(0, 10));
+        if (page.products.length > 0) {
+          const result = await storage.upsertDropshipProducts(page.products.map((product) => toDropshipProductInsert(vendor.id, product)));
+          created += result.created;
+          updated += result.updated;
+          processed += page.products.length;
+          seenSkus.push(...page.products.map((product) => product.sku));
+        }
+        if (!page.hasMore) break;
+        offset += 25;
+      }
+      await storage.markDropshipProductsUnavailable(vendor.id, seenSkus);
+      const completedAt = Date.now();
+      const finished = await storage.finishDropshipSyncLog(log.id, {
+        status: "completed",
+        completed_at: new Date(),
+        duration_ms: completedAt - startedAt,
+        products_processed: processed,
+        products_created: created,
+        products_updated: updated,
+        error_count: errorCount,
+        error_summary: errors.length ? errors.join("; ").slice(0, 2000) : null,
+        detail: { pages: Math.ceil((offset + 25) / 25), rateLimit: "25 products per request" },
+      });
+      res.json({ ok: true, log: finished, productsProcessed: processed, productsCreated: created, productsUpdated: updated, errorCount });
+    } catch (error: any) {
+      if (log?.id) {
+        await storage.finishDropshipSyncLog(log.id, {
+          status: "failed",
+          completed_at: new Date(),
+          duration_ms: Date.now() - startedAt,
+          error_count: 1,
+          error_summary: error?.message || "Kole Imports sync failed",
+        }).catch(() => {});
+      }
+      res.status(502).json({ error: error?.message || "Kole Imports sync failed" });
+    }
+  });
 
   // ===== PRODUCT ROUTES =====
 
@@ -6188,6 +6423,24 @@ export async function registerRoutes(
         }
       }
     } catch (_) { /* non-fatal — permissions may already exist */ }
+  })();
+
+  // ── Dropshipping permission auto-seed ─────────────────────────────────────────
+  await (async () => {
+    const DROPSHIP_PERMS: Array<{ module: string; action: string; description: string }> = [
+      { module: "dropshipping", action: "view", description: "Dropshipping: view vendor connections and catalogs" },
+      { module: "dropshipping", action: "manage", description: "Dropshipping: manage vendor connections and import queues" },
+      { module: "dropshipping", action: "sync", description: "Dropshipping: run vendor catalog synchronization" },
+    ];
+    try {
+      const existing = await storage.getAllPermissions();
+      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+      for (const p of DROPSHIP_PERMS) {
+        if (!existingSet.has(`${p.module}:${p.action}`)) {
+          await storage.createPermission(p);
+        }
+      }
+    } catch (_) { /* non-fatal */ }
   })();
 
   // ── Inventory Audit permission auto-seed ──────────────────────────────────────

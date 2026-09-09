@@ -21,3 +21,5 @@ export function usePermissions() {
 
   return { hasPermission, permStrings, isLoading };
 }
+
+export const DROPSHIPPING_PERMISSION = { key: "dropshipping", label: "Dropshipping" };
