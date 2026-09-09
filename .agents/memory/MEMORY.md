@@ -8,6 +8,7 @@
 - [BC order note editing pattern](bc-order-note-editing.md) — PATCH /api/bigcommerce/orders/:bcOrderId/notes is the canonical endpoint; field names are staff_notes + customer_message (not customer_note).
 - [CustomerOrdersPanel reuse](customer-orders-panel.md) — CRM CustomerProfile uses CustomerOrdersPanel with customerInfo prop; panel uses BcOrderExpandedRow + BcOrderActionsMenu; order # links to /orders/bc/:id.
 - [Sales App order routing](sales-app-order-routing.md) — synced Sales App orders must use their BigCommerce ID for detail navigation; only unsynced orders use the local ID.
+- [iOS PWA safe-area layout](ios-pwa-safe-area-layout.md) — keep the app shell edge-to-edge; apply safe-area insets to headers and fixed controls, not the outer wrapper.
 - [BC line items uniqueness](bc-line-items-uniqueness.md) — UNIQUE functional index on (order_id, product_id, COALESCE(variant_id,0)); no query-time dedup; full sync truncates line items only (not customers/orders).
 - [Inventory Audit + SKUVault module](inventory-audit-module.md) — Full build: schema, skuvault.ts client, storage methods, routes, all frontend pages; partial-unique-index seeded at startup.
 - [SKUVault location lookup & push strategy](skuvault-location-lookup.md) — addItemBulk for push; getInventoryByLocation (ProductSKUs, dict response) + getAvailableQuantities fallback for zero-stock; location stored in push log + audit task.
