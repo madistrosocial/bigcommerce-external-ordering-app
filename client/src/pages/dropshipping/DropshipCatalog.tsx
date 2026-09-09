@@ -40,6 +40,7 @@ function StatusBadge({ status }: { status: string }) {
 export default function DropshipCatalogPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { data: connection } = useQuery({ queryKey: ["dropship-connection"], queryFn: api.getKoleConnection });
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [category, setCategory] = useState("");
@@ -51,6 +52,7 @@ export default function DropshipCatalogPage() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [detail, setDetail] = useState<api.DropshipProduct | null>(null);
+  const displayName = connection?.displayName || "Vendor Catalog";
 
   const params = useMemo(() => ({ page, limit: PAGE_SIZE, search: appliedSearch, category, subcategory, inStock: stockOnly, closeout: closeoutOnly, imported: importedOnly, status }), [page, appliedSearch, category, subcategory, stockOnly, closeoutOnly, importedOnly, status]);
   const { data, isLoading, isFetching, error } = useQuery({ queryKey: ["dropship-products", params], queryFn: () => api.getKoleProducts(params) });
@@ -99,7 +101,7 @@ export default function DropshipCatalogPage() {
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" /> Product Catalog</h1>
-          <p className="text-sm text-slate-500 mt-1">Kole Imports products stored in SalesCore. Selecting or queueing a product does not create a BigCommerce product.</p>
+          <p className="text-sm text-slate-500 mt-1">{displayName} products stored in SalesCore. Selecting or queueing a product does not create a BigCommerce product.</p>
         </div>
         <div className="flex gap-2">
           {selected.size > 0 && <Button variant="outline" size="sm" onClick={queueSelected} disabled={updateStatus.isPending}><Plus className="h-4 w-4 mr-1.5" />Queue {selected.size}</Button>}
@@ -145,7 +147,7 @@ export default function DropshipCatalogPage() {
       </Card>
 
       <Card className="shadow-sm overflow-hidden">
-        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {(error as Error).message}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters. Run Sync Catalog after connecting Kole Imports.</div> : (
+        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {(error as Error).message}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters. Run Sync Catalog after connecting {displayName}.</div> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200"><tr className="text-left text-[11px] uppercase tracking-wide text-slate-500">

@@ -14,6 +14,7 @@ export default function KoleImportsPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [hasCredentials, setHasCredentials] = useState(false);
+  const [displayName, setDisplayName] = useState("Vendor Catalog");
   const [lastTestedAt, setLastTestedAt] = useState<string | null>(null);
   const [lastTestOk, setLastTestOk] = useState<boolean | null>(null);
   const [accountId, setAccountId] = useState("");
@@ -25,10 +26,11 @@ export default function KoleImportsPage() {
     try {
       const data = await api.getKoleConnection();
       setHasCredentials(data.hasCredentials);
+      setDisplayName(data.displayName || data.vendor.name || "Vendor Catalog");
       setLastTestedAt(data.lastTestedAt);
       setLastTestOk(data.lastTestOk);
     } catch (error: any) {
-      toast({ title: "Failed to load Kole Imports settings", description: error.message, variant: "destructive" });
+      toast({ title: "Failed to load vendor settings", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -37,17 +39,18 @@ export default function KoleImportsPage() {
   useEffect(() => { void load(); }, []);
 
   const handleSave = async () => {
-    if (!accountId.trim() && !apiKey.trim() && !hasCredentials) {
-      toast({ title: "Credentials required", description: "Enter your Kole account ID and API key.", variant: "destructive" });
+    if (!displayName.trim()) {
+      toast({ title: "Display name required", description: "Enter a placeholder name for this vendor connection.", variant: "destructive" });
       return;
     }
     setSaving(true);
     try {
-      const saved = await api.saveKoleConnection({ accountId: accountId.trim() || undefined, apiKey: apiKey.trim() || undefined });
+      const saved = await api.saveKoleConnection({ accountId: accountId.trim() || undefined, apiKey: apiKey.trim() || undefined, displayName });
       setHasCredentials(saved.hasCredentials);
+      setDisplayName(saved.displayName);
       setAccountId("");
       setApiKey("");
-      toast({ title: "Kole Imports connection saved", description: "Credentials remain server-side and are not returned to the browser." });
+      toast({ title: "Vendor connection saved", description: "Credentials remain server-side and are not returned to the browser." });
     } catch (error: any) {
       toast({ title: "Save failed", description: error.message, variant: "destructive" });
     } finally {
@@ -82,9 +85,9 @@ export default function KoleImportsPage() {
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
       <div>
         <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-          <Plug className="h-5 w-5 text-indigo-600" /> Kole Imports
+          <Plug className="h-5 w-5 text-indigo-600" /> {displayName}
         </h1>
-        <p className="text-sm text-slate-500 mt-1">Connect the vendor catalog without publishing products or changing inventory.</p>
+        <p className="text-sm text-slate-500 mt-1">Connect this vendor catalog without publishing products or changing inventory.</p>
       </div>
 
       <Card className="shadow-sm">
@@ -94,7 +97,7 @@ export default function KoleImportsPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-slate-600">Kole Imports API</span>
+            <span className="text-sm text-slate-600">{displayName} API</span>
             {hasCredentials && lastTestOk === false ? (
               <Badge className="bg-red-100 text-red-700 border-0"><XCircle className="h-3.5 w-3.5 mr-1" />Connection Error</Badge>
             ) : hasCredentials && lastTestOk === true ? (
@@ -133,13 +136,17 @@ export default function KoleImportsPage() {
         <CardContent className="space-y-4">
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor="kole-account-id">Kole account ID</Label>
-              <Input id="kole-account-id" value={accountId} onChange={(event) => setAccountId(event.target.value)} autoComplete="off" placeholder={hasCredentials ? "Configured" : "Enter account ID"} />
+              <Label htmlFor="vendor-display-name">Display name</Label>
+              <Input id="vendor-display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={80} autoComplete="off" placeholder="Vendor Catalog" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="kole-api-key">Kole API key</Label>
+              <Label htmlFor="vendor-account-id">Vendor account ID</Label>
+              <Input id="vendor-account-id" value={accountId} onChange={(event) => setAccountId(event.target.value)} autoComplete="off" placeholder={hasCredentials ? "Configured" : "Enter account ID"} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="vendor-api-key">Vendor API key</Label>
               <div className="relative">
-                <Input id="kole-api-key" value={apiKey} onChange={(event) => setApiKey(event.target.value)} type={showKey ? "text" : "password"} autoComplete="new-password" placeholder={hasCredentials ? "Configured" : "Enter API key"} className="pr-10" />
+                <Input id="vendor-api-key" value={apiKey} onChange={(event) => setApiKey(event.target.value)} type={showKey ? "text" : "password"} autoComplete="new-password" placeholder={hasCredentials ? "Configured" : "Enter API key"} className="pr-10" />
                 <button type="button" onClick={() => setShowKey((value) => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label={showKey ? "Hide API key" : "Show API key"}>
                   {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>

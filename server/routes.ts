@@ -27,7 +27,7 @@ import {
   getZohoCampaignsCredentialStatus,
   saveZohoCampaignsCredentials,
 } from "./zoho-credentials";
-import { KOLE_VENDOR, KoleImportsAdapter, toDropshipProductInsert, type KoleCredentials } from "./vendors/kole-imports";
+import { DEFAULT_VENDOR_DISPLAY_NAME, KOLE_VENDOR, KoleImportsAdapter, toDropshipProductInsert, type KoleCredentials } from "./vendors/kole-imports";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 import {
   ATTENDANCE_PERMISSION_DEFINITIONS,
@@ -564,48 +564,78 @@ export async function registerRoutes(
     || (await storage.getUserPermissionStrings(user.id)).includes("attendance:view_all");
 
   // ===== KOLE IMPORTS DROPSHIPPING (PHASE 1) =====
-  const getKoleConfig = async (): Promise<KoleCredentials | null> => {
+  const getKoleSetting = async (): Promise<Record<string, any>> => {
     const saved = await storage.getSetting("kole_imports_config").catch(() => null);
-    const value = saved?.value && typeof saved.value === "string" ? JSON.parse(saved.value) : saved?.value;
+    if (!saved?.value) return {};
+    if (typeof saved.value === "object") return saved.value as Record<string, any>;
+    try {
+      const parsed = JSON.parse(String(saved.value));
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const normalizeVendorDisplayName = (value: unknown): string => {
+    const name = String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+    return name || DEFAULT_VENDOR_DISPLAY_NAME;
+  };
+
+  const getKoleDisplayName = async (setting?: Record<string, any>) =>
+    normalizeVendorDisplayName((setting ?? await getKoleSetting()).displayName);
+
+  const getKoleConfig = async (): Promise<KoleCredentials | null> => {
+    const value = await getKoleSetting();
     const accountId = String(process.env.KOLE_ACCOUNT_ID || value?.accountId || "").trim();
     const apiKey = String(process.env.KOLE_API_KEY || value?.apiKey || "").trim();
     return accountId && apiKey ? { accountId, apiKey } : null;
   };
 
-  const getKoleVendor = () => storage.ensureDropshipVendor(KOLE_VENDOR);
+  const getKoleVendor = () => storage.ensureDropshipVendor({
+    code: KOLE_VENDOR.code,
+    name: DEFAULT_VENDOR_DISPLAY_NAME,
+    provider: KOLE_VENDOR.provider,
+  });
 
   app.get("/api/dropshipping/kole/connection", requirePermission("dropshipping", "view"), async (_req, res) => {
     try {
       const vendor = await getKoleVendor();
-      const saved = await storage.getSetting("kole_imports_config").catch(() => null);
-      const value = saved?.value && typeof saved.value === "string" ? JSON.parse(saved.value) : saved?.value;
+      const value = await getKoleSetting();
       res.json({
-        vendor: { id: vendor.id, code: vendor.code, name: vendor.name, provider: vendor.provider },
+        vendor: { id: vendor.id, code: vendor.code, name: await getKoleDisplayName(value), provider: "vendor" },
         hasCredentials: Boolean(await getKoleConfig()),
+        displayName: await getKoleDisplayName(value),
         lastTestedAt: value?.lastTestedAt ?? null,
         lastTestOk: value?.lastTestOk ?? null,
       });
     } catch (error: any) {
-      res.status(500).json({ error: error?.message || "Failed to load Kole Imports connection status" });
+      res.status(500).json({ error: "Failed to load vendor connection status" });
     }
   });
 
   app.put("/api/dropshipping/kole/connection", requirePermission("dropshipping", "manage"), async (req, res) => {
     try {
-      const current = await storage.getSetting("kole_imports_config").catch(() => null);
-      const currentValue = current?.value && typeof current.value === "string" ? JSON.parse(current.value) : current?.value;
-      const accountId = String(req.body?.accountId ?? "").trim() || String(currentValue?.accountId ?? "").trim();
-      const apiKey = String(req.body?.apiKey ?? "").trim() || String(currentValue?.apiKey ?? "").trim();
-      if (!accountId || !apiKey) return res.status(400).json({ error: "Kole account ID and API key are required." });
-      await storage.setSetting("kole_imports_config", {
-        accountId,
-        apiKey,
+      const currentValue = await getKoleSetting();
+      const suppliedAccountId = String(req.body?.accountId ?? "").trim();
+      const suppliedApiKey = String(req.body?.apiKey ?? "").trim();
+      const accountId = suppliedAccountId || String(currentValue?.accountId ?? "").trim();
+      const apiKey = suppliedApiKey || String(currentValue?.apiKey ?? "").trim();
+      if ((suppliedAccountId || suppliedApiKey) && (!accountId || !apiKey) && !(process.env.KOLE_ACCOUNT_ID && process.env.KOLE_API_KEY)) {
+        return res.status(400).json({ error: "Vendor account ID and API key are required together." });
+      }
+      const displayName = normalizeVendorDisplayName(req.body?.displayName ?? currentValue.displayName);
+      const nextValue: Record<string, any> = {
+        ...currentValue,
+        displayName,
         lastTestedAt: currentValue?.lastTestedAt ?? null,
         lastTestOk: currentValue?.lastTestOk ?? null,
-      });
-      res.json({ ok: true, hasCredentials: true });
+      };
+      if (suppliedAccountId) nextValue.accountId = suppliedAccountId;
+      if (suppliedApiKey) nextValue.apiKey = suppliedApiKey;
+      await storage.setSetting("kole_imports_config", nextValue);
+      res.json({ ok: true, hasCredentials: Boolean(await getKoleConfig()), displayName });
     } catch (error: any) {
-      res.status(500).json({ error: error?.message || "Failed to save Kole Imports connection" });
+      res.status(500).json({ error: "Failed to save vendor connection" });
     }
   });
 
@@ -613,22 +643,20 @@ export async function registerRoutes(
     const testedAt = new Date().toISOString();
     try {
       const credentials = await getKoleConfig();
-      if (!credentials) return res.status(400).json({ ok: false, message: "Kole Imports credentials are not configured." });
+      if (!credentials) return res.status(400).json({ ok: false, message: "Vendor credentials are not configured." });
       const adapter = new KoleImportsAdapter(credentials);
       await adapter.getProducts({ limit: 1, offset: 0 });
-      const setting = await storage.getSetting("kole_imports_config").catch(() => null);
-      const value = setting?.value && typeof setting.value === "string" ? JSON.parse(setting.value) : setting?.value;
+      const value = await getKoleSetting();
       if (value && !process.env.KOLE_ACCOUNT_ID && !process.env.KOLE_API_KEY) {
         await storage.setSetting("kole_imports_config", { ...value, lastTestedAt: testedAt, lastTestOk: true });
       }
-      res.json({ ok: true, message: "Kole Imports connection succeeded." });
+      res.json({ ok: true, message: "Vendor connection succeeded." });
     } catch (error: any) {
-      const setting = await storage.getSetting("kole_imports_config").catch(() => null);
-      const value = setting?.value && typeof setting.value === "string" ? JSON.parse(setting.value) : setting?.value;
+      const value = await getKoleSetting();
       if (value && !process.env.KOLE_ACCOUNT_ID && !process.env.KOLE_API_KEY) {
         await storage.setSetting("kole_imports_config", { ...value, lastTestedAt: testedAt, lastTestOk: false });
       }
-      res.status(502).json({ ok: false, message: error?.message || "Kole Imports connection failed." });
+      res.status(502).json({ ok: false, message: "Vendor connection failed. Check the saved credentials and try again." });
     }
   });
 
@@ -652,7 +680,7 @@ export async function registerRoutes(
       const facets = await storage.getDropshipProductFacets(vendor.id);
       res.json({ ...result, page, limit, ...facets });
     } catch (error: any) {
-      res.status(500).json({ error: error?.message || "Failed to load vendor catalog" });
+      res.status(500).json({ error: "Failed to load vendor catalog" });
     }
   });
 
@@ -662,7 +690,7 @@ export async function registerRoutes(
       if (!product) return res.status(404).json({ error: "Vendor product not found" });
       res.json(product);
     } catch (error: any) {
-      res.status(500).json({ error: error?.message || "Failed to load vendor product" });
+      res.status(500).json({ error: "Failed to load vendor product" });
     }
   });
 
@@ -676,7 +704,7 @@ export async function registerRoutes(
       if (!product) return res.status(404).json({ error: "Vendor product not found" });
       res.json(product);
     } catch (error: any) {
-      res.status(500).json({ error: error?.message || "Failed to update vendor product status" });
+      res.status(500).json({ error: "Failed to update vendor product status" });
     }
   });
 
@@ -685,7 +713,7 @@ export async function registerRoutes(
       const vendor = await getKoleVendor();
       res.json(await storage.getDropshipSyncLogs(vendor.id));
     } catch (error: any) {
-      res.status(500).json({ error: error?.message || "Failed to load vendor sync logs" });
+      res.status(500).json({ error: "Failed to load vendor sync logs" });
     }
   });
 
@@ -694,7 +722,7 @@ export async function registerRoutes(
     let log: any;
     try {
       const credentials = await getKoleConfig();
-      if (!credentials) return res.status(400).json({ error: "Kole Imports credentials are not configured." });
+      if (!credentials) return res.status(400).json({ error: "Vendor credentials are not configured." });
       const vendor = await getKoleVendor();
       log = await storage.createDropshipSyncLog({ vendor_id: vendor.id });
       const adapter = new KoleImportsAdapter(credentials);
@@ -730,7 +758,7 @@ export async function registerRoutes(
         products_created: created,
         products_updated: updated,
         error_count: errorCount,
-        error_summary: errors.length ? errors.join("; ").slice(0, 2000) : null,
+        error_summary: errors.length ? "Some vendor products could not be normalized." : null,
         detail: { pages: Math.ceil((offset + 25) / 25), rateLimit: "25 products per request" },
       });
       res.json({ ok: true, log: finished, productsProcessed: processed, productsCreated: created, productsUpdated: updated, errorCount });
@@ -741,10 +769,10 @@ export async function registerRoutes(
           completed_at: new Date(),
           duration_ms: Date.now() - startedAt,
           error_count: 1,
-          error_summary: error?.message || "Kole Imports sync failed",
+          error_summary: "Vendor catalog sync failed.",
         }).catch(() => {});
       }
-      res.status(502).json({ error: error?.message || "Kole Imports sync failed" });
+      res.status(502).json({ error: "Vendor catalog sync failed. Check the connection and try again." });
     }
   });
 

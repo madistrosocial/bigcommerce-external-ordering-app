@@ -7,6 +7,7 @@ export const KOLE_VENDOR = {
   baseUrl: "https://api.koleimports.com",
 } as const;
 
+export const DEFAULT_VENDOR_DISPLAY_NAME = "Vendor Catalog";
 const KOLE_PRODUCT_JSON_MEDIA_TYPE = "application/vnd.koleimports.ds.product+json";
 
 export interface KoleCredentials {

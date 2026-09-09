@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getUsersSummary } from "@/lib/api";
+import { getKoleConnection, getUsersSummary } from "@/lib/api";
 import { useLocation } from "wouter";
 import { useStore } from "@/lib/store";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -37,6 +37,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useLocation();
   const { currentUser, isOfflineMode, setOfflineMode, toggleOfflineMode, logout } = useStore();
   const { hasPermission } = usePermissions();
+  const { data: dropshipConnection } = useQuery({
+    queryKey: ["dropship-connection"],
+    queryFn: getKoleConnection,
+    enabled: hasPermission("dropshipping"),
+  });
+  const dropshipDisplayName = dropshipConnection?.displayName || "Vendor Catalog";
   const { toast } = useToast();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -145,7 +151,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   ];
 
   const dropshippingChildren: NavLeaf[] = [
-    ...(hasPermission("dropshipping") ? [{ label: "Kole Imports", path: "/dropshipping/kole" }] : []),
+    ...(hasPermission("dropshipping") ? [{ label: dropshipDisplayName, path: "/dropshipping/kole" }] : []),
     ...(hasPermission("dropshipping") ? [{ label: "Product Catalog", path: "/dropshipping/products" }] : []),
     ...(hasPermission("dropshipping") ? [{ label: "Sync Logs", path: "/dropshipping/sync-logs" }] : []),
   ];

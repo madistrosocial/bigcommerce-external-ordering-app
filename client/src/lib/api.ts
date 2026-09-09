@@ -132,13 +132,14 @@ export function getKoleConnection() {
   return dropshipRequest<{
     vendor: { id: number; code: string; name: string; provider: string };
     hasCredentials: boolean;
+    displayName: string;
     lastTestedAt: string | null;
     lastTestOk: boolean | null;
   }>("/dropshipping/kole/connection");
 }
 
-export function saveKoleConnection(data: { accountId?: string; apiKey?: string }) {
-  return dropshipRequest<{ ok: boolean; hasCredentials: boolean }>("/dropshipping/kole/connection", {
+export function saveKoleConnection(data: { accountId?: string; apiKey?: string; displayName?: string }) {
+  return dropshipRequest<{ ok: boolean; hasCredentials: boolean; displayName: string }>("/dropshipping/kole/connection", {
     method: "PUT",
     body: JSON.stringify(data),
   });

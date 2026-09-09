@@ -26,3 +26,4 @@
 - [Attendance location maps](attendance-location-maps.md) — admin views use validated Google Maps links; employee APIs keep raw coordinates hidden.
 - [Draft invoice safety](draft-invoice-safety.md) — draft PDFs must stay visibly non-final and never expose staff notes or SMTP credentials.
 - [Dropshipping phase boundaries](dropshipping-phase-boundaries.md) — vendor catalog ingestion stays separate from BigCommerce/SkuVault side effects until an explicit import/order phase.
+- [Dropshipping display labels](dropshipping-display-labels.md) — vendor provider identity stays server-side; user-facing labels are persisted placeholders editable from the connector.
