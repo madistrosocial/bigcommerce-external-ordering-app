@@ -126,6 +126,25 @@ function money(value: number): string {
   })}`;
 }
 
+function compactNumber(value: number): string {
+  const absolute = Math.abs(value);
+  const units = [
+    { threshold: 1_000_000_000, suffix: "B" },
+    { threshold: 1_000_000, suffix: "M" },
+    { threshold: 1_000, suffix: "K" },
+  ];
+  const unit = units.find(({ threshold }) => absolute >= threshold);
+  if (!unit) return value.toLocaleString("en-US");
+
+  return `${(value / unit.threshold).toLocaleString("en-US", {
+    maximumFractionDigits: 1,
+  })}${unit.suffix}`;
+}
+
+function compactMoney(value: number): string {
+  return Math.abs(value) < 1_000 ? money(value) : `$${compactNumber(value)}`;
+}
+
 function shortDate(value: any): string {
   if (!value) return "—";
   return new Date(value).toLocaleDateString("en-US", {
@@ -138,6 +157,7 @@ function shortDate(value: any): string {
 interface StatCardProps {
   title: string;
   value: string | number;
+  valueTitle?: string;
   icon: React.ElementType;
   iconClass: string;
   iconBackground: string;
@@ -149,6 +169,7 @@ interface StatCardProps {
 function StatCard({
   title,
   value,
+  valueTitle,
   icon: Icon,
   iconClass,
   iconBackground,
@@ -164,7 +185,12 @@ function StatCard({
         </div>
         <div className="min-w-0">
           <p className="truncate text-[10px] font-medium uppercase tracking-wide text-slate-500 sm:text-[11px]">{title}</p>
-          <p className="mt-0.5 truncate text-[22px] font-bold leading-tight text-slate-900 sm:text-[24px]" data-testid={testId}>
+          <p
+            className="mt-0.5 whitespace-nowrap text-[22px] font-bold leading-tight tracking-tight text-slate-900 sm:text-[24px]"
+            title={valueTitle ?? String(value)}
+            aria-label={valueTitle ?? String(value)}
+            data-testid={testId}
+          >
             {value}
           </p>
           {trend && (
@@ -439,12 +465,12 @@ export default function DashboardPage() {
         </section>
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-          <StatCard title="Orders" value={isLoading ? "—" : totalOrders.toLocaleString()} icon={ShoppingBag} iconClass="text-blue-600" iconBackground="bg-blue-50" trend={<Trend current={totalOrders} previous={previousOrders.length} />} testId="stat-orders" />
-          <StatCard title="Sales Revenue" value={isLoading ? "—" : money(revenue)} icon={DollarSign} iconClass="text-emerald-600" iconBackground="bg-emerald-50" trend={<Trend current={revenue} previous={previousRevenue} />} testId="stat-sales-revenue" />
-          <StatCard title="Avg Order Value" value={isLoading ? "—" : money(avgOrderValue)} icon={TrendingUp} iconClass="text-purple-600" iconBackground="bg-purple-50" trend={<Trend current={avgOrderValue} previous={previousAvgOrderValue} />} testId="stat-avg-order-value" />
-          <StatCard title="Pending Audits" value={auditKpis?.skusToAudit ?? "—"} icon={ClipboardCheck} iconClass="text-amber-600" iconBackground="bg-amber-50" trend="Needs review" trendTone="neutral" testId="stat-pending-audits" />
-          <StatCard title="Inventory Pushes" value={isLoading ? "—" : totalPushes} icon={Package} iconClass="text-blue-600" iconBackground="bg-blue-50" trend={<Trend current={totalPushes} previous={previousPushLogs.length} />} testId="stat-inventory-pushes" />
-          <StatCard title="Sync Issues" value={isLoading ? "—" : failed} icon={AlertCircle} iconClass="text-red-600" iconBackground="bg-red-50" trend={<Trend current={failed} previous={0} invert />} trendTone="negative" testId="stat-sync-issues" />
+          <StatCard title="Orders" value={isLoading ? "—" : compactNumber(totalOrders)} valueTitle={isLoading ? undefined : totalOrders.toLocaleString()} icon={ShoppingBag} iconClass="text-blue-600" iconBackground="bg-blue-50" trend={<Trend current={totalOrders} previous={previousOrders.length} />} testId="stat-orders" />
+          <StatCard title="Sales Revenue" value={isLoading ? "—" : compactMoney(revenue)} valueTitle={isLoading ? undefined : money(revenue)} icon={DollarSign} iconClass="text-emerald-600" iconBackground="bg-emerald-50" trend={<Trend current={revenue} previous={previousRevenue} />} testId="stat-sales-revenue" />
+          <StatCard title="Avg Order Value" value={isLoading ? "—" : compactMoney(avgOrderValue)} valueTitle={isLoading ? undefined : money(avgOrderValue)} icon={TrendingUp} iconClass="text-purple-600" iconBackground="bg-purple-50" trend={<Trend current={avgOrderValue} previous={previousAvgOrderValue} />} testId="stat-avg-order-value" />
+          <StatCard title="Pending Audits" value={auditKpis?.skusToAudit == null ? "—" : compactNumber(auditKpis.skusToAudit)} valueTitle={auditKpis?.skusToAudit == null ? undefined : auditKpis.skusToAudit.toLocaleString()} icon={ClipboardCheck} iconClass="text-amber-600" iconBackground="bg-amber-50" trend="Needs review" trendTone="neutral" testId="stat-pending-audits" />
+          <StatCard title="Inventory Pushes" value={isLoading ? "—" : compactNumber(totalPushes)} valueTitle={isLoading ? undefined : totalPushes.toLocaleString()} icon={Package} iconClass="text-blue-600" iconBackground="bg-blue-50" trend={<Trend current={totalPushes} previous={previousPushLogs.length} />} testId="stat-inventory-pushes" />
+          <StatCard title="Sync Issues" value={isLoading ? "—" : compactNumber(failed)} valueTitle={isLoading ? undefined : failed.toLocaleString()} icon={AlertCircle} iconClass="text-red-600" iconBackground="bg-red-50" trend={<Trend current={failed} previous={0} invert />} trendTone="negative" testId="stat-sync-issues" />
         </section>
 
         <section className="grid w-full min-w-0 gap-4 lg:grid-cols-[0.96fr_1.04fr]">
