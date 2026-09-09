@@ -438,6 +438,14 @@ export default function DashboardPage() {
     { label: "New Order", icon: Plus, path: "/pos", color: "bg-cyan-50/70", iconColor: "text-cyan-600" },
   ];
 
+  const openRecentOrder = (order: Order) => {
+    if (order.bigcommerce_order_id) {
+      setLocation(`/orders/bc/${order.bigcommerce_order_id}`);
+    } else if (order.id) {
+      setLocation(`/orders/${order.id}`);
+    }
+  };
+
   return (
     <div className="min-h-full bg-[#fbfcfe] px-4 py-5 sm:px-6 sm:py-7 lg:px-7">
       <div className="mx-auto max-w-[1240px] space-y-4 sm:space-y-5">
@@ -540,11 +548,11 @@ export default function DashboardPage() {
             <div className="divide-y divide-slate-100">
               {recentOrders.length === 0 && <p className="px-4 py-8 text-center text-xs text-slate-400">No orders found for this period.</p>}
               {recentOrders.map((order) => (
-                <button key={order.id} type="button" onClick={() => order.id && setLocation(`/orders/${order.id}`)} className="grid w-full grid-cols-[1fr_auto] items-center gap-2 px-4 py-3 text-left hover:bg-slate-50 sm:grid-cols-[70px_1fr_88px_72px_72px]" data-testid={`dashboard-order-${order.id}`}>
-                  <span className="text-[11px] font-medium text-slate-700 sm:text-xs">#{order.bigcommerce_order_id ?? order.id}</span>
-                  <span className="min-w-0 truncate text-[11px] text-slate-700 sm:text-xs">{order.customer_name || "Unknown Customer"}</span>
+                <button key={order.id} type="button" onClick={() => openRecentOrder(order)} className="grid w-full grid-cols-[1fr_auto] items-center gap-2 px-4 py-3 text-left hover:bg-slate-50 sm:grid-cols-[70px_1fr_88px_72px_72px]" data-testid={`dashboard-order-${order.id}`}>
+                  <span className="min-w-0 truncate text-[11px] font-medium text-slate-700 sm:text-xs">#{order.bigcommerce_order_id ?? order.id}</span>
+                  <span className="min-w-0 truncate text-right text-[11px] text-slate-700 sm:text-left sm:text-xs">{order.customer_name || "Unknown Customer"}</span>
                   <span className="hidden text-[10px] text-slate-500 sm:block">{shortDate(order.date)}</span>
-                  <span className="text-right text-[11px] font-semibold text-slate-800 sm:text-left">{order.total ? money(parseFloat(String(order.total))) : "—"}</span>
+                  <span className="col-span-2 text-right text-[11px] font-semibold text-slate-800 sm:col-span-1 sm:text-left">{order.total ? money(parseFloat(String(order.total))) : "—"}</span>
                   <span className="hidden justify-self-start rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-semibold text-emerald-700 sm:inline-block">{order.status === "pending_sync" ? "Pending Sync" : order.status === "failed" ? "Failed" : order.status === "draft" ? "Draft" : "Completed"}</span>
                 </button>
               ))}
