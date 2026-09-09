@@ -126,9 +126,19 @@
     top: 0;
     right: 0;
     left: 0;
-    height: var(--app-height, 100%);
-    min-height: var(--app-height, 100%);
+    height: 100%;
+    min-height: 100%;
     overflow: hidden;
+  }
+
+  /* In standalone iOS/iPadOS PWAs, innerHeight/visualViewport can stop
+     above the bottom safe area. Use the full layout viewport so the app
+     background and fixed drawers cover that region too. */
+  @media (display-mode: standalone) {
+    #root {
+      height: 100vh;
+      min-height: 100vh;
+    }
   }
 
   body {
