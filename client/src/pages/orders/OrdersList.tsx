@@ -601,12 +601,11 @@ export default function OrdersList() {
   };
 
   const openDetail = (order: ConsolidatedOrder) => {
-    if (order.is_bc_mirror) {
-      if (order.bigcommerce_order_id) {
-        setLocation(`/orders/bc/${order.bigcommerce_order_id}`);
-      } else {
-        openInvoice(order);
-      }
+    // Sales App orders can also have a BigCommerce counterpart after syncing.
+    // Prefer the BC route whenever that real order ID is available; otherwise
+    // fall back to the local detail page for unsynced orders.
+    if (order.bigcommerce_order_id) {
+      setLocation(`/orders/bc/${order.bigcommerce_order_id}`);
     } else {
       setLocation(`/orders/${order.id}`);
     }
