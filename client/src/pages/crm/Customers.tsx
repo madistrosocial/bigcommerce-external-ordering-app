@@ -67,6 +67,21 @@ const COL_MIN_WIDTHS: Record<ColKey, number> = {
 
 const PAGE_SIZE = 50;
 
+const CUSTOMER_AVATAR_COLORS = [
+  "bg-blue-100 text-blue-700",
+  "bg-emerald-100 text-emerald-700",
+  "bg-violet-100 text-violet-700",
+  "bg-amber-100 text-amber-700",
+  "bg-rose-100 text-rose-700",
+  "bg-cyan-100 text-cyan-700",
+  "bg-indigo-100 text-indigo-700",
+  "bg-orange-100 text-orange-700",
+] as const;
+
+function getCustomerAvatarColor(customerId: number): string {
+  return CUSTOMER_AVATAR_COLORS[Math.abs(customerId) % CUSTOMER_AVATAR_COLORS.length];
+}
+
 function daysSince(date: string | null): number | null {
   if (!date) return null;
   return Math.floor((Date.now() - new Date(date).getTime()) / 86_400_000);
@@ -832,7 +847,7 @@ export default function CRMCustomers() {
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
                           {/* Avatar */}
-                          <div className="h-8 w-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[11px] font-bold shrink-0 select-none">
+                          <div className={`h-8 w-8 rounded-full ${getCustomerAvatarColor(c.id)} flex items-center justify-center text-[11px] font-bold shrink-0 select-none`}>
                             {initials}
                           </div>
                           {/* Text stack */}
