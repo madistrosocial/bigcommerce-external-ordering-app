@@ -539,8 +539,7 @@ export default function CRMCustomers() {
       <div className="border-b bg-white px-4 py-3 shrink-0">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h1 className="text-lg font-bold text-slate-800">CRM Customers</h1>
-            <p className="text-xs text-slate-400 mt-0.5">{total.toLocaleString()} customers from local mirror</p>
+            <h1 className="text-lg font-bold text-slate-800">Customers</h1>
           </div>
           <div className="flex items-center gap-1.5 flex-nowrap shrink-0">
             <Popover open={showColMenu} onOpenChange={setShowColMenu}>
