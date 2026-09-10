@@ -239,7 +239,6 @@ function AdminShell({ activeTab, children }: { activeTab: string; children: Reac
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="flex items-center gap-2"><Clock3 className="h-5 w-5 text-red-600" /><h1 className="text-xl font-bold text-slate-900">Attendance</h1></div>
-            <p className="mt-1 text-xs text-slate-500">Employee time, validation, and location audit</p>
           </div>
         </div>
         <div className="mt-5 flex gap-1 overflow-x-auto border-b border-slate-200">
