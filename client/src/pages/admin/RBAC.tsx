@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { SaaSLayout } from "@/components/layout/SaaSLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -633,7 +632,7 @@ function UsersTab() {
 
 export default function RBACPage() {
   return (
-    <SaaSLayout title="Access Control">
+    <div>
       <div className="p-6 space-y-6 max-w-5xl mx-auto">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center">
@@ -672,6 +671,6 @@ export default function RBACPage() {
           </TabsContent>
         </Tabs>
       </div>
-    </SaaSLayout>
+    </div>
   );
 }

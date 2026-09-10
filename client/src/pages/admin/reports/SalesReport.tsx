@@ -525,7 +525,7 @@ export default function SalesReport() {
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col min-h-full bg-slate-50">
+    <div className="flex flex-col bg-slate-50">
 
       {/* Header */}
       <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-200 bg-white">

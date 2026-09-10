@@ -212,7 +212,7 @@ export default function StoreCreditLedger() {
   const hasFilters = !!(search || dateFrom || dateTo || typeFilter !== "all");
 
   return (
-    <div className="flex-1 overflow-auto bg-slate-50">
+    <div className="bg-slate-50">
       {/* Header */}
       <div className="bg-white border-b px-4 py-4 sm:px-6">
         <div className="flex items-center justify-between gap-3 flex-wrap">

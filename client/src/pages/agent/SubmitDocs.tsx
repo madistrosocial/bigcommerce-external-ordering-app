@@ -5,8 +5,8 @@ const COGNITO_FORM_URL = "https://www.cognitoforms.com/MidAtlanticDistribution1/
 
 export default function SubmitDocs() {
   return (
-    <div className="h-full min-h-0 bg-slate-50 p-4 sm:p-6">
-      <div className="mx-auto flex h-full max-w-5xl flex-col gap-4">
+    <div className="bg-slate-50 p-4 sm:p-6">
+      <div className="mx-auto flex max-w-5xl flex-col gap-4">
         <header className="rounded-xl border bg-white px-4 py-3 shadow-sm sm:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">

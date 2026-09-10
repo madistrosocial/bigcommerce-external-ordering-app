@@ -146,7 +146,7 @@ function GroupDetail({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="bg-slate-50 flex flex-col">
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0">
         <Button variant="ghost" size="sm" onClick={onBack} className="h-8 w-8 p-0 shrink-0">
           <ArrowLeft className="h-4 w-4" />
@@ -196,7 +196,7 @@ function GroupDetail({
         </AlertDialog>
       </header>
 
-      <div className="flex-1 overflow-auto px-4 py-4 space-y-4">
+      <div className="px-4 py-4 space-y-4">
 
         {/* Name & description card */}
         <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
@@ -573,7 +573,7 @@ export default function AdminGroups() {
   const isLoading = groupsLoading || permsLoading;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="bg-slate-50 flex flex-col">
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0">
         <UsersRound className="h-5 w-5 text-slate-600" />
         <h1 className="text-base font-bold text-slate-800">User Groups</h1>
@@ -584,7 +584,7 @@ export default function AdminGroups() {
         </Button>
       </header>
 
-      <div className="flex-1 overflow-auto px-4 py-4 space-y-3">
+      <div className="px-4 py-4 space-y-3">
 
         {/* Create form */}
         {showCreateForm && (

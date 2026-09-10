@@ -207,7 +207,7 @@ export default function AllOrders() {
     .reduce((sum, o) => sum + parseFloat(o.total), 0);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="bg-slate-50 flex flex-col">
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0 flex-wrap gap-y-2">
         <ClipboardList className="h-5 w-5 text-slate-600 shrink-0" />
         <h1 className="text-base font-bold text-slate-800">All Orders</h1>
@@ -245,7 +245,7 @@ export default function AllOrders() {
         </div>
       )}
 
-      <div className="flex-1 overflow-auto px-4 py-4">
+      <div className="px-4 py-4">
         {isLoading ? (
           <div className="flex items-center justify-center py-20 text-slate-400">
             <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading…

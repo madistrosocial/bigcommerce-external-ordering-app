@@ -285,7 +285,7 @@ export default function AttendancePage() {
   }
 
   return (
-    <div className="min-h-full bg-slate-50 px-4 py-5 md:px-6">
+    <div className="bg-slate-50 px-4 py-5 md:px-6">
       <div className="mx-auto max-w-2xl">
         <AttendanceHeader onHistory={() => setShowHistory(true)} />
         {error && <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}

@@ -165,7 +165,7 @@ export default function MyOrders() {
   const orders = allOrders.filter((o) => o.status !== "draft");
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="bg-slate-50 flex flex-col">
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0">
         <ShoppingBag className="h-5 w-5 text-slate-600" />
         <h1 className="text-base font-bold text-slate-800">My Orders</h1>
@@ -176,7 +176,7 @@ export default function MyOrders() {
         )}
       </header>
 
-      <div className="flex-1 overflow-auto px-4 py-4">
+      <div className="px-4 py-4">
         {isLoading ? (
           <div className="flex items-center justify-center py-20 text-slate-400">
             <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading…
