@@ -102,7 +102,7 @@ const PRODUCT_DISPLAY_FIELDS: Array<[keyof MarketingProductDisplayOptions, strin
 
 export function PageShell({ children, title, subtitle, action }: { children: React.ReactNode; title: string; subtitle?: string; action?: React.ReactNode }) {
   return (
-    <div className="marketing-page bg-slate-50">
+    <div className="marketing-page min-h-full bg-slate-50">
       <div className="border-b bg-white px-4 py-5 sm:px-6">
         <div className="mx-auto flex max-w-7xl items-start justify-between gap-4">
           <div><p className="mb-1 text-xs font-semibold uppercase tracking-wider text-blue-600">Marketing</p><h1 className="text-2xl font-bold tracking-tight text-slate-900">{title}</h1>{subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}</div>

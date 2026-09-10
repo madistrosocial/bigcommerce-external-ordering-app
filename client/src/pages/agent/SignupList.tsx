@@ -29,7 +29,7 @@ export default function SignupList() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div className="bg-slate-50 p-4 sm:p-6">
+    <div className="min-h-full bg-slate-50 p-4 sm:p-6">
       <div className="mx-auto max-w-6xl space-y-4">
         <header className="flex flex-col gap-3 rounded-xl border bg-white px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="flex items-center gap-2.5">

@@ -234,7 +234,7 @@ function AdminShell({ activeTab, children }: { activeTab: string; children: Reac
   });
 
   return (
-    <div className="bg-slate-50 px-4 py-5 md:px-6">
+    <div className="min-h-full bg-slate-50 px-4 py-5 md:px-6">
       <div className="mx-auto max-w-7xl">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>

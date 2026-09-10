@@ -152,7 +152,7 @@ export default function BcOrderDetail() {
     .split(/\s+/).slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
 
   return (
-    <div className="bg-slate-50">
+    <div className="flex-1 overflow-auto bg-slate-50">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="bg-white border-b px-4 py-3 sticky top-0 z-10">
         <div className="flex items-center gap-3 flex-wrap">

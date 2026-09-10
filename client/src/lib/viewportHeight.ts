@@ -8,8 +8,9 @@ export function initViewportHeightVar() {
     const isStandalonePwa =
       window.matchMedia("(display-mode: standalone)").matches ||
       (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
-    document.documentElement.dataset.appMode = isStandalonePwa ? "standalone" : "browser";
-    const height = window.visualViewport?.height ?? window.innerHeight;
+    const height = isStandalonePwa
+      ? window.innerHeight
+      : (window.visualViewport?.height ?? window.innerHeight);
     document.documentElement.style.setProperty("--app-height", `${height}px`);
   };
 
@@ -17,15 +18,11 @@ export function initViewportHeightVar() {
 
   window.addEventListener("resize", setAppHeight);
   window.addEventListener("orientationchange", setAppHeight);
-  window.addEventListener("pageshow", setAppHeight);
-  document.addEventListener("visibilitychange", setAppHeight);
   window.visualViewport?.addEventListener("resize", setAppHeight);
 
   return () => {
     window.removeEventListener("resize", setAppHeight);
     window.removeEventListener("orientationchange", setAppHeight);
-    window.removeEventListener("pageshow", setAppHeight);
-    document.removeEventListener("visibilitychange", setAppHeight);
     window.visualViewport?.removeEventListener("resize", setAppHeight);
   };
 }

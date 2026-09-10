@@ -39,7 +39,7 @@ export default function PriceOverrideAuditPage() {
   const totalLoss = rows.reduce((sum, r) => sum + Number(r.loss_amount), 0);
 
   return (
-    <div className="bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-slate-50 flex flex-col">
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0 flex-wrap">
         <Button variant="ghost" size="sm" onClick={() => navigate("/pos")} data-testid="button-back-pos">
           <ArrowLeft className="h-4 w-4 mr-1" />
@@ -90,7 +90,7 @@ export default function PriceOverrideAuditPage() {
         </div>
       </div>
 
-      <div className="px-4 py-4">
+      <div className="flex-1 overflow-auto px-4 py-4">
         {isLoading ? (
           <div className="flex items-center justify-center py-20 text-slate-400">
             <Loader2 className="h-6 w-6 animate-spin mr-2" />

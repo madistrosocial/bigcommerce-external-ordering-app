@@ -646,7 +646,7 @@ export default function DraftOrders() {
   );
 
   return (
-    <div className="flex flex-col bg-slate-50">
+    <div className="flex flex-col h-full bg-slate-50">
       {!isLoading && (
         <div className="border-b bg-white px-3 sm:px-4 py-2 sm:py-3 shrink-0">
           <div className="flex gap-1.5 sm:gap-2 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
@@ -701,7 +701,7 @@ export default function DraftOrders() {
         </div>
       </header>
 
-      <div>
+      <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-32 text-slate-400 text-sm">
             <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading…
