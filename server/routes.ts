@@ -554,7 +554,8 @@ export async function registerRoutes(
       if (!user) return res.status(401).json({ error: "Authentication required" });
       if (user.role === "admin") { (req as any).authUser = user; return next(); }
       const perms = await storage.getUserPermissionStrings(user.id);
-      if (!perms.includes(`${module}:${action}`)) return res.status(403).json({ error: "Forbidden" });
+      const hasModuleAccess = module !== "attendance" || action === "view" || perms.includes("attendance:view");
+      if (!perms.includes(`${module}:${action}`) || !hasModuleAccess) return res.status(403).json({ error: "Forbidden" });
       (req as any).authUser = user;
       next();
     };
@@ -7648,8 +7649,18 @@ export async function registerRoutes(
         storage.getAllUsers(),
         storage.getAttendanceExceptions({ status: "open", from, to, limit: 50, offset: 0 }),
       ]);
+      const attendanceUsers = (await Promise.all(
+        users
+          .filter(user => user.is_enabled)
+          .map(async user => {
+            if (user.role === "admin") return user;
+            const permissions = await storage.getUserPermissionStrings(user.id);
+            return permissions.includes("attendance:view") ? user : null;
+          }),
+      )).filter((user): user is typeof users[number] => user !== null);
+      const attendanceUserIds = new Set(attendanceUsers.map(user => user.id));
       const activeCount = recordResult.rows.filter(row => row.status === "active").length;
-      const loggedIn = new Set(recordResult.rows.map(row => row.user_id));
+      const loggedIn = new Set(recordResult.rows.filter(row => attendanceUserIds.has(row.user_id)).map(row => row.user_id));
       const totalSeconds = recordResult.rows.reduce((sum, row) => sum + Number(row.total_seconds ?? 0), 0);
       const missingTimeOutRows = recordResult.rows.filter(row => row.time_in && !row.time_out && row.work_date < today);
       const reviewRows = recordResult.rows.filter(row => row.review_status === "needs_review");
@@ -7685,10 +7696,10 @@ export async function registerRoutes(
         payPeriod: currentPayPeriod,
         kpis: {
           totalSeconds,
-          employees: users.filter(user => user.is_enabled).length,
-          salesReps: users.filter(user => user.is_enabled).length,
+          employees: attendanceUsers.length,
+          salesReps: attendanceUsers.length,
           currentlyWorking: activeCount,
-          notLoggedIn: Math.max(0, users.filter(user => user.is_enabled).length - loggedIn.size),
+          notLoggedIn: Math.max(0, attendanceUsers.length - loggedIn.size),
           needsReview: reviewRows.length + exceptionResult.total,
           missingTimeOut: missingTimeOutRows.length,
           exceptions: exceptionResult.total,

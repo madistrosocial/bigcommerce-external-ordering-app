@@ -1,6 +1,7 @@
 import type { IStorage } from "./storage";
 
 export const ATTENDANCE_PERMISSION_DEFINITIONS = [
+  { module: "attendance", action: "view", description: "Attendance: access and use the module" },
   { module: "attendance", action: "clock", description: "Attendance: start and end your own day" },
   { module: "attendance", action: "view_own", description: "Attendance: view your own history" },
   { module: "attendance", action: "view_dashboard", description: "Attendance: view the management overview" },

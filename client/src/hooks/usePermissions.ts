@@ -16,7 +16,9 @@ export function usePermissions() {
     // System admins always have full access — skip permission checks
     if (currentUser?.role === "admin") return true;
     // All other users need an explicit permission grant
-    return permStrings.includes(`${module}:${action}`);
+    const hasAttendanceModuleAccess =
+      module !== "attendance" || action === "view" || permStrings.includes("attendance:view");
+    return hasAttendanceModuleAccess && permStrings.includes(`${module}:${action}`);
   }
 
   return { hasPermission, permStrings, isLoading };
