@@ -620,7 +620,13 @@ export default function Catalog() {
     const variants = getVariants(variantModalProduct);
     return (
       <Dialog open={true} onOpenChange={() => setVariantModalProduct(null)}>
-        <DialogContent className="w-[95vw] max-w-[95vw] h-[95vh] max-h-[95vh] flex flex-col p-0 gap-0">
+        <DialogContent
+          className="w-[95vw] max-w-[95vw] flex flex-col p-0 gap-0"
+          style={{
+            height: "calc(var(--app-height, 100dvh) * 0.95)",
+            maxHeight: "calc(var(--app-height, 100dvh) * 0.95)",
+          }}
+        >
           <DialogHeader className="px-5 pt-5 pb-3 shrink-0 border-b">
             <DialogTitle className="text-base leading-snug pr-8">{variantModalProduct.name}</DialogTitle>
           </DialogHeader>

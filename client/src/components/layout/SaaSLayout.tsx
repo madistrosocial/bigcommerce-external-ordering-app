@@ -395,7 +395,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className="app-shell flex min-h-[100svh] bg-white"
+      className="app-shell flex min-h-0 bg-white"
     >
       {mobileOpen && <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setMobileOpen(false)} />}
 

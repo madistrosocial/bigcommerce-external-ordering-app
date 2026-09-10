@@ -464,7 +464,11 @@ function VariantPopupDialog({
       }}
     >
       <DialogContent
-        className="w-[95vw] max-w-[95vw] h-[95vh] max-h-[95vh] flex flex-col p-0 gap-0"
+        className="w-[95vw] max-w-[95vw] flex flex-col p-0 gap-0"
+        style={{
+          height: "calc(var(--app-height, 100dvh) * 0.95)",
+          maxHeight: "calc(var(--app-height, 100dvh) * 0.95)",
+        }}
         onInteractOutside={(e) => e.preventDefault()}
         data-testid="dialog-variant-picker"
       >
@@ -3307,7 +3311,8 @@ export default function POSPage() {
 
               return (
                 <div
-                  className="mx-4 mb-2 bg-white border rounded-lg shadow-lg z-30 overflow-y-auto max-h-[calc(100vh-200px)] divide-y"
+                  className="mx-4 mb-2 bg-white border rounded-lg shadow-lg z-30 overflow-y-auto divide-y"
+                  style={{ maxHeight: "calc(var(--app-height, 100dvh) - 200px)" }}
                   onScroll={handleDropdownScroll}
                   onClick={(e) => e.stopPropagation()}
                   data-testid="pos-suggestions-dropdown"
@@ -4967,7 +4972,11 @@ function PushInventoryModal({
       }}
     >
       <DialogContent
-        className="w-[95vw] max-w-[95vw] h-[90vh] max-h-[90vh] flex flex-col p-0 gap-0"
+        className="w-[95vw] max-w-[95vw] flex flex-col p-0 gap-0"
+        style={{
+          height: "calc(var(--app-height, 100dvh) * 0.9)",
+          maxHeight: "calc(var(--app-height, 100dvh) * 0.9)",
+        }}
         data-testid="dialog-push-inventory"
       >
         <DialogHeader className="px-5 pt-5 pb-3 border-b shrink-0">
