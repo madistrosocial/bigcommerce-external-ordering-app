@@ -8,6 +8,7 @@ export function initViewportHeightVar() {
     const isStandalonePwa =
       window.matchMedia("(display-mode: standalone)").matches ||
       (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+    document.documentElement.dataset.appMode = isStandalonePwa ? "standalone" : "browser";
     const height = isStandalonePwa
       ? window.innerHeight
       : (window.visualViewport?.height ?? window.innerHeight);
