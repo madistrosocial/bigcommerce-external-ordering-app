@@ -1,4 +1,83 @@
-ald-700",
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useLocation } from "wouter";
+import {
+  AlertTriangle, BarChart3, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3,
+  Download, ExternalLink, FileClock, Filter, History, Loader2, LockKeyhole, MapPin, Pencil, Settings2, Trash2, Users, X,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { getAuthHeaders } from "@/lib/api";
+import { useTimeService } from "@/hooks/useTimeService";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useStore } from "@/lib/store";
+
+function apiJson(path: string, init?: RequestInit) {
+  return fetch(path, { ...init, headers: { ...getAuthHeaders(), ...(init?.headers ?? {}) } }).then(async response => {
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? "Attendance request failed");
+    return body;
+  });
+}
+
+function attendanceSearchParams(location: string) {
+  const queryIndex = location.indexOf("?");
+  if (queryIndex >= 0) return new URLSearchParams(location.slice(queryIndex + 1));
+  if (typeof window !== "undefined") return new URLSearchParams(window.location.search);
+  return new URLSearchParams();
+}
+
+function googleMapsUrl(latitude: unknown, longitude: unknown) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`;
+}
+
+function googleMapsEmbedUrl(latitude: unknown, longitude: unknown) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}&z=15&output=embed`;
+}
+
+function LocationMapPreview({ latitude, longitude, label }: { latitude: unknown; longitude: unknown; label: string }) {
+  const mapUrl = googleMapsUrl(latitude, longitude);
+  const embedUrl = googleMapsEmbedUrl(latitude, longitude);
+  if (!mapUrl || !embedUrl) return <p className="text-[10px] text-slate-400">Location unavailable</p>;
+  return (
+    <a href={mapUrl} target="_blank" rel="noreferrer" className="group block h-full overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+      <div className="relative h-40 w-full overflow-hidden">
+        <iframe title={`${label} location map`} src={embedUrl} loading="lazy" className="pointer-events-none h-full w-full border-0" />
+        <span className="absolute inset-x-0 bottom-0 bg-slate-900/70 px-2 py-1 text-[10px] font-medium text-white transition group-hover:bg-blue-700/80">Open in Google Maps</span>
+      </div>
+    </a>
+  );
+}
+
+function hours(seconds: number | null | undefined) {
+  const value = Math.max(0, Number(seconds ?? 0));
+  return `${Math.floor(value / 3600)}h ${String(Math.floor((value % 3600) / 60)).padStart(2, "0")}m`;
+}
+
+function statusBadge(status: string) {
+  const styles: Record<string, string> = {
+    active: "border-0 bg-blue-100 text-blue-700",
+    completed: "border-0 bg-emerald-100 text-emerald-700",
+    incomplete: "border-0 bg-orange-100 text-orange-700",
+    exception: "border-0 bg-red-100 text-red-700",
+    not_reviewed: "border-0 bg-slate-100 text-slate-600",
+    needs_review: "border-0 bg-orange-100 text-orange-700",
+    approved: "border-0 bg-emerald-100 text-emerald-700",
+    locked: "border-0 bg-blue-100 text-blue-700",
+    open: "border-0 bg-red-100 text-red-700",
+    resolved: "border-0 bg-slate-100 text-slate-600",
+    captured: "border-0 bg-emerald-100 text-emerald-700",
   };
   return <Badge className={styles[status] ?? "border-0 bg-slate-100 text-slate-600"}>{status.replace(/_/g, " ")}</Badge>;
 }

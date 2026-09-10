@@ -1,4 +1,722 @@
-st TABS: { id: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
+import { useState, useEffect } from "react";
+import { useStore } from "@/lib/store";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useParams, useLocation } from "wouter";
+import { getAuthHeaders, getMarketingPreference, updateMarketingPreference } from "@/lib/api";
+import { usePermissions } from "@/hooks/usePermissions";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  ArrowLeft, Building2, User, Mail, Phone, Hash, TrendingUp, ShoppingBag,
+  Calendar, DollarSign, Users, Plus, Pencil, Trash2, MessageSquare,
+  UserCheck, UserMinus, AlertTriangle, Clock, ChevronLeft, ChevronRight,
+  FileText, CreditCard, Edit3, RefreshCw, BookOpen, Save, CheckSquare,
+} from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { useTimeService } from "@/hooks/useTimeService";
+import CustomerOrdersPanel from "@/components/orders/CustomerOrdersPanel";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatBcAddress(addr: any): string {
+  if (!addr) return "";
+  const parts = [
+    addr.address1 || addr.street_1 || addr.street1 || "",
+    addr.address2 || addr.street_2 || addr.street2 || "",
+    addr.city || "",
+    [addr.state_or_province || addr.state || "", addr.postal_code || addr.zip || ""].filter(Boolean).join(" "),
+    addr.country || "",
+  ].filter(Boolean);
+  return parts.join(", ");
+}
+
+function fmtCurrency(v: string | number | null | undefined): string {
+  const n = Number(v ?? 0);
+  if (isNaN(n)) return "$0.00";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+}
+
+/**
+ * Resolve display name for who performed an action.
+ * - name known          → name
+ * - name missing + no id → "System" (auto-generated)
+ * - name missing + id   → "Unknown" (user record deleted)
+ */
+function createdBy(name: string | null | undefined, actorId: number | null | undefined): string {
+  if (name) return name;
+  if (!actorId) return "System";
+  return "Unknown";
+}
+
+function statusColor(s: string | null): "default" | "destructive" | "secondary" | "outline" {
+  if (!s) return "secondary";
+  const l = s.toLowerCase();
+  if (l.includes("complete") || l.includes("shipped")) return "default";
+  if (l.includes("cancel") || l.includes("refund")) return "destructive";
+  return "secondary";
+}
+
+const HEALTH_COLORS: Record<string, string> = {
+  Healthy:    "bg-green-100 text-green-700 border-green-200",
+  Watch:      "bg-yellow-100 text-yellow-700 border-yellow-200",
+  "At Risk":  "bg-orange-100 text-orange-700 border-orange-200",
+  Lost:       "bg-red-100 text-red-700 border-red-200",
+};
+
+const NOTE_TYPE_COLORS: Record<string, string> = {
+  "General":     "bg-slate-100 text-slate-700",
+  "Follow Up":   "bg-blue-100 text-blue-700",
+  "Sales":       "bg-green-100 text-green-700",
+  "Issue":       "bg-red-100 text-red-700",
+  "Credit":      "bg-orange-100 text-orange-700",
+  "Replacement": "bg-purple-100 text-purple-700",
+  "Visit":       "bg-cyan-100 text-cyan-700",
+  "Internal":    "bg-yellow-100 text-yellow-700",
+  "Order Note":  "bg-indigo-100 text-indigo-700",
+};
+
+const NOTE_TYPES = ["General","Follow Up","Sales","Issue","Credit","Replacement","Visit","Internal","Order Note"];
+const ACTION_MODE_NOTE = "note";
+const ACTION_MODE_TODO = "todo";
+
+function HealthBadge({ health }: { health: string | null | undefined }) {
+  if (!health) return null;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${HEALTH_COLORS[health] ?? "bg-slate-100 text-slate-600"}`}>
+      <AlertTriangle className="h-3 w-3" />{health}
+    </span>
+  );
+}
+function NoteTypePill({ type }: { type: string }) {
+  return <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${NOTE_TYPE_COLORS[type] ?? "bg-slate-100 text-slate-600"}`}>{type}</span>;
+}
+
+// ─── Timeline helpers ─────────────────────────────────────────────────────────
+
+function TimelineIconBg(type: string, action?: string) {
+  if (type === "order")  return "bg-blue-100";
+  if (type === "note")   return "bg-purple-100";
+  if (type === "audit") {
+    if (action === "note_deleted") return "bg-red-100";
+    if (action === "bc_notes_updated") return "bg-teal-100";
+    if (action?.includes("rep")) return "bg-green-100";
+    if (action?.includes("note")) return "bg-purple-100";
+    if (action?.includes("staff_note") || action?.includes("customer_note")) return "bg-amber-100";
+  }
+  return "bg-slate-100";
+}
+function TimelineIconEl({ type, action }: { type: string; action?: string }) {
+  if (type === "order")  return <ShoppingBag className="h-3.5 w-3.5 text-blue-600" />;
+  if (type === "note")   return <MessageSquare className="h-3.5 w-3.5 text-purple-600" />;
+  if (type === "audit") {
+    if (action === "note_deleted")                                         return <Trash2 className="h-3.5 w-3.5 text-red-500" />;
+    if (action === "note_edited")                                          return <Pencil className="h-3.5 w-3.5 text-purple-600" />;
+    if (action === "note_created" || action === "order_note_created")      return <MessageSquare className="h-3.5 w-3.5 text-purple-600" />;
+    if (action === "bc_notes_updated")                                     return <BookOpen className="h-3.5 w-3.5 text-teal-600" />;
+    if (action === "staff_note_updated" || action === "customer_note_updated") return <Edit3 className="h-3.5 w-3.5 text-amber-600" />;
+    if (action?.includes("rep"))                                           return <UserCheck className="h-3.5 w-3.5 text-green-600" />;
+  }
+  return <FileText className="h-3.5 w-3.5 text-slate-400" />;
+}
+function TimelineDescription({ entry }: { entry: any }) {
+  if (entry.type === "order") {
+    return (
+      <p className="text-sm text-slate-700">
+        <span className="font-medium">Order #{entry.order_number ?? entry.bc_order_id}</span>
+        {" — "}{fmtCurrency(entry.order_total)}
+        {entry.status && <span className="ml-1 text-xs text-slate-400">({entry.status})</span>}
+      </p>
+    );
+  }
+  if (entry.type === "note") {
+    return (
+      <div>
+        <p className="text-sm text-slate-700 flex items-center gap-1.5">
+          <NoteTypePill type={entry.note_type ?? "General"} />
+          {entry.order_id && <span className="text-xs text-indigo-500 font-medium">Order #{entry.order_id}</span>}
+          <span className="text-xs text-slate-500">by {createdBy(entry.created_by_name, entry.created_by)}</span>
+        </p>
+        {entry.note_content && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{entry.note_content}</p>}
+      </div>
+    );
+  }
+  if (entry.type === "audit") {
+    const who = createdBy(entry.user_name, entry.user_id);
+    const d = entry.detail as any ?? {};
+    switch (entry.action) {
+      case "note_created":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> created a <NoteTypePill type={d.note_type ?? "General"} /> note.</p>;
+      case "order_note_created":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> created an Order Note{d.order_id ? ` for Order #${d.order_id}` : ""}.</p>;
+      case "note_edited":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> updated a <NoteTypePill type={d.note_type ?? "General"} /> note.</p>;
+      case "note_deleted":
+        return <p className="text-sm text-red-700"><span className="font-medium">{who}</span> deleted a <NoteTypePill type={d.note_type ?? "General"} /> note.</p>;
+      case "staff_note_updated":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> updated Staff Note{d.bc_order_id ? ` for Order #${d.bc_order_id}` : ""}.</p>;
+      case "customer_note_updated":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> updated Customer Note{d.bc_order_id ? ` for Order #${d.bc_order_id}` : ""}.</p>;
+      case "bc_notes_updated":
+        return <p className="text-sm text-slate-700"><span className="font-medium">{who}</span> updated <span className="font-medium text-teal-700">Customer General Notes</span>{d.source === "crm_note_created" ? <span className="text-xs text-slate-400 ml-1">(auto-synced from CRM note)</span> : ""}.</p>;
+      case "sales_rep_assigned":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Rep assigned:</span> {d.rep_name ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "sales_rep_reassigned":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Rep changed</span> to {d.rep_name ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "sales_rep_removed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Rep removed</span> <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "primary_rep_assigned":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Primary Rep assigned:</span> {d.new_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "primary_rep_changed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Primary Rep changed:</span> {d.old_value ?? "—"} → {d.new_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "primary_rep_removed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Primary Rep removed:</span> {d.old_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "secondary_rep_assigned":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Secondary Rep assigned:</span> {d.new_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "secondary_rep_changed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Secondary Rep changed:</span> {d.old_value ?? "—"} → {d.new_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "secondary_rep_removed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Secondary Rep removed:</span> {d.old_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "customer_type_changed":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Customer Type changed:</span> {d.old_value ?? "—"} → {d.new_value ?? "—"} <span className="text-xs text-slate-400">by {who}</span></p>;
+      case "address_type_updated":
+        return <p className="text-sm text-slate-700"><span className="font-medium">Address Type updated:</span> {d.old_value ?? "—"} → {d.new_value ?? "—"} <span className="text-xs text-slate-400 ml-1">(Source: BigCommerce)</span></p>;
+    }
+  }
+  return <p className="text-sm text-slate-500">Activity recorded</p>;
+}
+
+// ─── Note Modal ───────────────────────────────────────────────────────────────
+
+interface NoteModalProps {
+  open: boolean;
+  onClose: () => void;
+  onSave: (data: { note: string; note_type: string; order_id?: number | null; bc_target: string }) => void;
+  onSaveTodo?: (data: { title: string; note: string; priority: string; due_date: string | null; assigned_to_user_id?: number | null }) => void;
+  saving: boolean;
+  initial?: { note: string; note_type: string; order_id?: number | null };
+  title: string;
+  orders?: any[];
+  users?: { id: number; name: string }[];
+  currentUserId?: number | null;
+}
+function NoteModal({ open, onClose, onSave, onSaveTodo, saving, initial, title, orders = [], users = [], currentUserId }: NoteModalProps) {
+  const [actionMode, setActionMode] = useState<"note" | "todo">(ACTION_MODE_NOTE);
+  const [note, setNote]         = useState(initial?.note ?? "");
+  const [noteType, setNoteType] = useState(initial?.note_type ?? "General");
+  const [orderId, setOrderId]   = useState<string>(String(initial?.order_id ?? ""));
+  const [bcStaff, setBcStaff]   = useState(false);
+  const [bcCustomer, setBcCustomer] = useState(false);
+  // Todo fields
+  const [todoTitle, setTodoTitle]       = useState("");
+  const [todoNote, setTodoNote]         = useState("");
+  const [todoPriority, setTodoPriority] = useState("medium");
+  const [todoDueDate, setTodoDueDate]   = useState("");
+  const [todoAssigned, setTodoAssigned] = useState(currentUserId ? String(currentUserId) : "");
+
+  const handleClose = () => {
+    setActionMode(ACTION_MODE_NOTE);
+    setNote(initial?.note ?? ""); setNoteType(initial?.note_type ?? "General");
+    setOrderId(String(initial?.order_id ?? "")); setBcStaff(false); setBcCustomer(false);
+    setTodoTitle(""); setTodoNote(""); setTodoPriority("medium"); setTodoDueDate(""); setTodoAssigned(currentUserId ? String(currentUserId) : "");
+    onClose();
+  };
+
+  const bcTarget    = bcStaff && bcCustomer ? "both" : bcStaff ? "staff" : bcCustomer ? "customer" : "crm";
+  const isOrderNote = noteType === "Order Note";
+  const effectiveOrderId = (orderId && orderId !== "__none__") ? orderId : "";
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) handleClose(); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          {/* Top-level: Note or To Do */}
+          <div>
+            <Label className="text-xs mb-1.5 block">Action Type</Label>
+            <div className="flex rounded-lg border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setActionMode(ACTION_MODE_NOTE)}
+                className={`flex-1 py-1.5 text-sm font-medium transition-colors ${actionMode === ACTION_MODE_NOTE ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              >
+                Note
+              </button>
+              <button
+                type="button"
+                onClick={() => setActionMode(ACTION_MODE_TODO)}
+                className={`flex-1 py-1.5 text-sm font-medium transition-colors ${actionMode === ACTION_MODE_TODO ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              >
+                To Do
+              </button>
+            </div>
+          </div>
+
+          {actionMode === ACTION_MODE_NOTE ? (
+            <>
+              <div>
+                <Label className="text-xs mb-1.5 block">Type</Label>
+                <Select value={noteType} onValueChange={setNoteType}>
+                  <SelectTrigger data-testid="select-note-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>{NOTE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              {isOrderNote && orders.length > 0 && (
+                <div>
+                  <Label className="text-xs mb-1.5 block">Associated Order</Label>
+                  <Select value={orderId} onValueChange={setOrderId}>
+                    <SelectTrigger data-testid="select-note-order"><SelectValue placeholder="Select order (optional)…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">No specific order</SelectItem>
+                      {orders.map((o: any) => (
+                        <SelectItem key={o.bigcommerce_order_id} value={String(o.bigcommerce_order_id)}>
+                          #{o.order_number ?? o.bigcommerce_order_id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div>
+                <Label className="text-xs mb-1.5 block">Note</Label>
+                <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Enter note…" rows={4} data-testid="textarea-note" />
+              </div>
+              {isOrderNote && !!effectiveOrderId && (
+                <div className="border rounded-lg p-3 space-y-2 bg-slate-50">
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">BigCommerce Sync</p>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                    <Checkbox checked={bcStaff} onCheckedChange={v => setBcStaff(!!v)} id="bc-staff" data-testid="check-bc-staff" />
+                    <span>Staff Note (BigCommerce)</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                    <Checkbox checked={bcCustomer} onCheckedChange={v => setBcCustomer(!!v)} id="bc-customer" data-testid="check-bc-customer" />
+                    <span>Customer Note (BigCommerce)</span>
+                  </label>
+                  <p className="text-[11px] text-slate-400">Leave unchecked to store in CRM only.</p>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div>
+                <Label className="text-xs mb-1.5 block">Title *</Label>
+                <Input value={todoTitle} onChange={e => setTodoTitle(e.target.value)} placeholder="What needs to be done?" />
+              </div>
+              <div>
+                <Label className="text-xs mb-1.5 block">Description</Label>
+                <Textarea value={todoNote} onChange={e => setTodoNote(e.target.value)} placeholder="Optional details…" rows={2} />
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <Label className="text-xs mb-1.5 block">Priority</Label>
+                  <Select value={todoPriority} onValueChange={setTodoPriority}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex-1">
+                  <Label className="text-xs mb-1.5 block">Due Date</Label>
+                  <Input type="date" value={todoDueDate} onChange={e => setTodoDueDate(e.target.value)} className="h-8 text-xs" />
+                </div>
+              </div>
+              {users.length > 0 && (
+                <div>
+                  <Label className="text-xs mb-1.5 block">Assigned To</Label>
+                  <Select value={todoAssigned} onValueChange={setTodoAssigned}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {users.map(u => <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={handleClose}>Cancel</Button>
+          {actionMode === ACTION_MODE_NOTE ? (
+            <Button onClick={() => onSave({ note, note_type: noteType, order_id: effectiveOrderId ? parseInt(effectiveOrderId) : null, bc_target: bcTarget })} disabled={!note.trim() || saving} data-testid="btn-save-note">
+              {saving ? "Saving…" : "Save Note"}
+            </Button>
+          ) : (
+            <Button onClick={() => onSaveTodo?.({ title: todoTitle, note: todoNote, priority: todoPriority, due_date: todoDueDate || null, assigned_to_user_id: todoAssigned ? parseInt(todoAssigned) : null })} disabled={!todoTitle.trim() || saving}>
+              {saving ? "Saving…" : "Create To Do"}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Order Notes Modal (editable) ─────────────────────────────────────────────
+
+// OrderNotesModal and OrdersTable have been replaced by CustomerOrdersPanel
+// which handles its own data fetching, expandable rows, and note editing.
+
+// ─── Tab type ─────────────────────────────────────────────────────────────────
+
+type Tab = "overview" | "orders" | "notes" | "timeline";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Main Component
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export default function CustomerProfile() {
+  const fmt = useTimeService();
+  const params = useParams<{ id: string }>();
+  const [, setLocation] = useLocation();
+  const { hasPermission } = usePermissions();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const id = parseInt(params.id);
+
+  const currentUser      = useStore((s) => s.currentUser);
+  const currentUserId    = currentUser?.id ?? null;
+  const isAdmin          = currentUser?.role === "admin";
+  const canCreateNote    = hasPermission("crm", "add_note");
+  const canEditNote      = hasPermission("crm", "notes_edit");
+  const canDeleteNote    = hasPermission("crm", "notes_delete");
+  const canAssignRep     = hasPermission("crm", "assign_rep");
+  const canEditBcNotes   = hasPermission("crm", "edit_customer_notes");
+  const canManageTodos   = isAdmin || hasPermission("crm", "manage_todos") || hasPermission("crm", "add_note");
+  const canManageAccountType = isAdmin || hasPermission("crm", "manage_account_classification");
+  const canManageInactive    = isAdmin || hasPermission("crm", "manage_inactive_accounts");
+
+  const [activeTab, setActiveTab]           = useState<Tab>("overview");
+  const [showAddNote, setShowAddNote]       = useState(false);
+  const [showAddTodo, setShowAddTodo]       = useState(false);
+  // Mark inactive modal
+  const [showMarkInactiveModal, setShowMarkInactiveModal] = useState(false);
+  const [markInactiveReason, setMarkInactiveReason]       = useState("");
+  const [markInactiveNotes, setMarkInactiveNotes]         = useState("");
+  const [savingMarkInactive, setSavingMarkInactive]       = useState(false);
+  const [editingTodo, setEditingTodo]       = useState<any | null>(null);
+  const [deletingTodoId, setDeletingTodoId] = useState<number | null>(null);
+  const [todoTitle, setTodoTitle]           = useState("");
+  const [todoNote, setTodoNote]             = useState("");
+  const [todoPriority, setTodoPriority]     = useState("medium");
+  const [todoDueDate, setTodoDueDate]       = useState("");
+  const [todoAssignedTo, setTodoAssignedTo] = useState("");
+  const [editingNote, setEditingNote]       = useState<any | null>(null);
+  const [deletingNoteId, setDeletingNoteId] = useState<number | null>(null);
+  const [showAssignRep, setShowAssignRep]   = useState(false);
+  const [repAssignMode, setRepAssignMode]   = useState<"primary" | "secondary">("primary");
+  const [selectedRep, setSelectedRep]       = useState("");
+  const [assignSaving, setAssignSaving]     = useState(false);
+  const [generalNotesEdit, setGeneralNotesEdit] = useState<string | null>(null); // null = not loaded yet
+  const [savingBcNotes, setSavingBcNotes]   = useState(false);
+  const [selectedAddressIdx, setSelectedAddressIdx] = useState(0);
+
+  // ── Queries ──────────────────────────────────────────────────────────────────
+
+  const { data: customer, isLoading: loadingCustomer } = useQuery({
+    queryKey: ["crm", "customer", id],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/customers/${id}`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Customer not found");
+      return r.json();
+    },
+    enabled: !!id,
+  });
+  const { data: marketingPreference } = useQuery<any>({
+    queryKey: ["marketing-preference", id],
+    queryFn: () => getMarketingPreference(id),
+    enabled: !!id && hasPermission("marketing"),
+  });
+  const marketingPreferenceMutation = useMutation({
+    mutationFn: (subscribed: boolean) => updateMarketingPreference(id, subscribed, subscribed ? "Re-enabled by staff" : "Opted out by staff"),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["marketing-preference", id] }); toast({ title: "Marketing preference updated" }); },
+    onError: (e: any) => toast({ title: "Unable to update preference", description: e.message, variant: "destructive" }),
+  });
+
+  const { data: addressBook = [], isLoading: loadingAddresses } = useQuery<any[]>({
+    queryKey: ["crm", "customer", id, "addresses"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/customers/${id}/addresses`, { headers: getAuthHeaders() });
+      if (!r.ok) return [];
+      return r.json();
+    },
+    enabled: !!id,
+    staleTime: 60_000,
+  });
+
+  // Needed for the "link note to order" dropdown in NoteModal
+  const { data: orders = [] } = useQuery({
+    queryKey: ["crm", "customer", id, "orders"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/customers/${id}/orders`, { headers: getAuthHeaders() });
+      if (!r.ok) return [];
+      return r.json();
+    },
+    enabled: !!id,
+    staleTime: 120_000,
+  });
+
+  const { data: notes = [], isLoading: loadingNotes } = useQuery({
+    queryKey: ["crm", "customer", id, "notes"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/customers/${id}/notes`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load notes");
+      return r.json();
+    },
+    enabled: !!id,
+  });
+
+  const { data: timeline = [], isLoading: loadingTimeline } = useQuery({
+    queryKey: ["crm", "customer", id, "timeline"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/customers/${id}/timeline`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load timeline");
+      return r.json();
+    },
+    enabled: !!id,
+  });
+
+  const { data: todos = [], isLoading: loadingTodos } = useQuery<any[]>({
+    queryKey: ["crm", "customer", id, "todos"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/todos?customerId=${id}&status=all&allUsers=true`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load todos");
+      return r.json();
+    },
+    enabled: !!id,
+  });
+
+  const { data: bcNotesData, isLoading: loadingBcNotes, refetch: refetchBcNotes } = useQuery({
+    queryKey: ["crm", "customer", id, "bc-notes"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/customers/${id}/bc-notes`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load BC notes");
+      return r.json() as Promise<{ generalNotes: string; crmHistory: string; raw: string }>;
+    },
+    enabled: activeTab === "notes",
+  });
+
+  const { data: crmUsers = [] } = useQuery({
+    queryKey: ["crm", "users"],
+    queryFn: async () => {
+      const r = await fetch("/api/crm/users", { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load users");
+      return r.json() as Promise<{ id: number; name: string }[]>;
+    },
+    enabled: canAssignRep,
+    staleTime: 60_000,
+  });
+
+  // ── Mutations ─────────────────────────────────────────────────────────────────
+
+  const invalidateNotes = () => {
+    queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "notes"] });
+    queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
+  };
+
+  const invalidateTodos = () => {
+    queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "todos"] });
+    queryClient.invalidateQueries({ queryKey: ["crm", "todos"] });
+  };
+
+  const createTodoMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const r = await fetch("/api/crm/todos", {
+        method: "POST", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ ...data, customer_id: id }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to create to do");
+      return r.json();
+    },
+    onSuccess: () => {
+      invalidateTodos();
+      setShowAddTodo(false);
+      setTodoTitle(""); setTodoNote(""); setTodoPriority("medium"); setTodoDueDate(""); setTodoAssignedTo("");
+      toast({ title: "To Do created" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const updateTodoMutation = useMutation({
+    mutationFn: async ({ todoId, data }: { todoId: number; data: any }) => {
+      const r = await fetch(`/api/crm/todos/${todoId}`, {
+        method: "PUT", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to update to do");
+      return r.json();
+    },
+    onSuccess: () => { invalidateTodos(); setEditingTodo(null); toast({ title: "To Do updated" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteTodoMutation = useMutation({
+    mutationFn: async (todoId: number) => {
+      const r = await fetch(`/api/crm/todos/${todoId}`, { method: "DELETE", headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to delete to do");
+    },
+    onSuccess: () => { invalidateTodos(); setDeletingTodoId(null); toast({ title: "To Do deleted" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const createNoteMutation = useMutation({
+    mutationFn: async (data: { note: string; note_type: string; order_id?: number | null; bc_target?: string }) => {
+      const r = await fetch(`/api/crm/customers/${id}/notes`, {
+        method: "POST", headers: { ...getAuthHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(data),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to create note");
+      return r.json();
+    },
+    onSuccess: () => { invalidateNotes(); setShowAddNote(false); toast({ title: "Note added" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const updateNoteMutation = useMutation({
+    mutationFn: async ({ noteId, data }: { noteId: number; data: { note: string; note_type: string; order_id?: number | null } }) => {
+      const r = await fetch(`/api/crm/customers/${id}/notes/${noteId}`, {
+        method: "PUT", headers: { ...getAuthHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(data),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to update note");
+      return r.json();
+    },
+    onSuccess: () => { invalidateNotes(); setEditingNote(null); toast({ title: "Note updated" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteNoteMutation = useMutation({
+    mutationFn: async (noteId: number) => {
+      const r = await fetch(`/api/crm/customers/${id}/notes/${noteId}`, { method: "DELETE", headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to delete note");
+    },
+    onSuccess: () => { invalidateNotes(); setDeletingNoteId(null); toast({ title: "Note deleted" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const handleAssignRep = async () => {
+    if (!selectedRep) return;
+    setAssignSaving(true);
+    try {
+      const field = repAssignMode === "primary" ? "primary_rep_id" : "secondary_rep_id";
+      const r = await fetch(`/api/crm/customers/${id}`, {
+        method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: parseInt(selectedRep) }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to assign rep");
+      queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
+      queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
+      toast({ title: repAssignMode === "primary" ? "Primary rep assigned" : "Secondary rep assigned" });
+      setShowAssignRep(false);
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setAssignSaving(false); }
+  };
+
+  const handleRemoveRep = async (mode: "primary" | "secondary") => {
+    try {
+      const field = mode === "primary" ? "primary_rep_id" : "secondary_rep_id";
+      const r = await fetch(`/api/crm/customers/${id}`, {
+        method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: null }),
+      });
+      if (!r.ok) throw new Error("Failed to remove rep");
+      queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
+      queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
+      toast({ title: mode === "primary" ? "Primary rep removed" : "Secondary rep removed" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const handleMasterFieldChange = async (field: string, value: string) => {
+    try {
+      const r = await fetch(`/api/crm/customers/${id}`, {
+        method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to update");
+      queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
+  };
+
+  // ── BC notes edit buffer sync (hooks must be before any early returns) ────────
+
+  // Sync edit buffer when bc-notes data arrives or tab opens
+  useEffect(() => {
+    if (bcNotesData && generalNotesEdit === null) {
+      setGeneralNotesEdit(bcNotesData.generalNotes ?? "");
+    }
+  }, [bcNotesData]);
+
+  // Reset edit buffer when tab changes away from notes
+  useEffect(() => {
+    if (activeTab !== "notes") setGeneralNotesEdit(null);
+  }, [activeTab]);
+
+  // ── Loading / Error ───────────────────────────────────────────────────────────
+
+  if (loadingCustomer) {
+    return <div className="flex items-center justify-center h-48 text-slate-400 text-sm">Loading customer…</div>;
+  }
+  if (!customer) {
+    return (
+      <div className="p-6">
+        <p className="text-slate-500">Customer not found.</p>
+        <Button variant="ghost" size="sm" className="mt-2" onClick={() => setLocation("/crm/customers")}>
+          <ArrowLeft className="h-4 w-4 mr-1.5" /> Back
+        </Button>
+      </div>
+    );
+  }
+
+  const lifetimeOrders  = Number(customer.lifetime_orders ?? 0);
+  const lifetimeRevenue = Number(customer.lifetime_revenue ?? 0);
+  const avgOrderValue   = lifetimeOrders > 0 ? lifetimeRevenue / lifetimeOrders : 0;
+  const daysSince       = customer.last_order_date
+    ? Math.floor((Date.now() - new Date(customer.last_order_date).getTime()) / 86_400_000)
+    : null;
+
+  // Overview: latest 5 notes, latest 10 timeline
+  const recentNotes    = (notes as any[]).slice(0, 5);
+  const recentTimeline = (timeline as any[]).slice(0, 10);
+
+  // ── Tab nav ────────────────────────────────────────────────────────────────
+
+  const handleSaveBcNotes = async () => {
+    if (generalNotesEdit === null) return;
+    setSavingBcNotes(true);
+    try {
+      const r = await fetch(`/api/crm/customers/${id}/bc-notes`, {
+        method: "PUT",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ generalNotes: generalNotesEdit }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to save");
+      toast({ title: "General notes saved to BigCommerce" });
+      refetchBcNotes();
+      queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setSavingBcNotes(false); }
+  };
+
+  // Next follow-up: nearest pending todo with a due_date
+  const nextFollowUp = (todos as any[])
+    .filter((t: any) => !t.completed_at && t.due_date)
+    .sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())[0] ?? null;
+
+  const pendingTodos  = (todos as any[]).filter((t: any) => !t.completed_at);
+  const totalActions  = (notes as any[]).length + (todos as any[]).length;
+
+  const TABS: { id: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
     { id: "overview",  label: "Overview",  icon: <User className="h-3.5 w-3.5" /> },
     { id: "orders",    label: "Orders",    icon: <ShoppingBag className="h-3.5 w-3.5" /> },
     { id: "notes",     label: "Actions",   icon: <MessageSquare className="h-3.5 w-3.5" />, count: totalActions || undefined },
