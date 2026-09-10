@@ -248,6 +248,14 @@ html[data-app-mode="standalone"] .app-shell-main {
   padding-bottom: 0;
 }
 
+/* Fixed elements anchor to iOS's reduced standalone viewport rather than the
+   root's safe-area extension. Extend their painted background through the
+   bottom inset while retaining padding inside the drawer for its controls. */
+html[data-app-mode="standalone"] .mobile-nav-backdrop,
+html[data-app-mode="standalone"] .mobile-nav-drawer {
+  bottom: calc(-1 * env(safe-area-inset-bottom, 0px)) !important;
+}
+
 .login-page {
   height: 100%;
   display: flex;
