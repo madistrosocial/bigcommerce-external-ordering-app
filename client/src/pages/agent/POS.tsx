@@ -112,6 +112,27 @@ function variantLabel(variant: any): string {
   return variant.sku || "";
 }
 
+function productMatchesSearch(product: api.Product, query: string): boolean {
+  const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return false;
+
+  const productText = `${product.name || ""} ${product.sku || ""}`.toLowerCase();
+  const variantText = getVariants(product)
+    .flatMap((variant: any) => [
+      variant.name,
+      variant.sku,
+      variant.upc,
+      variantLabel(variant),
+    ])
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return terms.every(
+    (term) => productText.includes(term) || variantText.includes(term),
+  );
+}
+
 function loadPersistedPosCustomer(): api.BigCommerceCustomer | null {
   try {
     const raw = localStorage.getItem(POS_SELECTED_CUSTOMER_STORAGE_KEY);
@@ -2142,10 +2163,8 @@ export default function POSPage() {
       const lower = q.toLowerCase().trim();
 
       // Instant local filtering of pinned products
-      const localMatches = pinnedProducts.filter(
-        (p) =>
-          p.name.toLowerCase().includes(lower) ||
-          p.sku.toLowerCase().includes(lower),
+      const localMatches = pinnedProducts.filter((p) =>
+        productMatchesSearch(p, lower),
       );
       const localSuggestions = buildSuggestions(localMatches);
 

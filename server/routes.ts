@@ -2504,6 +2504,18 @@ export async function registerRoutes(
         variant: shapeVariant(v, p.price.toString(), p.sale_price),
       });
 
+      const fetchKeywordProducts = async (keyword: string): Promise<any[]> => {
+        const response = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(keyword)}&include=primary_image,variants&limit=250`,
+          { headers: bcHeaders },
+        );
+        if (!response.ok) {
+          throw new Error(`BigCommerce API error: ${response.statusText}`);
+        }
+        const data = await response.json();
+        return Array.isArray(data.data) ? data.data : [];
+      };
+
       // ── Step 1: Direct SKU lookup via variants endpoint ──
       const skuRes = await fetch(
         `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/variants?sku=${encodeURIComponent(q)}`,
@@ -2539,16 +2551,46 @@ export async function registerRoutes(
         }
       }
 
-      // ── Step 3: Keyword search — but rescue exact SKU/UPC hits before returning product cards ──
-      const kwRes = await fetch(
-        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(q)}&include=primary_image,variants`,
-        { headers: bcHeaders },
-      );
-      if (!kwRes.ok)
-        throw new Error(`BigCommerce API error: ${kwRes.statusText}`);
+      // ── Step 3: Keyword search — support product-title + variant-name queries ──
+      // BigCommerce keyword matching is not reliable for variant option values.
+      // For multi-word searches, query each term and keep candidates where every
+      // term matches either the product title or one of the variant's names/options.
+      const searchTerms = q.toLowerCase().split(/\s+/).filter(Boolean);
+      let kwProducts: any[];
+      if (searchTerms.length > 1 && searchTerms.length <= 6) {
+        const keywordResults = await Promise.all([
+          q,
+          ...searchTerms,
+        ].map((keyword) => fetchKeywordProducts(keyword)));
+        const candidates = new Map<number, any>();
+        for (const products of keywordResults) {
+          for (const product of products) {
+            if (product?.id != null && !candidates.has(product.id)) {
+              candidates.set(product.id, product);
+            }
+          }
+        }
 
-      const kwData = await kwRes.json();
-      const kwProducts: any[] = kwData.data || [];
+        kwProducts = Array.from(candidates.values()).filter((product) => {
+          const productText = String(product.name || "").toLowerCase();
+          const variantText = (product.variants || [])
+            .flatMap((variant: any) => [
+              variant.name,
+              variant.sku,
+              variant.upc,
+              ...(variant.option_values || []).map((option: any) => option.label),
+            ])
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+          return searchTerms.every(
+            (term) => productText.includes(term) || variantText.includes(term),
+          );
+        });
+      } else {
+        kwProducts = await fetchKeywordProducts(q);
+      }
 
       // Secondary exact-match rescue: if any variant inside keyword results matches the query
       // exactly by SKU or UPC, return it as a direct variant (not a product card)
