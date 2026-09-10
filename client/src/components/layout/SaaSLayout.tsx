@@ -395,10 +395,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className="flex bg-white overflow-hidden"
-      style={{
-        height: "100%",
-      }}
+      className="app-shell flex min-h-[100svh] bg-white"
     >
       {mobileOpen && <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setMobileOpen(false)} />}
 
@@ -420,7 +417,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
         <SidebarContent />
       </aside>
 
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col">
         <header
           className="flex items-center justify-between px-3 md:px-4 h-14 bg-white border-b shrink-0 shadow-sm"
           style={{
@@ -444,7 +441,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="app-shell-main min-h-0 flex-1 overflow-visible">{children}</main>
       </div>
     </div>
   );
