@@ -1321,6 +1321,8 @@ export class DatabaseStorage implements IStorage {
         ilike(customersMirror.company, s),
         ilike(customersMirror.first_name, s),
         ilike(customersMirror.last_name, s),
+        sql`concat_ws(' ', ${customersMirror.first_name}, ${customersMirror.last_name}) ILIKE ${s}`,
+        sql`concat_ws(' ', ${customersMirror.last_name}, ${customersMirror.first_name}) ILIKE ${s}`,
         ilike(customersMirror.email, s),
         ilike(customersMirror.phone, s),
         sql`coalesce(${customersMirror.shipping_address}->>'city', ${customersMirror.billing_address}->>'city') ILIKE ${s}`,
