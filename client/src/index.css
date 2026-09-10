@@ -132,12 +132,14 @@
     body {
       height: 100%;
       overflow: hidden;
+      background: #fbfcfe;
     }
 
     #root {
       position: fixed;
       inset: 0;
       overflow: hidden;
+      height: 100%;
       background: #fbfcfe;
     }
   }
@@ -219,12 +221,14 @@
 html[data-app-mode="standalone"] body {
   height: 100%;
   overflow: hidden;
+  background: #fbfcfe;
 }
 
 html[data-app-mode="standalone"] #root {
   position: fixed;
   inset: 0;
   overflow: hidden;
+  height: 100%;
   background: #fbfcfe;
 }
 
