@@ -137,10 +137,8 @@
     }
 
     #root {
-      position: fixed;
-      inset: 0;
-      overflow: hidden;
-      height: var(--app-height, 100dvh);
+      height: 100%;
+      overflow: visible;
       background: #fbfcfe;
     }
   }
@@ -170,24 +168,6 @@
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04) !important;
 }
 
-.app-root {
-  /* 100% (not dvh) — chains through html/body/#root, which are already
-     sized to the exact device screen. This avoids drift between JS/CSS
-     viewport-unit calculations and the real WKWebView box in standalone
-     PWA mode, which was leaving a gap at the bottom of the screen. */
-  min-height: 100%;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-@media (display-mode: standalone) {
-  .app-root {
-    height: 100%;
-    overflow: hidden;
-  }
-}
-
 /* The browser version grows with its content so Safari can scroll the
    document and collapse its browser chrome. The standalone PWA switches back
    to a bounded inner scroller because it has no browser chrome. */
@@ -203,7 +183,8 @@
 
 @media (display-mode: standalone) {
   .app-shell {
-    height: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
     overflow: hidden;
     background: #fbfcfe;
   }
@@ -227,15 +208,14 @@ html[data-app-mode="standalone"] body {
 }
 
 html[data-app-mode="standalone"] #root {
-  position: fixed;
-  inset: 0;
-  overflow: hidden;
-  height: var(--app-height, 100dvh);
+  height: 100%;
+  overflow: visible;
   background: #fbfcfe;
 }
 
 html[data-app-mode="standalone"] .app-shell {
-  height: 100%;
+  height: 100dvh;
+  min-height: 100dvh;
   overflow: hidden;
   background: #fbfcfe;
 }
@@ -246,14 +226,6 @@ html[data-app-mode="standalone"] .app-shell-main {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding-bottom: 0;
-}
-
-/* Fixed elements anchor to iOS's reduced standalone viewport rather than the
-   root's safe-area extension. Extend their painted background through the
-   bottom inset while retaining padding inside the drawer for its controls. */
-html[data-app-mode="standalone"] .mobile-nav-backdrop,
-html[data-app-mode="standalone"] .mobile-nav-drawer {
-  bottom: calc(-1 * env(safe-area-inset-bottom, 0px)) !important;
 }
 
 .login-page {
