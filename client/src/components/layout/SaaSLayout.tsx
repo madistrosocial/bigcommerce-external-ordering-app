@@ -256,7 +256,11 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
           </div>
         )}
         {!collapsed && !businessLogo && <span className="font-bold text-[13px] text-white truncate">Midatlantic</span>}
-        <button onClick={() => setMobileOpen(false)} className={cn("text-slate-400 hover:text-white md:hidden", collapsed ? "ml-auto" : "absolute top-2 right-2")}>
+        <button
+          onClick={() => setMobileOpen(false)}
+          style={{ top: "calc(0.5rem + env(safe-area-inset-top))" }}
+          className={cn("text-slate-400 hover:text-white md:hidden", collapsed ? "ml-auto" : "absolute right-2")}
+        >
           <X className="h-5 w-5" />
         </button>
       </div>
@@ -406,8 +410,8 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
         <div
           className="mobile-nav-backdrop fixed left-0 right-0 bg-black/50 z-30 md:hidden"
           style={{
-            top: "env(safe-area-inset-top)",
-            bottom: "env(safe-area-inset-bottom)",
+            top: 0,
+            bottom: 0,
           }}
           onClick={() => setMobileOpen(false)}
         />
@@ -422,9 +426,10 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
         className={cn("mobile-nav-drawer fixed left-0 h-full w-[240px] bg-slate-900 text-slate-100 z-40 flex flex-col transition-transform duration-200 border-r border-slate-800 md:hidden",
           mobileOpen ? "translate-x-0" : "-translate-x-full")}
         style={{
-          top: "env(safe-area-inset-top)",
+          top: 0,
           bottom: 0,
           height: "auto",
+          paddingTop: "env(safe-area-inset-top)",
           paddingBottom: "env(safe-area-inset-bottom)",
         }}
       >
