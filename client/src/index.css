@@ -140,7 +140,7 @@
       position: fixed;
       inset: 0;
       overflow: hidden;
-      height: calc(100% + env(safe-area-inset-bottom, 0px));
+      height: var(--app-height, 100dvh);
       background: #fbfcfe;
     }
   }
@@ -230,7 +230,7 @@ html[data-app-mode="standalone"] #root {
   position: fixed;
   inset: 0;
   overflow: hidden;
-  height: calc(100% + env(safe-area-inset-bottom, 0px));
+  height: var(--app-height, 100dvh);
   background: #fbfcfe;
 }
 
