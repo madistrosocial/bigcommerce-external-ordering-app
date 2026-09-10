@@ -79,7 +79,7 @@ export default function BCProductLinkLogs() {
   });
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="bg-slate-50 flex flex-col">
       {/* Header */}
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0">
         <button
@@ -124,7 +124,7 @@ export default function BCProductLinkLogs() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div>
         {isLoading && (
           <div className="flex items-center justify-center py-20 text-slate-400 text-sm gap-2">
             <RefreshCw className="h-4 w-4 animate-spin" /> Loading logs…

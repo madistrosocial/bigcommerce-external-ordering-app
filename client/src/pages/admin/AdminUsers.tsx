@@ -255,7 +255,7 @@ function UserDetail({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="bg-slate-50 flex flex-col">
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0">
         <Button variant="ghost" size="sm" onClick={onBack} className="h-8 w-8 p-0 shrink-0" data-testid="btn-back-users">
           <ArrowLeft className="h-4 w-4" />
@@ -272,7 +272,7 @@ function UserDetail({
         </Button>
       </header>
 
-      <div className="flex-1 overflow-auto px-4 py-4 space-y-4">
+      <div className="px-4 py-4 space-y-4">
         {/* Account details */}
         <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b bg-slate-50 flex items-center gap-2">
@@ -775,14 +775,14 @@ export default function AdminUsersPage() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="bg-slate-50 flex flex-col">
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0">
         <Users className="h-5 w-5 text-slate-600" />
         <h1 className="text-base font-bold text-slate-800">User Management</h1>
         {!usersLoading && <span className="ml-auto text-xs text-slate-400">{users.length} user{users.length !== 1 ? "s" : ""}</span>}
       </header>
 
-      <div className="flex-1 overflow-auto px-4 py-4 space-y-3">
+      <div className="px-4 py-4 space-y-3">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input placeholder="Search by name or username…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 bg-white" data-testid="input-user-search" />

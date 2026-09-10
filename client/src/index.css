@@ -183,8 +183,8 @@
 
 @media (display-mode: standalone) {
   .app-shell {
-    height: 100dvh;
-    min-height: 100dvh;
+    height: var(--app-height, 100dvh);
+    min-height: var(--app-height, 100dvh);
     overflow: hidden;
     background: #fbfcfe;
   }
@@ -214,8 +214,8 @@ html[data-app-mode="standalone"] #root {
 }
 
 html[data-app-mode="standalone"] .app-shell {
-  height: 100dvh;
-  min-height: 100dvh;
+  height: var(--app-height, 100dvh);
+  min-height: var(--app-height, 100dvh);
   overflow: hidden;
   background: #fbfcfe;
 }

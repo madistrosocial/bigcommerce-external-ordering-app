@@ -627,7 +627,7 @@ export default function OrdersList() {
   ];
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
 
       {/* ── KPI cards ──────────────────────────────────────────────────────── */}
       {data && (
@@ -785,7 +785,7 @@ export default function OrdersList() {
       )}
 
       {/* ── Content ────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto">
+      <div>
         {isLoading ? (
           <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading orders…</div>
         ) : orderList.length === 0 ? (

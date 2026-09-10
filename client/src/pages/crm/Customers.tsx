@@ -502,7 +502,7 @@ export default function CRMCustomers() {
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
 
       {/* ── Health Cards ─────────────────────────────────────────────────────── */}
       {metrics && (
@@ -768,7 +768,7 @@ export default function CRMCustomers() {
       )}
 
       {/* ── Table ────────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto">
+      <div>
         {isLoading ? (
           <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading customers…</div>
         ) : customers.length === 0 ? (

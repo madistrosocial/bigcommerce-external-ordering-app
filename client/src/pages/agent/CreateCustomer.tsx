@@ -171,7 +171,7 @@ export default function CreateCustomer() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="bg-slate-50 flex flex-col">
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0">
         <UserPlus className="h-5 w-5 text-slate-600" />
         <div>
@@ -180,7 +180,7 @@ export default function CreateCustomer() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto p-4 max-w-2xl mx-auto w-full">
+      <div className="p-4 max-w-2xl mx-auto w-full">
         <form onSubmit={handleSubmit} className="space-y-5" data-testid="form-create-customer">
           <section className="bg-white rounded-lg border shadow-sm p-4 space-y-4">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Customer Details</p>

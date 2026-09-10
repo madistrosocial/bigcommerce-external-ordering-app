@@ -404,7 +404,7 @@ export default function CRMToDo() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
 
       {/* ── Header ────────────────────────────────────────────────────────────── */}
       <div className="border-b bg-white px-4 py-3 shrink-0">
@@ -437,7 +437,7 @@ export default function CRMToDo() {
       </div>
 
       {/* ── Content ───────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className="p-4">
         {isLoading ? (
           <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
         ) : todos.length === 0 ? (

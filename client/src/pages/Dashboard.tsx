@@ -447,7 +447,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-full bg-[#fbfcfe] px-4 py-5 sm:px-6 sm:py-7 lg:px-7">
+    <div className="bg-[#fbfcfe] px-4 py-5 sm:px-6 sm:py-7 lg:px-7">
       <div className="mx-auto max-w-[1240px] space-y-4 sm:space-y-5">
         <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
