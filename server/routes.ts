@@ -2783,39 +2783,92 @@ export async function registerRoutes(
             .json({ error: "BigCommerce credentials not configured" });
         }
 
-        // BC v3 Customers API: use name:like for names, email:in for email addresses
-        const q = query as string;
-        const filterParam = q.includes("@")
-          ? `email:in=${encodeURIComponent(q)}`
-          : `name:like=${encodeURIComponent(q)}`;
-        const bcUrl = `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?${filterParam}&limit=10`;
-        console.log("[BC customer search] Fetching:", bcUrl);
+        // Search names, companies, and phone numbers independently because the
+        // BigCommerce API combines multiple filters with AND rather than OR.
+        const q = String(query).trim();
+        const isEmailSearch = q.includes("@");
+        const phoneDigits = q.replace(/\D/g, "");
+        const isPhoneSearch =
+          !isEmailSearch &&
+          phoneDigits.length >= 3 &&
+          !/[a-z]/i.test(q);
+        const filters = isEmailSearch
+          ? [{ field: "email:in", value: q }]
+          : [
+              { field: "name:like", value: q },
+              { field: "company:like", value: q },
+              ...(isPhoneSearch
+                ? [
+                    { field: "phone:like", value: q },
+                    ...(phoneDigits !== q
+                      ? [{ field: "phone:like", value: phoneDigits }]
+                      : []),
+                  ]
+                : []),
+            ];
 
-        const response = await fetch(bcUrl, {
-          headers: {
-            "X-Auth-Token": String(token),
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-        });
+        const rowsByFilter = await Promise.all(
+          filters.map(async ({ field, value }) => {
+            const filterParam = `${field}=${encodeURIComponent(value)}`;
+            const bcUrl = `https://api.bigcommerce.com/stores/${storeHash}/v3/customers?${filterParam}&limit=10`;
+            console.log("[BC customer search] Fetching:", bcUrl);
 
-        // Read raw text first so we can log it if JSON parsing fails
-        const rawText = await response.text();
-        console.log("[BC customer search] Status:", response.status, "Body:", rawText.slice(0, 400));
+            const response = await fetch(bcUrl, {
+              headers: {
+                "X-Auth-Token": String(token),
+                "Content-Type": "application/json",
+                Accept: "application/json",
+              },
+            });
 
-        let data: any = null;
-        try {
-          data = JSON.parse(rawText);
-        } catch {
-          throw new Error(`BigCommerce returned non-JSON response (HTTP ${response.status}): ${rawText.slice(0, 200)}`);
+            // Read raw text first so we can log it if JSON parsing fails
+            const rawText = await response.text();
+            console.log(
+              "[BC customer search] Status:",
+              response.status,
+              "Body:",
+              rawText.slice(0, 400),
+            );
+
+            let data: any = null;
+            try {
+              data = JSON.parse(rawText);
+            } catch {
+              throw new Error(
+                `BigCommerce returned non-JSON response (HTTP ${response.status}): ${rawText.slice(0, 200)}`,
+              );
+            }
+
+            if (!response.ok) {
+              const bcMsg =
+                data?.title ||
+                data?.detail ||
+                data?.errors?.[0] ||
+                data?.message ||
+                response.statusText;
+              throw new Error(`BigCommerce API error (${response.status}): ${bcMsg}`);
+            }
+
+            return Array.isArray(data?.data) ? data.data : [];
+          }),
+        );
+
+        // Interleave each filter's results so a name match cannot hide all
+        // company or phone matches when the API returns ten name matches first.
+        const rows: any[] = [];
+        const seenIds = new Set<number>();
+        for (let index = 0; rows.length < 10; index += 1) {
+          let addedFromFilter = false;
+          for (const filterRows of rowsByFilter) {
+            const customer = filterRows[index];
+            if (!customer || seenIds.has(customer.id)) continue;
+            seenIds.add(customer.id);
+            rows.push(customer);
+            addedFromFilter = true;
+            if (rows.length >= 10) break;
+          }
+          if (!addedFromFilter) break;
         }
-
-        if (!response.ok) {
-          const bcMsg = data?.title || data?.detail || data?.errors?.[0] || data?.message || response.statusText;
-          throw new Error(`BigCommerce API error (${response.status}): ${bcMsg}`);
-        }
-
-        const rows: any[] = Array.isArray(data?.data) ? data.data : [];
 
         const customers = rows.map((c: any) => ({
           id: c.id,

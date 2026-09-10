@@ -2232,7 +2232,10 @@ export default function POSPage() {
         setCustomerResults(r);
         setShowCustomerDrop(r.length > 0);
         if (r.length === 0) {
-          toast({ title: "No customers found", description: "Try a different name or email." });
+          toast({
+            title: "No customers found",
+            description: "Try a different name, company, phone, or email.",
+          });
         }
       } catch (e: any) {
         setCustomerResults([]);
@@ -2997,7 +3000,7 @@ export default function POSPage() {
             </button>
           )}
           <Input
-            placeholder="Search customer…"
+            placeholder="Search name, company, phone, or email…"
             className="pl-8 h-8 text-sm bg-white pr-8"
             value={customerSearch}
             readOnly={!!selectedCustomer}
@@ -3030,7 +3033,10 @@ export default function POSPage() {
                       </span>
                     ) : null}
                   </p>
-                  <p className="text-xs text-slate-500">{c.email}</p>
+                  <p className="text-xs text-slate-500">
+                    {c.email}
+                    {c.phone ? ` · ${c.phone}` : ""}
+                  </p>
                 </button>
               ))}
             </div>
