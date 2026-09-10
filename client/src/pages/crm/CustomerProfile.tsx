@@ -1,9 +1,4 @@
-n()).error ?? "Failed to save");
-      toast({ title: "General notes saved to BigCommerce" });
-      refetchBcNotes();
-      queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
-    } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+t({ title: "Error", description: e.message, variant: "destructive" });
     } finally { setSavingBcNotes(false); }
   };
 
@@ -39,15 +34,15 @@ n()).error ?? "Failed to save");
       ═══════════════════════════════════════════════════════════════════════ */}
       <div className="px-3 sm:px-4 md:px-6 pt-3 sm:pt-4">
         <div className="bg-white border rounded-xl p-4 sm:p-5 shadow-sm">
-          <div className="grid grid-cols-[auto_1fr] items-start gap-3 sm:flex sm:items-stretch sm:gap-4">
+          <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-3 sm:flex sm:items-stretch sm:gap-4">
 
             {/* Avatar */}
-            <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-blue-100 flex items-center justify-center shrink-0 self-center sm:self-start mt-0.5">
-              <User className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
+            <div className="col-start-2 row-start-1 order-1 h-16 w-16 sm:h-14 sm:w-14 rounded-full bg-blue-100 flex items-center justify-center shrink-0 self-center justify-self-center sm:order-1 sm:col-auto sm:row-auto sm:justify-self-auto sm:self-start mt-0.5">
+              <User className="h-8 w-8 sm:h-7 sm:w-7 text-blue-600" />
             </div>
 
             {/* Main info — grows */}
-            <div className="order-3 col-span-2 w-full min-w-0 sm:order-2 sm:flex-1">
+            <div className="order-3 col-span-3 w-full min-w-0 sm:order-2 sm:col-auto sm:flex-1">
 
               {/* Company name */}
               {customer.company && (
@@ -238,7 +233,7 @@ n()).error ?? "Failed to save");
             </div>
 
             {/* Right column: status badge + days counter */}
-            <div className="order-2 self-center shrink-0 flex flex-col items-start gap-1 sm:order-3 sm:self-auto sm:items-end sm:gap-2 sm:border-l sm:pl-4 sm:min-w-[72px]">
+            <div className="col-start-3 row-start-1 order-2 self-center justify-self-end shrink-0 flex flex-col items-end gap-1 text-right sm:order-3 sm:self-auto sm:items-end sm:gap-2 sm:border-l sm:pl-4 sm:min-w-[72px]">
 
               {/* Active / Inactive status badge */}
               {canManageInactive ? (
@@ -255,7 +250,7 @@ n()).error ?? "Failed to save");
                           toast({ title: "Customer restored to active" });
                         } catch (e: any) { toast({ title: "Error", description: e.message, variant: "destructive" }); }
                       }}
-                      className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200 hover:bg-red-200 transition-colors cursor-pointer"
+                       className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 border border-red-200 hover:bg-red-200 transition-colors cursor-pointer"
                       title="Click to restore active"
                     >
                       Inactive
@@ -269,14 +264,14 @@ n()).error ?? "Failed to save");
                 ) : (
                   <button
                     onClick={() => { setMarkInactiveReason(""); setMarkInactiveNotes(""); setShowMarkInactiveModal(true); }}
-                    className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200 hover:bg-green-200 transition-colors cursor-pointer"
+                     className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700 border border-green-200 hover:bg-green-200 transition-colors cursor-pointer"
                     title="Click to mark inactive"
                   >
                     Active
                   </button>
                 )
               ) : (
-                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${customer.inactive_at ? "bg-red-100 text-red-700 border border-red-200" : "bg-green-100 text-green-700 border border-green-200"}`}>
+                 <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${customer.inactive_at ? "bg-red-100 text-red-700 border border-red-200" : "bg-green-100 text-green-700 border border-green-200"}`}>
                   {customer.inactive_at ? "Inactive" : "Active"}
                 </span>
               )}
@@ -284,10 +279,10 @@ n()).error ?? "Failed to save");
               {/* Days since last order */}
               {daysSince != null && (
                 <div className="text-center sm:text-right mt-1">
-                  <p className={`text-base sm:text-4xl font-extrabold leading-none ${daysSince > 90 ? "text-red-500" : daysSince > 30 ? "text-amber-500" : "text-green-600"}`}>
+                  <p className={`text-xs sm:text-3xl font-extrabold leading-none ${daysSince > 90 ? "text-red-500" : daysSince > 30 ? "text-amber-500" : "text-green-600"}`}>
                     {daysSince}d
                   </p>
-                  <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5">since last order</p>
+                  <p className="text-[9px] sm:text-[11px] text-slate-400 mt-0.5">since last order</p>
                 </div>
               )}
             </div>
