@@ -191,6 +191,7 @@
    document and collapse its browser chrome. The standalone PWA switches back
    to a bounded inner scroller because it has no browser chrome. */
 .app-shell {
+  min-height: 100%;
   overflow: visible;
 }
 
@@ -211,7 +212,7 @@
     overflow: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: 0;
   }
 }
 
@@ -243,7 +244,7 @@ html[data-app-mode="standalone"] .app-shell-main {
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: 0;
 }
 
 .login-page {

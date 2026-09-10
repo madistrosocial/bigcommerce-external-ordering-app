@@ -450,7 +450,7 @@ export default function Cart() {
 
   return (
     <div className="p-4 md:p-6 max-w-2xl mx-auto">
-      <div className="space-y-6 pb-24">
+      <div className="space-y-6 pb-[calc(6rem+env(safe-area-inset-bottom,0px))]">
         {isOfflineMode && (
           <Card className="p-3 bg-orange-50 border-orange-200">
             <div className="flex items-center gap-2 text-orange-700">
@@ -705,7 +705,7 @@ export default function Cart() {
           })}
         </div>
 
-        <div className="fixed bottom-0 left-0 right-0 bg-white p-4 border-t">
+        <div className="fixed bottom-0 left-0 right-0 bg-white px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] border-t">
           <div className="flex items-center justify-between mb-2">
             <span className="font-bold text-xl">${total.toFixed(2)}</span>
           </div>
