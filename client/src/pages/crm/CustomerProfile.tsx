@@ -1,16 +1,4 @@
-t({ title: "Error", description: e.message, variant: "destructive" });
-    } finally { setSavingBcNotes(false); }
-  };
-
-  // Next follow-up: nearest pending todo with a due_date
-  const nextFollowUp = (todos as any[])
-    .filter((t: any) => !t.completed_at && t.due_date)
-    .sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())[0] ?? null;
-
-  const pendingTodos  = (todos as any[]).filter((t: any) => !t.completed_at);
-  const totalActions  = (notes as any[]).length + (todos as any[]).length;
-
-  const TABS: { id: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
+st TABS: { id: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
     { id: "overview",  label: "Overview",  icon: <User className="h-3.5 w-3.5" /> },
     { id: "orders",    label: "Orders",    icon: <ShoppingBag className="h-3.5 w-3.5" /> },
     { id: "notes",     label: "Actions",   icon: <MessageSquare className="h-3.5 w-3.5" />, count: totalActions || undefined },
@@ -348,11 +336,20 @@ t({ title: "Error", description: e.message, variant: "destructive" });
           {activeTab === "overview" && (
             <div className="p-5 space-y-5">
               {hasPermission("marketing") && (
-                <div className="flex flex-wrap items-center gap-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4">
-                  <Mail className="h-5 w-5 text-blue-600" />
-                  <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-slate-800">Marketing email preference</p><p className="text-xs text-slate-500">Separate from transactional order and invoice email.</p></div>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${marketingPreference?.email_subscribed === false ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{marketingPreference?.email_subscribed === false ? "Unsubscribed" : "Subscribed"}</span>
-                  {hasPermission("marketing", "manage_suppressions") && <Button size="sm" variant="outline" onClick={() => marketingPreferenceMutation.mutate(marketingPreference?.email_subscribed === false)} disabled={marketingPreferenceMutation.isPending}>{marketingPreference?.email_subscribed === false ? "Re-enable" : "Unsubscribe"}</Button>}
+                <div className="flex flex-col gap-3 rounded-xl border border-blue-100 bg-blue-50/50 p-4 sm:flex-row sm:items-center sm:gap-4">
+                  <div className="flex min-w-0 flex-1 items-start gap-3">
+                    <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white border border-blue-100">
+                      <Mail className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold leading-tight text-slate-800">Marketing email preference</p>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-500">Separate from transactional order and invoice email.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 pl-12 sm:shrink-0 sm:pl-0">
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${marketingPreference?.email_subscribed === false ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{marketingPreference?.email_subscribed === false ? "Unsubscribed" : "Subscribed"}</span>
+                    {hasPermission("marketing", "manage_suppressions") && <Button size="sm" variant="outline" className="shrink-0" onClick={() => marketingPreferenceMutation.mutate(marketingPreference?.email_subscribed === false)} disabled={marketingPreferenceMutation.isPending}>{marketingPreference?.email_subscribed === false ? "Re-enable" : "Unsubscribe"}</Button>}
+                  </div>
                 </div>
               )}
 
