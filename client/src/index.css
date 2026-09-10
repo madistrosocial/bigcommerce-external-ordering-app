@@ -115,31 +115,24 @@
 
   html,
   body {
-    min-height: 100%;
+    height: 100%;
     margin: 0;
-    overflow-x: hidden;
-    overflow-y: auto;
-    color-scheme: light;
+    overflow: hidden;
   }
 
+  /* Keep the app shell pinned to the full standalone-PWA viewport. */
   #root {
-    min-height: 100%;
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
   }
 
-  /* Standalone iOS/iPadOS PWAs use a pinned shell because there is no browser
-     toolbar to collapse. Safe-area spacing belongs to the shell contents. */
+  /* Standalone iOS/iPadOS PWAs can keep the bottom safe area outside the
+     visual viewport. Extend the app root into it so the shell and overlays
+     draw over the entire screen instead of exposing the body background. */
   @media (display-mode: standalone) {
-    html,
-    body {
-      height: 100%;
-      overflow: hidden;
-      background: #fbfcfe;
-    }
-
     #root {
-      height: 100%;
-      overflow: visible;
-      background: #fbfcfe;
+      bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
     }
   }
 
@@ -168,64 +161,16 @@
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04) !important;
 }
 
-/* The browser version grows with its content so Safari can scroll the
-   document and collapse its browser chrome. The standalone PWA switches back
-   to a bounded inner scroller because it has no browser chrome. */
-.app-shell {
-  min-height: 100%;
-  overflow: visible;
-}
-
-.app-shell-main {
-  flex: 0 1 auto;
-  overflow: visible;
-}
-
-@media (display-mode: standalone) {
-  .app-shell {
-    height: var(--app-height, 100dvh);
-    min-height: var(--app-height, 100dvh);
-    overflow: hidden;
-    background: #fbfcfe;
-  }
-
-  .app-shell-main {
-    flex: 1 1 0%;
-    overflow: auto;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-    padding-bottom: 0;
-  }
-}
-
-/* iOS exposes navigator.standalone even on versions where the CSS
-   display-mode media query is inconsistent. main.tsx sets this marker before
-   React mounts so standalone PWAs receive the same bounded-shell rules. */
-html[data-app-mode="standalone"] body {
+.app-root {
+  /* 100% (not dvh) — chains through html/body/#root, which are already
+     sized to the exact device screen. This avoids drift between JS/CSS
+     viewport-unit calculations and the real WKWebView box in standalone
+     PWA mode, which was leaving a gap at the bottom of the screen. */
   height: 100%;
+  width: 100%;
   overflow: hidden;
-  background: #fbfcfe;
-}
-
-html[data-app-mode="standalone"] #root {
-  height: 100%;
-  overflow: visible;
-  background: #fbfcfe;
-}
-
-html[data-app-mode="standalone"] .app-shell {
-  height: var(--app-height, 100dvh);
-  min-height: var(--app-height, 100dvh);
-  overflow: hidden;
-  background: #fbfcfe;
-}
-
-html[data-app-mode="standalone"] .app-shell-main {
-  flex: 1 1 0%;
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  padding-bottom: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .login-page {

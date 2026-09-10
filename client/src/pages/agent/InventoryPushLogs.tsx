@@ -92,7 +92,7 @@ export default function InventoryPushLogs() {
   const rangeEnd = Math.min((page + 1) * PAGE_SIZE, total);
 
   return (
-    <div className="bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Header */}
       <header className="bg-white border-b px-3 py-2.5 flex items-center gap-2 shrink-0">
         <Button
@@ -192,7 +192,7 @@ export default function InventoryPushLogs() {
       </div>
 
       {/* Content */}
-      <div className="px-3 py-3 flex flex-col gap-3">
+      <div className="flex-1 overflow-auto px-3 py-3 flex flex-col gap-3">
         {isLoading && !data ? (
           <div className="flex items-center justify-center py-20 text-slate-400">
             <Loader2 className="h-6 w-6 animate-spin mr-2" />

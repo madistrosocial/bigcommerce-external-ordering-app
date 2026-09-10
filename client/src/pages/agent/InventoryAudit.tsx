@@ -608,7 +608,7 @@ export default function InventoryAuditPage() {
   };
 
   return (
-    <div className="flex flex-col bg-slate-50">
+    <div className="flex flex-col h-full bg-slate-50">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="bg-white border-b px-4 py-3 sm:px-6 shrink-0">
         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -736,7 +736,7 @@ export default function InventoryAuditPage() {
       </div>
 
       {/* ── Content ────────────────────────────────────────────────────────── */}
-      <div className="px-4 py-3 sm:px-6 space-y-2">
+      <div className="flex-1 overflow-auto px-4 py-3 sm:px-6 space-y-2">
         {/* Section header */}
         <div className="flex items-center justify-between mb-1">
           <p className="text-xs font-semibold text-slate-600">

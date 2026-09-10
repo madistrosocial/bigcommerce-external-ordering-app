@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { flushSync } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getKoleConnection, getUsersSummary } from "@/lib/api";
 import { useLocation } from "wouter";
@@ -103,12 +102,8 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     });
   };
   const navigate = (path: string) => {
-    // Safari samples the page-edge color when pushState runs. Remove the dark
-    // mobile backdrop first so browser chrome does not retain its gray tint.
-    if (mobileOpen) {
-      flushSync(() => setMobileOpen(false));
-    }
     setLocation(path);
+    setMobileOpen(false);
     if (!path.startsWith("/admin/")) {
       setOpenGroups((prev) => {
         if (!prev.has("settings")) return prev;
@@ -256,11 +251,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
           </div>
         )}
         {!collapsed && !businessLogo && <span className="font-bold text-[13px] text-white truncate">Midatlantic</span>}
-        <button
-          onClick={() => setMobileOpen(false)}
-          style={{ top: "calc(0.5rem + env(safe-area-inset-top))" }}
-          className={cn("text-slate-400 hover:text-white md:hidden", collapsed ? "ml-auto" : "absolute right-2")}
-        >
+        <button onClick={() => setMobileOpen(false)} className={cn("text-slate-400 hover:text-white md:hidden", collapsed ? "ml-auto" : "absolute top-2 right-2")}>
           <X className="h-5 w-5" />
         </button>
       </div>
@@ -404,18 +395,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className="app-shell flex min-h-0 bg-white"
+      className="flex bg-white overflow-hidden"
+      style={{
+        height: "100%",
+      }}
     >
-      {mobileOpen && (
-        <div
-          className="mobile-nav-backdrop fixed left-0 right-0 bg-black/50 z-30 md:hidden"
-          style={{
-            top: 0,
-            bottom: 0,
-          }}
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
+      {mobileOpen && <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setMobileOpen(false)} />}
 
       <aside className={cn("hidden md:flex flex-col bg-slate-900 text-slate-100 transition-all duration-200 shrink-0 border-r border-slate-800",
         collapsed ? "w-[60px]" : "w-[220px]")}>
@@ -423,20 +408,19 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       <aside
-        className={cn("mobile-nav-drawer fixed left-0 h-full w-[240px] bg-slate-900 text-slate-100 z-40 flex flex-col transition-transform duration-200 border-r border-slate-800 md:hidden",
+        className={cn("fixed left-0 h-full w-[240px] bg-slate-900 text-slate-100 z-40 flex flex-col transition-transform duration-200 border-r border-slate-800 md:hidden",
           mobileOpen ? "translate-x-0" : "-translate-x-full")}
         style={{
-          top: 0,
+          top: "env(safe-area-inset-top)",
           bottom: 0,
           height: "auto",
-          paddingTop: "env(safe-area-inset-top)",
           paddingBottom: "env(safe-area-inset-bottom)",
         }}
       >
         <SidebarContent />
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <header
           className="flex items-center justify-between px-3 md:px-4 h-14 bg-white border-b shrink-0 shadow-sm"
           style={{
@@ -460,7 +444,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        <main className="app-shell-main min-h-0 flex-1 overflow-visible">{children}</main>
+        <main className="flex-1 overflow-auto">{children}</main>
       </div>
     </div>
   );

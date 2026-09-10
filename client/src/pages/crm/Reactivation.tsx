@@ -153,7 +153,7 @@ export default function CRMReactivation() {
   );
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col h-full">
       {/* Header */}
       <div className="border-b bg-white px-4 py-3 shrink-0 space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -230,7 +230,7 @@ export default function CRMReactivation() {
       </div>
 
       {/* Table */}
-      <div>
+      <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
         ) : customers.length === 0 ? (

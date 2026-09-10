@@ -182,7 +182,7 @@ export default function CRMNotes() {
   const gotoPage = (p: number) => setPage(Math.max(1, Math.min(totalPages, p)));
 
   return (
-    <div className="flex flex-col bg-slate-50">
+    <div className="flex flex-col min-h-full bg-slate-50">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="bg-white border-b px-4 md:px-6 py-4">

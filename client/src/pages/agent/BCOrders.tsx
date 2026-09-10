@@ -670,7 +670,7 @@ export default function BCOrders() {
   const handleLimitChange = (v: string) => { setLimit(Number(v)); setPage(1); };
 
   return (
-    <div className="bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Header */}
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0 flex-wrap gap-y-2">
         <ShoppingCart className="h-5 w-5 text-slate-600 shrink-0" />
@@ -713,7 +713,7 @@ export default function BCOrders() {
       </div>
 
       {/* List */}
-      <div className="px-4 py-4">
+      <div className="flex-1 overflow-auto px-4 py-4">
         {isLoading ? (
           <div className="flex items-center justify-center py-20 text-slate-400">
             <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading orders…
