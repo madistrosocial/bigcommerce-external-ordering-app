@@ -176,6 +176,14 @@
   overflow: visible;
 }
 
+.app-shell-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: var(--app-height, 100dvh);
+  max-height: var(--app-height, 100dvh);
+}
+
 .app-shell-main {
   flex: 0 1 auto;
   overflow: visible;
@@ -229,7 +237,7 @@ html[data-app-mode="standalone"] .app-shell-main {
 }
 
 .login-page {
-  height: 100%;
+  min-height: var(--app-height, 100dvh);
   display: flex;
   align-items: center;
   justify-content: center;
