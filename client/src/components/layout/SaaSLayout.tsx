@@ -436,7 +436,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
         <SidebarContent />
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header
           className="flex items-center justify-between px-3 md:px-4 h-14 bg-white border-b shrink-0 shadow-sm"
           style={{

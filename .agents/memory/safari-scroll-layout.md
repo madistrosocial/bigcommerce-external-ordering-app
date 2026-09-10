@@ -14,3 +14,9 @@ Authenticated pages rendered inside `SaaSLayout` should be content-growing. Do n
 **Why:** Page-level flex scrollers nested inside `.app-shell-main` recreate the iOS Safari toolbar and bottom-boundary problems the shell sizing fix is intended to prevent.
 
 **How to apply:** When adding or moving a route under `SaaSLayout`, start with normal-flow page content and let the browser document or standalone shell main own vertical scrolling. Add a bounded scroller only around a genuinely local region.
+
+Standalone shells also require `min-height: 0` on the direct flex column containing the header and `.app-shell-main`. Without it, the column's default `min-height: auto` can force the shell to grow to the page's content height, leaving the intended inner scroller with no overflow.
+
+**Why:** Long PWA pages were expanding the shell itself instead of scrolling inside `.app-shell-main`, which recreates the bottom-gap and stuck-toolbar symptoms even when the viewport variable is correct.
+
+**How to apply:** Keep the shell's content column shrinkable whenever the standalone shell owns the viewport height; verify a long page has `main.scrollHeight > main.clientHeight` while the shell height remains equal to the visible viewport.
