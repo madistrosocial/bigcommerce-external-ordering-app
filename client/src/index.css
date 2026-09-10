@@ -125,9 +125,8 @@
     min-height: 100%;
   }
 
-  /* Standalone iOS/iPadOS PWAs can keep the bottom safe area outside the
-     visual viewport. Extend the app root into it so the shell and overlays
-     draw over the entire screen instead of exposing the body background. */
+  /* Standalone iOS/iPadOS PWAs use a pinned shell because there is no browser
+     toolbar to collapse. Safe-area spacing belongs to the shell contents. */
   @media (display-mode: standalone) {
     html,
     body {
@@ -139,7 +138,7 @@
       position: fixed;
       inset: 0;
       overflow: hidden;
-      bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
+      background: #fbfcfe;
     }
   }
 
@@ -202,6 +201,7 @@
   .app-shell {
     height: 100%;
     overflow: hidden;
+    background: #fbfcfe;
   }
 
   .app-shell-main {
@@ -211,6 +211,35 @@
     overscroll-behavior: contain;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+}
+
+/* iOS exposes navigator.standalone even on versions where the CSS
+   display-mode media query is inconsistent. main.tsx sets this marker before
+   React mounts so standalone PWAs receive the same bounded-shell rules. */
+html[data-app-mode="standalone"] body {
+  height: 100%;
+  overflow: hidden;
+}
+
+html[data-app-mode="standalone"] #root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #fbfcfe;
+}
+
+html[data-app-mode="standalone"] .app-shell {
+  height: 100%;
+  overflow: hidden;
+  background: #fbfcfe;
+}
+
+html[data-app-mode="standalone"] .app-shell-main {
+  flex: 1 1 0%;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .login-page {
