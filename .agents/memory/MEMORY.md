@@ -28,4 +28,4 @@
 - [Dropshipping phase boundaries](dropshipping-phase-boundaries.md) — vendor catalog ingestion stays separate from BigCommerce/SkuVault side effects until an explicit import/order phase.
 - [Dropshipping display labels](dropshipping-display-labels.md) — vendor provider identity stays server-side; user-facing labels are persisted placeholders editable from the connector.
 - [ShipStation dropship automation](shipstation-dropship-automation.md) — product tags can flow to order tags, but shipment splitting needs separate product or routing configuration.
-- [Safari browser scroll layout](safari-scroll-layout.md) — browser uses document scrolling; standalone uses one bounded scroller whose direct flex column must be shrinkable.
+- [Safari browser scroll layout](safari-scroll-layout.md) — browser uses document scrolling; standalone uses one bounded scroller, with a sticky viewport-height desktop rail.
