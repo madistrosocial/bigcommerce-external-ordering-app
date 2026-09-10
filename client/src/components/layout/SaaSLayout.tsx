@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getKoleConnection, getUsersSummary } from "@/lib/api";
 import { useLocation } from "wouter";
@@ -102,8 +103,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     });
   };
   const navigate = (path: string) => {
+    // Safari samples the page-edge color when pushState runs. Remove the dark
+    // mobile backdrop first so browser chrome does not retain its gray tint.
+    if (mobileOpen) {
+      flushSync(() => setMobileOpen(false));
+    }
     setLocation(path);
-    setMobileOpen(false);
     if (!path.startsWith("/admin/")) {
       setOpenGroups((prev) => {
         if (!prev.has("settings")) return prev;
@@ -399,7 +404,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     >
       {mobileOpen && (
         <div
-          className="fixed left-0 right-0 bg-black/50 z-30 md:hidden"
+          className="mobile-nav-backdrop fixed left-0 right-0 bg-black/50 z-30 md:hidden"
           style={{
             top: "env(safe-area-inset-top)",
             bottom: "env(safe-area-inset-bottom)",
@@ -414,7 +419,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       <aside
-        className={cn("fixed left-0 h-full w-[240px] bg-slate-900 text-slate-100 z-40 flex flex-col transition-transform duration-200 border-r border-slate-800 md:hidden",
+        className={cn("mobile-nav-drawer fixed left-0 h-full w-[240px] bg-slate-900 text-slate-100 z-40 flex flex-col transition-transform duration-200 border-r border-slate-800 md:hidden",
           mobileOpen ? "translate-x-0" : "-translate-x-full")}
         style={{
           top: "env(safe-area-inset-top)",
