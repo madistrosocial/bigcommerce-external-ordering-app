@@ -1,6 +1,4 @@
- }),
-      });
-      if (!r.ok) throw new Error((await r.json()).error ?? "Failed to save");
+n()).error ?? "Failed to save");
       toast({ title: "General notes saved to BigCommerce" });
       refetchBcNotes();
       queryClient.invalidateQueries({ queryKey: ["crm", "customer", id, "timeline"] });
@@ -41,7 +39,7 @@
       ═══════════════════════════════════════════════════════════════════════ */}
       <div className="px-3 sm:px-4 md:px-6 pt-3 sm:pt-4">
         <div className="bg-white border rounded-xl p-4 sm:p-5 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
+          <div className="grid grid-cols-[auto_1fr] items-start gap-3 sm:flex sm:items-stretch sm:gap-4">
 
             {/* Avatar */}
             <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-blue-100 flex items-center justify-center shrink-0 self-center sm:self-start mt-0.5">
@@ -49,7 +47,7 @@
             </div>
 
             {/* Main info — grows */}
-            <div className="order-3 w-full min-w-0 sm:order-2 sm:flex-1">
+            <div className="order-3 col-span-2 w-full min-w-0 sm:order-2 sm:flex-1">
 
               {/* Company name */}
               {customer.company && (
@@ -240,7 +238,7 @@
             </div>
 
             {/* Right column: status badge + days counter */}
-            <div className="order-2 shrink-0 flex flex-col items-center gap-1 sm:order-3 sm:items-end sm:gap-2 sm:border-l sm:pl-4 sm:min-w-[72px]">
+            <div className="order-2 self-center shrink-0 flex flex-col items-start gap-1 sm:order-3 sm:self-auto sm:items-end sm:gap-2 sm:border-l sm:pl-4 sm:min-w-[72px]">
 
               {/* Active / Inactive status badge */}
               {canManageInactive ? (
