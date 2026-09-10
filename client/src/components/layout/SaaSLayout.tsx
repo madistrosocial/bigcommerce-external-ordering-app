@@ -417,7 +417,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
         />
       )}
 
-      <aside className={cn("app-shell-sidebar hidden md:flex flex-col bg-slate-900 text-slate-100 transition-all duration-200 shrink-0 border-r border-slate-800",
+      <aside className={cn("app-shell-sidebar hidden md:flex flex-col bg-slate-900 text-slate-100 transition-all duration-200 border-r border-slate-800",
         collapsed ? "w-[60px]" : "w-[220px]")}>
         <SidebarContent />
       </aside>
@@ -436,7 +436,10 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
         <SidebarContent />
       </aside>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className={cn(
+        "flex min-h-0 min-w-0 flex-1 flex-col transition-[margin] duration-200",
+        collapsed ? "md:ml-[60px]" : "md:ml-[220px]",
+      )}>
         <header
           className="flex items-center justify-between px-3 md:px-4 h-14 bg-white border-b shrink-0 shadow-sm"
           style={{

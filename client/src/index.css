@@ -177,9 +177,10 @@
 }
 
 .app-shell-sidebar {
-  position: sticky;
+  position: fixed;
   top: 0;
-  align-self: flex-start;
+  left: 0;
+  z-index: 20;
   height: var(--app-height, 100dvh);
   max-height: var(--app-height, 100dvh);
 }

@@ -21,8 +21,8 @@ Standalone shells also require `min-height: 0` on the direct flex column contain
 
 **How to apply:** Keep the shell's content column shrinkable whenever the standalone shell owns the viewport height; verify a long page has `main.scrollHeight > main.clientHeight` while the shell height remains equal to the visible viewport.
 
-In browser mode, a desktop sidebar must be its own sticky viewport-height rail rather than a full-height flex sibling of the growing page content. Its navigation can scroll locally so the sign-out footer stays visible on long modules.
+In browser mode, a desktop sidebar must be its own fixed viewport-height rail rather than a full-height flex sibling of the growing page content. Its navigation can scroll locally so the sign-out footer stays visible on long modules.
 
 **Why:** Content-growing browser pages otherwise stretch the sidebar to the page height, pushing the footer below the viewport on routes such as Customers while short routes appear correct.
 
-**How to apply:** Use `position: sticky; top: 0; height: var(--app-height, 100dvh)` on the desktop rail and keep document scrolling on the page content.
+**How to apply:** Use `position: fixed; inset-block-start: 0; inset-inline-start: 0; height: var(--app-height, 100dvh)` on the desktop rail, offset the content column by the rail width, and keep document scrolling on the page content.
