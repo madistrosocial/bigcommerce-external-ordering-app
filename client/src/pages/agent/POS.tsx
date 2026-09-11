@@ -112,9 +112,9 @@ function variantLabel(variant: any): string {
   return variant.sku || "";
 }
 
-function productMatchesSearch(product: api.Product, query: string): boolean {
+function productSearchScore(product: api.Product, query: string): number {
   const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return false;
+  if (terms.length === 0) return -1;
 
   const productText = `${product.name || ""} ${product.sku || ""}`.toLowerCase();
   const variantText = getVariants(product)
@@ -128,9 +128,26 @@ function productMatchesSearch(product: api.Product, query: string): boolean {
     .join(" ")
     .toLowerCase();
 
-  return terms.every(
-    (term) => productText.includes(term) || variantText.includes(term),
+  if (!terms.every((term) => productText.includes(term) || variantText.includes(term))) {
+    return -1;
+  }
+  if (terms.length === 1) return 0;
+
+  const titleMatches = terms.filter((term) => productText.includes(term)).length;
+  const variantMatches = terms.filter((term) => variantText.includes(term)).length;
+  const titleAndVariantMatch = titleMatches > 0 && variantMatches > 0;
+  const exactTitleQuery = productText.includes(query.toLowerCase().trim());
+
+  return (
+    (titleAndVariantMatch ? 1000 : 0) +
+    titleMatches * 100 +
+    variantMatches * 80 +
+    (exactTitleQuery ? 25 : 0)
   );
+}
+
+function productMatchesSearch(product: api.Product, query: string): boolean {
+  return productSearchScore(product, query) >= 0;
 }
 
 function loadPersistedPosCustomer(): api.BigCommerceCustomer | null {
@@ -2163,9 +2180,11 @@ export default function POSPage() {
       const lower = q.toLowerCase().trim();
 
       // Instant local filtering of pinned products
-      const localMatches = pinnedProducts.filter((p) =>
-        productMatchesSearch(p, lower),
-      );
+      const localMatches = pinnedProducts
+        .filter((p) => productMatchesSearch(p, lower))
+        .sort(
+          (a, b) => productSearchScore(b, lower) - productSearchScore(a, lower),
+        );
       const localSuggestions = buildSuggestions(localMatches);
 
       if (!canSearchBC) {

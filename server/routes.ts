@@ -2571,7 +2571,7 @@ export async function registerRoutes(
           }
         }
 
-        kwProducts = Array.from(candidates.values()).filter((product) => {
+        const rankedProducts = Array.from(candidates.values()).filter((product) => {
           const productText = String(product.name || "").toLowerCase();
           const variantText = (product.variants || [])
             .flatMap((variant: any) => [
@@ -2588,6 +2588,38 @@ export async function registerRoutes(
             (term) => productText.includes(term) || variantText.includes(term),
           );
         });
+
+        const queryText = q.toLowerCase();
+        const scoreProduct = (product: any): number => {
+          const productText = String(product.name || "").toLowerCase();
+          const variantText = (product.variants || [])
+            .flatMap((variant: any) => [
+              variant.name,
+              variant.sku,
+              variant.upc,
+              ...(variant.option_values || []).map((option: any) => option.label),
+            ])
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          const titleMatches = searchTerms.filter((term) => productText.includes(term)).length;
+          const variantMatches = searchTerms.filter((term) => variantText.includes(term)).length;
+          const titleAndVariantMatch = titleMatches > 0 && variantMatches > 0;
+          const exactTitleQuery = productText.includes(queryText);
+
+          // Mixed title + variant matches are the most useful result for a
+          // multi-word POS search. More matched title/variant terms then break ties.
+          return (
+            (titleAndVariantMatch ? 1000 : 0) +
+            titleMatches * 100 +
+            variantMatches * 80 +
+            (exactTitleQuery ? 25 : 0)
+          );
+        };
+
+        kwProducts = rankedProducts.sort(
+          (a, b) => scoreProduct(b) - scoreProduct(a),
+        );
       } else {
         kwProducts = await fetchKeywordProducts(q);
       }
