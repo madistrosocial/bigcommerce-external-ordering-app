@@ -146,6 +146,43 @@ function productSearchScore(product: api.Product, query: string): number {
   );
 }
 
+function variantSearchScore(
+  product: api.Product,
+  variant: any,
+  query: string,
+): number {
+  const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return -1;
+
+  const productText = String(product.name || "").toLowerCase();
+  const variantText = [
+    variant?.name,
+    variant?.sku,
+    variant?.upc,
+    variantLabel(variant),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (!terms.every((term) => productText.includes(term) || variantText.includes(term))) {
+    return -1;
+  }
+  if (terms.length === 1) return 0;
+
+  const titleMatches = terms.filter((term) => productText.includes(term)).length;
+  const variantMatches = terms.filter((term) => variantText.includes(term)).length;
+  const titleAndVariantMatch = titleMatches > 0 && variantMatches > 0;
+  const exactTitleQuery = productText.includes(query.toLowerCase().trim());
+
+  return (
+    (titleAndVariantMatch ? 1000 : 0) +
+    titleMatches * 100 +
+    variantMatches * 80 +
+    (exactTitleQuery ? 25 : 0)
+  );
+}
+
 function productMatchesSearch(product: api.Product, query: string): boolean {
   return productSearchScore(product, query) >= 0;
 }
@@ -194,6 +231,7 @@ type SuggestionVariant = {
   kind: "variant";
   product: api.Product;
   variant: any;
+  searchScore?: number;
 };
 type SuggestionProduct = { kind: "product"; product: api.Product };
 type Suggestion = SuggestionVariant | SuggestionProduct;
@@ -2117,15 +2155,27 @@ export default function POSPage() {
 
   // ── Build suggestions from BC products ──────────────────────────────────────
   const buildSuggestions = useCallback(
-    (products: api.Product[]): Suggestion[] => {
+    (products: api.Product[], query = ""): Suggestion[] => {
       const variantItems: SuggestionVariant[] = [];
       const productItems: SuggestionProduct[] = [];
+      const isMultiWordSearch =
+        query.trim().split(/\s+/).filter(Boolean).length > 1;
 
       for (const p of products) {
         const variants = getVariants(p);
         if (variants.length > 0) {
           for (const v of variants) {
-            variantItems.push({ kind: "variant", product: p, variant: v });
+            const searchScore = isMultiWordSearch
+              ? variantSearchScore(p, v, query)
+              : undefined;
+            if (!isMultiWordSearch || (searchScore ?? -1) >= 0) {
+              variantItems.push({
+                kind: "variant",
+                product: p,
+                variant: v,
+                searchScore,
+              });
+            }
           }
         }
       }
@@ -2153,6 +2203,15 @@ export default function POSPage() {
         if (bStock <= 0 && aStock > 0) return -1;
         return 0;
       });
+
+      if (isMultiWordSearch) {
+        // Multi-word searches should show the best individual variants first,
+        // rather than making the user open each matching product title.
+        variantItems.sort(
+          (a, b) => (b.searchScore ?? 0) - (a.searchScore ?? 0),
+        );
+        return [...variantItems, ...productItems];
+      }
 
       // >50 total results → mother products first (easier to pick); ≤50 → variants first
       const totalResults = variantItems.length + productItems.length;
@@ -2185,7 +2244,7 @@ export default function POSPage() {
         .sort(
           (a, b) => productSearchScore(b, lower) - productSearchScore(a, lower),
         );
-      const localSuggestions = buildSuggestions(localMatches);
+      const localSuggestions = buildSuggestions(localMatches, lower);
 
       if (!canSearchBC) {
         setSuggestions(localSuggestions);
@@ -2218,7 +2277,7 @@ export default function POSPage() {
             setShowSuggestions(false);
             focusSearch();
           } else {
-            const bcSuggestions = buildSuggestions(result.products);
+            const bcSuggestions = buildSuggestions(result.products, q.trim());
             setSuggestions(bcSuggestions);
             setShowSuggestions(bcSuggestions.length > 0);
           }
