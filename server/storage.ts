@@ -2006,7 +2006,7 @@ export class DatabaseStorage implements IStorage {
       { name: "Closed", color: "#dc2626", position: 5, is_active: true, is_default: false },
     ];
     for (const stage of defaults) {
-      await db.insert(crmReactivationStages).values(stage);
+      await db.insert(crmReactivationStages).values(stage).onConflictDoNothing({ target: crmReactivationStages.name });
     }
     return this.getReactivationStages(true);
   }
@@ -2118,7 +2118,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(caseStage, eq(caseStage.id, crmReactivationCases.stage_id))
       .leftJoin(ownerUser, eq(ownerUser.id, crmReactivationCases.owner_user_id));
 
-    const [countRows, rows, summaryRows] = await Promise.all([
+    const [countRows, rows, summaryRecords] = await Promise.all([
       fromQuery(db.select({ count: sql<number>`count(distinct ${customersMirror.id})::int` })).where(where),
       fromQuery(db.select({
         c: customersMirror,
@@ -2139,12 +2139,23 @@ export class DatabaseStorage implements IStorage {
         reactivation_updated_at: crmReactivationCases.updated_at,
       })).where(where).orderBy(orderExpr as any).limit(limit).offset(offset),
       fromQuery(db.select({
-        stage_id: sql<number>`coalesce(${crmReactivationCases.stage_id}, ${defaultStage.id})`,
-        count: sql<number>`count(distinct ${customersMirror.id})::int`,
-        expected_value: sql<string>`coalesce(sum(${crmReactivationCases.expected_value}), 0)::text`,
-        overdue: sql<number>`count(distinct ${customersMirror.id}) filter (where ${crmReactivationCases.next_action_date} IS NOT NULL AND ${crmReactivationCases.next_action_date} < now())::int`,
-      })).where(where).groupBy(sql`coalesce(${crmReactivationCases.stage_id}, ${defaultStage.id})`),
+        customer_id: customersMirror.id,
+        stage_id: crmReactivationCases.stage_id,
+        expected_value: crmReactivationCases.expected_value,
+        next_action_date: crmReactivationCases.next_action_date,
+      })).where(where),
     ]);
+    const summaryByStage = new Map<number, { stage_id: number; count: number; expected_value: number; overdue: number }>();
+    for (const record of summaryRecords) {
+      const stageIdForSummary = record.stage_id ?? defaultStage.id;
+      if (!summaryByStage.has(record.customer_id)) {
+        const current = summaryByStage.get(stageIdForSummary) ?? { stage_id: stageIdForSummary, count: 0, expected_value: 0, overdue: 0 };
+        current.count += 1;
+        current.expected_value += Number(record.expected_value ?? 0);
+        if (record.next_action_date && new Date(record.next_action_date).getTime() < Date.now()) current.overdue += 1;
+        summaryByStage.set(stageIdForSummary, current);
+      }
+    }
 
     return {
       customers: rows.map((row: any) => ({
@@ -2166,7 +2177,7 @@ export class DatabaseStorage implements IStorage {
         reactivation_updated_at: row.reactivation_updated_at ?? null,
       })),
       total: countRows[0]?.count ?? 0,
-      summary: summaryRows,
+      summary: Array.from(summaryByStage.values()).map(summary => ({ ...summary, expected_value: summary.expected_value.toFixed(2) })),
     };
   }
 

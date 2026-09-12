@@ -356,6 +356,7 @@ export const crmReactivationStages = pgTable("crm_reactivation_stages", {
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({
+  nameUnique: uniqueIndex("idx_crm_reactivation_stages_name_unique").on(t.name),
   positionIdx: index("idx_crm_reactivation_stages_position").on(t.position),
   activeIdx: index("idx_crm_reactivation_stages_active").on(t.is_active),
 }));

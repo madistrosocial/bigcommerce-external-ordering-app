@@ -30,3 +30,4 @@
 - [ShipStation dropship automation](shipstation-dropship-automation.md) — product tags can flow to order tags, but shipment splitting needs separate product or routing configuration.
 - [GitHub push authentication](github-push-auth.md) — Git HTTPS push may reject the installed GitHub integration; use its authenticated Git data API for branch-only updates.
 - [BigCommerce customer search filters](bigcommerce-customer-search-filters.md) — this store rejects v3 company:like and phone:like; use cached v2 directory filtering for those fields.
+- [Reactivation stage initialization](reactivation-stage-initialization.md) — default pipeline seeding must be conflict-safe because board and stage requests can initialize concurrently.
