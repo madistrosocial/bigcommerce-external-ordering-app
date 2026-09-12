@@ -2,9 +2,7 @@
 
 ## Overview
 
-VanSales Pro is an offline-first mobile van sales application designed for field sales agents. The application allows sales agents to browse product catalogs, manage shopping carts, and create orders while working in areas with limited connectivity. Administrators can manage product catalogs and agent accounts through a separate admin interface.
-
-The system integrates with BigCommerce as the source of product data and order synchronization, with local IndexedDB storage enabling offline functionality.
+VanSales Pro is an offline-first mobile van sales application designed for field sales agents to manage product catalogs, shopping carts, and create orders even with limited connectivity. It aims to streamline the sales process for agents on the go. Administrators can manage product data and agent accounts through a separate interface. The system integrates with BigCommerce for product data and order synchronization, leveraging local IndexedDB for robust offline capabilities.
 
 ## User Preferences
 
@@ -12,101 +10,57 @@ Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
-### Frontend Architecture
+### Frontend
 - **Framework**: React 18 with TypeScript
-- **Routing**: Wouter (lightweight alternative to React Router)
-- **State Management**: Zustand for global app state (user session, cart, offline mode)
-- **Data Fetching**: TanStack Query for server state and caching
-- **Offline Storage**: Dexie.js (IndexedDB wrapper) for local data persistence
-- **UI Components**: shadcn/ui component library built on Radix UI primitives
-- **Styling**: Tailwind CSS v4 with custom industrial slate theme
+- **Routing**: Wouter
+- **State Management**: Zustand (global state), TanStack Query (server state/caching)
+- **Offline Storage**: Dexie.js (IndexedDB)
+- **UI Components**: shadcn/ui (built on Radix UI)
+- **Styling**: Tailwind CSS v4 with a custom industrial slate theme
 
-### Backend Architecture
+### Backend
 - **Runtime**: Node.js with Express.js
-- **Language**: TypeScript compiled with tsx
-- **API Design**: RESTful endpoints under `/api/` prefix
-- **Build System**: Vite for development, esbuild for production server bundling
+- **Language**: TypeScript
+- **API Design**: RESTful endpoints
+- **Build System**: Vite (development), esbuild (production)
 
 ### Data Storage
 - **Primary Database**: PostgreSQL with Drizzle ORM
-- **Schema Location**: `shared/schema.ts` contains all table definitions
-- **Migrations**: Managed via `drizzle-kit push` command
-- **Client-side**: IndexedDB via Dexie for offline-first capabilities
+- **Schema**: Defined in `shared/schema.ts`
+- **Client-side**: IndexedDB via Dexie for offline persistence
 
 ### Authentication
-- **Method**: Username/password authentication with bcryptjs hashing
-- **Session Storage**: User stored in localStorage after login
-- **Role-based Access**: Two roles - 'admin' and 'agent' with separate interfaces
+- **Method**: Username/password with bcryptjs hashing
+- **Session**: User stored in localStorage
+- **Access Control**: Role-based ('admin', 'agent') with distinct interfaces
 
-### Key Data Models
-- **Users**: Admin and agent accounts with enable/disable functionality
-- **Products**: Catalog items with BigCommerce ID references, pinning for featured items
-- **Orders**: Sales orders with status tracking (draft/pending_sync/failed/synced), order notes, sync error capture
-
-### Order Status Flow
-1. **Draft** - Created offline with manual customer input, no BigCommerce sync
-2. **Pending** - Awaiting sync to BigCommerce
-3. **Synced** - Successfully synced with BigCommerce order ID
-4. **Failed** - Sync attempt failed, error message stored in sync_error field
-
-### Local Price History Cache
-- IndexedDB table `localPriceHistory` mirrors the Postgres `price_history_cache` table
-- `getLocalPriceHistory(customerId, productId)` is checked first before backend price history API calls
-- Background sync hook (`usePriceHistorySync`) syncs Postgres records into IndexedDB incrementally
-- Sync is device-aware: mobile skips, tablet prompts user once, desktop syncs automatically when idle (2.5s)
-- Sync endpoint: `GET /api/price-history/sync?after=<ms>&limit=<n>`
-- Last sync timestamp stored in localStorage key `vansales_price_history_last_sync`
-- Sync indicator shown at bottom-left of POS during sync; tablet shows a confirm prompt
-
-### Offline Mode
-- Automatic detection via browser online/offline events
-- When offline: Customer search disabled, manual input fields shown
-- Draft orders can be submitted when back online with automatic customer matching
-- If auto-match fails, agent can edit customer details and manually search BigCommerce
-
-### Agent Permissions
-- `allow_bigcommerce_search` field on users table controls agent catalog search
-- When enabled, agents see toggle to search full BigCommerce catalog (not just pinned products)
-- Backend validates permission before allowing BigCommerce search API calls
-- Admin can toggle permission per-agent in Users tab
-
-### Inventory Validation
-- Cart quantity inputs are clamped to available stock level
-- +/- buttons respect inventory limits
-- Zero-inventory items cannot be added to cart
-- Validation accounts for items already in cart
-
-### Directory Structure
-```
-├── client/src/          # React frontend application
-│   ├── components/ui/   # shadcn/ui components
-│   ├── pages/           # Route components (Login, admin/, agent/)
-│   ├── lib/             # Utilities, API client, stores
-│   └── hooks/           # Custom React hooks
-├── server/              # Express backend
-│   ├── routes.ts        # API endpoint definitions
-│   ├── storage.ts       # Database access layer
-│   └── static.ts        # Production static file serving
-├── shared/              # Shared code between client/server
-│   └── schema.ts        # Drizzle database schema
-└── db/                  # Database configuration and seeds
-```
+### Key Features
+- **Offline-First Capabilities**: Enables agents to work without internet, syncing data when reconnected. Includes offline order creation and customer management.
+- **Product Catalog Management**: Agents can browse and select products, with pinning for featured items.
+- **Order Management**: Create, view, and manage sales orders with various statuses (Draft, Pending, Synced, Failed). Includes a local price history cache for quick access to past customer prices.
+- **Cart Validation & Max Purchase Override**: Automatic quantity validation and a mechanism to override BigCommerce max purchase limits during checkout for specific scenarios.
+- **Manual Inventory Push**: Admins can manually push inventory updates to BigCommerce, with logging and search functionality.
+- **Agent Permissions (RBAC)**: Granular role-based access control system (`roles`, `permissions`, `role_permissions`, `user_permissions`) governing access to modules and actions.
+- **Customer Management**: Create new BigCommerce customers and view/manage all BigCommerce customers with search, sort, and detailed order history.
+- **BigCommerce Order Browser**: Comprehensive interface to view, filter, search, and edit existing BigCommerce orders, including adding/removing/updating line items.
+- **SaaS Layout**: Global application layout with a collapsible sidebar and header, adapting for mobile and desktop, with role-based navigation.
+- **Dashboard**: Landing page providing a summary of orders and quick actions for both agents and administrators.
+- **Admin Console**: Dedicated section for administrators to manage users, roles, permissions, BigCommerce integration settings, and view all orders.
 
 ## External Dependencies
 
 ### Database
-- **PostgreSQL**: Primary data store accessed via `DATABASE_URL` environment variable
-- **Drizzle ORM**: Type-safe database queries and schema management
+- **PostgreSQL**: Primary relational database.
+- **Drizzle ORM**: Type-safe ORM for PostgreSQL.
 
 ### Third-Party Services
-- **BigCommerce**: External e-commerce platform for product catalog source and order syncing (fully integrated with v2 Orders API)
-- **Google Sheets**: Order backup integration was requested but dismissed - user declined to provide credentials. To enable in future, user needs to provide Google Service Account JSON and spreadsheet ID.
+- **BigCommerce**: E-commerce platform used for product catalog, inventory, and order synchronization.
 
 ### Key npm Packages
-- `@tanstack/react-query`: Server state management
-- `dexie` + `dexie-react-hooks`: IndexedDB offline storage
-- `zustand`: Client state management
-- `bcryptjs`: Password hashing
-- `drizzle-orm` + `drizzle-kit`: Database ORM and migrations
-- `wouter`: Client-side routing
-- Radix UI primitives: Accessible component foundations
+- `@tanstack/react-query`: Server state management.
+- `dexie` + `dexie-react-hooks`: IndexedDB wrapper for offline storage.
+- `zustand`: Client-side state management.
+- `bcryptjs`: Password hashing utility.
+- `drizzle-orm` + `drizzle-kit`: ORM and migration tools for PostgreSQL.
+- `wouter`: Lightweight client-side router.
+- Radix UI primitives: Headless UI component library.

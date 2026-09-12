@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import type { User, Product } from './api';
 
+export const POS_SELECTED_CUSTOMER_STORAGE_KEY = 'vansales_pos_selected_customer';
+export const POS_SELECTED_ADDRESS_STORAGE_KEY = 'vansales_pos_selected_address';
+
 export interface CartItem {
   lineId: string;
   product: Product;
@@ -68,8 +71,22 @@ function loadPersistedCart(): CartItem[] {
   }
 }
 
+function loadPersistedUser(): User | null {
+  try {
+    const raw = localStorage.getItem('vansales_user');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed as User;
+  } catch {
+    // A damaged saved session must not prevent the app from rendering.
+    try { localStorage.removeItem('vansales_user'); } catch {}
+    return null;
+  }
+}
+
 export const useStore = create<AppState>((set, get) => ({
-  currentUser: JSON.parse(localStorage.getItem('vansales_user') || 'null'),
+  currentUser: loadPersistedUser(),
   isOfflineMode: !navigator.onLine,
   cart: loadPersistedCart(),
 
@@ -81,6 +98,8 @@ export const useStore = create<AppState>((set, get) => ({
   logout: () => {
     localStorage.removeItem('vansales_user');
     localStorage.removeItem('vansales_cart');
+    localStorage.removeItem(POS_SELECTED_CUSTOMER_STORAGE_KEY);
+    localStorage.removeItem(POS_SELECTED_ADDRESS_STORAGE_KEY);
     set({ currentUser: null, cart: [] });
   },
 

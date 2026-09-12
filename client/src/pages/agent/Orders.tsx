@@ -1,8 +1,7 @@
-import { MobileShell } from "@/components/layout/MobileShell";
 import { useStore } from "@/lib/store";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { format } from "date-fns";
+import { useTimeService } from "@/hooks/useTimeService";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +18,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import * as api from "@/lib/api";
 
 function getStatusBadge(order: api.Order) {
@@ -59,6 +58,7 @@ function getStatusBadge(order: api.Order) {
 
 export default function Orders() {
   const { currentUser, isOfflineMode, addToCart, clearCart } = useStore();
+  const fmt = useTimeService();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
@@ -75,18 +75,10 @@ export default function Orders() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ── Invoice ────────────────────────────────────────────────────────────────
-  const storeHashRef = useRef<string>("");
-  useEffect(() => {
-    api.getSetting('bigcommerce_config').then(s => {
-      if (s?.value?.storeHash) storeHashRef.current = s.value.storeHash;
-    }).catch(() => {});
-  }, []);
-  const buildInvoiceUrl = (orderId: number) =>
-    `https://store-${storeHashRef.current}.mybigcommerce.com/admin/index.php?ToDo=printOrderInvoice&orderId=${orderId}`;
   const handlePrintInvoice = (order: api.Order) => {
     const orderId = order.bigcommerce_order_id || order.id;
     if (!orderId) return;
-    window.open(buildInvoiceUrl(orderId), "_blank");
+    window.open(`/invoice/${orderId}`, "_blank");
   };
 
   const { data: orders = [] } = useQuery({ 
@@ -215,9 +207,21 @@ export default function Orders() {
     }
   };
 
-  const loadDraftToCart = (order: api.Order) => {
+  const loadDraftToCart = async (order: api.Order) => {
     clearCart();
+    // Fetch fresh stock so max_purchase_quantity is populated on every item —
+    // without this, the max-qty override bypass is skipped for drafted carts.
+    const bcIds = [...new Set(order.items.map(i => i.bigcommerce_product_id).filter((id): id is number => !!id))];
+    const stockMap = new Map<number, api.StockInfo>();
+    if (bcIds.length > 0) {
+      try {
+        const stockData = await api.refreshProductStock(bcIds);
+        stockData.forEach(s => stockMap.set(s.bigcommerce_id, s));
+      } catch {}
+    }
     order.items.forEach((item) => {
+      const info = item.bigcommerce_product_id ? stockMap.get(item.bigcommerce_product_id) : undefined;
+      const freshVariantInfo = item.variant_id ? info?.variants.find(v => v.id === item.variant_id) : undefined;
       const product: any = {
         id: item.product_id ?? 0,
         name: item.name,
@@ -225,10 +229,11 @@ export default function Orders() {
         price: parseFloat(item.price_at_sale),
         image: item.image || "",
         description: "",
-        stock_level: 0,
+        stock_level: info?.stock_level ?? 0,
         is_pinned: false,
         bigcommerce_id: item.bigcommerce_product_id ?? 0,
         variants: [],
+        max_purchase_quantity: info?.max_purchase_quantity ?? null,
       };
       const variant = item.variant_id
         ? {
@@ -236,7 +241,8 @@ export default function Orders() {
             sku: item.sku,
             price: parseFloat(item.price_at_sale),
             option_values: item.variant_option_values || [],
-            stock_level: 0,
+            stock_level: freshVariantInfo?.stock_level ?? 0,
+            max_purchase_quantity: freshVariantInfo?.max_purchase_quantity ?? null,
           }
         : undefined;
       const price = parseFloat(item.price_at_sale) || 0;
@@ -348,7 +354,7 @@ export default function Orders() {
   };
 
   return (
-    <MobileShell title="Order History">
+    <div className="p-4 md:p-6 max-w-4xl mx-auto">
       <div className="space-y-4">
         {orders.map((order) => (
           <Card key={order.id} className="overflow-hidden" data-testid={`order-${order.id}`}>
@@ -363,7 +369,7 @@ export default function Orders() {
                     <div className="flex items-center justify-between w-full text-sm text-slate-500 font-normal">
                       <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {order.date && format(new Date(order.date), "MMM d, h:mm a")}
+                        {order.date && fmt.dateTimeShort(order.date)}
                       </span>
                       <span className="font-bold text-slate-900" data-testid={`total-${order.id}`}>${parseFloat(order.total).toFixed(2)}</span>
                     </div>
@@ -613,6 +619,6 @@ export default function Orders() {
         </DialogContent>
       </Dialog>
 
-    </MobileShell>
+    </div>
   );
 }

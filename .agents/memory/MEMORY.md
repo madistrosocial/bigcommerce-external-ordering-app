@@ -1,0 +1,32 @@
+- [Rollup native binary fix](rollup-fix.md) — missing @rollup/rollup-linux-x64-gnu breaks startup; fix with installLanguagePackages.
+- [CRM Phase 1 build](crm-phase1.md) — 3 new tables, storage methods, routes, pages all built; db:push confirmed.
+- [Duplicate getBcCreds hoisting bug](duplicate-function-hoisting.md) — two same-named async functions in registerRoutes(); JS hoisting lets the second silently win and break all callers.
+- [CRM auth pattern](crm-auth-pattern.md) — `requireAuth` sets `authUser`, NOT `userId`; using `(req as any).userId` silently breaks all CRM endpoints (returns 401 → shows 0 customers).
+- [CRM Visibility RBAC](crm-visibility-rbac.md) — crm:view_all is the canonical "see all customers" perm; CRM_ACTION_PERMS in AdminUsers.tsx; health cards and reactivation both now pass visibility scope.
+- [Native BC store credit checkout](bc-native-store-credit.md) — full OAuth flow for native store_credit_amount on POS orders; requires clientId+clientSecret in bigcommerce_config setting.
+- [Reports Module architecture](reports-module.md) — shared engine pattern; individual reports supply config only; use getAllPermissions() not getPermissions() in seeds.
+- [BC order note editing pattern](bc-order-note-editing.md) — PATCH /api/bigcommerce/orders/:bcOrderId/notes is the canonical endpoint; field names are staff_notes + customer_message (not customer_note).
+- [CustomerOrdersPanel reuse](customer-orders-panel.md) — CRM CustomerProfile uses CustomerOrdersPanel with customerInfo prop; panel uses BcOrderExpandedRow + BcOrderActionsMenu; order # links to /orders/bc/:id.
+- [Sales App order routing](sales-app-order-routing.md) — synced Sales App orders must use their BigCommerce ID for detail navigation; only unsynced orders use the local ID.
+- [iOS PWA safe-area layout](ios-pwa-safe-area-layout.md) — keep the app shell edge-to-edge; apply safe-area insets to headers and fixed controls, not the outer wrapper.
+- [BC line items uniqueness](bc-line-items-uniqueness.md) — UNIQUE functional index on (order_id, product_id, COALESCE(variant_id,0)); no query-time dedup; full sync truncates line items only (not customers/orders).
+- [Inventory Audit + SKUVault module](inventory-audit-module.md) — Full build: schema, skuvault.ts client, storage methods, routes, all frontend pages; partial-unique-index seeded at startup.
+- [SKUVault location lookup & push strategy](skuvault-location-lookup.md) — addItemBulk for push; getInventoryByLocation (ProductSKUs, dict response) + getAvailableQuantities fallback for zero-stock; location stored in push log + audit task.
+- [SKUVault Reason field & React Query cache trap](skuvault-reason-field.md) — Reason must be exact account-configured text string; QueryClient staleTime:Infinity traps stale empty results; use useEffect not useQuery for per-mount settings; server-side reason substitution guards all push routes.
+- [Render secret boundary](render-secret-boundary.md) — Render does not inherit Replit Secrets; production auth needs a Render-managed generated SESSION_SECRET.
+- [SMTP retry safety](smtp-retry-safety.md) — retry only explicit pre-DATA transient responses; post-DATA SMTP failures have uncertain acceptance and must not be retried.
+- [Tiptap external content sync](tiptap-external-content-sync.md) — Tiptap 3 setContent syncs must suppress update events when parent state owns the HTML.
+- [Marketing audience safety](marketing-audience-safety.md) — blank audiences are draft-only; “all eligible” must be an explicit selection, never a fallback.
+- [Marketing editor media](marketing-editor-media.md) — local marketing images use bounded inline data URLs with server-side HTML validation; product clicks use signed redirects.
+- [Marketing sender settings](marketing-sender-settings.md) — reusable From addresses are separate from SMTP credentials; legacy campaigns fall back to the existing invoice sender.
+- [Zoho marketing delivery boundary](zoho-marketing-delivery.md) — ZeptoMail is transactional-only; compliant campaign delivery requires Zoho Campaigns/Email API access.
+- [Attendance accounting baseline](attendance-accounting-baseline.md) — ledger excludes weekends and observed US holidays; short hours use an 8-hour weekday expectation until schedules are configurable.
+- [Stale session recovery](stale-session-recovery.md) — invalid saved auth must fail safely and expose a cache-clearing force-logout path.
+- [Attendance review and audit](attendance-review-audit.md) — completion state stays separate from manager approval; corrections preserve reasoned old/new history.
+- [Attendance location maps](attendance-location-maps.md) — admin views use validated Google Maps links; employee APIs keep raw coordinates hidden.
+- [Draft invoice safety](draft-invoice-safety.md) — draft PDFs must stay visibly non-final and never expose staff notes or SMTP credentials.
+- [Dropshipping phase boundaries](dropshipping-phase-boundaries.md) — vendor catalog ingestion stays separate from BigCommerce/SkuVault side effects until an explicit import/order phase.
+- [Dropshipping display labels](dropshipping-display-labels.md) — vendor provider identity stays server-side; user-facing labels are persisted placeholders editable from the connector.
+- [ShipStation dropship automation](shipstation-dropship-automation.md) — product tags can flow to order tags, but shipment splitting needs separate product or routing configuration.
+- [GitHub push authentication](github-push-auth.md) — Git HTTPS push may reject the installed GitHub integration; use its authenticated Git data API for branch-only updates.
+- [BigCommerce customer search filters](bigcommerce-customer-search-filters.md) — this store rejects v3 company:like and phone:like; use cached v2 directory filtering for those fields.

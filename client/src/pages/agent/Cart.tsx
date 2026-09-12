@@ -1,4 +1,3 @@
-import { MobileShell } from "@/components/layout/MobileShell";
 import { useStore } from "@/lib/store";
 import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
@@ -7,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Plus, Minus, CreditCard, Search, MapPin, User, Loader2, WifiOff, FileText, X } from "lucide-react";
+import { Trash2, Plus, Minus, CreditCard, Search, MapPin, User, Loader2, WifiOff, FileText, X, AlertTriangle } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -89,17 +88,28 @@ export default function Cart() {
     if (!raw) return;
     localStorage.removeItem('vansales_restore_customer');
     try {
-      const { bcId } = JSON.parse(raw) as { bcId: number };
+      const { bcId, name, email } = JSON.parse(raw) as {
+        bcId: number;
+        name?: string;
+        email?: string;
+      };
       if (!bcId) return;
       api.getCustomerByBcId(bcId).then(async (customer) => {
         setSelectedCustomer(customer);
-        setCustomerSearch(`${customer.first_name} ${customer.last_name}`);
+        const loadedName = `${customer.first_name || ""} ${customer.last_name || ""}`.trim();
+        setCustomerSearch(loadedName || name || email || "");
         try {
           const addresses = await api.getCustomerAddresses(customer.id);
           setCustomerAddresses(addresses);
           if (addresses.length > 0) setSelectedAddress(addresses[0]);
         } catch {}
-      }).catch(() => {});
+      }).catch(() => {
+        // Keep the name from the draft visible even if the customer lookup is
+        // temporarily unavailable. The user can retry the customer search.
+        setCustomerSearch(name || email || "");
+        setManualCustomerName(name || "");
+        setManualCustomerEmail(email || "");
+      });
     } catch {}
   }, []);
 
@@ -166,11 +176,17 @@ export default function Cart() {
         const results = await api.searchBigCommerceCustomers(query);
         setSearchResults(results);
         setShowResults(true);
+        if (results.length === 0) {
+          toast({ title: "No customers found", description: "Try a different name or email." });
+        }
       } catch (e: any) {
         console.error('Customer search error:', e);
+        setSearchResults([]);
         if (e.message?.includes('fetch') || e.message?.includes('network')) {
           setOfflineMode(true);
           toast({ title: "Connection lost", description: "Switched to offline mode", variant: "destructive" });
+        } else {
+          toast({ title: "Search failed", description: e.message || "Could not search customers.", variant: "destructive" });
         }
       } finally {
         setIsSearching(false);
@@ -218,6 +234,36 @@ export default function Cart() {
     }
 
     setIsSubmitting(true);
+
+    // ── Max purchase qty override ────────────────────────────────────────────
+    // BC supports limits at variant level AND product level — handle both.
+    const variantLimitMap = new Map<string, { product_id: number; variant_id: number; originalMax: number | null }>();
+    const productLimitMap = new Map<number, number | null>();
+    for (const item of cart) {
+      const pid = item.product.bigcommerce_id;
+      if (!pid) continue;
+      const vMax = item.variant?.max_purchase_quantity ?? null;
+      if (item.variant?.id != null && vMax != null && vMax > 0) {
+        const key = `${pid}-${item.variant.id}`;
+        if (!variantLimitMap.has(key))
+          variantLimitMap.set(key, { product_id: pid, variant_id: item.variant.id, originalMax: vMax });
+      } else {
+        const pMax = item.product.max_purchase_quantity ?? null;
+        if (pMax != null && pMax > 0 && !productLimitMap.has(pid))
+          productLimitMap.set(pid, pMax);
+      }
+    }
+    const variantLimitList = Array.from(variantLimitMap.values());
+    const productLimitList = Array.from(productLimitMap.entries()).map(([product_id, originalMax]) => ({ product_id, originalMax }));
+    try {
+      if (variantLimitList.length > 0)
+        await api.setVariantMaxQty(variantLimitList.map(({ product_id, variant_id }) => ({ product_id, variant_id, max_purchase_quantity: 0 })));
+      if (productLimitList.length > 0)
+        await api.setProductMaxQty(productLimitList.map(({ product_id }) => ({ product_id, max_purchase_quantity: 0 })));
+    } catch (err) {
+      console.error("Failed to remove max qty limits before checkout:", err);
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     const billingAddress = {
       first_name: selectedAddress.first_name,
@@ -295,6 +341,14 @@ export default function Cart() {
       }
     } finally {
       setIsSubmitting(false);
+      // ── Restore max purchase qty limits ────────────────────────────────────
+      if (variantLimitList.length > 0)
+        api.setVariantMaxQty(variantLimitList.map(({ product_id, variant_id, originalMax }) => ({ product_id, variant_id, max_purchase_quantity: originalMax })))
+          .catch(err => console.error("Failed to restore variant max qty limits:", err));
+      if (productLimitList.length > 0)
+        api.setProductMaxQty(productLimitList.map(({ product_id, originalMax }) => ({ product_id, max_purchase_quantity: originalMax })))
+          .catch(err => console.error("Failed to restore product max qty limits:", err));
+      // ────────────────────────────────────────────────────────────────────────
     }
   };
 
@@ -384,18 +438,18 @@ export default function Cart() {
 
   if (cart.length === 0) {
     return (
-      <MobileShell title="Cart" showBack>
+      <div className="p-4 md:p-6 max-w-2xl mx-auto">
         <div className="flex flex-col items-center justify-center h-[60vh] text-center">
           <CreditCard className="h-12 w-12 text-slate-400 mb-4" />
           <h2 className="text-xl font-bold">Your cart is empty</h2>
           <Button onClick={() => setLocation('/catalog')} className="mt-4">Browse Catalog</Button>
         </div>
-      </MobileShell>
+      </div>
     );
   }
 
   return (
-    <MobileShell title="Checkout" showBack>
+    <div className="p-4 md:p-6 max-w-2xl mx-auto">
       <div className="space-y-6 pb-24">
         {isOfflineMode && (
           <Card className="p-3 bg-orange-50 border-orange-200">
@@ -603,38 +657,49 @@ export default function Cart() {
               ? freshStockByLineId.get(item.lineId)!
               : (item.variant?.stock_level ?? item.product.stock_level ?? 0);
             const hasInvErr = inventoryErrorIds.has(item.lineId);
+            const maxPurchase = item.variant?.max_purchase_quantity ?? item.product.max_purchase_quantity ?? null;
             return (
-              <Card key={item.lineId} className={`p-3 flex gap-3 items-center ${hasInvErr ? "border-red-300 bg-red-50" : ""}`}>
-                <img src={item.product.image} className="h-12 w-12 object-cover rounded" alt="" />
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-semibold text-sm leading-tight line-clamp-2">{item.product.name}</h4>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {item.variant && <p className="text-xs text-slate-500">{item.variant.sku}</p>}
-                    <p className={`text-xs font-medium ${stock <= 0 ? "text-red-500" : "text-slate-400"}`}>
-                      Stock: {stock}
-                    </p>
+              <Card key={item.lineId} className={`p-3 ${hasInvErr ? "border-red-300 bg-red-50" : ""}`}>
+                <div className="flex gap-3 items-center">
+                  <img src={item.product.image} className="h-12 w-12 object-cover rounded shrink-0" alt="" />
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-sm leading-tight line-clamp-2">{item.product.name}</h4>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {item.variant && <p className="text-xs text-slate-500">{item.variant.sku}</p>}
+                      <p className={`text-xs font-medium ${stock <= 0 ? "text-red-500" : "text-slate-400"}`}>
+                        Stock: {stock}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                      <span className={`text-sm font-medium ${item.discount_type ? 'text-red-600 font-bold' : ''}`}>
+                        ${item.price_at_sale.toFixed(2)}
+                      </span>
+                      {item.discount_type && (
+                        <span className="text-xs text-slate-400 line-through">${item.original_price.toFixed(2)}</span>
+                      )}
+                      {item.discount_type === 'free' && (
+                        <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1 rounded">FREE</span>
+                      )}
+                      {item.discount_type === 'percent' && (
+                        <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1 rounded">-{item.discount_value}%</span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                    <span className={`text-sm font-medium ${item.discount_type ? 'text-red-600 font-bold' : ''}`}>
-                      ${item.price_at_sale.toFixed(2)}
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantityAtIndex(idx, -1)}><Minus className="h-3 w-3"/></Button>
+                    <span className="text-sm w-6 text-center">{item.quantity}</span>
+                    <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantityAtIndex(idx, 1)}><Plus className="h-3 w-3"/></Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => removeFromCartAtIndex(idx)}><Trash2 className="h-4 w-4"/></Button>
+                  </div>
+                </div>
+                {maxPurchase != null && maxPurchase > 0 && (
+                  <div className="flex items-start gap-1.5 mt-2 bg-amber-50 border border-amber-300 rounded px-2 py-1.5 text-xs text-amber-800" data-testid={`warning-max-purchase-${item.lineId}`}>
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px text-amber-500" />
+                    <span>
+                      <strong>BC Max Purchase Limit: {maxPurchase}</strong> — limit is automatically removed before checkout and restored after.
                     </span>
-                    {item.discount_type && (
-                      <span className="text-xs text-slate-400 line-through">${item.original_price.toFixed(2)}</span>
-                    )}
-                    {item.discount_type === 'free' && (
-                      <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1 rounded">FREE</span>
-                    )}
-                    {item.discount_type === 'percent' && (
-                      <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1 rounded">-{item.discount_value}%</span>
-                    )}
                   </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantityAtIndex(idx, -1)}><Minus className="h-3 w-3"/></Button>
-                  <span className="text-sm w-6 text-center">{item.quantity}</span>
-                  <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartQuantityAtIndex(idx, 1)}><Plus className="h-3 w-3"/></Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => removeFromCartAtIndex(idx)}><Trash2 className="h-4 w-4"/></Button>
-                </div>
+                )}
               </Card>
             );
           })}
@@ -718,6 +783,6 @@ export default function Cart() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </MobileShell>
+    </div>
   );
 }
