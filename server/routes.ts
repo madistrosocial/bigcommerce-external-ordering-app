@@ -6636,7 +6636,7 @@ export async function registerRoutes(
   }, 15 * 60 * 1000); // every 15 minutes
 
   // ── CRM permission auto-seed ──────────────────────────────────────────────────
-  // Ensures the 5 CRM RBAC permissions exist in the DB at startup so admins can
+  // Ensures CRM RBAC permissions exist in the DB at startup so admins can
   // assign them to roles/users through the normal RBAC console.
   await (async () => {
     const CRM_PERMS: Array<{ module: string; action: string; description: string }> = [
@@ -6645,6 +6645,8 @@ export async function registerRoutes(
       { module: "crm", action: "visibility_assigned_only",       description: "CRM: see only own-assigned customers" },
       { module: "crm", action: "assign_rep",                     description: "CRM: assign / remove a sales rep on a customer" },
       { module: "crm", action: "export",                         description: "CRM: export customer list to CSV / Excel" },
+      { module: "crm", action: "manage_reactivation",             description: "CRM: update reactivation stages, ownership, pledges, and follow-ups" },
+      { module: "crm", action: "manage_reactivation_stages",      description: "CRM: configure reactivation pipeline stages" },
     ];
     try {
       const existing = await storage.getPermissions();
@@ -6957,7 +6959,8 @@ export async function registerRoutes(
       const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const { search = "", sortBy = "last_order_date", sortDir = "desc", group = "", state = "", health = "", assignedRep = "", customerType = "", addressType = "", primaryRep = "", secondaryRep = "", accountType = "", status = "active" } = req.query as any;
-      const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
+      const isExport = req.query.format === "csv" || req.query.export === "true";
+      const limit = Math.min(parseInt(String(req.query.limit ?? "50")), isExport ? 5000 : 200);
       const offset = parseInt(String(req.query.offset ?? "0"));
       const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
       const visScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
@@ -7528,20 +7531,100 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // GET /api/crm/reactivation/stages
+  app.get("/api/crm/reactivation/stages", requireAuth, async (_req, res) => {
+    try {
+      res.json(await storage.ensureReactivationStages());
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/crm/reactivation/stages — admin-only pipeline configuration
+  app.put("/api/crm/reactivation/stages", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      if (user.role !== "admin") return res.status(403).json({ error: "Forbidden: administrator access required" });
+      if (!Array.isArray(req.body?.stages)) return res.status(400).json({ error: "stages must be an array" });
+      const stages = await storage.saveReactivationStages(req.body.stages);
+      res.json(stages);
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
   // GET /api/crm/reactivation
   app.get("/api/crm/reactivation", requireAuth, async (req, res) => {
     try {
       const user = (req as any).authUser;
       const userId = user?.id as number;
       if (!user) return res.status(401).json({ error: "Unauthorized" });
-      const { search = "", group = "", state = "", health = "", rep, sortBy = "last_order_date", sortDir = "asc" } = req.query as Record<string, string>;
+      const { search = "", group = "", state = "", health = "", rep, stageId, source = "at_risk", overdue, sortBy = "last_order_date", sortDir = "asc" } = req.query as Record<string, string>;
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
       const offset = parseInt(String(req.query.offset ?? "0"));
       const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
       const visScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
-      const result = await storage.getReactivationCustomers({ search, group, state, health, rep: rep ? parseInt(rep) : undefined, sortBy, sortDir, limit, offset, visibilityScope: visScope.scope, visibilityUserId: visScope.userId });
+      const result = await storage.getReactivationCustomers({
+        search, group, state, health, rep: rep ? parseInt(rep) : undefined,
+        stageId: stageId ? parseInt(stageId) : undefined,
+        source: ["at_risk", "inactive", "all"].includes(source) ? source : "at_risk",
+        overdue: overdue === "true",
+        sortBy, sortDir, limit, offset,
+        visibilityScope: visScope.scope, visibilityUserId: visScope.userId,
+      });
       res.json(result);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/crm/reactivation/:customerId
+  app.get("/api/crm/reactivation/:customerId", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const customerId = parseInt(req.params.customerId);
+      if (!Number.isInteger(customerId)) return res.status(400).json({ error: "Invalid customer id" });
+      if (!await assertCrmCustomerAccess(storage, customerId, user.id, user.role, res)) return;
+      res.json(await storage.getReactivationCase(customerId));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PATCH /api/crm/reactivation/:customerId
+  app.patch("/api/crm/reactivation/:customerId", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const userId = user.id as number;
+      const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
+      if (user.role !== "admin" && !perms.includes("crm:manage_reactivation")) {
+        return res.status(403).json({ error: "Forbidden: crm:manage_reactivation permission required" });
+      }
+      const customerId = parseInt(req.params.customerId);
+      if (!Number.isInteger(customerId)) return res.status(400).json({ error: "Invalid customer id" });
+      if (!await assertCrmCustomerAccess(storage, customerId, userId, user.role, res)) return;
+      const body = req.body ?? {};
+      const update: Record<string, any> = {};
+      if ("stage_id" in body) update.stage_id = parseInt(String(body.stage_id));
+      if ("owner_user_id" in body) update.owner_user_id = body.owner_user_id == null || body.owner_user_id === "" ? null : parseInt(String(body.owner_user_id));
+      if ("pledge_status" in body) update.pledge_status = String(body.pledge_status || "not_started");
+      if ("pledge_notes" in body) update.pledge_notes = body.pledge_notes == null ? null : String(body.pledge_notes);
+      for (const field of ["expected_order_date", "next_action_date"] as const) {
+        if (field in body) {
+          if (body[field] == null || body[field] === "") update[field] = null;
+          else {
+            const date = new Date(String(body[field]));
+            if (Number.isNaN(date.getTime())) return res.status(400).json({ error: `${field} must be a valid date` });
+            update[field] = date;
+          }
+        }
+      }
+      if ("expected_value" in body) update.expected_value = body.expected_value == null || body.expected_value === "" ? null : String(body.expected_value);
+      if ("next_action_note" in body) update.next_action_note = body.next_action_note == null ? null : String(body.next_action_note);
+      const result = await storage.updateReactivationCase(customerId, userId, update);
+      await storage.createCrmAuditLog({
+        user_id: userId,
+        action: result.case?.stage_id && update.stage_id ? "reactivation_stage_updated" : "reactivation_case_updated",
+        customer_id: customerId,
+        detail: { fields: Object.keys(update), stage_id: result.case?.stage_id ?? null, pledge_status: result.case?.pledge_status ?? null },
+      });
+      res.json(result);
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
   // GET /api/crm/metrics

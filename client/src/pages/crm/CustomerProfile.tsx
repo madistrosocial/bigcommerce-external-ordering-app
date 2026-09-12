@@ -392,6 +392,7 @@ export default function CustomerProfile() {
   const canManageTodos   = isAdmin || hasPermission("crm", "manage_todos") || hasPermission("crm", "add_note");
   const canManageAccountType = isAdmin || hasPermission("crm", "manage_account_classification");
   const canManageInactive    = isAdmin || hasPermission("crm", "manage_inactive_accounts");
+  const canManageReactivation = isAdmin || hasPermission("crm", "manage_reactivation");
 
   const [activeTab, setActiveTab]           = useState<Tab>("overview");
   const [showAddNote, setShowAddNote]       = useState(false);
@@ -426,6 +427,15 @@ export default function CustomerProfile() {
       const r = await fetch(`/api/crm/customers/${id}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Customer not found");
       return r.json();
+    },
+    enabled: !!id,
+  });
+  const { data: reactivation } = useQuery({
+    queryKey: ["crm", "customer", id, "reactivation"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/reactivation/${id}`, { headers: getAuthHeaders() });
+      if (!r.ok) return null;
+      return r.json() as Promise<{ case: any; stage: any; owner_name: string | null; history: any[] }>;
     },
     enabled: !!id,
   });
@@ -1012,6 +1022,27 @@ export default function CustomerProfile() {
             onRefresh={() => queryClient.invalidateQueries({ queryKey: ["crm", "customer", id] })}
             isRefreshing={loadingCustomer}
           />
+        </div>
+      </div>
+
+      {/* Reactivation pledge summary */}
+      <div className="px-4 md:px-6 pt-3">
+        <div className="rounded-xl border border-orange-200 bg-orange-50/40 overflow-hidden">
+          <div className="px-4 py-3 border-b border-orange-100 flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-orange-900 flex items-center gap-1.5"><AlertTriangle className="h-4 w-4 text-orange-600" />Reactivation plan</h2>
+            <Button size="sm" variant="outline" className="h-7 text-xs bg-white" onClick={() => setLocation("/crm/reactivation")}>Open Reactivation CRM</Button>
+          </div>
+          {!reactivation?.case ? (
+            <div className="px-4 py-3 text-xs text-slate-500">This customer has no reactivation case yet. Add them to the board when a follow-up plan is agreed.</div>
+          ) : (
+            <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Stage</p><p className="mt-1 text-sm font-semibold text-slate-800 flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: reactivation.stage?.color ?? "#64748b" }} />{reactivation.stage?.name ?? "Unknown"}</p></div>
+              <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Pledge</p><p className="mt-1 text-sm font-semibold text-slate-800 capitalize">{String(reactivation.case.pledge_status ?? "not_started").replace(/_/g, " ")}</p></div>
+              <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Expected order</p><p className="mt-1 text-sm font-semibold text-slate-800">{reactivation.case.expected_order_date ? fmt.date(reactivation.case.expected_order_date) : "No date"}{reactivation.case.expected_value ? ` · ${fmtCurrency(reactivation.case.expected_value)}` : ""}</p></div>
+              <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Next action</p><p className={`mt-1 text-sm font-semibold ${reactivation.case.next_action_date && new Date(reactivation.case.next_action_date).getTime() < Date.now() ? "text-red-600" : "text-slate-800"}`}>{reactivation.case.next_action_date ? fmt.date(reactivation.case.next_action_date) : "Not scheduled"}</p><p className="text-xs text-slate-500 truncate">{reactivation.case.next_action_note || "No action note"}</p></div>
+              {(reactivation.case.pledge_notes || reactivation.owner_name) && <div className="col-span-2 sm:col-span-4 text-xs text-slate-600 border-t border-orange-100 pt-3"><span className="font-medium">Owner:</span> {reactivation.owner_name || "Unassigned"}{reactivation.case.pledge_notes && <><span className="mx-2 text-slate-300">·</span><span className="font-medium">Commitment:</span> {reactivation.case.pledge_notes}</>}</div>}
+            </div>
+          )}
         </div>
       </div>
 

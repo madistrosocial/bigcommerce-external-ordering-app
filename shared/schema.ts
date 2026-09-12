@@ -346,6 +346,56 @@ export const crmAuditLog = pgTable("crm_audit_log", {
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const crmReactivationStages = pgTable("crm_reactivation_stages", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  color: text("color").notNull().default("#64748b"),
+  position: integer("position").notNull().default(0),
+  is_active: boolean("is_active").notNull().default(true),
+  is_default: boolean("is_default").notNull().default(false),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  positionIdx: index("idx_crm_reactivation_stages_position").on(t.position),
+  activeIdx: index("idx_crm_reactivation_stages_active").on(t.is_active),
+}));
+
+export const crmReactivationCases = pgTable("crm_reactivation_cases", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  customer_id: integer("customer_id").notNull().unique().references(() => customersMirror.id, { onDelete: "cascade" }),
+  stage_id: integer("stage_id").notNull().references(() => crmReactivationStages.id),
+  owner_user_id: integer("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+  pledge_status: text("pledge_status").notNull().default("not_started"),
+  pledge_notes: text("pledge_notes"),
+  expected_order_date: timestamp("expected_order_date"),
+  expected_value: decimal("expected_value", { precision: 14, scale: 2 }),
+  next_action_date: timestamp("next_action_date"),
+  next_action_note: text("next_action_note"),
+  created_by: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  updated_by: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  stageIdx: index("idx_crm_reactivation_cases_stage").on(t.stage_id),
+  ownerIdx: index("idx_crm_reactivation_cases_owner").on(t.owner_user_id),
+  nextActionIdx: index("idx_crm_reactivation_cases_next_action").on(t.next_action_date),
+}));
+
+export const crmReactivationHistory = pgTable("crm_reactivation_history", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  case_id: integer("case_id").references(() => crmReactivationCases.id, { onDelete: "cascade" }),
+  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  from_stage_id: integer("from_stage_id").references(() => crmReactivationStages.id, { onDelete: "set null" }),
+  to_stage_id: integer("to_stage_id").references(() => crmReactivationStages.id, { onDelete: "set null" }),
+  action: text("action").notNull(),
+  detail: jsonb("detail").notNull().default({}),
+  user_id: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  customerIdx: index("idx_crm_reactivation_history_customer").on(t.customer_id, t.created_at),
+  caseIdx: index("idx_crm_reactivation_history_case").on(t.case_id, t.created_at),
+}));
+
 // ─── Attendance ────────────────────────────────────────────────────────────────
 
 export const attendanceSessions = pgTable("attendance_sessions", {
@@ -791,6 +841,12 @@ export type InsertCrmNote = z.infer<typeof insertCrmNoteSchema>;
 export type CrmNote = typeof crmCustomerNotes.$inferSelect;
 export type InsertCrmAuditLog = z.infer<typeof insertCrmAuditLogSchema>;
 export type CrmAuditLogEntry = typeof crmAuditLog.$inferSelect;
+export type InsertCrmReactivationStage = typeof crmReactivationStages.$inferInsert;
+export type CrmReactivationStage = typeof crmReactivationStages.$inferSelect;
+export type InsertCrmReactivationCase = typeof crmReactivationCases.$inferInsert;
+export type CrmReactivationCase = typeof crmReactivationCases.$inferSelect;
+export type InsertCrmReactivationHistory = typeof crmReactivationHistory.$inferInsert;
+export type CrmReactivationHistory = typeof crmReactivationHistory.$inferSelect;
 export type InsertAttendanceSession = z.infer<typeof insertAttendanceSessionSchema>;
 export type AttendanceSession = typeof attendanceSessions.$inferSelect;
 export type InsertAttendanceCheckpoint = z.infer<typeof insertAttendanceCheckpointSchema>;

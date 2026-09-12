@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getAuthHeaders } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -9,7 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   RefreshCw, Users, ShoppingBag, Database, Clock, BarChart2, Info,
-  HeartPulse, Save, Zap, Trash2, PlayCircle, StopCircle, List,
+  HeartPulse, Save, Zap, Trash2, PlayCircle, StopCircle, List, Plus,
+  GripVertical, ChevronUp, ChevronDown,
 } from "lucide-react";
 import { useTimeService } from "@/hooks/useTimeService";
 
@@ -95,12 +96,48 @@ export default function CRMSettings() {
   const [watchDays, setWatchDays] = useState("");
   const [atRiskDays, setAtRiskDays] = useState("");
   const [thresholdsLoaded, setThresholdsLoaded] = useState(false);
+  const [reactivationStages, setReactivationStages] = useState<any[]>([]);
+  const [stagesLoaded, setStagesLoaded] = useState(false);
+  const [savingReactivationStages, setSavingReactivationStages] = useState(false);
   if (thresholds && !thresholdsLoaded) {
     setHealthyDays(String(thresholds.healthy_days));
     setWatchDays(String(thresholds.watch_days));
     setAtRiskDays(String(thresholds.at_risk_days));
     setThresholdsLoaded(true);
   }
+
+  const { data: configuredStages } = useQuery({
+    queryKey: ["crm", "reactivation", "stages"],
+    queryFn: async () => {
+      const r = await fetch("/api/crm/reactivation/stages", { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load reactivation stages");
+      return r.json() as Promise<any[]>;
+    },
+  });
+  useEffect(() => {
+    if (configuredStages && !stagesLoaded) {
+      setReactivationStages(configuredStages.map(stage => ({ ...stage })));
+      setStagesLoaded(true);
+    }
+  }, [configuredStages, stagesLoaded]);
+
+  const saveReactivationStages = async () => {
+    setSavingReactivationStages(true);
+    try {
+      const r = await fetch("/api/crm/reactivation/stages", {
+        method: "PUT",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ stages: reactivationStages }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Failed to save reactivation stages");
+      setReactivationStages(data);
+      toast({ title: "Reactivation stages saved" });
+      qc.invalidateQueries({ queryKey: ["crm", "reactivation"] });
+    } catch (e: any) {
+      toast({ title: "Unable to save stages", description: e.message, variant: "destructive" });
+    } finally { setSavingReactivationStages(false); }
+  };
 
   // ── Sync helpers ──────────────────────────────────────────────────────────
 
@@ -492,6 +529,46 @@ export default function CRMSettings() {
                 </Button>
               </div>
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Reactivation Pipeline Configuration */}
+      <Card className="border-orange-200">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2 text-orange-800">
+            <List className="h-4 w-4" /> Reactivation Pipeline Stages
+          </CardTitle>
+          <p className="text-xs text-slate-500">
+            Configure the ordered stages used by the Reactivation board. Archived stages remain in history and cannot receive new cases.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {!stagesLoaded ? <div className="text-sm text-slate-400 py-2">Loading stages…</div> : (
+            <>
+              <div className="space-y-2">
+                {reactivationStages.map((stage, index) => (
+                  <div key={stage.id ?? `new-${index}`} className={`flex items-center gap-2 rounded-lg border p-2.5 ${stage.is_active ? "bg-white" : "bg-slate-50 opacity-70"}`}>
+                    <GripVertical className="h-4 w-4 text-slate-300 shrink-0" />
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <input type="color" value={stage.color || "#64748b"} onChange={e => setReactivationStages(items => items.map((item, i) => i === index ? { ...item, color: e.target.value } : item))} className="h-7 w-7 rounded border-0 p-0 cursor-pointer" aria-label="Stage color" />
+                      <Input value={stage.name} onChange={e => setReactivationStages(items => items.map((item, i) => i === index ? { ...item, name: e.target.value } : item))} className="h-8 text-sm max-w-xs" />
+                    </div>
+                    <label className="flex items-center gap-1.5 text-xs text-slate-500 whitespace-nowrap">
+                      <input type="radio" name="reactivation-default-stage" checked={stage.is_default === true} onChange={() => setReactivationStages(items => items.map((item, i) => ({ ...item, is_default: i === index })))} />
+                      Default
+                    </label>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={index === 0} onClick={() => setReactivationStages(items => { const next = [...items]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next.map((item, i) => ({ ...item, position: i })); })} aria-label="Move stage up"><ChevronUp className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={index === reactivationStages.length - 1} onClick={() => setReactivationStages(items => { const next = [...items]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; return next.map((item, i) => ({ ...item, position: i })); })} aria-label="Move stage down"><ChevronDown className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${stage.is_active ? "text-slate-500" : "text-green-600"}`} onClick={() => setReactivationStages(items => items.map((item, i) => i === index ? { ...item, is_active: !item.is_active, is_default: !item.is_active ? item.is_default : false } : item))}>{stage.is_active ? "Archive" : "Restore"}</Button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between gap-3 pt-1">
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setReactivationStages(items => [...items, { name: "New stage", color: "#64748b", position: items.length, is_active: true, is_default: false }])}><Plus className="h-3.5 w-3.5" /> Add stage</Button>
+                <Button size="sm" className="gap-1.5 bg-orange-600 hover:bg-orange-700" onClick={saveReactivationStages} disabled={savingReactivationStages}>{savingReactivationStages ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Saving…</> : <><Save className="h-3.5 w-3.5" /> Save stages</>}</Button>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
