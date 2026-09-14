@@ -9,7 +9,7 @@ description: SKUVault Reason must be exact account-configured text; QueryClient 
 - Invalid reason strings cause a SKUVault validation error (typically HTTP 400).
 - SKUVault has no dedicated configured-reasons API endpoint; recent `getTransactions` results are not a reliable source for the complete remove-reason list.
 - The single-item endpoint reports its application result in `RemoveItemStatus` (not the bulk endpoint's `Status`/`Errors` shape).
-- A successful HTTP response from `removeItem` is not proof that stock changed. Confirm the exact bin quantity through `getInventoryByLocation` before reporting success or recording a successful removal.
+- A successful `RemoveItemStatus` should be confirmed through `getInventoryByLocation` before reporting success; if that read is HTTP 429, trust the successful mutation response, record the predicted quantity, and show a rate-limit warning instead of retrying.
 
 **Why:** SKUVault validates Reason against the account's pre-configured list server-side.
 
