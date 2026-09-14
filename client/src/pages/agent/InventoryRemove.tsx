@@ -20,6 +20,19 @@ function variantLabel(variant: any): string {
   return variant.sku || "";
 }
 
+function friendlySkuVaultError(message: string): string {
+  if (message === "Authentication required") {
+    return "Your Sales App session has expired. Sign in again, then reopen Remove Inventory.";
+  }
+  if (/SKUVault credentials not configured/i.test(message)) {
+    return "SKUVault credentials are not configured. An administrator must configure them in Admin → SKUVault.";
+  }
+  if (/SKUVault .*HTTP 401|SKUVault .*Authentication required/i.test(message)) {
+    return "SKUVault rejected the connection. Check the credentials in Admin → SKUVault.";
+  }
+  return message;
+}
+
 export default function InventoryRemovePage() {
   const { toast } = useToast();
   const { currentUser } = useStore();
@@ -52,7 +65,7 @@ export default function InventoryRemovePage() {
         setReasonSource(result.source);
         setReason(result.reasons?.[0] ?? "");
       } catch (error: any) {
-        setReasonError(error.message);
+        setReasonError(friendlySkuVaultError(error.message));
       } finally {
         setReasonLoading(false);
       }
@@ -69,7 +82,7 @@ export default function InventoryRemovePage() {
     setSvLocationLoading(true);
     api.resolveSkuVaultLocation(sku)
       .then(setSvLocation)
-      .catch((error) => setSvLocation({ locationCode: null, currentQty: null, source: "error", error: error.message }))
+      .catch((error) => setSvLocation({ locationCode: null, currentQty: null, source: "error", error: friendlySkuVaultError(error.message) }))
       .finally(() => setSvLocationLoading(false));
   }, [selectedVariant, removeFromSkuvault, selectedProduct?.sku]);
 
@@ -144,9 +157,6 @@ export default function InventoryRemovePage() {
         <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
           <PackageMinus className="h-5 w-5 text-red-600" /> Remove Inventory
         </h2>
-        <p className="text-sm text-slate-500 mt-0.5">
-          Remove stock for internal purchases or other inventory adjustments. No invoice or sales order is created.
-        </p>
       </div>
 
       <Card className="shadow-sm">

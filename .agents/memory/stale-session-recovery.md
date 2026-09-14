@@ -7,4 +7,4 @@ Persisted authentication state must be parsed defensively, and the UI should pro
 
 **Why:** A malformed or expired saved session can leave protected routes unusable or appear blank even while the server is healthy.
 
-**How to apply:** Preserve the safe local-session loader and keep a force-logout action available from authenticated screens and the login recovery state.
+**How to apply:** Preserve the safe local-session loader and keep a force-logout action available from authenticated screens and the login recovery state. Protected pages can still render from persisted user state while their API calls return `Authentication required`, so surface that as an expired Sales App session rather than attributing it to an external integration.
