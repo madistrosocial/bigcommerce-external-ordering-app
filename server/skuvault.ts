@@ -288,7 +288,7 @@ export async function addSkuVaultInventory(
 }
 
 /**
- * Remove quantity from a list of SKUs using removeItemBulk.
+ * Remove quantity from a list of SKUs using removeItem.
  * SKUVault requires a warehouse location and an account-configured reason.
  */
 export async function removeSkuVaultInventory(
@@ -327,21 +327,28 @@ export async function removeSkuVaultInventory(
 
   if (toRemove.length === 0) return { results: errorResults };
 
-  const removeResult = await svPost<SvSetQuantityResult>("/inventory/removeItemBulk", {
+  const removeResult = await svPost<any>("/inventory/removeItem", {
     TenantToken: cfg.tenantToken,
     UserToken: cfg.userToken,
-    Items: toRemove.map((p) => ({
-      Sku: p.sku,
-      WarehouseId: cfg.warehouseId,
-      LocationCode: p.locationCode,
-      Quantity: p.quantityToRemove,
-      Reason: reason,
-    })),
+    Sku: toRemove[0].sku,
+    WarehouseId: cfg.warehouseId,
+    LocationCode: toRemove[0].locationCode,
+    Quantity: toRemove[0].quantityToRemove,
+    Reason: reason,
   });
 
   const errorsBySku: Record<string, string> = {};
-  for (const e of removeResult.Errors ?? []) {
+  const apiErrors = Array.isArray(removeResult?.Errors) ? removeResult.Errors : [];
+  for (const e of apiErrors) {
     errorsBySku[e.Sku] = e.ErrorMessages?.join("; ") || "Unknown error";
+  }
+  const directError = Array.isArray(removeResult?.ErrorMessages)
+    ? removeResult.ErrorMessages.join("; ")
+    : typeof removeResult?.Error === "string"
+      ? removeResult.Error
+      : "";
+  if (directError && !errorsBySku[toRemove[0].sku]) {
+    errorsBySku[toRemove[0].sku] = directError;
   }
 
   const removeResults = toRemove.map((p) => {

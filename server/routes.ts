@@ -3749,6 +3749,7 @@ export async function registerRoutes(
       const log = await storage.createInventoryRemoveLog(logEntry);
       res.json({ success: true, previous_inventory, new_inventory, log, skuvault: svResult });
     } catch (error: any) {
+      console.error("[Inventory Remove] Error:", error.message, error.stack);
       res.status(500).json({ error: error.message });
     }
   });
