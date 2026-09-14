@@ -8,6 +8,7 @@ description: SKUVault Reason must be exact account-configured text; QueryClient 
 - NOT free-text, NOT a numeric ID.
 - Misconfigured/legacy reason strings cause `ReasonNotFound` (HTTP 400) from addItemBulk.
 - Admin stores valid reasons in `skuvault_config.reasons[]` (configured via Admin → SKUVault settings textarea).
+- SKUVault has no dedicated configured-reasons API endpoint; recent `getTransactions` results can provide exact observed reason strings, with the configured list as a fallback/union.
 
 **Why:** SKUVault validates Reason against the account's pre-configured list server-side.
 

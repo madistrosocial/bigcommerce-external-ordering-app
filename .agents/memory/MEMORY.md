@@ -31,3 +31,4 @@
 - [GitHub push authentication](github-push-auth.md) — Git HTTPS push may reject the installed GitHub integration; use its authenticated Git data API for branch-only updates.
 - [BigCommerce customer search filters](bigcommerce-customer-search-filters.md) — this store rejects v3 company:like and phone:like; use cached v2 directory filtering for those fields.
 - [Reactivation stage initialization](reactivation-stage-initialization.md) — default pipeline seeding must be conflict-safe because board and stage requests can initialize concurrently.
+- [Schema push drift](schema-push-drift.md) — never force Drizzle to truncate unrelated populated tables just to apply a new feature table.

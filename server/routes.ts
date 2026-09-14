@@ -3483,7 +3483,7 @@ export async function registerRoutes(
       const configuredReasons = Array.isArray(svCfg.reasons)
         ? svCfg.reasons.filter((reason: unknown): reason is string => typeof reason === "string" && !!reason.trim())
         : [];
-      const reasons = transactionReasons.length > 0 ? transactionReasons : configuredReasons;
+      const reasons = [...new Set([...transactionReasons, ...configuredReasons])].sort((a, b) => a.localeCompare(b));
       res.json({ reasons, source: transactionReasons.length > 0 ? "skuvault_transactions" : "configured_fallback" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -3644,6 +3644,30 @@ export async function registerRoutes(
       let svResult: any = null;
       let svLocation: string | null = null;
 
+      // Preflight BigCommerce before touching SKUVault. External inventory
+      // changes cannot be rolled back atomically if the second system rejects.
+      if (remove_from_bigcommerce) {
+        const bcSetting = await storage.getSetting("bigcommerce_config");
+        let storeHash = process.env.BC_STORE_HASH;
+        let token = process.env.BC_TOKEN;
+        if (bcSetting?.value) {
+          const cfg = typeof bcSetting.value === "string" ? JSON.parse(bcSetting.value) : bcSetting.value;
+          storeHash = cfg.storeHash || storeHash;
+          token = cfg.token || token;
+        }
+        if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+        const preflightRes = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product_id}/variants/${variant_id}`,
+          { headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" } }
+        );
+        if (!preflightRes.ok) throw new Error(`Failed to fetch variant: ${preflightRes.statusText}`);
+        const preflightData = await preflightRes.json();
+        const preflightInventory = Number(preflightData.data?.inventory_level ?? 0);
+        if (quantity_removed > preflightInventory) {
+          return res.status(400).json({ error: `Cannot remove ${quantity_removed} units from BigCommerce; only ${preflightInventory} are currently in stock.` });
+        }
+      }
+
       if (remove_from_skuvault) {
         const svSetting = await storage.getSetting("skuvault_config");
         const svCfg = svSetting?.value ? (typeof svSetting.value === "string" ? JSON.parse(svSetting.value) : svSetting.value) : null;
@@ -3658,7 +3682,7 @@ export async function registerRoutes(
         };
         const transactionReasons = await getSkuVaultTransactionReasons(cfg);
         const configuredReasons: string[] = Array.isArray(svCfg.reasons) ? svCfg.reasons : [];
-        const validReasons = transactionReasons.length > 0 ? transactionReasons : configuredReasons;
+        const validReasons = [...new Set([...transactionReasons, ...configuredReasons])];
         if (validReasons.length === 0) {
           return res.status(400).json({ error: "No SKUVault transaction reasons are available. Create a SKUVault transaction first or configure the fallback reason list in Settings > SKUVault." });
         }
@@ -3673,7 +3697,7 @@ export async function registerRoutes(
         svLocation = item?.locationCode || null;
         if (!remove_from_bigcommerce) {
           previous_inventory = item?.newQty == null ? 0 : item.newQty + quantity_removed;
-          new_inventory = item?.newQty ?? Math.max(0, quantity_removed * -1);
+          new_inventory = item?.newQty ?? 0;
         }
       }
 
