@@ -56,3 +56,17 @@ mtime_ms = 1788861598096
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/55b3818e-0726-4007-aa52-82e6729a5540/d1da1883-17b8-45d6-b34e-746fa74a4196"
 storage_version_token = "1788861638779096"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "QjFPdPnNrAr9g9BUdm3uv"
+uri = "file://exports/chat-log-until-attendance-update.txt"
+type = "text"
+title = "Chat log export until attendance update"
+description = "Text export of the conversation content available in this session, ending before the attendance update. Earlier compacted context is labeled and secret values are excluded."
+logical_id = "5ce28780-4d7a-4952-9c3b-afd0db71dd4f"
+content_hash = "sha256:20d047bdd20ef43ebbf2b4d601ff673fa5567ae56e313929db1ba15370b5baa2"
+size = 5271
+mtime_ms = 1789381307847
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/5ce28780-4d7a-4952-9c3b-afd0db71dd4f/0d1af6c3-c1da-42a1-8207-5b246c649930"
+storage_version_token = "1789381310320189"
+content_type = "text/plain"
