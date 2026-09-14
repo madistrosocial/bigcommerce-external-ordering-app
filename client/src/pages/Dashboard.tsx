@@ -409,7 +409,7 @@ export default function DashboardPage() {
       value: totalPushes,
       icon: Package,
       tone: "blue" as const,
-      path: "/inventory-push-logs",
+      path: "/inventory/logs",
     },
     {
       label: "Failed Syncs",
@@ -562,7 +562,7 @@ export default function DashboardPage() {
           <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-none">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Inventory Activity</h3>
-              <button type="button" onClick={() => setLocation("/inventory-push-logs")} className="flex items-center gap-1 text-[11px] font-medium text-blue-600" data-testid="link-inventory-logs">
+              <button type="button" onClick={() => setLocation("/inventory/logs")} className="flex items-center gap-1 text-[11px] font-medium text-blue-600" data-testid="link-inventory-logs">
                 View Inventory Logs <ArrowUpRight className="h-3.5 w-3.5" />
               </button>
             </div>

@@ -5,7 +5,6 @@ import * as api from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Minus, Plus, Search, X, Loader2, CheckSquare, Square, PackageMinus, AlertTriangle } from "lucide-react";
 
 function getVariants(product: api.Product): any[] {
@@ -45,11 +44,7 @@ export default function InventoryRemovePage() {
   const [selectedProduct, setSelectedProduct] = useState<api.Product | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<any | null>(null);
   const [quantityInput, setQuantityInput] = useState("1");
-  const [reason, setReason] = useState("");
-  const [reasons, setReasons] = useState<string[]>([]);
-  const [reasonSource, setReasonSource] = useState("");
-  const [reasonLoading, setReasonLoading] = useState(true);
-  const [reasonError, setReasonError] = useState("");
+  const [reason, setReason] = useState("Internal Purchase");
   const [removeFromBigCommerce, setRemoveFromBigCommerce] = useState(true);
   const [removeFromSkuvault, setRemoveFromSkuvault] = useState(true);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -58,19 +53,6 @@ export default function InventoryRemovePage() {
   const [svLocationLoading, setSvLocationLoading] = useState(false);
 
   useEffect(() => {
-    const loadReasons = async () => {
-      try {
-        const result = await api.getSkuVaultReasons();
-        setReasons(result.reasons ?? []);
-        setReasonSource(result.source);
-        setReason(result.reasons?.[0] ?? "");
-      } catch (error: any) {
-        setReasonError(friendlySkuVaultError(error.message));
-      } finally {
-        setReasonLoading(false);
-      }
-    };
-    loadReasons();
     setTimeout(() => searchRef.current?.focus(), 80);
   }, []);
 
@@ -119,7 +101,7 @@ export default function InventoryRemovePage() {
   const stock = Number(selectedVariant?.stock_level ?? 0);
   const tooManyForBigCommerce = removeFromBigCommerce && quantity > stock;
   const hasDestination = removeFromBigCommerce || removeFromSkuvault;
-  const canSubmit = !!selectedProduct && !!selectedVariant && quantity > 0 && !!reason && hasDestination && !tooManyForBigCommerce && !reasonLoading && reasons.length > 0;
+  const canSubmit = !!selectedProduct && !!selectedVariant && quantity > 0 && !!reason.trim() && hasDestination && !tooManyForBigCommerce;
   const destination = [removeFromBigCommerce && "BigCommerce", removeFromSkuvault && "SKUVault"].filter(Boolean).join(" + ") || "…";
 
   const handleSubmit = async () => {
@@ -223,10 +205,8 @@ export default function InventoryRemovePage() {
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">SKUVault Add Reason (required)</label>
-                    {reasonLoading ? <div className="h-9 flex items-center text-sm text-slate-400 gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading reasons from SKUVault…</div> : reasons.length > 0 ? (
-                      <><Select value={reason} onValueChange={setReason}><SelectTrigger className="h-9 text-sm" data-testid="select-remove-inv-reason"><SelectValue placeholder="Select a SKUVault Add Reason" /></SelectTrigger><SelectContent>{reasons.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><p className="text-[11px] text-slate-400 mt-1">{reasonSource === "skuvault_transactions" ? "Loaded from recent SKUVault transactions." : "Using the configured SKUVault fallback reason list."}</p></>
-                    ) : <p className="text-sm text-red-600">{reasonError || "No SKUVault reasons are available."}</p>}
+                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">SKUVault Transaction Reason (required)</label>
+                    <Input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Internal Purchase" data-testid="input-remove-inv-reason" />
                   </div>
 
                   <div>

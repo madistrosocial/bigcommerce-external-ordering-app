@@ -3680,16 +3680,9 @@ export async function registerRoutes(
           warehouseId: svCfg.warehouseId ?? 0,
           warehouseLocation: svCfg.warehouseLocation,
         };
-        const transactionReasons = await getSkuVaultTransactionReasons(cfg);
-        const configuredReasons: string[] = Array.isArray(svCfg.reasons) ? svCfg.reasons : [];
-        const validReasons = [...new Set([...transactionReasons, ...configuredReasons])];
-        if (validReasons.length === 0) {
-          return res.status(400).json({ error: "No SKUVault transaction reasons are available. Create a SKUVault transaction first or configure the fallback reason list in Settings > SKUVault." });
-        }
-        if (!validReasons.includes(reason.trim())) {
-          return res.status(400).json({ error: "The selected reason is not a valid SKUVault transaction reason. Refresh the dropdown and select one of the available reasons." });
-        }
-
+        // The reason is editable because SKUVault's configured transaction
+        // reasons are not exposed through a reliable listing endpoint. Let
+        // SKUVault validate the exact account-configured value.
         const result = await removeSkuVaultInventory(cfg, [{ sku, quantityToRemove: quantity_removed }], reason.trim());
         const item = result.results[0];
         if (item?.error) throw new Error(`SKUVault removal failed for ${sku}: ${item.error}`);
@@ -3819,6 +3812,71 @@ export async function registerRoutes(
       const dateTo = (req.query.dateTo as string) || undefined;
       const result = await storage.getInventoryPushLogs({ page, limit, search, username, dateFrom, dateTo });
       res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Unified inventory activity log — includes both inventory additions and removals.
+  app.get("/api/inventory/logs/usernames", requireAuth, async (_req, res) => {
+    try {
+      res.json(await storage.getInventoryLogUsernames());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/inventory/logs/export", requireAuth, async (req, res) => {
+    try {
+      const search = (req.query.search as string) || undefined;
+      const username = (req.query.username as string) || undefined;
+      const dateFrom = (req.query.dateFrom as string) || undefined;
+      const dateTo = (req.query.dateTo as string) || undefined;
+      const rows = await storage.getInventoryLogsForExport({ search, username, dateFrom, dateTo });
+      const neutralize = (value: string | number | null | undefined): string => {
+        const text = value == null ? "" : String(value);
+        return text.length > 0 && ["=", "+", "-", "@", "\t", "\r"].includes(text[0]) ? `'${text}` : text;
+      };
+      const escapeCell = (value: string | number | null | undefined): string => {
+        const text = neutralize(value);
+        return text.includes(",") || text.includes('"') || text.includes("\n") || text.includes("\r")
+          ? `"${text.replace(/"/g, '""')}"` : text;
+      };
+      const filename = `inventory-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      const lines = [["Date", "User", "Type", "Product", "Variant", "SKU", "Before", "Change", "After", "Destination", "SKUVault Location", "Reason"].join(",")];
+      for (const log of rows) {
+        lines.push([
+          escapeCell(log.created_at ? new Date(log.created_at).toISOString() : ""),
+          escapeCell(log.username || `User #${log.user_id}`),
+          escapeCell(log.log_type === "remove" ? "Remove" : "Add"),
+          escapeCell(log.product_name || `Product #${log.product_id}`),
+          escapeCell(log.variant_name || `Variant #${log.variant_id}`),
+          escapeCell(log.sku),
+          escapeCell(log.previous_inventory),
+          escapeCell(`${log.log_type === "remove" ? "-" : "+"}${log.quantity}`),
+          escapeCell(log.new_inventory),
+          escapeCell(log.destination),
+          escapeCell(log.skuvault_location || ""),
+          escapeCell(log.reason || ""),
+        ].join(","));
+      }
+      res.send(lines.join("\n"));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/inventory/logs", requireAuth, async (req, res) => {
+    try {
+      const page = Math.max(0, parseInt(req.query.page as string) || 0);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 25));
+      const search = (req.query.search as string) || undefined;
+      const username = (req.query.username as string) || undefined;
+      const dateFrom = (req.query.dateFrom as string) || undefined;
+      const dateTo = (req.query.dateTo as string) || undefined;
+      res.json(await storage.getInventoryLogs({ page, limit, search, username, dateFrom, dateTo }));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

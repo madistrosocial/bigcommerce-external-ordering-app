@@ -143,7 +143,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("inventory_push") ? [{ label: "Push Inventory", path: "/inventory/push" }] : []),
     ...(hasPermission("inventory_remove") ? [{ label: "Remove Inventory", path: "/inventory/remove" }] : []),
     ...(hasPermission("inventory_audit") ? [{ label: "Inventory Audit", path: "/inventory/audit" }] : []),
-    ...(hasPermission("inventory_logs") ? [{ label: "Push Logs", path: "/inventory-push-logs" }] : []),
+    ...(hasPermission("inventory_logs") ? [{ label: "Logs", path: "/inventory/logs" }] : []),
   ];
 
   const marketingChildren: NavLeaf[] = [

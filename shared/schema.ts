@@ -810,6 +810,24 @@ export type InsertInventoryPushLog = z.infer<typeof insertInventoryPushLogSchema
 export type InventoryPushLog = typeof inventoryPushLogs.$inferSelect;
 export type InsertInventoryRemoveLog = z.infer<typeof insertInventoryRemoveLogSchema>;
 export type InventoryRemoveLog = typeof inventoryRemoveLogs.$inferSelect;
+export type InventoryLogRow = {
+  id: number;
+  log_type: "add" | "remove";
+  user_id: number;
+  username: string;
+  sku: string;
+  product_id: number;
+  variant_id: number;
+  product_name: string;
+  variant_name: string;
+  previous_inventory: number;
+  new_inventory: number;
+  quantity: number;
+  reason: string | null;
+  destination: string;
+  skuvault_location: string | null;
+  created_at: Date;
+};
 
 export type InsertProductLinkLog = z.infer<typeof insertProductLinkLogSchema>;
 export type ProductLinkLog = typeof productLinkLogs.$inferSelect;

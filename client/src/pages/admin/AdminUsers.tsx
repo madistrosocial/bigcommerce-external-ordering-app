@@ -53,7 +53,7 @@ export const MODULES = [
   { key: "inventory_push",     label: "Inventory › Push Inventory" },
   { key: "inventory_remove",   label: "Inventory › Remove Inventory" },
   { key: "inventory_audit",    label: "Inventory › Audit Queue" },
-  { key: "inventory_logs",     label: "Inventory › Push Logs" },
+  { key: "inventory_logs",     label: "Inventory › Logs" },
   { key: "marketing",          label: "Marketing" },
   { key: "pricing",            label: "Price Tiers" },
   { key: "reports",            label: "Reports" },

@@ -1,5 +1,5 @@
 import { db } from "../db";
- import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertInventoryRemoveLog, type InventoryRemoveLog, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type CrmReactivationStage, type CrmReactivationCase, type CrmReactivationHistory, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, type AttendanceSession, type InsertAttendanceSession, type AttendanceCheckpoint, type InsertAttendanceCheckpoint, type AttendanceException, type InsertAttendanceException, type InsertDropshipProduct, type DropshipProduct, type DropshipSyncLog, type DropshipVendor, type InsertDropshipSyncLog, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, inventoryRemoveLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, crmReactivationStages, crmReactivationCases, crmReactivationHistory, attendanceSessions, attendanceLocationCheckpoints, attendanceExceptions, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, dropshipVendors, dropshipProducts, dropshipSyncLogs, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
+ import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertInventoryRemoveLog, type InventoryRemoveLog, type InventoryLogRow, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type CrmReactivationStage, type CrmReactivationCase, type CrmReactivationHistory, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, type AttendanceSession, type InsertAttendanceSession, type AttendanceCheckpoint, type InsertAttendanceCheckpoint, type AttendanceException, type InsertAttendanceException, type DropshipProduct, type InsertDropshipProduct, type DropshipSyncLog, type DropshipVendor, type InsertDropshipSyncLog, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, inventoryRemoveLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, crmReactivationStages, crmReactivationCases, crmReactivationHistory, attendanceSessions, attendanceLocationCheckpoints, attendanceExceptions, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, dropshipVendors, dropshipProducts, dropshipSyncLogs, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
 import { eq, desc, and, inArray, notInArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { normalizeMarketingProductDisplayOptions, DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS } from "@shared/marketing-products";
@@ -91,6 +91,9 @@ export interface IStorage {
   getInventoryPushLogUsernames(): Promise<string[]>;
   getInventoryPushLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<InventoryPushLog[]>;
   createInventoryRemoveLog(entry: InsertInventoryRemoveLog): Promise<InventoryRemoveLog>;
+  getInventoryLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<{ rows: InventoryLogRow[]; total: number }>;
+  getInventoryLogUsernames(): Promise<string[]>;
+  getInventoryLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<InventoryLogRow[]>;
 
   // Inventory audit task operations
   createOrUpdateAuditTask(opts: { sku: string; product_id: number; variant_id: number; product_name: string; variant_name: string; quantity_added: number; system_qty: number; created_by: number; source?: string }): Promise<InventoryAuditTask>;
@@ -1014,6 +1017,92 @@ export class DatabaseStorage implements IStorage {
       .where(sql`${inventoryPushLogs.username} != ''`)
       .orderBy(inventoryPushLogs.username);
     return result.map(r => r.username);
+  }
+
+  async getInventoryLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<{ rows: InventoryLogRow[]; total: number }> {
+    const { page, limit, search, username, dateFrom, dateTo } = opts;
+    const buildConditions = (table: typeof inventoryPushLogs | typeof inventoryRemoveLogs) => {
+      const conditions = [];
+      if (search) conditions.push(or(ilike(table.product_name, `%${search}%`), ilike(table.sku, `%${search}%`))!);
+      if (username) conditions.push(eq(table.username, username));
+      if (dateFrom) conditions.push(gte(table.created_at, new Date(dateFrom)));
+      if (dateTo) {
+        const end = new Date(dateTo);
+        end.setDate(end.getDate() + 1);
+        conditions.push(lt(table.created_at, end));
+      }
+      return conditions.length > 0 ? and(...conditions) : undefined;
+    };
+
+    const [adds, removes] = await Promise.all([
+      db.select().from(inventoryPushLogs).where(buildConditions(inventoryPushLogs)),
+      db.select().from(inventoryRemoveLogs).where(buildConditions(inventoryRemoveLogs)),
+    ]);
+    const rows: InventoryLogRow[] = [
+      ...adds.map((log): InventoryLogRow => ({
+        id: log.id,
+        log_type: "add",
+        user_id: log.user_id,
+        username: log.username,
+        sku: log.sku,
+        product_id: log.product_id,
+        variant_id: log.variant_id,
+        product_name: log.product_name,
+        variant_name: log.variant_name,
+        previous_inventory: log.previous_inventory,
+        new_inventory: log.new_inventory,
+        quantity: log.quantity_added,
+        reason: log.reason,
+        destination: [
+          log.push_to_bigcommerce && "BigCommerce",
+          log.push_to_skuvault && "SKUVault",
+        ].filter(Boolean).join(" + "),
+        skuvault_location: log.skuvault_location,
+        created_at: log.created_at,
+      })),
+      ...removes.map((log): InventoryLogRow => ({
+        id: log.id,
+        log_type: "remove",
+        user_id: log.user_id,
+        username: log.username,
+        sku: log.sku,
+        product_id: log.product_id,
+        variant_id: log.variant_id,
+        product_name: log.product_name,
+        variant_name: log.variant_name,
+        previous_inventory: log.previous_inventory,
+        new_inventory: log.new_inventory,
+        quantity: log.quantity_removed,
+        reason: log.reason,
+        destination: [
+          log.remove_from_bigcommerce && "BigCommerce",
+          log.remove_from_skuvault && "SKUVault",
+        ].filter(Boolean).join(" + "),
+        skuvault_location: log.skuvault_location,
+        created_at: log.created_at,
+      })),
+    ].sort((a, b) => {
+      const dateDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      return dateDiff || b.id - a.id;
+    });
+
+    const offset = page * limit;
+    return { rows: rows.slice(offset, offset + limit), total: rows.length };
+  }
+
+  async getInventoryLogUsernames(): Promise<string[]> {
+    const [pushUsers, removeUsers] = await Promise.all([
+      this.getInventoryPushLogUsernames(),
+      db.selectDistinct({ username: inventoryRemoveLogs.username })
+        .from(inventoryRemoveLogs)
+        .where(sql`${inventoryRemoveLogs.username} != ''`)
+        .orderBy(inventoryRemoveLogs.username),
+    ]);
+    return [...new Set([...pushUsers, ...removeUsers.map((row) => row.username)])].sort();
+  }
+
+  async getInventoryLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<InventoryLogRow[]> {
+    return (await this.getInventoryLogs({ page: 0, limit: 100000, ...opts })).rows;
   }
 
   // ── Inventory audit task methods ──────────────────────────────────────────

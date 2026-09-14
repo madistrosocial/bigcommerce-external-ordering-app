@@ -4,11 +4,10 @@ description: SKUVault Reason must be exact account-configured text; QueryClient 
 ---
 
 ## SKUVault `Reason` field
-- Must be the **exact text string** shown in SKUVault's "Reason to Add" dropdown (e.g. `Add`, `Add for Hike Order`).
-- NOT free-text, NOT a numeric ID.
-- Misconfigured/legacy reason strings cause `ReasonNotFound` (HTTP 400) from addItemBulk.
-- Admin stores valid reasons in `skuvault_config.reasons[]` (configured via Admin → SKUVault settings textarea).
-- SKUVault has no dedicated configured-reasons API endpoint; recent `getTransactions` results can provide exact observed reason strings, with the configured list as a fallback/union.
+- Must be the **exact text string** configured in the SKUVault account.
+- The Remove Inventory UI uses an editable textbox defaulted to `Internal Purchase`; the server passes the value through and lets SKUVault validate it.
+- Invalid reason strings cause a SKUVault validation error (typically HTTP 400).
+- SKUVault has no dedicated configured-reasons API endpoint; recent `getTransactions` results are not a reliable source for the complete remove-reason list.
 
 **Why:** SKUVault validates Reason against the account's pre-configured list server-side.
 
@@ -19,7 +18,7 @@ description: SKUVault Reason must be exact account-configured text; QueryClient 
   3. Client sends a valid reason from the list → use as-is
 - This ensures pushes succeed even when the UI hasn't loaded the dropdown yet.
 
-**How to apply:** Keep this logic in the push route and both audit-complete routes.
+**How to apply:** Keep reason substitution in the push route and both audit-complete routes. Do not reintroduce a Remove dropdown sourced from recent transactions unless SKUVault provides a true configured-reasons endpoint.
 
 ## React Query `staleTime: Infinity` trap
 - The global QueryClient (`queryClient.ts`) sets `staleTime: Infinity` and `retry: false`.

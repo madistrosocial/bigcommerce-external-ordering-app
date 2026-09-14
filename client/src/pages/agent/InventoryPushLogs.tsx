@@ -47,7 +47,7 @@ export default function InventoryPushLogs() {
   const exportCSV = useCallback(async () => {
     setIsExporting(true);
     try {
-      const { blob, filename } = await api.exportInventoryPushLogs({
+      const { blob, filename } = await api.exportInventoryLogs({
         search: appliedSearch || undefined,
         username: username || undefined,
         dateFrom: dateFrom || undefined,
@@ -67,14 +67,14 @@ export default function InventoryPushLogs() {
   }, [appliedSearch, username, dateFrom, dateTo]);
 
   const { data: usernames = [] } = useQuery<string[]>({
-    queryKey: ["inventory-push-log-usernames"],
-    queryFn: api.getInventoryPushLogUsernames,
+    queryKey: ["inventory-log-usernames"],
+    queryFn: api.getInventoryLogUsernames,
   });
 
-  const { data, isLoading } = useQuery<{ rows: api.InventoryPushLog[]; total: number }>({
-    queryKey: ["inventory-push-logs", page, appliedSearch, username, dateFrom, dateTo],
+  const { data, isLoading } = useQuery<{ rows: api.InventoryLog[]; total: number }>({
+    queryKey: ["inventory-logs", page, appliedSearch, username, dateFrom, dateTo],
     queryFn: () =>
-      api.getInventoryPushLogs({
+      api.getInventoryLogs({
         page,
         limit: PAGE_SIZE,
         search: appliedSearch || undefined,
@@ -107,7 +107,7 @@ export default function InventoryPushLogs() {
         </Button>
         <div className="flex items-center gap-1.5 min-w-0">
           <Package className="h-4 w-4 text-slate-600 shrink-0" />
-          <h1 className="text-sm font-bold text-slate-800 truncate">Inventory Push Logs</h1>
+          <h1 className="text-sm font-bold text-slate-800 truncate">Logs</h1>
         </div>
         <span className="ml-auto text-xs text-slate-400 shrink-0">
           {isLoading ? "Loading…" : `${total.toLocaleString()} rec${total !== 1 ? "s" : ""}`}
@@ -201,7 +201,7 @@ export default function InventoryPushLogs() {
         ) : logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400">
             <Package className="h-12 w-12 mb-3 opacity-30" />
-            <p className="text-sm">{hasFilters ? "No logs match the current filters." : "No inventory pushes recorded yet."}</p>
+            <p className="text-sm">{hasFilters ? "No logs match the current filters." : "No inventory transactions recorded yet."}</p>
           </div>
         ) : (
           <>
@@ -212,12 +212,14 @@ export default function InventoryPushLogs() {
                   <tr>
                     <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide whitespace-nowrap">Date</th>
                     <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">User</th>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Type</th>
                     <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Product</th>
                     <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Variant</th>
                     <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">SKU</th>
                     <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Before</th>
-                    <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Added</th>
+                    <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Change</th>
                     <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">After</th>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Destination</th>
                     <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">SV Location</th>
                     <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase tracking-wide">Reason</th>
                   </tr>
@@ -231,6 +233,11 @@ export default function InventoryPushLogs() {
                       <td className="px-3 py-2 text-xs font-medium text-slate-700">
                         {log.username || `User #${log.user_id}`}
                       </td>
+                      <td className="px-3 py-2 text-xs">
+                        <span className={`inline-flex rounded px-1.5 py-0.5 font-semibold ${log.log_type === "remove" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
+                          {log.log_type === "remove" ? "Remove" : "Add"}
+                        </span>
+                      </td>
                       <td className="px-3 py-2 text-xs text-slate-700 max-w-[180px] truncate">
                         {log.product_name || `Product #${log.product_id}`}
                       </td>
@@ -243,11 +250,14 @@ export default function InventoryPushLogs() {
                       <td className="px-3 py-2 text-right text-xs text-slate-600">
                         {log.previous_inventory}
                       </td>
-                      <td className="px-3 py-2 text-right text-xs font-bold text-green-600">
-                        +{log.quantity_added}
+                      <td className={`px-3 py-2 text-right text-xs font-bold ${log.log_type === "remove" ? "text-red-600" : "text-green-600"}`}>
+                        {log.log_type === "remove" ? "−" : "+"}{log.quantity}
                       </td>
                       <td className="px-3 py-2 text-right text-xs font-semibold text-slate-800">
                         {log.new_inventory}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-500">
+                        {log.destination || "—"}
                       </td>
                       <td className="px-3 py-2 text-xs">
                         {log.skuvault_location
@@ -267,9 +277,9 @@ export default function InventoryPushLogs() {
             <div className={`flex md:hidden flex-col gap-2 transition-opacity ${isLoading ? "opacity-60" : ""}`}>
               {logs.map((log) => (
                 <div
-                  key={log.id}
+                  key={`${log.log_type}-${log.id}`}
                   className="bg-white rounded-lg border shadow-sm px-4 py-3"
-                  data-testid={`log-card-${log.id}`}
+                  data-testid={`log-card-${log.log_type}-${log.id}`}
                 >
                   {/* Top row: product name + qty change */}
                   <div className="flex items-start justify-between gap-2 mb-1.5">
@@ -280,8 +290,8 @@ export default function InventoryPushLogs() {
                       <span className="text-xs text-slate-500">{log.previous_inventory}</span>
                       <span className="text-xs text-slate-400">→</span>
                       <span className="text-sm font-bold text-slate-800">{log.new_inventory}</span>
-                      <span className="text-xs font-semibold text-green-600 bg-green-50 rounded px-1.5 py-0.5 ml-0.5">
-                        +{log.quantity_added}
+                        <span className={`text-xs font-semibold rounded px-1.5 py-0.5 ml-0.5 ${log.log_type === "remove" ? "text-red-600 bg-red-50" : "text-green-600 bg-green-50"}`}>
+                         {log.log_type === "remove" ? "−" : "+"}{log.quantity}
                       </span>
                     </div>
                   </div>

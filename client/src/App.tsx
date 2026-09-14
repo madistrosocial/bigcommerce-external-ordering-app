@@ -149,7 +149,7 @@ function Router() {
         {() => <ProtectedRoute component={POSPage} role="agent" />}
       </Route>
       <Route path="/inventory-push-logs">
-        {() => <ProtectedRoute component={InventoryPushLogs} role="agent" />}
+        {() => <Redirect to="/inventory/logs" />}
       </Route>
       <Route path="/inventory/push">
         {() => <ProtectedRoute component={InventoryPushPage} />}
@@ -161,7 +161,7 @@ function Router() {
         {() => <ProtectedRoute component={InventoryAuditPage} />}
       </Route>
       <Route path="/inventory/logs">
-        {() => <Redirect to="/inventory-push-logs" />}
+        {() => <ProtectedRoute component={InventoryPushLogs} role="agent" />}
       </Route>
 
       {/* ── Attendance routes ── */}

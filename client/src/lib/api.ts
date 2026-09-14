@@ -1304,6 +1304,81 @@ export async function getInventoryPushLogUsernames(): Promise<string[]> {
   return res.json();
 }
 
+export interface InventoryLog {
+  id: number;
+  log_type: "add" | "remove";
+  user_id: number;
+  username: string;
+  sku: string;
+  product_id: number;
+  variant_id: number;
+  product_name: string;
+  variant_name: string;
+  previous_inventory: number;
+  new_inventory: number;
+  quantity: number;
+  reason: string | null;
+  destination: string;
+  skuvault_location: string | null;
+  created_at: string;
+}
+
+export async function getInventoryLogs(opts?: {
+  page?: number;
+  limit?: number;
+  search?: string;
+  username?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<{ rows: InventoryLog[]; total: number }> {
+  const params = new URLSearchParams();
+  if (opts?.page !== undefined) params.set("page", String(opts.page));
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts?.search) params.set("search", opts.search);
+  if (opts?.username) params.set("username", opts.username);
+  if (opts?.dateFrom) params.set("dateFrom", opts.dateFrom);
+  if (opts?.dateTo) params.set("dateTo", opts.dateTo);
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/inventory/logs${qs ? `?${qs}` : ""}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch inventory logs");
+  return res.json();
+}
+
+export async function exportInventoryLogs(opts?: {
+  search?: string;
+  username?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<{ blob: Blob; filename: string }> {
+  const params = new URLSearchParams();
+  if (opts?.search) params.set("search", opts.search);
+  if (opts?.username) params.set("username", opts.username);
+  if (opts?.dateFrom) params.set("dateFrom", opts.dateFrom);
+  if (opts?.dateTo) params.set("dateTo", opts.dateTo);
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/inventory/logs/export${qs ? `?${qs}` : ""}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to export inventory logs");
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  return {
+    blob,
+    filename: match?.[1] ?? `inventory-logs-${new Date().toISOString().slice(0, 10)}.csv`,
+  };
+}
+
+export async function getInventoryLogUsernames(): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/inventory/logs/usernames`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch inventory log usernames");
+  return res.json();
+}
+
 export interface PendingOrderEntry {
   order_id: number;
   status: string;
