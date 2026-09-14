@@ -108,7 +108,7 @@ export default function InventoryRemovePage() {
     if (!selectedProduct || !selectedVariant || !canSubmit) return;
     setIsSubmitting(true);
     try {
-      await api.removeInventory({
+      const result = await api.removeInventory({
         product_id: selectedProduct.bigcommerce_id,
         variant_id: selectedVariant.id,
         sku: selectedVariant.sku || selectedProduct.sku,
@@ -119,7 +119,12 @@ export default function InventoryRemovePage() {
         remove_from_bigcommerce: removeFromBigCommerce,
         remove_from_skuvault: removeFromSkuvault,
       });
-      toast({ title: "Inventory Removed", description: `${selectedVariant.sku || selectedProduct.sku}: removed ${quantity} unit${quantity === 1 ? "" : "s"}` });
+      toast({
+        title: "Inventory Removed",
+        description: result.skuvault_warning
+          ? `${selectedVariant.sku || selectedProduct.sku}: removed ${quantity} unit${quantity === 1 ? "" : "s"}. SKUVault confirmation is temporarily rate-limited.`
+          : `${selectedVariant.sku || selectedProduct.sku}: removed ${quantity} unit${quantity === 1 ? "" : "s"}`,
+      });
       setSelectedProduct(null);
       setSelectedVariant(null);
       setQuantityInput("1");

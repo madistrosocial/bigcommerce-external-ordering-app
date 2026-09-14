@@ -318,7 +318,7 @@ export async function removeSkuVaultInventory(
   cfg: SkuVaultConfig,
   items: { sku: string; quantityToRemove: number }[],
   reason: string
-): Promise<{ results: { sku: string; newQty: number | null; locationCode: string; error?: string }[] }> {
+): Promise<{ results: { sku: string; newQty: number | null; locationCode: string; error?: string; warning?: string }[] }> {
   const skus = items.map((i) => i.sku);
   const { primaryBins, locationBySku } = await resolveLocations(cfg, skus);
   const fallbackLocation = cfg.warehouseLocation || null;
@@ -390,6 +390,7 @@ export async function removeSkuVaultInventory(
   }
 
   let verifiedQty: number | null = null;
+  let verificationWarning: string | undefined;
   if (!errorsBySku[item.sku] && startingQty != null) {
     const expectedQty = startingQty - item.quantityToRemove;
     let verificationError: string | null = null;
@@ -404,6 +405,14 @@ export async function removeSkuVaultInventory(
         }
       } catch (error: any) {
         verificationError = error?.message || String(error);
+        if (/HTTP 429\b/.test(verificationError)) {
+          // The removeItem response is authoritative. Do not turn a completed
+          // mutation into a GUI error just because the confirmation read was
+          // throttled, and do not make more calls while the account is limited.
+          verifiedQty = expectedQty;
+          verificationWarning = "SKUVault completed the removal, but the follow-up inventory check was rate-limited.";
+          break;
+        }
       }
     }
     if (verifiedQty == null) {
@@ -421,6 +430,7 @@ export async function removeSkuVaultInventory(
       locationCode: p.locationCode,
       newQty: errorsBySku[p.sku] ? null : verifiedQty,
       error: errorsBySku[p.sku],
+      warning: errorsBySku[p.sku] ? undefined : verificationWarning,
     };
   });
 

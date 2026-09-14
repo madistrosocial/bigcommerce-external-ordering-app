@@ -1113,7 +1113,7 @@ export async function removeInventory(data: {
   variant_name?: string;
   remove_from_bigcommerce?: boolean;
   remove_from_skuvault?: boolean;
-}): Promise<{ success: boolean; previous_inventory: number; new_inventory: number; log: InventoryRemoveLog; skuvault?: any }> {
+}): Promise<{ success: boolean; previous_inventory: number; new_inventory: number; log: InventoryRemoveLog; skuvault?: any; skuvault_warning?: string | null }> {
   const res = await fetch(`${API_BASE}/inventory/remove`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getAuthHeaders() },

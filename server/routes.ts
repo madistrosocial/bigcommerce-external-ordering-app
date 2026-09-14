@@ -3643,6 +3643,7 @@ export async function registerRoutes(
       let new_inventory = 0;
       let svResult: any = null;
       let svLocation: string | null = null;
+      let skuvaultWarning: string | null = null;
       let effectiveReason = reason.trim();
 
       // Preflight BigCommerce before touching SKUVault. External inventory
@@ -3701,6 +3702,7 @@ export async function registerRoutes(
         if (item?.error) throw new Error(`SKUVault removal failed for ${sku}: ${item.error}`);
         svResult = result;
         svLocation = item?.locationCode || null;
+        skuvaultWarning = item?.warning || null;
         if (!remove_from_bigcommerce) {
           previous_inventory = item?.newQty == null ? 0 : item.newQty + quantity_removed;
           new_inventory = item?.newQty ?? 0;
@@ -3753,7 +3755,7 @@ export async function registerRoutes(
         skuvault_location: svLocation,
       };
       const log = await storage.createInventoryRemoveLog(logEntry);
-      res.json({ success: true, previous_inventory, new_inventory, log, skuvault: svResult });
+      res.json({ success: true, previous_inventory, new_inventory, log, skuvault: svResult, skuvault_warning: skuvaultWarning });
     } catch (error: any) {
       console.error("[Inventory Remove] Error:", error.message, error.stack);
       res.status(500).json({ error: error.message });
