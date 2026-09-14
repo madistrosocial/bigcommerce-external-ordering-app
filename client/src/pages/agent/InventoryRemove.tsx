@@ -223,9 +223,9 @@ export default function InventoryRemovePage() {
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">SKUVault Removal Reason (required)</label>
+                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">SKUVault Add Reason (required)</label>
                     {reasonLoading ? <div className="h-9 flex items-center text-sm text-slate-400 gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading reasons from SKUVault…</div> : reasons.length > 0 ? (
-                      <><Select value={reason} onValueChange={setReason}><SelectTrigger className="h-9 text-sm" data-testid="select-remove-inv-reason"><SelectValue placeholder="Select a SKUVault reason" /></SelectTrigger><SelectContent>{reasons.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><p className="text-[11px] text-slate-400 mt-1">{reasonSource === "skuvault_transactions" ? "Loaded from recent SKUVault transactions." : "Using the configured SKUVault fallback reason list."}</p></>
+                      <><Select value={reason} onValueChange={setReason}><SelectTrigger className="h-9 text-sm" data-testid="select-remove-inv-reason"><SelectValue placeholder="Select a SKUVault Add Reason" /></SelectTrigger><SelectContent>{reasons.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><p className="text-[11px] text-slate-400 mt-1">{reasonSource === "skuvault_transactions" ? "Loaded from recent SKUVault transactions." : "Using the configured SKUVault fallback reason list."}</p></>
                     ) : <p className="text-sm text-red-600">{reasonError || "No SKUVault reasons are available."}</p>}
                   </div>
 
@@ -242,7 +242,7 @@ export default function InventoryRemovePage() {
 
                   {removeFromSkuvault && <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs"><span className="font-semibold text-slate-600 uppercase tracking-wide">SKUVault Bin: </span>{svLocationLoading ? <span className="text-slate-400 inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Looking up bin…</span> : svLocation?.locationCode ? <><span className="font-mono text-purple-700 font-semibold">{svLocation.locationCode}</span>{svLocation.currentQty !== null && <span className="text-slate-400 ml-2">(current: {svLocation.currentQty})</span>}</> : <span className="text-red-600">{svLocation?.error ?? "No bin found — configure a fallback location if needed."}</span>}</div>}
 
-                  {!showConfirm ? <Button className="w-full h-12 text-base font-semibold bg-red-600 hover:bg-red-700" disabled={!canSubmit} onClick={() => setShowConfirm(true)} data-testid="button-remove-inv-confirm-open"><PackageMinus className="h-4 w-4 mr-2" />Remove {quantity} Unit{quantity !== 1 ? "s" : ""} from {destination}</Button> : (
+                  {!showConfirm ? <Button className="w-full h-12 text-base font-semibold bg-red-600 hover:bg-red-700" disabled={!canSubmit} onClick={() => setShowConfirm(true)} data-testid="button-remove-inv-confirm-open"><PackageMinus className="h-4 w-4 mr-2" />Remove {quantity} Unit{quantity !== 1 ? "s" : ""}</Button> : (
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
                       <p className="text-sm font-semibold text-amber-800 flex items-center gap-2"><AlertTriangle className="h-4 w-4" />Confirm Inventory Removal</p>
                       <p className="text-sm text-amber-700">Remove <strong>{quantity}</strong> unit{quantity !== 1 ? "s" : ""} of <strong>{variantLabel(selectedVariant) || selectedVariant.sku}</strong> from <strong>{destination}</strong>.<br />BigCommerce stock: <strong>{stock}</strong> → <strong>{Math.max(0, stock - quantity)}</strong><br />Reason: <em>{reason}</em></p>
