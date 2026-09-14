@@ -91,9 +91,9 @@ export interface IStorage {
   getInventoryPushLogUsernames(): Promise<string[]>;
   getInventoryPushLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<InventoryPushLog[]>;
   createInventoryRemoveLog(entry: InsertInventoryRemoveLog): Promise<InventoryRemoveLog>;
-  getInventoryLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<{ rows: InventoryLogRow[]; total: number }>;
+  getInventoryLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string; type?: "add" | "remove" }): Promise<{ rows: InventoryLogRow[]; total: number }>;
   getInventoryLogUsernames(): Promise<string[]>;
-  getInventoryLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<InventoryLogRow[]>;
+  getInventoryLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string; type?: "add" | "remove" }): Promise<InventoryLogRow[]>;
 
   // Inventory audit task operations
   createOrUpdateAuditTask(opts: { sku: string; product_id: number; variant_id: number; product_name: string; variant_name: string; quantity_added: number; system_qty: number; created_by: number; source?: string }): Promise<InventoryAuditTask>;
@@ -1019,8 +1019,8 @@ export class DatabaseStorage implements IStorage {
     return result.map(r => r.username);
   }
 
-  async getInventoryLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<{ rows: InventoryLogRow[]; total: number }> {
-    const { page, limit, search, username, dateFrom, dateTo } = opts;
+  async getInventoryLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string; type?: "add" | "remove" }): Promise<{ rows: InventoryLogRow[]; total: number }> {
+    const { page, limit, search, username, dateFrom, dateTo, type } = opts;
     const buildConditions = (table: typeof inventoryPushLogs | typeof inventoryRemoveLogs) => {
       const conditions = [];
       if (search) conditions.push(or(ilike(table.product_name, `%${search}%`), ilike(table.sku, `%${search}%`))!);
@@ -1086,8 +1086,9 @@ export class DatabaseStorage implements IStorage {
       return dateDiff || b.id - a.id;
     });
 
+    const filteredRows = type ? rows.filter((row) => row.log_type === type) : rows;
     const offset = page * limit;
-    return { rows: rows.slice(offset, offset + limit), total: rows.length };
+    return { rows: filteredRows.slice(offset, offset + limit), total: filteredRows.length };
   }
 
   async getInventoryLogUsernames(): Promise<string[]> {
@@ -1101,7 +1102,7 @@ export class DatabaseStorage implements IStorage {
     return [...new Set([...pushUsers, ...removeUsers.map((row) => row.username)])].sort();
   }
 
-  async getInventoryLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<InventoryLogRow[]> {
+  async getInventoryLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string; type?: "add" | "remove" }): Promise<InventoryLogRow[]> {
     return (await this.getInventoryLogs({ page: 0, limit: 100000, ...opts })).rows;
   }
 

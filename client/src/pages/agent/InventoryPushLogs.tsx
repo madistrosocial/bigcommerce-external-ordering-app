@@ -24,6 +24,7 @@ export default function InventoryPushLogs() {
   const [username, setUsername] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [logType, setLogType] = useState<"all" | "add" | "remove">("all");
   const [page, setPage] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const [appliedSearch, setAppliedSearch] = useState("");
@@ -39,10 +40,11 @@ export default function InventoryPushLogs() {
     setUsername("");
     setDateFrom("");
     setDateTo("");
+    setLogType("all");
     setPage(0);
   };
 
-  const hasFilters = appliedSearch || username || dateFrom || dateTo;
+  const hasFilters = appliedSearch || username || dateFrom || dateTo || logType !== "all";
 
   const exportCSV = useCallback(async () => {
     setIsExporting(true);
@@ -52,6 +54,7 @@ export default function InventoryPushLogs() {
         username: username || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
+        type: logType === "all" ? undefined : logType,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -64,7 +67,7 @@ export default function InventoryPushLogs() {
     } finally {
       setIsExporting(false);
     }
-  }, [appliedSearch, username, dateFrom, dateTo]);
+  }, [appliedSearch, username, dateFrom, dateTo, logType]);
 
   const { data: usernames = [] } = useQuery<string[]>({
     queryKey: ["inventory-log-usernames"],
@@ -72,7 +75,7 @@ export default function InventoryPushLogs() {
   });
 
   const { data, isLoading } = useQuery<{ rows: api.InventoryLog[]; total: number }>({
-    queryKey: ["inventory-logs", page, appliedSearch, username, dateFrom, dateTo],
+    queryKey: ["inventory-logs", page, appliedSearch, username, dateFrom, dateTo, logType],
     queryFn: () =>
       api.getInventoryLogs({
         page,
@@ -81,6 +84,7 @@ export default function InventoryPushLogs() {
         username: username || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
+        type: logType === "all" ? undefined : logType,
       }),
     placeholderData: (prev) => prev,
   });
@@ -157,6 +161,16 @@ export default function InventoryPushLogs() {
               onChange={(e) => { setDateFrom(e.target.value); setPage(0); }}
             />
           </div>
+          <Select value={logType} onValueChange={(value: "all" | "add" | "remove") => { setLogType(value); setPage(0); }}>
+            <SelectTrigger className="h-8 text-xs w-32" data-testid="select-inventory-log-type">
+              <SelectValue placeholder="All types" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              <SelectItem value="add">Add only</SelectItem>
+              <SelectItem value="remove">Remove only</SelectItem>
+            </SelectContent>
+          </Select>
           <div className="flex items-center gap-1">
             <span className="text-xs text-slate-500 whitespace-nowrap">To</span>
             <Input

@@ -3832,7 +3832,8 @@ export async function registerRoutes(
       const username = (req.query.username as string) || undefined;
       const dateFrom = (req.query.dateFrom as string) || undefined;
       const dateTo = (req.query.dateTo as string) || undefined;
-      const rows = await storage.getInventoryLogsForExport({ search, username, dateFrom, dateTo });
+      const type = req.query.type === "add" || req.query.type === "remove" ? req.query.type : undefined;
+      const rows = await storage.getInventoryLogsForExport({ search, username, dateFrom, dateTo, type });
       const neutralize = (value: string | number | null | undefined): string => {
         const text = value == null ? "" : String(value);
         return text.length > 0 && ["=", "+", "-", "@", "\t", "\r"].includes(text[0]) ? `'${text}` : text;
@@ -3876,7 +3877,8 @@ export async function registerRoutes(
       const username = (req.query.username as string) || undefined;
       const dateFrom = (req.query.dateFrom as string) || undefined;
       const dateTo = (req.query.dateTo as string) || undefined;
-      res.json(await storage.getInventoryLogs({ page, limit, search, username, dateFrom, dateTo }));
+      const type = req.query.type === "add" || req.query.type === "remove" ? req.query.type : undefined;
+      res.json(await storage.getInventoryLogs({ page, limit, search, username, dateFrom, dateTo, type }));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

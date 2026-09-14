@@ -1330,6 +1330,7 @@ export async function getInventoryLogs(opts?: {
   username?: string;
   dateFrom?: string;
   dateTo?: string;
+  type?: "add" | "remove";
 }): Promise<{ rows: InventoryLog[]; total: number }> {
   const params = new URLSearchParams();
   if (opts?.page !== undefined) params.set("page", String(opts.page));
@@ -1338,6 +1339,7 @@ export async function getInventoryLogs(opts?: {
   if (opts?.username) params.set("username", opts.username);
   if (opts?.dateFrom) params.set("dateFrom", opts.dateFrom);
   if (opts?.dateTo) params.set("dateTo", opts.dateTo);
+  if (opts?.type) params.set("type", opts.type);
   const qs = params.toString();
   const res = await fetch(`${API_BASE}/inventory/logs${qs ? `?${qs}` : ""}`, {
     headers: getAuthHeaders(),
@@ -1351,12 +1353,14 @@ export async function exportInventoryLogs(opts?: {
   username?: string;
   dateFrom?: string;
   dateTo?: string;
+  type?: "add" | "remove";
 }): Promise<{ blob: Blob; filename: string }> {
   const params = new URLSearchParams();
   if (opts?.search) params.set("search", opts.search);
   if (opts?.username) params.set("username", opts.username);
   if (opts?.dateFrom) params.set("dateFrom", opts.dateFrom);
   if (opts?.dateTo) params.set("dateTo", opts.dateTo);
+  if (opts?.type) params.set("type", opts.type);
   const qs = params.toString();
   const res = await fetch(`${API_BASE}/inventory/logs/export${qs ? `?${qs}` : ""}`, {
     headers: getAuthHeaders(),
