@@ -3687,9 +3687,14 @@ export async function registerRoutes(
         const configuredReasons: string[] = Array.isArray(svCfg.reasons)
           ? svCfg.reasons.filter((value: unknown): value is string => typeof value === "string" && !!value.trim())
           : [];
-        if (configuredReasons.length > 0 && !configuredReasons.includes(effectiveReason)) {
-          console.warn(`[SKUVault] Remove reason "${effectiveReason}" is not configured; using "${configuredReasons[0]}"`);
-          effectiveReason = configuredReasons[0];
+        const removalReasons = await getSkuVaultTransactionReasons(cfg, "Remove");
+        const configuredRemovalReason = removalReasons.find((value) => configuredReasons.includes(value));
+        if (!removalReasons.includes(effectiveReason)) {
+          const fallbackReason = configuredRemovalReason || removalReasons[0] || configuredReasons[0];
+          if (fallbackReason && fallbackReason !== effectiveReason) {
+            console.warn(`[SKUVault] Remove reason "${effectiveReason}" is not valid for removal; using "${fallbackReason}"`);
+            effectiveReason = fallbackReason;
+          }
         }
         const result = await removeSkuVaultInventory(cfg, [{ sku, quantityToRemove: quantity_removed }], effectiveReason);
         const item = result.results[0];

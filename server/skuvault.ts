@@ -551,7 +551,8 @@ export async function getLiveSkuQuantities(
  * reasons when an account has no recent transactions.
  */
 export async function getSkuVaultTransactionReasons(
-  cfg: SkuVaultConfig
+  cfg: SkuVaultConfig,
+  transactionType = "All"
 ): Promise<string[]> {
   const toDate = new Date();
   const fromDate = new Date(toDate.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -572,6 +573,8 @@ export async function getSkuVaultTransactionReasons(
     if (!Array.isArray(rows)) return [];
     const reasons = new Set<string>();
     for (const row of rows) {
+      const rowType = row?.TransactionType ?? row?.Type ?? row?.type;
+      if (transactionType !== "All" && rowType !== transactionType) continue;
       const value = row?.Reason ?? row?.TransactionReason ?? row?.reason ?? row?.transactionReason;
       if (typeof value === "string" && value.trim()) reasons.add(value.trim());
     }

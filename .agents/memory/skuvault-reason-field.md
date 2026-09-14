@@ -5,7 +5,7 @@ description: SKUVault Reason must be exact account-configured text; QueryClient 
 
 ## SKUVault `Reason` field
 - Must be the **exact text string** configured in the SKUVault account.
-- The Remove Inventory UI uses an editable textbox defaulted to `Internal Purchase`; the server substitutes the first locally configured account reason when the entered value is not valid for that account.
+- The Remove Inventory UI uses an editable textbox defaulted to `Internal Purchase`; the server prefers a reason observed on recent SKUVault removal transactions when the entered value is not valid for removal.
 - Invalid reason strings cause a SKUVault validation error (typically HTTP 400).
 - SKUVault has no dedicated configured-reasons API endpoint; recent `getTransactions` results are not a reliable source for the complete remove-reason list.
 - The single-item endpoint reports its application result in `RemoveItemStatus` (not the bulk endpoint's `Status`/`Errors` shape).
@@ -21,6 +21,14 @@ description: SKUVault Reason must be exact account-configured text; QueryClient 
 - This ensures pushes succeed even when the UI hasn't loaded the dropdown yet.
 
 **How to apply:** Keep reason substitution in the push route and both audit-complete routes. Do not reintroduce a Remove dropdown sourced from recent transactions unless SKUVault provides a true configured-reasons endpoint.
+
+## Removal reason selection
+- Addition and removal reasons can differ even when both appear in recent transaction history. A reason such as `Add` may be valid for additions but return `ReasonNotFound` for `removeItem`.
+- For Remove Inventory, prefer a configured reason that has appeared on a recent `Remove` transaction; fall back to the most recent removal reason before using the local configured list.
+
+**Why:** The account returned `Add` and `Item Audit` in transaction history, but only `Item Audit` was associated with a removal and accepted by `removeItem`.
+
+**How to apply:** Keep the textbox editable, but classify fallback reasons by transaction type rather than selecting the first configured reason blindly.
 
 ## React Query `staleTime: Infinity` trap
 - The global QueryClient (`queryClient.ts`) sets `staleTime: Infinity` and `retry: false`.
