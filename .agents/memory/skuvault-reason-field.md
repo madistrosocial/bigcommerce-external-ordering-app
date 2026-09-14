@@ -8,6 +8,8 @@ description: SKUVault Reason must be exact account-configured text; QueryClient 
 - The Remove Inventory UI uses an editable textbox defaulted to `Internal Purchase`; the server passes the value through and lets SKUVault validate it.
 - Invalid reason strings cause a SKUVault validation error (typically HTTP 400).
 - SKUVault has no dedicated configured-reasons API endpoint; recent `getTransactions` results are not a reliable source for the complete remove-reason list.
+- The single-item endpoint reports its application result in `RemoveItemStatus` (not the bulk endpoint's `Status`/`Errors` shape).
+- A successful HTTP response from `removeItem` is not proof that stock changed. Confirm the exact bin quantity through `getInventoryByLocation` before reporting success or recording a successful removal.
 
 **Why:** SKUVault validates Reason against the account's pre-configured list server-side.
 

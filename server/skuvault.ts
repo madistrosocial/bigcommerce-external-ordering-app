@@ -34,6 +34,13 @@ export interface SvSetQuantityResult {
   Errors: { Sku: string; ErrorMessages: string[] }[];
 }
 
+interface SvRemoveItemResult {
+  RemoveItemStatus?: string;
+  Error?: string;
+  ErrorMessages?: string[];
+  Errors?: { Sku?: string; ErrorMessages?: string[] }[];
+}
+
 /** Extended result from setSkuVaultInventory, includes the resolved bin per SKU */
 export interface SvSetInventoryResult extends SvSetQuantityResult {
   ResolvedLocations: Record<string, string>;   // sku → locationCode used
@@ -61,6 +68,9 @@ interface PrimaryBin {
   locationCode: string;
   currentQty: number;
 }
+
+const wait = (milliseconds: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 async function svPost<T>(path: string, body: Record<string, unknown>): Promise<T> {
   const res = await fetch(`${SV_BASE}${path}`, {
@@ -156,6 +166,19 @@ function extractPrimaryBinBySku(
     }
   }
   return bysku;
+}
+
+function getLocationQty(
+  result: SvGetInventoryResult,
+  sku: string,
+  locationCode: string
+): number | null {
+  const entries = result?.Items?.[sku];
+  if (!Array.isArray(entries)) return null;
+  const location = entries.find((entry) => entry?.LocationCode === locationCode);
+  if (!location) return null;
+  const quantity = location.QuantityAvailable ?? location.QuantityOnHand ?? location.Quantity;
+  return Number.isFinite(Number(quantity)) ? Number(quantity) : null;
 }
 
 /**
@@ -327,7 +350,7 @@ export async function removeSkuVaultInventory(
 
   if (toRemove.length === 0) return { results: errorResults };
 
-  const removeResult = await svPost<any>("/inventory/removeItem", {
+  const removeResult = await svPost<SvRemoveItemResult>("/inventory/removeItem", {
     TenantToken: cfg.tenantToken,
     UserToken: cfg.userToken,
     Sku: toRemove[0].sku,
@@ -351,16 +374,52 @@ export async function removeSkuVaultInventory(
     errorsBySku[toRemove[0].sku] = directError;
   }
 
+  const status = typeof removeResult?.RemoveItemStatus === "string"
+    ? removeResult.RemoveItemStatus.trim()
+    : "";
+  if (status && !/^success$/i.test(status) && !errorsBySku[toRemove[0].sku]) {
+    errorsBySku[toRemove[0].sku] = `SKUVault removal returned status "${status}"`;
+  }
+
+  // removeItem can return HTTP 200 without proving that inventory changed.
+  // Confirm the exact bin quantity before reporting success or writing an audit log.
+  const item = toRemove[0];
+  const startingQty = primaryBins[item.sku]?.currentQty;
+  if (!errorsBySku[item.sku] && startingQty == null) {
+    errorsBySku[item.sku] = "Could not determine the SKUVault quantity before removal";
+  }
+
+  let verifiedQty: number | null = null;
+  if (!errorsBySku[item.sku] && startingQty != null) {
+    const expectedQty = startingQty - item.quantityToRemove;
+    let verificationError: string | null = null;
+    for (const delayMs of [0, 300, 900, 1800]) {
+      if (delayMs) await wait(delayMs);
+      try {
+        const inventory = await getSkuVaultInventory(cfg, [item.sku]);
+        const observedQty = getLocationQty(inventory, item.sku, item.locationCode);
+        if (observedQty === expectedQty) {
+          verifiedQty = observedQty;
+          break;
+        }
+      } catch (error: any) {
+        verificationError = error?.message || String(error);
+      }
+    }
+    if (verifiedQty == null) {
+      errorsBySku[item.sku] =
+        verificationError
+          ? `SKUVault accepted the removal request, but its result could not be verified (${verificationError}). Check SKUVault before retrying.`
+          : `SKUVault accepted the request but the quantity at location ${item.locationCode} ` +
+            `did not change from ${startingQty} to ${expectedQty}. No successful removal was recorded.`;
+    }
+  }
+
   const removeResults = toRemove.map((p) => {
-    const bin = primaryBins[p.sku];
     return {
       sku: p.sku,
       locationCode: p.locationCode,
-      newQty: errorsBySku[p.sku]
-        ? null
-        : bin
-          ? Math.max(0, bin.currentQty - p.quantityToRemove)
-          : null,
+      newQty: errorsBySku[p.sku] ? null : verifiedQty,
       error: errorsBySku[p.sku],
     };
   });
