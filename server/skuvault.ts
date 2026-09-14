@@ -582,9 +582,15 @@ export async function getSkuVaultTransactionReasons(
     const rows = response?.Transactions ?? response?.Items ?? response?.Results ?? [];
     if (!Array.isArray(rows)) return [];
     const reasons = new Set<string>();
+    const normalizeTransactionType = (value: unknown): string =>
+      String(value ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "").replace(/item$/, "");
+    const requestedType = normalizeTransactionType(transactionType);
     for (const row of rows) {
       const rowType = row?.TransactionType ?? row?.Type ?? row?.type;
-      if (transactionType !== "All" && rowType !== transactionType) continue;
+      // SKUVault uses both "Remove" and "RemoveItem" (and similarly
+      // "Add"/"AddItem") in transaction history. Treat the suffix as an
+      // endpoint/API naming detail so removal reasons are not misclassified.
+      if (requestedType !== "all" && normalizeTransactionType(rowType) !== requestedType) continue;
       const value = row?.Reason ?? row?.TransactionReason ?? row?.reason ?? row?.transactionReason;
       if (typeof value === "string" && value.trim()) reasons.add(value.trim());
     }

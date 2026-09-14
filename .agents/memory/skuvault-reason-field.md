@@ -24,9 +24,9 @@ description: SKUVault Reason must be exact account-configured text; QueryClient 
 
 ## Removal reason selection
 - Addition and removal reasons can differ even when both appear in recent transaction history. A reason such as `Add` may be valid for additions but return `ReasonNotFound` for `removeItem`.
-- For Remove Inventory, prefer a configured reason that has appeared on a recent `Remove` transaction; fall back to the most recent removal reason before using the local configured list.
+- For Remove Inventory, prefer a configured reason that has appeared on a recent `Remove`/`RemoveItem` transaction; treat those transaction-type names as equivalent before using the local configured list.
 
-**Why:** The account returned `Add` and `Item Audit` in transaction history, but only `Item Audit` was associated with a removal and accepted by `removeItem`.
+**Why:** SKUVault can label removal history as `RemoveItem` even though the mutation endpoint is `removeItem`; exact reason selection must not miss those rows and fall back to an older reason.
 
 **How to apply:** Keep the textbox editable, but classify fallback reasons by transaction type rather than selecting the first configured reason blindly.
 
