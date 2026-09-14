@@ -21,6 +21,7 @@ import Cart from "@/pages/agent/Cart";
 import POSPage from "@/pages/agent/POS";
 import InventoryPushLogs from "@/pages/agent/InventoryPushLogs";
 import InventoryPushPage from "@/pages/agent/InventoryPush";
+import InventoryRemovePage from "@/pages/agent/InventoryRemove";
 import InventoryAuditPage from "@/pages/agent/InventoryAudit";
 import AdminSkuvaultPage from "@/pages/admin/AdminSkuvault";
 import AdminZohoPage from "@/pages/admin/AdminZoho";
@@ -152,6 +153,9 @@ function Router() {
       </Route>
       <Route path="/inventory/push">
         {() => <ProtectedRoute component={InventoryPushPage} />}
+      </Route>
+      <Route path="/inventory/remove">
+        {() => <ProtectedRoute component={InventoryRemovePage} />}
       </Route>
       <Route path="/inventory/audit">
         {() => <ProtectedRoute component={InventoryAuditPage} />}

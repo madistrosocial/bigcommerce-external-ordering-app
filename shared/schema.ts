@@ -190,6 +190,25 @@ export const inventoryPushLogs = pgTable("inventory_push_logs", {
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const inventoryRemoveLogs = pgTable("inventory_remove_logs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").notNull().references(() => users.id),
+  username: text("username").notNull().default(""),
+  sku: text("sku").notNull(),
+  product_id: integer("product_id").notNull(),
+  variant_id: integer("variant_id").notNull(),
+  product_name: text("product_name").notNull().default(""),
+  variant_name: text("variant_name").notNull().default(""),
+  previous_inventory: integer("previous_inventory").notNull(),
+  new_inventory: integer("new_inventory").notNull(),
+  quantity_removed: integer("quantity_removed").notNull(),
+  reason: text("reason").notNull(),
+  remove_from_bigcommerce: boolean("remove_from_bigcommerce").notNull().default(true),
+  remove_from_skuvault: boolean("remove_from_skuvault").notNull().default(false),
+  skuvault_location: text("skuvault_location"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const promoFreeSkuTracker = pgTable("promo_free_sku_tracker", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   sku: text("sku").notNull().unique(),
@@ -519,6 +538,7 @@ export const insertProductSchema = createInsertSchema(products).omit({ id: true 
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, date: true });
 export const insertPriceHistoryCacheSchema = createInsertSchema(priceHistoryCache).omit({ id: true, created_at: true });
 export const insertInventoryPushLogSchema = createInsertSchema(inventoryPushLogs).omit({ id: true, created_at: true });
+export const insertInventoryRemoveLogSchema = createInsertSchema(inventoryRemoveLogs).omit({ id: true, created_at: true });
 export const insertProductLinkLogSchema = createInsertSchema(productLinkLogs).omit({ id: true, created_at: true });
 export const insertPromoFreeSkuTrackerSchema = createInsertSchema(promoFreeSkuTracker).omit({ id: true, created_at: true, updated_at: true });
 export const insertShipstationExportHistorySchema = createInsertSchema(shipstationExportHistory).omit({ id: true, created_at: true, export_date: true });
@@ -788,6 +808,8 @@ export type PriceHistoryCacheEntry = typeof priceHistoryCache.$inferSelect;
 
 export type InsertInventoryPushLog = z.infer<typeof insertInventoryPushLogSchema>;
 export type InventoryPushLog = typeof inventoryPushLogs.$inferSelect;
+export type InsertInventoryRemoveLog = z.infer<typeof insertInventoryRemoveLogSchema>;
+export type InventoryRemoveLog = typeof inventoryRemoveLogs.$inferSelect;
 
 export type InsertProductLinkLog = z.infer<typeof insertProductLinkLogSchema>;
 export type ProductLinkLog = typeof productLinkLogs.$inferSelect;

@@ -288,6 +288,80 @@ export async function addSkuVaultInventory(
 }
 
 /**
+ * Remove quantity from a list of SKUs using removeItemBulk.
+ * SKUVault requires a warehouse location and an account-configured reason.
+ */
+export async function removeSkuVaultInventory(
+  cfg: SkuVaultConfig,
+  items: { sku: string; quantityToRemove: number }[],
+  reason: string
+): Promise<{ results: { sku: string; newQty: number | null; locationCode: string; error?: string }[] }> {
+  const skus = items.map((i) => i.sku);
+  const { primaryBins, locationBySku } = await resolveLocations(cfg, skus);
+  const fallbackLocation = cfg.warehouseLocation || null;
+
+  const payloads = items.map((i) => {
+    const bin = primaryBins[i.sku];
+    const loc = locationBySku[i.sku] ?? fallbackLocation;
+    if (!loc) {
+      return {
+        sku: i.sku,
+        quantityToRemove: i.quantityToRemove,
+        locationCode: "",
+        error: `No location found for SKU ${i.sku} in SKUVault. Configure a fallback Warehouse Location Code in Admin → SKUVault settings.`,
+      };
+    }
+    if (!locationBySku[i.sku] && fallbackLocation) {
+      console.warn(`[SKUVault] No location found for SKU ${i.sku}, using configured fallback: ${fallbackLocation}`);
+    }
+    return { sku: i.sku, quantityToRemove: i.quantityToRemove, locationCode: loc, error: undefined };
+  });
+
+  const toRemove = payloads.filter((p) => !p.error);
+  const errorResults = payloads.filter((p) => !!p.error).map((p) => ({
+    sku: p.sku,
+    newQty: null,
+    locationCode: p.locationCode,
+    error: p.error,
+  }));
+
+  if (toRemove.length === 0) return { results: errorResults };
+
+  const removeResult = await svPost<SvSetQuantityResult>("/inventory/removeItemBulk", {
+    TenantToken: cfg.tenantToken,
+    UserToken: cfg.userToken,
+    Items: toRemove.map((p) => ({
+      Sku: p.sku,
+      WarehouseId: cfg.warehouseId,
+      LocationCode: p.locationCode,
+      Quantity: p.quantityToRemove,
+      Reason: reason,
+    })),
+  });
+
+  const errorsBySku: Record<string, string> = {};
+  for (const e of removeResult.Errors ?? []) {
+    errorsBySku[e.Sku] = e.ErrorMessages?.join("; ") || "Unknown error";
+  }
+
+  const removeResults = toRemove.map((p) => {
+    const bin = primaryBins[p.sku];
+    return {
+      sku: p.sku,
+      locationCode: p.locationCode,
+      newQty: errorsBySku[p.sku]
+        ? null
+        : bin
+          ? Math.max(0, bin.currentQty - p.quantityToRemove)
+          : null,
+      error: errorsBySku[p.sku],
+    };
+  });
+
+  return { results: [...removeResults, ...errorResults] };
+}
+
+/**
  * Set absolute inventory quantities for a list of SKUs using setItemQuantities.
  * Used during audit completion. Looks up each SKU's bin via two-step lookup.
  * Returns resolved locations so they can be stored in the audit task.
@@ -402,6 +476,44 @@ export async function getLiveSkuQuantities(
     console.warn("[SKUVault] getLiveSkuQuantities failed:", e);
   }
   return result;
+}
+
+/**
+ * SKUVault has no dedicated configured-reason listing endpoint. Recent
+ * transactions are the API-supported source for the exact reason strings
+ * accepted by the account. The caller can fall back to locally configured
+ * reasons when an account has no recent transactions.
+ */
+export async function getSkuVaultTransactionReasons(
+  cfg: SkuVaultConfig
+): Promise<string[]> {
+  const toDate = new Date();
+  const fromDate = new Date(toDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+  try {
+    const response = await svPost<any>("/inventory/getTransactions", {
+      TenantToken: cfg.tenantToken,
+      UserToken: cfg.userToken,
+      FromDate: fromDate.toISOString().slice(0, 10),
+      ToDate: toDate.toISOString().slice(0, 10),
+      PageNumber: 0,
+      PageSize: 1000,
+      MinimumPageSize: 1000,
+      WarehouseId: cfg.warehouseId || null,
+      TransactionType: "All",
+    });
+
+    const rows = response?.Transactions ?? response?.Items ?? response?.Results ?? [];
+    if (!Array.isArray(rows)) return [];
+    const reasons = new Set<string>();
+    for (const row of rows) {
+      const value = row?.Reason ?? row?.TransactionReason ?? row?.reason ?? row?.transactionReason;
+      if (typeof value === "string" && value.trim()) reasons.add(value.trim());
+    }
+    return [...reasons].sort((a, b) => a.localeCompare(b));
+  } catch (error: any) {
+    console.warn("[SKUVault] Failed to load transaction reasons:", error.message);
+    return [];
+  }
 }
 
 /**

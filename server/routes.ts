@@ -8,6 +8,7 @@ import {
   type InsertOrder,
   type InsertPriceHistoryCache,
   type InsertInventoryPushLog,
+  type InsertInventoryRemoveLog,
   type InsertProductLinkLog,
 } from "@shared/schema";
 import { z } from "zod";
@@ -20,7 +21,7 @@ import { Readable } from "stream";
 import { createHmac, timingSafeEqual } from "crypto";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-import { addSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
+import { addSkuVaultInventory, removeSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, getSkuVaultTransactionReasons, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
 import { getMarketingSenderSettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
 import {
   clearZohoCampaignsCredentials,
@@ -3462,6 +3463,33 @@ export async function registerRoutes(
     }
   });
 
+  // Return exact SKUVault transaction reasons for the Remove dropdown.
+  // SKUVault does not expose a configured-reasons endpoint, so use recent
+  // transactions and fall back to the locally stored account list.
+  app.get("/api/inventory/skuvault-reasons", requireAuth, async (_req, res) => {
+    try {
+      const svSetting = await storage.getSetting("skuvault_config");
+      const svCfg = svSetting?.value ? (typeof svSetting.value === "string" ? JSON.parse(svSetting.value) : svSetting.value) : null;
+      if (!svCfg?.tenantToken || !svCfg?.userToken) {
+        return res.status(400).json({ error: "SKUVault credentials not configured" });
+      }
+      const cfg: SkuVaultConfig = {
+        tenantToken: svCfg.tenantToken,
+        userToken: svCfg.userToken,
+        warehouseId: svCfg.warehouseId ?? 0,
+        warehouseLocation: svCfg.warehouseLocation,
+      };
+      const transactionReasons = await getSkuVaultTransactionReasons(cfg);
+      const configuredReasons = Array.isArray(svCfg.reasons)
+        ? svCfg.reasons.filter((reason: unknown): reason is string => typeof reason === "string" && !!reason.trim())
+        : [];
+      const reasons = transactionReasons.length > 0 ? transactionReasons : configuredReasons;
+      res.json({ reasons, source: transactionReasons.length > 0 ? "skuvault_transactions" : "configured_fallback" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/inventory/push", requireAuth, async (req, res) => {
     try {
       const {
@@ -3582,6 +3610,119 @@ export async function registerRoutes(
       };
       const log = await storage.createInventoryPushLog(logEntry);
 
+      res.json({ success: true, previous_inventory, new_inventory, log, skuvault: svResult });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/inventory/remove", requireAuth, async (req, res) => {
+    try {
+      const {
+        product_id, variant_id, sku, quantity_removed, reason, product_name, variant_name,
+        remove_from_bigcommerce = true,
+        remove_from_skuvault = true,
+      } = req.body as {
+        product_id: number; variant_id: number; sku: string; quantity_removed: number;
+        reason?: string; product_name?: string; variant_name?: string;
+        remove_from_bigcommerce?: boolean; remove_from_skuvault?: boolean;
+      };
+      const authUser = (req as any).authUser;
+
+      if (!product_id || !variant_id || !sku || !Number.isInteger(quantity_removed) || quantity_removed <= 0) {
+        return res.status(400).json({ error: "product_id, variant_id, sku, and a positive whole-number quantity_removed are required" });
+      }
+      if (!remove_from_bigcommerce && !remove_from_skuvault) {
+        return res.status(400).json({ error: "At least one destination must be selected" });
+      }
+      if (!reason?.trim()) {
+        return res.status(400).json({ error: "A SKUVault transaction reason is required" });
+      }
+
+      let previous_inventory = 0;
+      let new_inventory = 0;
+      let svResult: any = null;
+      let svLocation: string | null = null;
+
+      if (remove_from_skuvault) {
+        const svSetting = await storage.getSetting("skuvault_config");
+        const svCfg = svSetting?.value ? (typeof svSetting.value === "string" ? JSON.parse(svSetting.value) : svSetting.value) : null;
+        if (!svCfg?.tenantToken || !svCfg?.userToken) {
+          return res.status(400).json({ error: "SKUVault credentials not configured. Please set them in Settings > SKUVault." });
+        }
+        const cfg: SkuVaultConfig = {
+          tenantToken: svCfg.tenantToken,
+          userToken: svCfg.userToken,
+          warehouseId: svCfg.warehouseId ?? 0,
+          warehouseLocation: svCfg.warehouseLocation,
+        };
+        const transactionReasons = await getSkuVaultTransactionReasons(cfg);
+        const configuredReasons: string[] = Array.isArray(svCfg.reasons) ? svCfg.reasons : [];
+        const validReasons = transactionReasons.length > 0 ? transactionReasons : configuredReasons;
+        if (validReasons.length === 0) {
+          return res.status(400).json({ error: "No SKUVault transaction reasons are available. Create a SKUVault transaction first or configure the fallback reason list in Settings > SKUVault." });
+        }
+        if (!validReasons.includes(reason.trim())) {
+          return res.status(400).json({ error: "The selected reason is not a valid SKUVault transaction reason. Refresh the dropdown and select one of the available reasons." });
+        }
+
+        const result = await removeSkuVaultInventory(cfg, [{ sku, quantityToRemove: quantity_removed }], reason.trim());
+        const item = result.results[0];
+        if (item?.error) throw new Error(`SKUVault removal failed for ${sku}: ${item.error}`);
+        svResult = result;
+        svLocation = item?.locationCode || null;
+        if (!remove_from_bigcommerce) {
+          previous_inventory = item?.newQty == null ? 0 : item.newQty + quantity_removed;
+          new_inventory = item?.newQty ?? Math.max(0, quantity_removed * -1);
+        }
+      }
+
+      if (remove_from_bigcommerce) {
+        const bcSetting = await storage.getSetting("bigcommerce_config");
+        let storeHash = process.env.BC_STORE_HASH;
+        let token = process.env.BC_TOKEN;
+        if (bcSetting?.value) {
+          const cfg = typeof bcSetting.value === "string" ? JSON.parse(bcSetting.value) : bcSetting.value;
+          storeHash = cfg.storeHash || storeHash;
+          token = cfg.token || token;
+        }
+        if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+
+        const getRes = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product_id}/variants/${variant_id}`,
+          { headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" } }
+        );
+        if (!getRes.ok) throw new Error(`Failed to fetch variant: ${getRes.statusText}`);
+        const variantData = await getRes.json();
+        previous_inventory = Number(variantData.data?.inventory_level ?? 0);
+        if (quantity_removed > previous_inventory) {
+          return res.status(400).json({ error: `Cannot remove ${quantity_removed} units from BigCommerce; only ${previous_inventory} are currently in stock.` });
+        }
+        new_inventory = previous_inventory - quantity_removed;
+
+        const putRes = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${product_id}/variants/${variant_id}`,
+          { method: "PUT", headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ inventory_level: new_inventory }) }
+        );
+        if (!putRes.ok) {
+          const errData = await putRes.json().catch(() => ({}));
+          throw new Error(`Failed to update BigCommerce inventory: ${JSON.stringify(errData)}`);
+        }
+      }
+
+      const logEntry: InsertInventoryRemoveLog = {
+        user_id: authUser.id,
+        username: authUser.username || "",
+        sku, product_id, variant_id,
+        product_name: product_name || "",
+        variant_name: variant_name || "",
+        previous_inventory, new_inventory, quantity_removed,
+        reason: reason.trim(),
+        remove_from_bigcommerce: !!remove_from_bigcommerce,
+        remove_from_skuvault: !!remove_from_skuvault,
+        skuvault_location: svLocation,
+      };
+      const log = await storage.createInventoryRemoveLog(logEntry);
       res.json({ success: true, previous_inventory, new_inventory, log, skuvault: svResult });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -6690,6 +6831,20 @@ export async function registerRoutes(
         if (!existingSet.has(`${p.module}:${p.action}`)) {
           await storage.createPermission({ module: p.module, action: p.action, description: p.description });
         }
+      }
+    } catch (_) { /* non-fatal */ }
+  })();
+
+  // ── Inventory Remove permission auto-seed ─────────────────────────────────────
+  await (async () => {
+    const REMOVE_PERMS: Array<{ module: string; action: string; description: string }> = [
+      { module: "inventory_remove", action: "view", description: "Inventory Remove: remove stock from BigCommerce and/or SKUVault" },
+    ];
+    try {
+      const existing = await storage.getAllPermissions();
+      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+      for (const p of REMOVE_PERMS) {
+        if (!existingSet.has(`${p.module}:${p.action}`)) await storage.createPermission(p);
       }
     } catch (_) { /* non-fatal */ }
   })();

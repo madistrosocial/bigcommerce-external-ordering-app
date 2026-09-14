@@ -1075,6 +1075,55 @@ export async function pushInventory(data: {
   return res.json();
 }
 
+export async function getSkuVaultReasons(): Promise<{ reasons: string[]; source: "skuvault_transactions" | "configured_fallback" }> {
+  const res = await fetch(`${API_BASE}/inventory/skuvault-reasons`, {
+    headers: getAuthHeaders(),
+  });
+  const body = await res.json().catch(() => ({ error: "Failed to load SKUVault reasons" }));
+  if (!res.ok) throw new Error(body.error || "Failed to load SKUVault reasons");
+  return body;
+}
+
+export interface InventoryRemoveLog {
+  id: number;
+  user_id: number;
+  username: string;
+  sku: string;
+  product_id: number;
+  variant_id: number;
+  product_name: string;
+  variant_name: string;
+  previous_inventory: number;
+  new_inventory: number;
+  quantity_removed: number;
+  reason: string;
+  remove_from_bigcommerce: boolean;
+  remove_from_skuvault: boolean;
+  skuvault_location: string | null;
+  created_at: string;
+}
+
+export async function removeInventory(data: {
+  product_id: number;
+  variant_id: number;
+  sku: string;
+  quantity_removed: number;
+  reason: string;
+  product_name?: string;
+  variant_name?: string;
+  remove_from_bigcommerce?: boolean;
+  remove_from_skuvault?: boolean;
+}): Promise<{ success: boolean; previous_inventory: number; new_inventory: number; log: InventoryRemoveLog; skuvault?: any }> {
+  const res = await fetch(`${API_BASE}/inventory/remove`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(data),
+  });
+  const body = await res.json().catch(() => ({ error: "Failed to remove inventory" }));
+  if (!res.ok) throw new Error(body.error || "Failed to remove inventory");
+  return body;
+}
+
 // ─── Inventory Audit ─────────────────────────────────────────────────────────
 
 export interface InventoryAuditTask {
