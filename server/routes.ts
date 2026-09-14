@@ -3643,6 +3643,7 @@ export async function registerRoutes(
       let new_inventory = 0;
       let svResult: any = null;
       let svLocation: string | null = null;
+      let effectiveReason = reason.trim();
 
       // Preflight BigCommerce before touching SKUVault. External inventory
       // changes cannot be rolled back atomically if the second system rejects.
@@ -3680,10 +3681,17 @@ export async function registerRoutes(
           warehouseId: svCfg.warehouseId ?? 0,
           warehouseLocation: svCfg.warehouseLocation,
         };
-        // The reason is editable because SKUVault's configured transaction
-        // reasons are not exposed through a reliable listing endpoint. Let
-        // SKUVault validate the exact account-configured value.
-        const result = await removeSkuVaultInventory(cfg, [{ sku, quantityToRemove: quantity_removed }], reason.trim());
+        // Keep the textbox editable, but never send a value that is not
+        // configured in this account. SKUVault rejects those with
+        // RemoveItemStatus: "ReasonNotFound".
+        const configuredReasons: string[] = Array.isArray(svCfg.reasons)
+          ? svCfg.reasons.filter((value: unknown): value is string => typeof value === "string" && !!value.trim())
+          : [];
+        if (configuredReasons.length > 0 && !configuredReasons.includes(effectiveReason)) {
+          console.warn(`[SKUVault] Remove reason "${effectiveReason}" is not configured; using "${configuredReasons[0]}"`);
+          effectiveReason = configuredReasons[0];
+        }
+        const result = await removeSkuVaultInventory(cfg, [{ sku, quantityToRemove: quantity_removed }], effectiveReason);
         const item = result.results[0];
         if (item?.error) throw new Error(`SKUVault removal failed for ${sku}: ${item.error}`);
         svResult = result;
@@ -3734,7 +3742,7 @@ export async function registerRoutes(
         product_name: product_name || "",
         variant_name: variant_name || "",
         previous_inventory, new_inventory, quantity_removed,
-        reason: reason.trim(),
+        reason: effectiveReason,
         remove_from_bigcommerce: !!remove_from_bigcommerce,
         remove_from_skuvault: !!remove_from_skuvault,
         skuvault_location: svLocation,
