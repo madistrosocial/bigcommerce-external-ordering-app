@@ -58,12 +58,36 @@ export interface LocalPriceHistoryEntry {
   created_at: string;
 }
 
+export interface LocalPosCustomer {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  company: string;
+  customer_group_id: number | null;
+  customer_group_name?: string;
+  is_active: boolean;
+  updatedAt: string;
+}
+
+export interface PosCustomerSyncMeta {
+  key: string;
+  scope: string;
+  storeScope?: string;
+  updatedUntil: string | null;
+  hasFullSnapshot: boolean;
+  updatedAt: number;
+}
+
 export class VanSalesDB extends Dexie {
   products!: Table<Product>;
   orders!: Table<Order>;
   users!: Table<User>;
   priceListCache!: Table<PriceListCacheEntry>;
   localPriceHistory!: Table<LocalPriceHistoryEntry>;
+  posCustomers!: Table<LocalPosCustomer, number>;
+  posCustomerSyncMeta!: Table<PosCustomerSyncMeta, string>;
 
   constructor() {
     super('VanSalesDB');
@@ -85,12 +109,22 @@ export class VanSalesDB extends Dexie {
       priceListCache: 'key, cachedAt',
       localPriceHistory: '++id, [customer_id+product_id], [customer_id+product_id+order_id], created_at'
     });
+    this.version(4).stores({
+      products: '++id, sku, is_pinned, bigcommerce_id',
+      orders: '++id, status, date, created_by_user_id',
+      users: '++id, username, role',
+      priceListCache: 'key, cachedAt',
+      localPriceHistory: '++id, [customer_id+product_id], [customer_id+product_id+order_id], created_at',
+      posCustomers: 'id, first_name, last_name, email, phone, company, customer_group_id, updatedAt',
+      posCustomerSyncMeta: 'key'
+    });
   }
 }
 
 export const db = new VanSalesDB();
 
 const PRICE_LIST_CACHE_TTL_MS = 30 * 60 * 1000;
+export const POS_CUSTOMER_SYNC_META_KEY = "pos-customer-directory";
 
 export async function getPriceListCacheEntry(priceListId: number, variantId: number): Promise<string | null> {
   try {
@@ -143,6 +177,84 @@ export async function getPriceListCacheBatch(priceListId: number, variantIds: nu
   } catch {
     return {};
   }
+}
+
+function normalizePosCustomer(customer: Omit<LocalPosCustomer, "updatedAt"> & { updatedAt?: string }): LocalPosCustomer {
+  return {
+    ...customer,
+    first_name: String(customer.first_name ?? ""),
+    last_name: String(customer.last_name ?? ""),
+    email: String(customer.email ?? ""),
+    phone: String(customer.phone ?? ""),
+    company: String(customer.company ?? ""),
+    customer_group_id: customer.customer_group_id == null ? null : Number(customer.customer_group_id),
+    is_active: customer.is_active !== false,
+    updatedAt: customer.updatedAt ?? new Date(0).toISOString(),
+  };
+}
+
+export async function searchLocalPosCustomers(query: string, limit = 10): Promise<LocalPosCustomer[]> {
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return [];
+  const queryDigits = trimmed.replace(/\D/g, "");
+  try {
+    const rows = await db.posCustomers
+      .filter((customer) => {
+        const textMatches = [
+          customer.first_name,
+          customer.last_name,
+          `${customer.first_name} ${customer.last_name}`,
+          `${customer.last_name} ${customer.first_name}`,
+          customer.email,
+          customer.phone,
+          customer.company,
+        ].some((value) => String(value ?? "").toLowerCase().includes(trimmed));
+        const phoneMatches = queryDigits.length >= 3 &&
+          customer.phone.replace(/\D/g, "").includes(queryDigits);
+        return textMatches || phoneMatches;
+      })
+      .toArray();
+    rows.sort((a, b) =>
+      `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`) ||
+      a.id - b.id,
+    );
+    return rows.slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+export async function saveLocalPosCustomers(customers: LocalPosCustomer[]): Promise<void> {
+  if (customers.length === 0) return;
+  try {
+    await db.posCustomers.bulkPut(customers.map(normalizePosCustomer));
+  } catch {}
+}
+
+export async function getPosCustomerSyncMeta(): Promise<PosCustomerSyncMeta | undefined> {
+  try {
+    return await db.posCustomerSyncMeta.get(POS_CUSTOMER_SYNC_META_KEY);
+  } catch {
+    return undefined;
+  }
+}
+
+export async function savePosCustomerSyncMeta(meta: Omit<PosCustomerSyncMeta, "key">): Promise<void> {
+  try {
+    await db.posCustomerSyncMeta.put({
+      key: POS_CUSTOMER_SYNC_META_KEY,
+      ...meta,
+    });
+  } catch {}
+}
+
+export async function clearLocalPosCustomerCache(): Promise<void> {
+  try {
+    await db.transaction("rw", db.posCustomers, db.posCustomerSyncMeta, async () => {
+      await db.posCustomers.clear();
+      await db.posCustomerSyncMeta.clear();
+    });
+  } catch {}
 }
 
 // ── Local price history cache (mirrors Postgres price_history_cache) ──────────

@@ -19,6 +19,8 @@
 - [Marketing audience safety](marketing-audience-safety.md) — blank audiences are draft-only; “all eligible” must be an explicit selection, never a fallback.
 - [Marketing editor media](marketing-editor-media.md) — local marketing images use bounded inline data URLs with server-side HTML validation; product clicks use signed redirects.
 - [Marketing sender settings](marketing-sender-settings.md) — reusable From addresses are separate from SMTP credentials; legacy campaigns fall back to the existing invoice sender.
+- [Order Form email templates](order-form-email-templates.md) — sender, subject, and body are user-editable; customer placeholders resolve server-side per recipient.
+- [Marketing Order Form architecture](marketing-order-form.md) — per-customer files use CRM visibility/audit/timeline and fresh BigCommerce variant inventory; no parallel customer system.
 - [Zoho marketing delivery boundary](zoho-marketing-delivery.md) — ZeptoMail is transactional-only; compliant campaign delivery requires Zoho Campaigns/Email API access.
 - [Attendance accounting baseline](attendance-accounting-baseline.md) — ledger excludes weekends and observed US holidays; short hours use an 8-hour weekday expectation until schedules are configurable.
 - [Stale session recovery](stale-session-recovery.md) — invalid saved auth must fail safely and expose a cache-clearing force-logout path.
@@ -32,3 +34,6 @@
 - [BigCommerce customer search filters](bigcommerce-customer-search-filters.md) — this store rejects v3 company:like and phone:like; use cached v2 directory filtering for those fields.
 - [Reactivation stage initialization](reactivation-stage-initialization.md) — default pipeline seeding must be conflict-safe because board and stage requests can initialize concurrently.
 - [Schema push drift](schema-push-drift.md) — never force Drizzle to truncate unrelated populated tables just to apply a new feature table.
+- [Marketing delivery log](marketing-delivery-log.md) — Campaign and Order Form sends share recipient-level sent records; CRM entries link to each stable log ID.
+- [Sales Report search performance](sales-report-search-performance.md) — debounce Product/SKU lookup and use the indexed prefix-SKU path instead of wildcard-scanning order history.
+- [POS customer search layers](pos-customer-search-mirror.md) — device cache first, then customers_mirror with sync-on-miss; live BigCommerce calls stay post-selection or final fallback.

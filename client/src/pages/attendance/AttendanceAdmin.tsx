@@ -1,91 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation } from "wouter";
-import {
-  AlertTriangle, BarChart3, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3,
-  Download, ExternalLink, FileClock, Filter, History, Loader2, LockKeyhole, MapPin, Pencil, Settings2, Trash2, Users, X,
-} from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { getAuthHeaders } from "@/lib/api";
-import { useTimeService } from "@/hooks/useTimeService";
-import { usePermissions } from "@/hooks/usePermissions";
-import { useStore } from "@/lib/store";
-
-function apiJson(path: string, init?: RequestInit) {
-  return fetch(path, { ...init, headers: { ...getAuthHeaders(), ...(init?.headers ?? {}) } }).then(async response => {
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error ?? "Attendance request failed");
-    return body;
-  });
-}
-
-function attendanceSearchParams(location: string) {
-  const queryIndex = location.indexOf("?");
-  if (queryIndex >= 0) return new URLSearchParams(location.slice(queryIndex + 1));
-  if (typeof window !== "undefined") return new URLSearchParams(window.location.search);
-  return new URLSearchParams();
-}
-
-function googleMapsUrl(latitude: unknown, longitude: unknown) {
-  const lat = Number(latitude);
-  const lng = Number(longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`;
-}
-
-function googleMapsEmbedUrl(latitude: unknown, longitude: unknown) {
-  const lat = Number(latitude);
-  const lng = Number(longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}&z=15&output=embed`;
-}
-
-function LocationMapPreview({ latitude, longitude, label }: { latitude: unknown; longitude: unknown; label: string }) {
-  const mapUrl = googleMapsUrl(latitude, longitude);
-  const embedUrl = googleMapsEmbedUrl(latitude, longitude);
-  if (!mapUrl || !embedUrl) return <p className="text-[10px] text-slate-400">Location unavailable</p>;
-  return (
-    <a href={mapUrl} target="_blank" rel="noreferrer" className="group block h-full overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
-      <div className="relative h-40 w-full overflow-hidden">
-        <iframe title={`${label} location map`} src={embedUrl} loading="lazy" className="pointer-events-none h-full w-full border-0" />
-        <span className="absolute inset-x-0 bottom-0 bg-slate-900/70 px-2 py-1 text-[10px] font-medium text-white transition group-hover:bg-blue-700/80">Open in Google Maps</span>
-      </div>
-    </a>
-  );
-}
-
-function hours(seconds: number | null | undefined) {
-  const value = Math.max(0, Number(seconds ?? 0));
-  return `${Math.floor(value / 3600)}h ${String(Math.floor((value % 3600) / 60)).padStart(2, "0")}m`;
-}
-
-function statusBadge(status: string) {
-  const styles: Record<string, string> = {
-    active: "border-0 bg-blue-100 text-blue-700",
-    completed: "border-0 bg-emerald-100 text-emerald-700",
-    incomplete: "border-0 bg-orange-100 text-orange-700",
-    exception: "border-0 bg-red-100 text-red-700",
-    not_reviewed: "border-0 bg-slate-100 text-slate-600",
-    needs_review: "border-0 bg-orange-100 text-orange-700",
-    approved: "border-0 bg-emerald-100 text-emerald-700",
-    locked: "border-0 bg-blue-100 text-blue-700",
-    open: "border-0 bg-red-100 text-red-700",
-    resolved: "border-0 bg-slate-100 text-slate-600",
-    captured: "border-0 bg-emerald-100 text-emerald-700",
-  };
-  return <Badge className={styles[status] ?? "border-0 bg-slate-100 text-slate-600"}>{status.replace(/_/g, " ")}</Badge>;
-}
-
-const EXPECTED_DAILY_SECONDS = 8 * 60 * 60;
-
-function dateOnly(date: Date) {
-  return date.toISOString().slice(0, 10);
+n date.toISOString().slice(0, 10);
 }
 
 function dateFromOnly(value: string) {
@@ -217,7 +130,6 @@ function ledgerStatus(
 const tabs = [
   { key: "overview", label: "Overview", icon: BarChart3, module: "attendance", action: "view_dashboard", fullAccess: true },
   { key: "logs", label: "Attendance Logs", icon: FileClock, module: "attendance", action: "view_logs" },
-  { key: "exceptions", label: "Exceptions", icon: AlertTriangle, module: "attendance", action: "view_exceptions", fullAccess: true },
   { key: "reports", label: "Reports", icon: BarChart3, module: "attendance", action: "view_reports", fullAccess: true },
   { key: "locations", label: "Home Locations", icon: MapPin, module: "attendance", action: "view_dashboard", fullAccess: true },
   { key: "settings", label: "Settings", icon: Settings2, adminOnly: true },
@@ -230,6 +142,7 @@ function AdminShell({ activeTab, children }: { activeTab: string; children: Reac
     if (tab.adminOnly) return currentUser?.role === "admin";
     if (isLoading) return false;
     if (tab.fullAccess && !hasPermission("attendance", "view_all")) return false;
+    if (!tab.module || !tab.action) return false;
     return hasPermission(tab.module, tab.action);
   });
 
@@ -309,9 +222,9 @@ function Overview() {
       })}
     </div>
     {Boolean(data?.attention?.length) && <Card className="mt-5 rounded-xl border-orange-200 bg-orange-50/50 shadow-sm">
-      <CardHeader className="flex flex-row items-center justify-between pb-3"><CardTitle className="text-sm">Needs Attention</CardTitle><Button variant="ghost" size="sm" className="h-7 text-xs text-red-600" onClick={() => window.location.href = "/attendance/exceptions"}>View all</Button></CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between pb-3"><CardTitle className="text-sm">Needs Attention</CardTitle><Button variant="ghost" size="sm" className="h-7 text-xs text-red-600" onClick={() => window.location.href = "/attendance/logs"}>View logs</Button></CardHeader>
       <CardContent className="grid gap-2 md:grid-cols-3">
-        {data.attention.map((item: any, index: number) => <button key={`${item.type}-${item.attendance_id ?? index}`} type="button" className="rounded-lg border border-orange-100 bg-white p-3 text-left hover:border-red-200" onClick={() => item.attendance_id ? (window.location.href = `/attendance/logs?record=${item.attendance_id}`) : (window.location.href = "/attendance/exceptions")}>
+        {data.attention.map((item: any, index: number) => <button key={`${item.type}-${item.attendance_id ?? index}`} type="button" className="rounded-lg border border-orange-100 bg-white p-3 text-left hover:border-red-200" onClick={() => item.attendance_id ? (window.location.href = `/attendance/logs?record=${item.attendance_id}`) : (window.location.href = "/attendance/logs")}>
           <p className="text-xs font-semibold capitalize text-slate-800">{item.label}</p><p className="mt-1 text-xs text-slate-500">{item.employee_name ?? "Employee"} · {item.work_date ?? "—"}</p><p className="mt-1 truncate text-[11px] text-slate-400">{item.details ?? "Review attendance evidence and status."}</p>
         </button>)}
       </CardContent>
@@ -330,6 +243,7 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   const client = useQueryClient();
   const canReview = hasPermission("attendance", "approve");
   const canManage = hasPermission("attendance", "manage");
+  const canAudit = hasPermission("attendance", "audit");
   const [editing, setEditing] = useState(false);
   const [reason, setReason] = useState("");
   const [timeIn, setTimeIn] = useState("");
@@ -338,12 +252,20 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   const data = query.data;
   if (!data) return null;
   const { attendance, employee, audit = [] } = data;
-  const toInput = (value: string | Date | null | undefined) => value ? new Date(value).toISOString().slice(0, 16) : "";
+  const toInput = (value: string | Date | null | undefined) => formatDateTimeLocal(value, fmt.tz);
   const submitCorrection = async () => {
+    const parsedTimeIn = timeIn ? parseDateTimeLocal(timeIn, fmt.tz) : null;
+    const parsedTimeOut = timeOut ? parseDateTimeLocal(timeOut, fmt.tz) : null;
+    if (timeIn && !parsedTimeIn) throw new Error("Enter a valid time in for the configured company timezone.");
+    if (timeOut && !parsedTimeOut) throw new Error("Enter a valid time out for the configured company timezone.");
     await apiJson(`/api/attendance/admin/logs/${id}/correction`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ time_in: timeIn, time_out: timeOut, reason }),
+      body: JSON.stringify({
+        time_in: parsedTimeIn?.toISOString() ?? "",
+        time_out: parsedTimeOut?.toISOString() ?? "",
+        reason,
+      }),
     });
     setEditing(false);
     setReason("");
@@ -361,6 +283,17 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
     client.invalidateQueries({ queryKey: ["attendance", "log", id] });
     client.invalidateQueries({ queryKey: ["attendance", "logs"] });
     client.invalidateQueries({ queryKey: ["attendance", "overview"] });
+  };
+  const approveSecondSession = async () => {
+    const approvalReason = window.prompt("Why is a second work session approved for this employee today?");
+    if (!approvalReason?.trim()) return;
+    await apiJson("/api/attendance/admin/allow-second-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ attendance_id: id, reason: approvalReason.trim() }),
+    });
+    client.invalidateQueries({ queryKey: ["attendance", "log", id] });
+    client.invalidateQueries({ queryKey: ["attendance", "logs"] });
   };
   return <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader className="flex flex-row items-start justify-between gap-3 pb-3"><div><CardTitle className="text-sm">{employee?.name ?? "Employee"} · {attendance.work_date}</CardTitle><div className="mt-2 flex flex-wrap items-center gap-2">{statusBadge(attendance.status)}{statusBadge(attendance.review_status ?? "not_reviewed")}</div></div><Button variant="ghost" size="sm" onClick={onClose}>Close</Button></CardHeader><CardContent className="space-y-5">
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Time In", attendance.time_in ? fmt.dateTime(attendance.time_in) : "—"], ["Time Out", attendance.time_out ? fmt.dateTime(attendance.time_out) : "—"], ["Total Hours", hours(attendance.total_seconds)], ["Start Method", attendance.start_method === "warehouse" ? "Warehouse" : "Driving"]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] text-slate-400">{label}</p><p className="mt-1 text-xs font-semibold capitalize text-slate-700">{value}</p></div>)}</div>
@@ -396,10 +329,11 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
          </CardContent>
        </Card>
      </div>
-     {(canReview || canManage) && <div className="flex flex-wrap gap-2 border-y border-slate-100 py-3">
+      {(canReview || canManage || canAudit) && <div className="flex flex-wrap gap-2 border-y border-slate-100 py-3">
        {canReview && attendance.review_status !== "needs_review" && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs text-orange-700" onClick={() => changeReview("needs_review")}><AlertTriangle className="mr-1.5 h-3.5 w-3.5" />Needs review</Button>}
        {canReview && attendance.review_status !== "approved" && attendance.review_status !== "locked" && <Button size="sm" className="h-8 bg-emerald-600 text-xs hover:bg-emerald-700" onClick={() => changeReview("approved")}><Check className="mr-1.5 h-3.5 w-3.5" />Approve</Button>}
        {canReview && attendance.review_status === "approved" && <Button size="sm" className="h-8 bg-blue-700 text-xs hover:bg-blue-800" onClick={() => changeReview("locked")}><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Lock record</Button>}
+        {canAudit && attendance.session_number === 1 && !attendance.second_session_approved && attendance.status !== "active" && <Button size="sm" variant="outline" className="h-8 border-blue-200 text-xs text-blue-700 hover:bg-blue-50" onClick={() => approveSecondSession().catch((error: any) => window.alert(error.message))}><Clock3 className="mr-1.5 h-3.5 w-3.5" />Approve second session</Button>}
        {canManage && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setTimeIn(toInput(attendance.time_in)); setTimeOut(toInput(attendance.time_out)); setEditing(value => !value); }}><Pencil className="mr-1.5 h-3.5 w-3.5" />Correct times</Button>}
      </div>}
      {editing && canManage && <div className="rounded-xl border border-red-100 bg-red-50/50 p-4"><div className="grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px]">Time in</Label><Input type="datetime-local" value={timeIn} onChange={e => setTimeIn(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px]">Time out</Label><Input type="datetime-local" value={timeOut} onChange={e => setTimeOut(e.target.value)} className="mt-1 h-9 text-xs" /></div></div><Label className="mt-3 block text-[11px]">Reason required</Label><Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Forgot to clock out" className="mt-1 h-9 text-xs" /><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button><Button size="sm" className="bg-red-600 text-xs hover:bg-red-700" disabled={!reason.trim()} onClick={() => submitCorrection().catch((error: any) => window.alert(error.message))}>Save correction</Button></div></div>}
@@ -510,11 +444,7 @@ function Logs() {
     team: "border-indigo-200 bg-indigo-50 text-indigo-700",
   };
   return <AdminShell activeTab="logs">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-       <div>
-         <h2 className="text-base font-bold text-slate-900">{canViewAll ? "Attendance ledger" : "My attendance ledger"}</h2>
-         <p className="mt-1 text-xs text-slate-500">{canViewAll ? "A daily view for payroll review, absences, and time reconciliation." : "Your attendance records and time reconciliation."}</p>
-       </div>
+     <div className="flex flex-wrap items-center justify-end gap-3">
       <Button
         size="sm"
         variant={showFilters ? "default" : "outline"}
@@ -541,23 +471,19 @@ function Logs() {
     </CardContent></Card>}
     <div className="mt-4 flex gap-3 overflow-x-auto px-0 pb-2 lg:grid lg:grid-cols-5 lg:overflow-visible">
       {[
-        ["Hours worked", hours(totalSeconds), "Actual recorded time", "text-blue-600"],
-        ["Hours lost / short", hours(lostSeconds), "Against 8h weekday expectation", "text-red-600"],
+        ["Hours worked", hours(totalSeconds), null, "text-blue-600"],
+        ["Hours lost / short", hours(lostSeconds), null, "text-red-600"],
         ["Days worked", String(daysWorked), selectedMember ? "Days with a log" : "Team member-days", "text-emerald-600"],
         ["Absent days", String(absentDays), selectedMember ? "Weekdays with no log" : "Across selected team", "text-amber-600"],
         ["Business days", String(businessDates.length), `${expectedTeamMembers || 0} team member${expectedTeamMembers === 1 ? "" : "s"} selected`, "text-slate-600"],
-      ].map(([label, value, hint, color]) => <Card key={label} className="min-w-[166px] shrink-0 rounded-xl border-slate-200 shadow-sm lg:min-w-0"><CardContent className="p-4"><p className={`text-xl font-bold ${color}`}>{value}</p><p className="mt-1 text-xs font-semibold text-slate-700">{label}</p><p className="mt-1 text-[10px] leading-4 text-slate-400">{hint}</p></CardContent></Card>)}
+      ].map(([label, value, hint, color]) => <Card key={label} className="min-w-[166px] shrink-0 rounded-xl border-slate-200 shadow-sm lg:min-w-0"><CardContent className="p-4"><p className={`text-xl font-bold ${color}`}>{value}</p><p className="mt-1 text-xs font-semibold text-slate-700">{label}</p>{hint && <p className="mt-1 text-[10px] leading-4 text-slate-400">{hint}</p>}</CardContent></Card>)}
     </div>
     <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[11px] text-slate-500">
       <span className="font-semibold text-slate-700">{selectedMember ? selectedMember.name : "All team members"}</span>
       <span>{from && to ? `${shortDate(from)} – ${shortDate(to)}` : "Choose a valid date range"}</span>
-      <span className="text-slate-300">•</span>
-      <span><span className="font-semibold text-slate-700">Weekdays</span> are expected workdays</span>
-      <span><span className="font-semibold text-amber-700">US holidays</span> and <span className="font-semibold text-slate-600">weekends</span> are excluded</span>
-      <span className="ml-auto text-slate-400">Expected time uses 8 hours per weekday</span>
     </div>
     {selectedId ? <div className="mt-4"><LogDetail id={selectedId} onClose={() => setSelectedId(null)} /></div> : <Card className="mt-4 overflow-hidden rounded-xl border-slate-200 shadow-sm">
-      <CardHeader className="border-b border-slate-100 bg-white pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-sm">Daily attendance</CardTitle><span className="text-xs text-slate-400">{dates.length} calendar days · {rows.length} logs</span></div></CardHeader>
+       <CardHeader className="border-b border-slate-100 bg-white pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-sm">Daily attendance</CardTitle><span className="text-xs text-slate-400">{rows.length} logs</span></div></CardHeader>
       <CardContent className="p-0">
          {query.isLoading || usersQuery.isLoading ? <div className="p-12 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /><p className="mt-2">Loading attendance ledger…</p></div> : query.isError || usersQuery.isError ? <div className="p-10 text-center text-sm text-red-600">Attendance logs could not be loaded. Try refreshing the page.</div> : !dates.length ? <div className="p-10 text-center text-sm text-slate-400">Choose a valid date range to view the ledger.</div> : (
            <>
@@ -697,32 +623,51 @@ function HomeLocations() {
   </AdminShell>;
 }
 
-function Exceptions() {
-  const fmt = useTimeService();
-  const client = useQueryClient();
-  const [status, setStatus] = useState("open");
-  const query = useQuery({ queryKey: ["attendance", "exceptions", status], queryFn: () => apiJson(`/api/attendance/admin/exceptions?status=${status}`) });
-  const review = useMutation({ mutationFn: ({ id, notes }: { id: number; notes: string }) => apiJson(`/api/attendance/admin/exceptions/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "resolved", review_notes: notes }) }), onSuccess: () => client.invalidateQueries({ queryKey: ["attendance", "exceptions"] }) });
-  return <AdminShell activeTab="exceptions">
-    <div className="flex flex-wrap gap-2">{[["open", "Open"], ["resolved", "Resolved"], ["all", "All"]].map(([key, label]) => <Button key={key} size="sm" variant={status === key ? "default" : "outline"} className={`h-8 text-xs ${status === key ? "bg-red-600 hover:bg-red-700" : ""}`} onClick={() => setStatus(key)}>{label}</Button>)}</div>
-    <div className="mt-4 space-y-2">{query.isLoading ? <div className="p-8 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></div> : query.data?.rows?.length ? query.data.rows.map((row: any) => <Card key={row.id} className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2">{statusBadge(row.status)}<span className="text-xs text-slate-400">{row.work_date ?? fmt.date(row.detected_at)}</span></div><h3 className="mt-2 text-sm font-semibold text-slate-800">{row.exception_type}</h3><p className="mt-1 text-sm text-slate-500">{row.employee_name ?? "Employee"} · {row.details}</p></div>{row.status === "open" && <Button size="sm" className="bg-red-600 text-xs hover:bg-red-700" onClick={() => review.mutate({ id: row.id, notes: window.prompt("Review notes (optional):") ?? "" })} disabled={review.isPending}>Mark resolved</Button>}</div><p className="mt-3 text-xs text-slate-400">Detected {fmt.dateTime(row.detected_at)}{row.reviewed_at ? ` · Reviewed ${fmt.dateTime(row.reviewed_at)}` : ""}</p></CardContent></Card>) : <Card className="border-dashed border-slate-200"><CardContent className="p-10 text-center text-sm text-slate-400">No attendance exceptions.</CardContent></Card>}</div>
-  </AdminShell>;
-}
-
 function Reports() {
+  const fmt = useTimeService();
   const [period, setPeriod] = useState("pay_period");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const query = useQuery({ queryKey: ["attendance", "reports", period, from, to], queryFn: () => apiJson(`/api/attendance/admin/reports?period=${period}${from ? `&from=${from}` : ""}${to ? `&to=${to}` : ""}`) });
+  const employees = query.data?.rows ?? [];
+  const days = query.data?.days ?? [];
   const exportCsv = () => {
-    const rows = query.data?.rows ?? [];
-    const csv = [["Employee", "Total Hours", "Days", "Missing Time Out", "Needs Review"], ...rows.map((row: any) => [row.employee_name, hours(row.total_seconds), row.days, row.missing, row.review])].map((row: any[]) => row.map((value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const csvRows = [
+      ["Day", ...employees.map((employee: any) => employee.employee_name)],
+      ...days.map((day: any) => [
+        `${day.date} (${day.day})`,
+        ...employees.map((employee: any) => {
+          const cell = day.cells?.[String(employee.user_id)];
+          if (!cell) return "";
+          const timeIn = cell.time_in ? fmt.time(cell.time_in) : "—";
+          const timeOut = cell.time_out ? fmt.time(cell.time_out) : "—";
+          return `${timeIn} - ${timeOut} (${hours(cell.total_seconds)})`;
+        }),
+      ]),
+      ["Total worked hours", ...employees.map((employee: any) => hours(employee.total_seconds))],
+    ];
+    const csv = csvRows.map((row: unknown[]) => row.map(value => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = `attendance-report-${query.data?.from ?? "period"}.csv`; link.click(); URL.revokeObjectURL(link.href);
   };
   return <AdminShell activeTab="reports">
     <Card className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><Label className="text-[11px] text-slate-500">Report period</Label><div className="mt-2"><PeriodButtons value={period} onChange={setPeriod} /></div></div><Button variant="outline" size="sm" className="text-xs" onClick={exportCsv} disabled={!query.data?.rows?.length}><Download className="mr-2 h-3.5 w-3.5" />Export CSV</Button></div>{period === "custom" && <div className="mt-4 grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="mt-1 h-9 text-xs" /></div></div>}</CardContent></Card>
     <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">{[["Employees", query.data?.summary?.employees ?? 0], ["Records", query.data?.summary?.records ?? 0], ["Total hours", hours(query.data?.summary?.totalSeconds)], ["Needs review", query.data?.summary?.needsReview ?? 0]].map(([label, value]) => <Card key={label} className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4"><p className="text-lg font-bold text-slate-800">{value}</p><p className="mt-1 text-[11px] text-slate-400">{label}</p></CardContent></Card>)}</div>
-    <Card className="mt-4 rounded-xl border-slate-200 shadow-sm"><CardHeader className="pb-3"><CardTitle className="text-sm">Employee totals <span className="font-normal text-slate-400">{query.data?.from} → {query.data?.to}</span></CardTitle></CardHeader><CardContent><div className="space-y-2">{query.isLoading ? <div className="p-8 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></div> : query.data?.rows?.length ? query.data.rows.map((row: any) => <div key={row.user_id} className="grid gap-3 rounded-xl border border-slate-100 p-3 sm:grid-cols-5 sm:items-center"><div className="font-medium text-slate-700 sm:col-span-2">{row.employee_name}</div><div><span className="text-[11px] text-slate-400">Total</span><p className="text-sm font-semibold">{hours(row.total_seconds)}</p></div><div><span className="text-[11px] text-slate-400">Days</span><p className="text-sm font-semibold">{row.days}</p></div><div className="text-xs"><span className="text-[11px] text-slate-400">Review</span><p className={row.review ? "font-semibold text-orange-700" : "text-slate-600"}>{row.review || "Clear"}</p></div><div className="text-xs"><span className="text-[11px] text-slate-400">Missing time out</span><p className={row.missing ? "font-semibold text-red-700" : "text-slate-600"}>{row.missing || "None"}</p></div></div>) : <p className="p-8 text-center text-sm text-slate-400">No report data for this period.</p>}</div></CardContent></Card>
+    <Card className="mt-4 overflow-hidden rounded-xl border-slate-200 shadow-sm"><CardHeader className="border-b border-slate-100 pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-sm">Attendance by day <span className="font-normal text-slate-400">{query.data?.from} → {query.data?.to}</span></CardTitle></div></CardHeader><CardContent className="p-0">
+      {query.isLoading ? <div className="p-10 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /><p className="mt-2">Loading attendance report…</p></div>
+        : query.isError ? <div className="p-10 text-center text-sm text-red-600">Attendance report could not be loaded. Try refreshing the page.</div>
+        : !days.length || !employees.length ? <div className="p-10 text-center text-sm text-slate-400">No attendance records for this period.</div>
+        : <div className="overflow-x-auto"><table className="min-w-max w-full text-left text-xs"><thead><tr className="border-b border-slate-200 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="sticky left-0 z-10 min-w-[150px] border-r border-slate-200 bg-slate-50 px-4 py-3 font-semibold">Day</th>{employees.map((employee: any) => <th key={employee.user_id} className="min-w-[175px] px-4 py-3 font-semibold text-slate-600">{employee.employee_name}</th>)}</tr></thead><tbody>
+          {days.map((day: any) => <tr key={day.date} className={`border-b border-slate-100 last:border-0 ${day.isWeekend ? "bg-slate-100/80" : "bg-white"}`}>
+            <th className={`sticky left-0 z-10 border-r border-slate-200 px-4 py-3 font-medium ${day.isWeekend ? "bg-slate-100 text-slate-400" : "bg-white text-slate-700"}`}><span className="block font-semibold">{day.date}</span><span className="mt-0.5 block text-[11px]">{day.day}{day.isWeekend ? " · Weekend" : ""}</span></th>
+            {employees.map((employee: any) => {
+              const cell = day.cells?.[String(employee.user_id)];
+              return <td key={employee.user_id} className={`min-w-[175px] px-4 py-3 align-top ${day.isWeekend ? "text-slate-500" : "text-slate-700"}`}>
+                {cell ? <><div className="font-medium">{cell.time_in ? fmt.time(cell.time_in) : "—"} <span className="text-slate-300">→</span> {cell.time_out ? fmt.time(cell.time_out) : "—"}</div><div className={`mt-1 font-semibold ${day.isWeekend ? "text-slate-600" : "text-emerald-700"}`}>{hours(cell.total_seconds)}</div></> : <span className="text-slate-300">—</span>}
+              </td>;
+            })}
+          </tr>)}
+        </tbody><tfoot><tr className="border-t-2 border-slate-300 bg-slate-50"><th className="sticky bottom-0 left-0 z-10 border-r border-slate-200 bg-slate-50 px-4 py-3 text-left font-bold text-slate-700">Total worked hours</th>{employees.map((employee: any) => <td key={employee.user_id} className="px-4 py-3 font-bold text-emerald-700">{hours(employee.total_seconds)}</td>)}</tr></tfoot></table></div>}
+    </CardContent></Card>
   </AdminShell>;
 }
 
@@ -771,7 +716,6 @@ export default function AttendanceAdminPage() {
   const [location] = useLocation();
   const tab = (location.split("/")[2] || "overview").split("?")[0];
   if (tab === "logs") return <Logs />;
-  if (tab === "exceptions") return <Exceptions />;
   if (tab === "reports") return <Reports />;
   if (tab === "locations") return <HomeLocations />;
   if (tab === "settings") return <AttendanceSettingsPage />;

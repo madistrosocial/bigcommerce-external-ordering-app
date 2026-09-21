@@ -112,11 +112,10 @@ export const ATTENDANCE_ACTION_PERMS = [
   { module: "attendance", action: "view_dashboard", label: "View Overview", description: "Can view the team Attendance management overview. Requires View All Employees." },
   { module: "attendance", action: "view_all", label: "View All Employees", description: "Unlocks team-wide Attendance views, filters, details, and management." },
   { module: "attendance", action: "view_logs", label: "View Attendance Logs", description: "Can view attendance logs; without View All Employees, only their own records are shown." },
-  { module: "attendance", action: "view_exceptions", label: "View Exceptions", description: "Can view team attendance exceptions. Requires View All Employees." },
   { module: "attendance", action: "view_reports", label: "View Reports", description: "Can view team pay-period attendance reports. Requires View All Employees." },
-  { module: "attendance", action: "review_exceptions", label: "Review Exceptions", description: "Can resolve attendance exceptions and add review notes." },
   { module: "attendance", action: "manage_settings", label: "Manage Settings", description: "Can configure warehouse, checkpoints, and pay periods." },
   { module: "attendance", action: "manage", label: "Manage Attendance", description: "Can perform administrative attendance actions." },
+  { module: "attendance", action: "audit", label: "Attendance Audit", description: "Can approve one additional work session for an employee on a date." },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

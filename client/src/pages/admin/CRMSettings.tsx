@@ -60,6 +60,14 @@ export default function CRMSettings() {
   const [customerLog, setCustomerLog] = useState<string | null>(null);
   const [orderLog, setOrderLog] = useState<string | null>(null);
   const [lineItemLog, setLineItemLog] = useState<string | null>(null);
+  const [priceAudit, setPriceAudit] = useState<{
+    totalLineItems: number;
+    checkoutPricedLineItems: number;
+    zeroPricedLineItems: number;
+    missingPriceLineItems: number;
+    legacyLineItems: number;
+  } | null>(null);
+  const [auditingPrices, setAuditingPrices] = useState(false);
   const [recalcLog, setRecalcLog] = useState<string | null>(null);
   const [thresholdErrors, setThresholdErrors] = useState<string[]>([]);
 
@@ -218,6 +226,20 @@ export default function CRMSettings() {
   const incSyncCustomers = () => runSync("/api/crm/sync/customers/incremental", "POST", setIncSyncingCustomers, setCustomerLog, "Incremental Customer Sync");
   const incSyncOrders    = () => runSync("/api/crm/sync/orders/incremental", "POST", setIncSyncingOrders, setOrderLog, "Incremental Order Sync");
   const incSyncLineItems = () => runSync("/api/crm/sync/line-items/incremental", "POST", setIncSyncingLineItems, setLineItemLog, "Incremental Line Items Sync");
+
+  const auditLineItemPrices = async () => {
+    setAuditingPrices(true);
+    try {
+      const r = await fetch("/api/crm/sync/line-items/price-audit", { headers: getAuthHeaders() });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Price audit failed");
+      setPriceAudit(data);
+    } catch (e: any) {
+      toast({ title: "Price Audit Failed", description: e.message, variant: "destructive" });
+    } finally {
+      setAuditingPrices(false);
+    }
+  };
 
   const resetCustomers = async () => {
     if (resettingCustomers === "idle") { setResettingCustomers("confirm"); return; }
@@ -623,6 +645,36 @@ export default function CRMSettings() {
             onReset={resetLineItems} resetState={resettingLineItems}
             testPrefix="line-items"
           />
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-medium text-slate-800">Line-Item Price Audit</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Separate valid free promotions from missing prices and rows created before price-source tracking.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={auditLineItemPrices}
+                disabled={auditingPrices}
+                className="gap-1.5 text-xs shrink-0"
+                data-testid="btn-audit-line-item-prices"
+              >
+                <BarChart2 className={`h-3.5 w-3.5 ${auditingPrices ? "animate-pulse" : ""}`} />
+                {auditingPrices ? "Auditing…" : "Audit Prices"}
+              </Button>
+            </div>
+            {priceAudit && (
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                <div><p className="text-slate-400">Total</p><p className="font-semibold text-slate-700">{priceAudit.totalLineItems.toLocaleString()}</p></div>
+                <div><p className="text-slate-400">Checkout-priced</p><p className="font-semibold text-green-700">{priceAudit.checkoutPricedLineItems.toLocaleString()}</p></div>
+                <div><p className="text-slate-400">Valid $0</p><p className="font-semibold text-blue-700">{priceAudit.zeroPricedLineItems.toLocaleString()}</p></div>
+                <div><p className="text-slate-400">Missing</p><p className={`font-semibold ${priceAudit.missingPriceLineItems > 0 ? "text-red-700" : "text-slate-700"}`}>{priceAudit.missingPriceLineItems.toLocaleString()}</p></div>
+                <div><p className="text-slate-400">Legacy</p><p className={`font-semibold ${priceAudit.legacyLineItems > 0 ? "text-amber-700" : "text-slate-700"}`}>{priceAudit.legacyLineItems.toLocaleString()}</p></div>
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 

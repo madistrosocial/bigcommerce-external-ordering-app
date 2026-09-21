@@ -422,6 +422,7 @@ export const attendanceSessions = pgTable("attendance_sessions", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   user_id: integer("user_id").notNull().references(() => users.id),
   work_date: text("work_date").notNull(),
+  session_number: integer("session_number").notNull().default(1),
   time_in: timestamp("time_in"),
   time_out: timestamp("time_out"),
   start_method: text("start_method").notNull(), // warehouse | driving
@@ -441,6 +442,9 @@ export const attendanceSessions = pgTable("attendance_sessions", {
   approved_by: integer("approved_by").references(() => users.id),
   approved_at: timestamp("approved_at"),
   locked_at: timestamp("locked_at"),
+  second_session_approved: boolean("second_session_approved").notNull().default(false),
+  second_session_approved_by: integer("second_session_approved_by").references(() => users.id),
+  second_session_approved_at: timestamp("second_session_approved_at"),
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({
@@ -665,6 +669,44 @@ export const marketingAudienceMembers = pgTable("marketing_audience_members", {
   contactMemberIdx: uniqueIndex("marketing_audience_contact_member_idx").on(t.audience_id, t.marketing_contact_id),
 }));
 
+export const marketingProductLists = pgTable("marketing_product_lists", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  created_by: integer("created_by").notNull().references(() => users.id),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const marketingProductListItems = pgTable("marketing_product_list_items", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  list_id: integer("list_id").notNull().references(() => marketingProductLists.id, { onDelete: "cascade" }),
+  product_id: integer("product_id").notNull(),
+  product_snapshot: jsonb("product_snapshot").notNull().default({}),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  listProductUnique: uniqueIndex("marketing_product_list_items_list_product_idx").on(t.list_id, t.product_id),
+  listIdx: index("marketing_product_list_items_list_idx").on(t.list_id),
+}));
+
+export const marketingDeliveryLogs = pgTable("marketing_delivery_logs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  delivery_type: text("delivery_type").notNull(), // campaign | order_form
+  campaign_id: integer("campaign_id").references(() => marketingCampaigns.id, { onDelete: "set null" }),
+  customer_id: integer("customer_id").references(() => customersMirror.id, { onDelete: "set null" }),
+  source_key: text("source_key"),
+  recipient_email: text("recipient_email").notNull().default(""),
+  product_titles: jsonb("product_titles").notNull().default([]),
+  sent_at: timestamp("sent_at").notNull().defaultNow(),
+  initiated_by: integer("initiated_by").references(() => users.id, { onDelete: "set null" }),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  deliveryTypeDateIdx: index("marketing_delivery_logs_type_date_idx").on(t.delivery_type, t.sent_at),
+  campaignDateIdx: index("marketing_delivery_logs_campaign_date_idx").on(t.campaign_id, t.sent_at),
+  customerDateIdx: index("marketing_delivery_logs_customer_date_idx").on(t.customer_id, t.sent_at),
+  sourceKeyUnique: uniqueIndex("marketing_delivery_logs_source_key_idx").on(t.source_key),
+}));
+
 export const marketingCampaignRecipients = pgTable("marketing_campaign_recipients", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   campaign_id: integer("campaign_id").notNull().references(() => marketingCampaigns.id, { onDelete: "cascade" }),
@@ -858,6 +900,9 @@ export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type MarketingCampaign = typeof marketingCampaigns.$inferSelect;
 export type MarketingAudience = typeof marketingAudiences.$inferSelect;
 export type MarketingAudienceMember = typeof marketingAudienceMembers.$inferSelect;
+export type MarketingProductList = typeof marketingProductLists.$inferSelect;
+export type MarketingProductListItem = typeof marketingProductListItems.$inferSelect;
+export type MarketingDeliveryLog = typeof marketingDeliveryLogs.$inferSelect;
 export type MarketingCampaignRecipient = typeof marketingCampaignRecipients.$inferSelect;
 export type MarketingCampaignActivity = typeof marketingCampaignActivity.$inferSelect;
 export type MarketingCampaignEvent = typeof marketingCampaignEvents.$inferSelect;
@@ -909,6 +954,7 @@ export const bcOrderLineItems = pgTable("bc_order_line_items", {
   variant_label: text("variant_label"),
   quantity: integer("quantity").notNull().default(0),
   base_price: decimal("base_price", { precision: 10, scale: 2 }).notNull().default("0"),
+  price_source: text("price_source").notNull().default("legacy"),
   order_date: timestamp("order_date"),
   customer_name: text("customer_name"),
   customer_email: text("customer_email"),
@@ -924,6 +970,8 @@ export const bcOrderLineItems = pgTable("bc_order_line_items", {
   orderDateIdx: index("idx_bc_order_line_items_order_date").on(t.order_date),
   // Covers product-level filtering
   productIdx: index("idx_bc_order_line_items_product").on(t.bigcommerce_product_id),
+  // Prefix SKU searches use this functional index.
+  skuSearchIdx: index("idx_bc_order_line_items_sku_search").on(sql`lower(${t.sku}) text_pattern_ops`),
 }));
 
 export const insertBcOrderLineItemSchema = createInsertSchema(bcOrderLineItems).omit({ id: true, created_at: true });

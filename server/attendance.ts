@@ -1,4 +1,7 @@
 import type { IStorage } from "./storage";
+import { dateOnlyInTimeZone, isValidTimeZone } from "@shared/timezone";
+
+export const DEFAULT_ATTENDANCE_TIMEZONE = "America/New_York";
 
 export const ATTENDANCE_PERMISSION_DEFINITIONS = [
   { module: "attendance", action: "view", description: "Attendance: access and use the module" },
@@ -7,12 +10,11 @@ export const ATTENDANCE_PERMISSION_DEFINITIONS = [
   { module: "attendance", action: "view_dashboard", description: "Attendance: view the management overview" },
   { module: "attendance", action: "view_all", description: "Attendance: view all employee attendance records" },
   { module: "attendance", action: "view_logs", description: "Attendance: view detailed attendance logs" },
-  { module: "attendance", action: "view_exceptions", description: "Attendance: view attendance exceptions" },
   { module: "attendance", action: "view_reports", description: "Attendance: view attendance reports" },
-  { module: "attendance", action: "review_exceptions", description: "Attendance: resolve attendance exceptions" },
   { module: "attendance", action: "manage_settings", description: "Attendance: manage warehouse and payroll settings" },
   { module: "attendance", action: "manage", description: "Attendance: manage attendance records" },
   { module: "attendance", action: "approve", description: "Attendance: approve and lock attendance records" },
+  { module: "attendance", action: "audit", description: "Attendance: approve one additional work session for an employee" },
 ] as const;
 
 export type AttendanceSettings = {
@@ -54,13 +56,19 @@ export const DEFAULT_ATTENDANCE_SETTINGS: AttendanceSettings = {
   payPeriodLengthDays: 14,
   paydayWeekday: 5,
   payPeriodAnchorDate: "2025-08-28",
-  timezone: "America/New_York",
+  timezone: DEFAULT_ATTENDANCE_TIMEZONE,
 };
 
 export async function getAttendanceSettings(storage: Pick<IStorage, "getSetting">): Promise<AttendanceSettings> {
   const row = await storage.getSetting("attendance_settings").catch(() => null);
   const value = row?.value && typeof row.value === "object" ? row.value : {};
   return { ...DEFAULT_ATTENDANCE_SETTINGS, ...value };
+}
+
+export async function getCompanyTimezone(storage: Pick<IStorage, "getSetting">): Promise<string> {
+  const row = await storage.getSetting("company_timezone").catch(() => null);
+  const timezone = typeof row?.value === "string" ? row.value : DEFAULT_ATTENDANCE_TIMEZONE;
+  return isValidTimeZone(timezone) ? timezone : DEFAULT_ATTENDANCE_TIMEZONE;
 }
 
 export function haversineDistanceMeters(
@@ -119,10 +127,11 @@ function startOfDate(date: Date): Date {
 
 export function getPayPeriod(
   date = new Date(),
-  settings: Pick<AttendanceSettings, "payPeriodLengthDays" | "payPeriodAnchorDate" | "paydayWeekday"> = DEFAULT_ATTENDANCE_SETTINGS,
+  settings: Pick<AttendanceSettings, "payPeriodLengthDays" | "payPeriodAnchorDate" | "paydayWeekday" | "timezone"> = DEFAULT_ATTENDANCE_SETTINGS,
 ): { start: string; end: string; payday: string } {
   const periodLength = Math.max(1, Number(settings.payPeriodLengthDays) || 14);
-  const current = startOfDate(date);
+  const timezone = isValidTimeZone(settings.timezone) ? settings.timezone : DEFAULT_ATTENDANCE_TIMEZONE;
+  const current = startOfDate(new Date(`${dateOnlyInTimeZone(date, timezone)}T00:00:00Z`));
   const anchor = startOfDate(new Date(`${settings.payPeriodAnchorDate}T00:00:00Z`));
   const diffDays = Math.floor((current.getTime() - anchor.getTime()) / 86_400_000);
   const periodNumber = Math.floor(diffDays / periodLength);

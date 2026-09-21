@@ -9,6 +9,8 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "verify:attendance-timezone": "tsx script/verify-attendance-timezone.ts",
+    "verify:sales-report-pricing": "tsx script/verify-sales-report-pricing.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

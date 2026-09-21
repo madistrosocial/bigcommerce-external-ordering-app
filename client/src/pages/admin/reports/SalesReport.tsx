@@ -152,6 +152,97 @@ function CategoryTreePicker({ categories, selectedIds, onChange }: {
   );
 }
 
+const BC_ORDER_STATUSES = [
+  "Completed",
+  "Awaiting Fulfillment",
+  "Awaiting Shipment",
+  "Shipped",
+  "Partially Shipped",
+  "Awaiting Payment",
+  "Pending",
+  "Incomplete",
+  "Cancelled",
+  "Declined",
+  "Refunded",
+  "Partially Refunded",
+];
+
+function BcStatusPicker({ selectedStatuses, onChange }: {
+  selectedStatuses: string[];
+  onChange: (statuses: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = useMemo(() => new Set(selectedStatuses), [selectedStatuses]);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  const toggleStatus = (status: string) => {
+    onChange(selected.has(status)
+      ? selectedStatuses.filter(value => value !== status)
+      : [...selectedStatuses, status]);
+  };
+
+  const label = selectedStatuses.length === 0
+    ? "All Statuses"
+    : selectedStatuses.length === 1
+      ? selectedStatuses[0]
+      : `${selectedStatuses.length} statuses`;
+
+  return (
+    <div ref={ref} className="relative" onMouseDown={e => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => setOpen(value => !value)}
+        className={`flex items-center gap-2 border rounded-md px-3 py-1.5 text-sm bg-white hover:border-slate-300 transition-colors min-w-[175px] max-w-[220px] focus:outline-none ${selectedStatuses.length > 0 ? "border-blue-400 text-blue-700" : "border-slate-200 text-slate-700"}`}
+        data-testid="button-bc-status-picker"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+      >
+        <span className="flex-1 text-left truncate">{label}</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div
+          className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-xl z-50 max-h-80 overflow-y-auto py-1"
+          role="listbox"
+          aria-label="BC order statuses"
+          aria-multiselectable="true"
+        >
+          <label className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 cursor-pointer select-none border-b border-slate-100">
+            <input
+              type="checkbox"
+              checked={selectedStatuses.length === 0}
+              onChange={() => onChange([])}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              data-testid="checkbox-bc-status-all"
+            />
+            <span className="text-sm font-medium text-slate-700">All Statuses</span>
+          </label>
+          {BC_ORDER_STATUSES.map(status => (
+            <label key={status} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={selected.has(status)}
+                onChange={() => toggleStatus(status)}
+                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                data-testid={`checkbox-bc-status-${status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+              />
+              <span className="text-sm text-slate-700">{status}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface VariantRow {
   bc_product_id: number;
   product_name: string;
@@ -194,13 +285,14 @@ interface ReportParams {
   categoryIds: number[];
   bcProductIds: number[];
   skuFilter: string;      // specific variant SKU (empty = no SKU filter)
-  bcStatusFilter: string; // BC order status (empty = all statuses)
+  bcStatusFilter: string[]; // BC order statuses (empty = all statuses)
 }
 
 interface ReportStats {
   totalProducts: number;
   totalVariants: number;
   totalQtySold: number;
+  totalSaleAmount: number;
   totalCurrentStock: number;
   dateFrom?: string;
   dateTo?: string;
@@ -221,6 +313,11 @@ interface ExportLog {
 function fmtNum(n: number | null | undefined): string {
   if (n == null) return "—";
   return Number(n).toLocaleString();
+}
+
+function fmtCurrency(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return Number(n).toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
 function fmtDate(d: string | null | undefined): string {
@@ -308,20 +405,24 @@ export default function SalesReport() {
 
   // ── Filter state (live editing) ──────────────────────────────────────────
   const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
-    return d.toISOString().slice(0, 10);
+    const d = new Date();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    return `${d.getFullYear()}-${month}-01`;
   });
   const [dateTo, setDateTo] = useState(() => {
-    const d = new Date(); d.setDate(0);
-    return d.toISOString().slice(0, 10);
+    const d = new Date();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${month}-${day}`;
   });
   const [selectedBrandId, setSelectedBrandId] = useState("");
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [productSearch, setProductSearch] = useState("");
+  const [productSearchQuery, setProductSearchQuery] = useState("");
   const [selectedProducts, setSelectedProducts] = useState<ProductOption[]>([]);
   const [selectedSkus, setSelectedSkus] = useState<string[]>([]); // variant-SKU level filters
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
-  const [bcStatusFilter, setBcStatusFilter] = useState(""); // "" = all statuses
+  const [bcStatusFilter, setBcStatusFilter] = useState<string[]>([]); // [] = all statuses
 
   const clearFilters = () => {
     setSelectedBrandId("");
@@ -329,7 +430,7 @@ export default function SalesReport() {
     setProductSearch("");
     setSelectedProducts([]);
     setSelectedSkus([]);
-    setBcStatusFilter("");
+    setBcStatusFilter([]);
   };
 
   // ── Confirmed params (only update on "Generate Report") ────────────────
@@ -352,6 +453,11 @@ export default function SalesReport() {
     return () => document.removeEventListener("mousedown", close);
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setProductSearchQuery(productSearch.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [productSearch]);
+
   // ─── Queries ──────────────────────────────────────────────────────────────
 
   const { data: brands = [] } = useQuery<Brand[]>({
@@ -373,13 +479,15 @@ export default function SalesReport() {
   });
 
   const { data: searchResults = [] } = useQuery<ProductOption[]>({
-    queryKey: ["report-product-search", productSearch],
+    queryKey: ["report-product-search", productSearchQuery],
     queryFn: async () => {
-      if (!productSearch) return [];
-      const r = await fetch(`/api/reports/product-search?q=${encodeURIComponent(productSearch)}`, { headers: getAuthHeaders() });
+      if (!productSearchQuery) return [];
+      const r = await fetch(`/api/reports/product-search?q=${encodeURIComponent(productSearchQuery)}`, { headers: getAuthHeaders() });
       return r.ok ? r.json() : [];
     },
-    enabled: productSearch.length >= 1,
+    enabled: productSearchQuery.length >= 2,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
   });
 
   const buildQs = (extra: Record<string, string> = {}) => {
@@ -389,7 +497,7 @@ export default function SalesReport() {
     if (reportParams.categoryIds.length > 0) p.categoryIds = reportParams.categoryIds.join(",");
     if (reportParams.bcProductIds.length > 0) p.bcProductIds = reportParams.bcProductIds.join(",");
     if (reportParams.skuFilter) p.skuFilter = reportParams.skuFilter;
-    if (reportParams.bcStatusFilter) p.bcStatusFilter = reportParams.bcStatusFilter;
+    if (reportParams.bcStatusFilter.length > 0) p.bcStatusFilter = reportParams.bcStatusFilter.join(",");
     return new URLSearchParams(p).toString();
   };
 
@@ -589,24 +697,7 @@ export default function SalesReport() {
               {/* BC Order Status filter */}
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-slate-500">BC Order Status</label>
-                <div className="relative">
-                  <select value={bcStatusFilter} onChange={e => setBcStatusFilter(e.target.value)} className="appearance-none border border-slate-200 rounded-md px-3 py-1.5 pr-8 text-sm text-slate-700 bg-white hover:border-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer w-full" data-testid="select-bc-status">
-                    <option value="">All Statuses</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Awaiting Fulfillment">Awaiting Fulfillment</option>
-                    <option value="Awaiting Shipment">Awaiting Shipment</option>
-                    <option value="Shipped">Shipped</option>
-                    <option value="Partially Shipped">Partially Shipped</option>
-                    <option value="Awaiting Payment">Awaiting Payment</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Incomplete">Incomplete</option>
-                    <option value="Cancelled">Cancelled</option>
-                    <option value="Declined">Declined</option>
-                    <option value="Refunded">Refunded</option>
-                    <option value="Partially Refunded">Partially Refunded</option>
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                </div>
+                <BcStatusPicker selectedStatuses={bcStatusFilter} onChange={setBcStatusFilter} />
               </div>
 
               {/* Product Search */}
@@ -653,7 +744,7 @@ export default function SalesReport() {
               <div className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:flex-1 lg:justify-end">
                 <button
                   onClick={clearFilters}
-                  disabled={!selectedBrandId && selectedCategoryIds.length === 0 && selectedProducts.length === 0 && selectedSkus.length === 0 && !bcStatusFilter}
+                   disabled={!selectedBrandId && selectedCategoryIds.length === 0 && selectedProducts.length === 0 && selectedSkus.length === 0 && bcStatusFilter.length === 0}
                   className="flex items-center gap-1.5 border border-slate-200 rounded-md px-3 py-1.5 text-sm bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   data-testid="button-clear-filters"
                 >
@@ -889,7 +980,7 @@ export default function SalesReport() {
             {!reportParams ? (
               <p className="text-xs text-slate-400 italic">Generate a report to see summary stats.</p>
             ) : loadingStats ? (
-              <div className="space-y-3">{[1,2,3,4,5].map(i => <div key={i} className="h-4 bg-slate-100 rounded animate-pulse" />)}</div>
+              <div className="space-y-3">{[1,2,3,4,5,6].map(i => <div key={i} className="h-4 bg-slate-100 rounded animate-pulse" />)}</div>
             ) : stats ? (
               <div className="space-y-3">
                 <div>
@@ -900,6 +991,7 @@ export default function SalesReport() {
                   { label: "Total Products", value: fmtNum(stats.totalProducts) },
                   { label: "Total Variants", value: fmtNum(stats.totalVariants) },
                   { label: "Total Qty Sold", value: fmtNum(stats.totalQtySold) },
+                  { label: "Total Sale Amount", value: fmtCurrency(stats.totalSaleAmount) },
                   { label: "Total Current Stock", value: fmtNum(stats.totalCurrentStock) },
                 ] as const).map(row => (
                   <div key={row.label}>

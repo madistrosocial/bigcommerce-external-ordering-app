@@ -50,6 +50,9 @@ import CRMReactivation from "@/pages/crm/Reactivation";
 import CRMNotes from "@/pages/crm/CRMNotes";
 import CRMToDo from "@/pages/crm/ToDo";
 import StoreCreditLedger from "@/pages/crm/StoreCreditLedger";
+import MarketingOrderForm from "@/pages/marketing/MarketingOrderForm";
+import MarketingProductLists from "@/pages/marketing/MarketingProductLists";
+import MarketingLog, { MarketingLogRoute } from "@/pages/marketing/MarketingLog";
 import PriceOverrideAuditPage from "@/pages/admin/reports/PriceOverrideAudit";
 import StoreCreditUsageReportPage from "@/pages/admin/reports/StoreCreditUsageReport";
 import SalesReportPage from "@/pages/admin/reports/SalesReport";
@@ -174,9 +177,6 @@ function Router() {
       <Route path="/attendance/logs">
         {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_logs" />}
       </Route>
-      <Route path="/attendance/exceptions">
-        {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_exceptions" />}
-      </Route>
       <Route path="/attendance/reports">
         {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_reports" />}
       </Route>
@@ -205,6 +205,18 @@ function Router() {
       </Route>
       <Route path="/marketing/campaigns/:id">
         {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" />}
+      </Route>
+      <Route path="/marketing/order-form">
+        {() => <PermissionRoute component={MarketingOrderForm} module="marketing" />}
+      </Route>
+      <Route path="/marketing/product-lists">
+        {() => <PermissionRoute component={MarketingProductLists} module="marketing" />}
+      </Route>
+      <Route path="/marketing/log/:id">
+        {() => <PermissionRoute component={MarketingLogRoute} module="marketing" />}
+      </Route>
+      <Route path="/marketing/log">
+        {() => <PermissionRoute component={MarketingLog} module="marketing" />}
       </Route>
       <Route path="/marketing/audiences">
         {() => <PermissionRoute component={MarketingAudiences} module="marketing" action="manage_audiences" />}

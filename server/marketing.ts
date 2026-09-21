@@ -297,12 +297,13 @@ export async function sendMarketingTestEmail(campaignId: number, email: string):
   return { messageId: info.transmissionId };
 }
 
-export async function processMarketingCampaign(campaignId: number): Promise<void> {
+export async function processMarketingCampaign(campaignId: number, initiatedByUserId?: number): Promise<void> {
   if (runningCampaigns.has(campaignId)) return;
   runningCampaigns.add(campaignId);
   try {
     const campaign = await storage.claimMarketingCampaign(campaignId);
     if (!campaign) return;
+    const initiatedBy = Number(initiatedByUserId ?? campaign.created_by) || null;
     const settings = await getMailSettings();
     const from = resolveMarketingSenderEmail(campaign, await getMarketingSenderSettings(settings));
     if (!from) throw new Error("Zoho Campaigns sender address is not configured.");
@@ -358,6 +359,38 @@ export async function processMarketingCampaign(campaignId: number): Promise<void
             },
           });
           await storage.markMarketingRecipientSent(row.id, info.transmissionId);
+          const productTitles = Array.from(new Set((Array.isArray(campaign.product_snapshots) ? campaign.product_snapshots : [])
+            .map((product: any) => String(product?.name ?? "").trim())
+            .filter(Boolean)));
+          let marketingLog: any;
+          try {
+            marketingLog = await storage.createMarketingDeliveryLog({
+              delivery_type: "campaign",
+              campaign_id: campaignId,
+              customer_id: imported ? null : Number(customer.id ?? row.customer_id) || null,
+              source_key: `campaign-recipient:${recipient.id}`,
+              recipient_email: recipient.email,
+              product_titles: productTitles,
+              sent_at: new Date(),
+              initiated_by: initiatedBy,
+            });
+          } catch (logError: any) {
+            console.error(`[marketing] delivery log failed for campaign ${campaignId}:`, logError?.message ?? logError);
+          }
+          if (marketingLog && !imported && Number(customer.id ?? row.customer_id)) {
+            await storage.createCrmAuditLog({
+              user_id: initiatedBy,
+              customer_id: Number(customer.id ?? row.customer_id),
+              action: "campaign_sent",
+              detail: {
+                marketing_log_id: marketingLog.id,
+                campaign_id: campaignId,
+                campaign_name: campaign.name,
+                recipient_email: recipient.email,
+                product_titles: productTitles,
+              },
+            });
+          }
         } catch (error: any) {
           await storage.markMarketingRecipientFailed(
             row.id,

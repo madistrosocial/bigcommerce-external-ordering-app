@@ -1,217 +1,4 @@
-// API client for backend calls
-
-export interface Product {
-  id: number;
-  name: string;
-  sku: string;
-  price: string;
-  cost_price?: string | null;
-  image: string;
-  description: string;
-  stock_level: number;
-  is_pinned: boolean;
-  bigcommerce_id: number;
-  variants: any[];
-  min_purchase_quantity?: number | null;
-  max_purchase_quantity?: number | null;
-}
-
-export interface User {
-  id: number;
-  username: string;
-  name: string;
-  role: 'admin' | 'agent';
-  is_enabled: boolean;
-  allow_bigcommerce_search: boolean;
-  default_landing_page?: string;
-  auth_token?: string;
-}
-
-export interface OrderItem {
-  product_id: number;
-  bigcommerce_product_id?: number;
-  variant_id?: number;
-  variant_option_values?: any[];
-  quantity: number;
-  price_at_sale: string;
-  name: string;
-  sku: string;
-  image: string;
-}
-
-export interface Order {
-  id?: number;
-  customer_name: string;
-  customer_email?: string;
-  status: 'draft' | 'pending_sync' | 'failed' | 'synced';
-  sync_error?: string;
-  order_note?: string;
-  customer_note?: string;
-  items: OrderItem[];
-  total: string;
-  date?: string;
-  created_by_user_id: number;
-  created_by_name?: string;
-  created_by_username?: string;
-  bigcommerce_order_id?: number;
-  bigcommerce_customer_id?: number;
-  billing_address?: any;
-}
-
-export interface DropshipProduct {
-  id: number;
-  vendor_id: number;
-  vendor_sku: string;
-  vendor_product_id?: string | null;
-  title: string;
-  description: string;
-  brand?: string | null;
-  upc?: string | null;
-  inventory: number;
-  cost?: string | null;
-  tier_data: unknown[];
-  image_data: unknown[];
-  vendor_category?: string | null;
-  vendor_subcategory?: string | null;
-  is_closeout: boolean;
-  vendor_modified_at?: string | null;
-  bigcommerce_product_id?: number | null;
-  status: "available" | "queued" | "mapped" | "unavailable" | "error" | string;
-  raw_data: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface DropshipSyncLog {
-  id: number;
-  vendor_id: number;
-  status: "running" | "completed" | "failed" | string;
-  started_at: string;
-  completed_at?: string | null;
-  duration_ms?: number | null;
-  products_processed: number;
-  products_created: number;
-  products_updated: number;
-  error_count: number;
-  error_summary?: string | null;
-  detail: Record<string, unknown>;
-}
-
-const API_BASE = '/api';
-
-/**
- * Returns auth headers derived from the session stored in localStorage.
- * Every protected API call must include these headers so the backend can
- * validate the caller without requiring a separate session cookie.
- */
-export function getAuthHeaders(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem('vansales_user');
-    if (!raw) return {};
-    const user = JSON.parse(raw);
-    if (!user?.auth_token) return {};
-    return {
-      Authorization: `Bearer ${user.auth_token}`,
-    };
-  } catch {
-    return {};
-  }
-}
-
-async function dropshipRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...getAuthHeaders(), ...(init.headers || {}) },
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || body.message || "Dropshipping request failed");
-  return body as T;
-}
-
-export function getKoleConnection() {
-  return dropshipRequest<{
-    vendor: { id: number; code: string; name: string; provider: string };
-    hasCredentials: boolean;
-    displayName: string;
-    lastTestedAt: string | null;
-    lastTestOk: boolean | null;
-  }>("/dropshipping/kole/connection");
-}
-
-export function saveKoleConnection(data: { accountId?: string; apiKey?: string; displayName?: string }) {
-  return dropshipRequest<{ ok: boolean; hasCredentials: boolean; displayName: string }>("/dropshipping/kole/connection", {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
-}
-
-export function testKoleConnection() {
-  return dropshipRequest<{ ok: boolean; message: string }>("/dropshipping/kole/connection/test", { method: "POST" });
-}
-
-export function getKoleProducts(params: {
-  page?: number; limit?: number; search?: string; category?: string; subcategory?: string;
-  inStock?: boolean; closeout?: boolean; imported?: boolean; status?: string;
-}) {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== "" && value !== false) query.set(key, String(value));
-  }
-  return dropshipRequest<{
-    rows: DropshipProduct[];
-    total: number;
-    page: number;
-    limit: number;
-    categories: string[];
-    subcategories: string[];
-  }>(`/dropshipping/kole/products?${query.toString()}`);
-}
-
-export function getKoleProduct(id: number) {
-  return dropshipRequest<DropshipProduct>(`/dropshipping/kole/products/${id}`);
-}
-
-export function updateKoleProductStatus(id: number, status: string) {
-  return dropshipRequest<DropshipProduct>(`/dropshipping/kole/products/${id}/status`, {
-    method: "PATCH",
-    body: JSON.stringify({ status }),
-  });
-}
-
-export function syncKoleCatalog() {
-  return dropshipRequest<{
-    ok: boolean;
-    productsProcessed: number;
-    productsCreated: number;
-    productsUpdated: number;
-    errorCount: number;
-    log: DropshipSyncLog;
-  }>("/dropshipping/kole/sync", { method: "POST" });
-}
-
-export function getKoleSyncLogs() {
-  return dropshipRequest<DropshipSyncLog[]>("/dropshipping/kole/sync-logs");
-}
-
-// ─── Marketing ────────────────────────────────────────────────────────────────
-
-async function marketingRequest(path: string, init: RequestInit = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...getAuthHeaders(), ...(init.headers || {}) },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || "Marketing request failed");
-  }
-  return res.status === 204 ? null : res.json();
-}
-
-export const getMarketingDashboard = () => marketingRequest("/marketing/dashboard");
-export const getMarketingSenderSettings = () => marketingRequest("/marketing/sender-settings");
-export const getMarketingProviderStatus = () => marketingRequest("/marketing/provider-status");
-export const saveMarketingSenderSettings = (data: { emails: string[]; defaultEmail: string }) =>
-  marketingRequest("/marketing/sender-settings", { method: "PUT", body: JSON.stringify(data) });
+ketingRequest("/marketing/sender-settings", { method: "PUT", body: JSON.stringify(data) });
 
 export const getAdminZohoCredentials = () => marketingRequest("/admin/zoho-credentials");
 export const saveAdminZohoCredentials = (data: {
@@ -247,6 +34,19 @@ export const getMarketingAnalytics = (params: { campaignId?: number; dateFrom?: 
   marketingRequest(`/marketing/analytics?${new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== "") as string[][]).toString()}`);
 export const getMarketingAudiences = () => marketingRequest("/marketing/audiences");
 export const getMarketingAudience = (id: number) => marketingRequest(`/marketing/audiences/${id}`);
+export const getMarketingProductLists = (search = "") =>
+  marketingRequest(`/marketing/product-lists?search=${encodeURIComponent(search)}`);
+export const getMarketingProductList = (id: number) => marketingRequest(`/marketing/product-lists/${id}`);
+export const createMarketingProductList = (data: { name: string; description?: string }) =>
+  marketingRequest("/marketing/product-lists", { method: "POST", body: JSON.stringify(data) });
+export const updateMarketingProductList = (id: number, data: { name?: string; description?: string }) =>
+  marketingRequest(`/marketing/product-lists/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+export const deleteMarketingProductList = (id: number) =>
+  marketingRequest(`/marketing/product-lists/${id}`, { method: "DELETE" });
+export const addMarketingProductListItems = (id: number, products: any[]) =>
+  marketingRequest(`/marketing/product-lists/${id}/items`, { method: "POST", body: JSON.stringify({ products }) });
+export const removeMarketingProductListItem = (listId: number, itemId: number) =>
+  marketingRequest(`/marketing/product-lists/${listId}/items/${itemId}`, { method: "DELETE" });
 export const createMarketingAudience = (data: any) => marketingRequest("/marketing/audiences", { method: "POST", body: JSON.stringify(data) });
 export const updateMarketingAudience = (id: number, data: any) => marketingRequest(`/marketing/audiences/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 export const deleteMarketingAudience = (id: number) => marketingRequest(`/marketing/audiences/${id}`, { method: "DELETE" });
@@ -260,6 +60,29 @@ export const getMarketingAudienceMembers = (id: number, params: { search?: strin
   marketingRequest(`/marketing/audiences/${id}/members?search=${encodeURIComponent(params.search || "")}&source=${encodeURIComponent(params.source || "all")}&status=${encodeURIComponent(params.status || "all")}&limit=${params.limit || 25}&offset=${params.offset || 0}`);
 export const getMarketingAudiencePreview = (filters: any) =>
   marketingRequest("/marketing/audience-preview", { method: "POST", body: JSON.stringify({ filters, limit: 25 }) });
+export const getMarketingOrderFormCustomers = (params: { search?: string; limit?: number; offset?: number } = {}) =>
+  marketingRequest(`/marketing/order-forms/customers?search=${encodeURIComponent(params.search || "")}&limit=${params.limit || 25}&offset=${params.offset || 0}`);
+export const getMarketingOrderFormHistory = () => marketingRequest("/marketing/order-forms/history");
+export const getMarketingDeliveryLogs = (params: { type?: "all" | "campaign" | "order_form"; campaignId?: number; customerId?: number; limit?: number; offset?: number } = {}) =>
+  marketingRequest(`/marketing/logs?${new URLSearchParams({
+    type: params.type || "all",
+    ...(params.campaignId ? { campaignId: String(params.campaignId) } : {}),
+    ...(params.customerId ? { customerId: String(params.customerId) } : {}),
+    limit: String(params.limit || 50),
+    offset: String(params.offset || 0),
+  }).toString()}`);
+export const getMarketingDeliveryLog = (id: number) => marketingRequest(`/marketing/logs/${id}`);
+export const sendMarketingOrderForms = (data: {
+  audience_type: "saved_audience" | "selected_customers";
+  audience_id?: number | null;
+  customer_ids?: number[];
+  product_ids: number[];
+  format: "csv" | "xlsx";
+  sender_email?: string | null;
+  email_title?: string;
+  email_body?: string;
+}) =>
+  marketingRequest("/marketing/order-forms/send", { method: "POST", body: JSON.stringify(data) });
 export const getMarketingTemplates = () => marketingRequest("/marketing/templates");
 export const createMarketingTemplate = (data: any) => marketingRequest("/marketing/templates", { method: "POST", body: JSON.stringify(data) });
 export const updateMarketingTemplate = (id: number, data: any) => marketingRequest(`/marketing/templates/${id}`, { method: "PATCH", body: JSON.stringify(data) });
@@ -716,11 +539,74 @@ export async function getCustomerSignups(page = 1, limit = 50, filters?: { dateF
 }
 
 export async function searchBigCommerceCustomers(query: string): Promise<BigCommerceCustomer[]> {
+  const startedAt = performance.now();
   const res = await fetch(
     `${API_BASE}/bigcommerce/customers/search?query=${encodeURIComponent(query)}`,
     { headers: getAuthHeaders() }
   );
+  if (!res.ok) {
+    console.warn("[BC customer search timing]", JSON.stringify({
+      requestMs: Math.round(performance.now() - startedAt),
+      status: res.status,
+    }));
+    throw new Error('Customer search failed');
+  }
+  const data = await res.json();
+  const directoryState = res.headers.get("X-BC-Customer-Directory");
+  if (directoryState) {
+    console.warn("[BC customer search timing]", JSON.stringify({
+      directoryState,
+      requestMs: Math.round(performance.now() - startedAt),
+    }));
+  }
+  console.debug("[BC customer search timing]", JSON.stringify({
+    requestMs: Math.round(performance.now() - startedAt),
+    status: res.status,
+  }));
+  return data;
+}
+
+export async function searchPosCustomers(query: string): Promise<BigCommerceCustomer[]> {
+  const res = await fetch(
+    `${API_BASE}/pos/customers/search?query=${encodeURIComponent(query)}`,
+    { headers: getAuthHeaders() }
+  );
   if (!res.ok) throw new Error('Customer search failed');
+  return res.json();
+}
+
+export async function searchPosCustomersFromPostgres(query: string): Promise<BigCommerceCustomer[]> {
+  const res = await fetch(
+    `${API_BASE}/pos/customers/search-mirror?query=${encodeURIComponent(query)}`,
+    { headers: getAuthHeaders() }
+  );
+  if (!res.ok) throw new Error('Customer mirror search failed');
+  return res.json();
+}
+
+export interface PosCustomerSnapshotPage {
+  customers: BigCommerceCustomer[];
+  nextCursor: number | null;
+  hasMore: boolean;
+  updatedUntil: string;
+  storeScope: string;
+}
+
+export async function getPosCustomerSnapshot(params: {
+  updatedSince?: string | null;
+  updatedUntil?: string | null;
+  cursor?: number | null;
+  limit?: number;
+} = {}): Promise<PosCustomerSnapshotPage> {
+  const query = new URLSearchParams();
+  if (params.updatedSince) query.set("updatedSince", params.updatedSince);
+  if (params.updatedUntil) query.set("updatedUntil", params.updatedUntil);
+  if (params.cursor != null) query.set("cursor", String(params.cursor));
+  query.set("limit", String(params.limit ?? 500));
+  const res = await fetch(`${API_BASE}/pos/customers/snapshot?${query.toString()}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Customer directory sync failed");
   return res.json();
 }
 

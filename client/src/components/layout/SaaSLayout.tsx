@@ -149,9 +149,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const marketingChildren: NavLeaf[] = [
     ...(hasPermission("marketing") ? [{ label: "Overview", path: "/marketing" }] : []),
     ...(hasPermission("marketing") ? [{ label: "Campaigns", path: "/marketing/campaigns" }] : []),
+    ...(hasPermission("marketing") ? [{ label: "Order Form", path: "/marketing/order-form" }] : []),
+    ...(hasPermission("marketing") ? [{ label: "Product Lists", path: "/marketing/product-lists" }] : []),
     ...(hasPermission("marketing", "manage_audiences") ? [{ label: "Audiences", path: "/marketing/audiences" }] : []),
     ...(hasPermission("marketing", "manage_templates") ? [{ label: "Templates", path: "/marketing/templates" }] : []),
     ...(hasPermission("marketing", "manage_automations") ? [{ label: "Automations", path: "/marketing/automations" }] : []),
+    ...(hasPermission("marketing") ? [{ label: "Log", path: "/marketing/log" }] : []),
     ...(hasPermission("marketing", "view_analytics") ? [{ label: "Analytics", path: "/marketing/analytics" }] : []),
   ];
 
@@ -173,7 +176,6 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("attendance", "clock") ? [{ label: "My Attendance", path: "/attendance" }] : []),
     ...(canViewAllAttendance && hasPermission("attendance", "view_dashboard") ? [{ label: "Overview", path: "/attendance/overview" }] : []),
     ...(hasPermission("attendance", "view_logs") ? [{ label: "Attendance Logs", path: "/attendance/logs" }] : []),
-    ...(canViewAllAttendance && hasPermission("attendance", "view_exceptions") ? [{ label: "Exceptions", path: "/attendance/exceptions" }] : []),
     ...(canViewAllAttendance && hasPermission("attendance", "view_reports") ? [{ label: "Reports", path: "/attendance/reports" }] : []),
   ];
 

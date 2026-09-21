@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { User, Product } from './api';
+import { clearLocalPosCustomerCache } from './db';
 
 export const POS_SELECTED_CUSTOMER_STORAGE_KEY = 'vansales_pos_selected_customer';
 export const POS_SELECTED_ADDRESS_STORAGE_KEY = 'vansales_pos_selected_address';
@@ -91,11 +92,15 @@ export const useStore = create<AppState>((set, get) => ({
   cart: loadPersistedCart(),
 
   login: (user) => {
+    if (get().currentUser?.id !== user.id) {
+      void clearLocalPosCustomerCache();
+    }
     localStorage.setItem('vansales_user', JSON.stringify(user));
     set({ currentUser: user });
   },
 
   logout: () => {
+    void clearLocalPosCustomerCache();
     localStorage.removeItem('vansales_user');
     localStorage.removeItem('vansales_cart');
     localStorage.removeItem(POS_SELECTED_CUSTOMER_STORAGE_KEY);

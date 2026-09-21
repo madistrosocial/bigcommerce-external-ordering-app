@@ -7,4 +7,4 @@ The installed iOS PWA should render its app shell edge-to-edge. Apply the top sa
 
 **Why:** Padding the entire shell with `env(safe-area-inset-bottom)` creates a visible empty strip above the home-indicator area and makes the app look like it is inside a smaller wrapper.
 
-**How to apply:** Keep the root and shell backgrounds full-viewport. Use `viewport-fit=cover`, header-specific top inset handling, and bottom inset handling only where content or controls could be obscured.
+**How to apply:** Keep the root and shell backgrounds full-viewport. Use `viewport-fit=cover`, header-specific top inset handling, and bottom inset handling only where content or controls could be obscured. Long mobile dialogs must scroll internally and include bottom safe-area padding so action buttons remain reachable.

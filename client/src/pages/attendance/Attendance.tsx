@@ -93,26 +93,74 @@ function EndDayDialog({ onCancel, onConfirm, saving }: { onCancel: () => void; o
 }
 
 function HistoryList({ rows, fmt }: { rows: any[]; fmt: ReturnType<typeof useTimeService> }) {
+  const groupedRows = Array.from(
+    rows.reduce((groups, row) => {
+      const date = row.work_date;
+      const sessions = groups.get(date) ?? [];
+      sessions.push(row);
+      groups.set(date, sessions);
+      return groups;
+    }, new Map<string, any[]>()).entries(),
+  ).map(([date, sessions]) => ({ date, sessions }));
+
   return (
     <div className="space-y-3">
-      {rows.length === 0 ? (
+      {groupedRows.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">No attendance history yet.</div>
-      ) : rows.map(row => (
-        <div key={row.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-800">{row.work_date}</p>
-              <p className="mt-1 text-xs text-slate-500">{row.start_method === "warehouse" ? "Started at warehouse" : "Started while driving"}</p>
+      ) : groupedRows.map(({ date, sessions }) => {
+        const hasActiveSession = sessions.some(session => session.status === "active");
+        const status = hasActiveSession
+          ? "active"
+          : sessions.every(session => session.status === "completed")
+            ? "completed"
+            : sessions[0]?.status;
+        const totalSeconds = sessions.reduce(
+          (total, session) => total + Math.max(0, Number(session.total_seconds) || 0),
+          0,
+        );
+
+        return (
+          <div key={date} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">{date}</p>
+                {sessions.length > 1 && <p className="mt-1 text-xs text-slate-500">{sessions.length} attendance sessions</p>}
+              </div>
+              <Badge className={status === "completed" ? "border-0 bg-emerald-100 text-emerald-700" : "border-0 bg-red-100 text-red-700"}>{status}</Badge>
             </div>
-            <Badge className={row.status === "completed" ? "border-0 bg-emerald-100 text-emerald-700" : "border-0 bg-red-100 text-red-700"}>{row.status}</Badge>
+
+            {sessions.length === 1 ? (
+              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                <div><span className="block text-slate-400">Time in</span><span className="font-medium text-slate-700">{sessions[0].time_in ? fmt.time(sessions[0].time_in) : "—"}</span></div>
+                <div><span className="block text-slate-400">Time out</span><span className="font-medium text-slate-700">{sessions[0].time_out ? fmt.time(sessions[0].time_out) : "—"}</span></div>
+                <div><span className="block text-slate-400">Total</span><span className="font-medium text-slate-700">{formatDuration(sessions[0].total_seconds)}</span></div>
+              </div>
+            ) : (
+              <>
+                <div className="mt-3 space-y-2">
+                  {sessions.map((session, index) => (
+                    <div key={session.id} className="rounded-xl bg-slate-50 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-slate-700">Session {session.session_number ?? index + 1}</p>
+                        <span className="text-xs font-medium text-slate-700">{formatDuration(session.total_seconds)}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">{session.start_method === "warehouse" ? "Started at warehouse" : "Started while driving"}</p>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                        <div><span className="block text-slate-400">Time in</span><span className="font-medium text-slate-700">{session.time_in ? fmt.time(session.time_in) : "—"}</span></div>
+                        <div><span className="block text-slate-400">Time out</span><span className="font-medium text-slate-700">{session.time_out ? fmt.time(session.time_out) : "—"}</span></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs">
+                  <span className="text-slate-400">Total worked</span>
+                  <span className="font-semibold text-slate-700">{formatDuration(totalSeconds)}</span>
+                </div>
+              </>
+            )}
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-            <div><span className="block text-slate-400">Time in</span><span className="font-medium text-slate-700">{row.time_in ? fmt.time(row.time_in) : "—"}</span></div>
-            <div><span className="block text-slate-400">Time out</span><span className="font-medium text-slate-700">{row.time_out ? fmt.time(row.time_out) : "—"}</span></div>
-            <div><span className="block text-slate-400">Total</span><span className="font-medium text-slate-700">{formatDuration(row.total_seconds)}</span></div>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -129,6 +177,7 @@ export default function AttendancePage() {
   const [showHistory, setShowHistory] = useState(false);
   const [error, setError] = useState("");
   const [settingHome, setSettingHome] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   const { data, isLoading } = useQuery({
     queryKey: ["attendance", "today", currentUser?.id],
@@ -138,6 +187,12 @@ export default function AttendancePage() {
   });
   const active = data?.active ?? null;
   const history = data?.history ?? [];
+  const todaySessions: any[] = data?.todaySessions ?? [];
+  const todayTotalSeconds = Number(data?.todayTotalSeconds ?? 0);
+  const todayAsOf = data?.todayAsOf ? new Date(data.todayAsOf).getTime() : 0;
+  const liveTodayTotalSeconds = active && todayAsOf
+    ? todayTotalSeconds + Math.max(0, Math.floor((now - todayAsOf) / 1000))
+    : todayTotalSeconds;
 
   const todosQuery = useQuery({
     queryKey: ["attendance", "todos", currentUser?.id],
@@ -168,6 +223,11 @@ export default function AttendancePage() {
     }, 60 * 60 * 1000);
     return () => window.clearInterval(interval);
   }, [active?.id]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const startWarehouse = async () => {
     setError("");
@@ -294,13 +354,18 @@ export default function AttendancePage() {
           <div className="mt-8">
             <div className="mx-auto mb-8 flex h-20 w-20 items-center justify-center rounded-full bg-red-50 text-red-600"><Clock3 className="h-10 w-10" /></div>
             <div className="text-center">
-              <h2 className="text-2xl font-bold text-slate-900">Start your day</h2>
-              <p className="mt-1 text-sm text-slate-500">Where are you starting?</p>
+              <h2 className="text-2xl font-bold text-slate-900">{todaySessions.length === 0 ? "Start your day" : data?.canStartSecondSession ? "Start a second session" : "Attendance complete for today"}</h2>
+              {todaySessions.length === 0 && <p className="mt-1 text-sm text-slate-500">Where are you starting?</p>}
+              {data?.canStartSecondSession && <p className="mt-1 text-sm text-slate-500">Your approved second shift is ready. Where are you starting?</p>}
             </div>
-            <div className="mt-8 space-y-3">
+            {(todaySessions.length === 0 || data?.canStartSecondSession) && <div className="mt-8 space-y-3">
               <StartChoice icon={<MapPin className="h-6 w-6" />} title="Warehouse" subtitle="Login when you arrive at the location" onClick={startWarehouse} />
               <StartChoice icon={<Car className="h-6 w-6" />} title="Route start" subtitle={homeConfigured ? "Login when you're on your way" : "Set your home location first"} onClick={startDriving} disabled={!homeConfigured} />
-            </div>
+            </div>}
+            {todaySessions.length > 0 && <Card className="mt-5 rounded-2xl border-slate-200 shadow-sm"><CardContent className="p-4">
+              <div className="flex items-center justify-between"><span className="text-xs text-slate-500">Worked today</span><span className="text-lg font-bold text-slate-800">{formatDuration(todayTotalSeconds)}</span></div>
+              <div className="mt-3 space-y-2">{todaySessions.map((session: any) => <div key={session.id} className="flex items-center justify-between text-xs"><span className="text-slate-500">Session {session.session_number ?? 1} · {session.time_in ? fmt.time(session.time_in) : "—"}{session.time_out ? ` – ${fmt.time(session.time_out)}` : " · Active"}</span><span className="font-medium text-slate-700">{formatDuration(session.total_seconds)}</span></div>)}</div>
+            </CardContent></Card>}
             {homeLocationQuery.isError ? (
               <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
                 <div className="flex items-start gap-3">
@@ -348,7 +413,7 @@ export default function AttendancePage() {
             <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><CheckCircle2 className="h-12 w-12" /></div>
             <h2 className="mt-6 text-xl font-bold text-slate-900">{validationMessage}</h2>
             <p className="mt-2 text-sm text-slate-500">{validationMethod === "driving" ? "You are outside your saved home area." : "Your location has been verified."}</p>
-            <Button className="mt-8 h-12 w-full bg-red-600 hover:bg-red-700" onClick={() => startMutation.mutate()} disabled={startMutation.isPending}>
+            <Button className="mt-8 h-12 w-full bg-red-600 hover:bg-red-700" onClick={() => startMutation.mutate(null)} disabled={startMutation.isPending}>
               {startMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}TIME IN
             </Button>
           </div>
@@ -373,6 +438,10 @@ export default function AttendancePage() {
                 </div>
                 <div className="p-4">
                   <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3"><Clock3 className="h-5 w-5 text-slate-500" /><div><p className="text-[11px] uppercase tracking-wide text-slate-400">Time In</p><p className="text-sm font-semibold text-slate-800">{active.time_in ? fmt.time(active.time_in) : "—"}</p><p className="mt-0.5 text-xs text-slate-500">{activeSubtitle}</p></div></div>
+                   <div className="mt-3 grid grid-cols-2 gap-3">
+                     <div className="rounded-xl border border-red-100 bg-red-50 p-3"><p className="text-[11px] uppercase tracking-wide text-red-500">Current session</p><p className="mt-1 text-lg font-bold text-red-700">{formatDuration(active.time_in ? Math.max(0, Math.floor((now - new Date(active.time_in).getTime()) / 1000)) : 0)}</p><p className="text-[11px] text-red-600">Elapsed</p></div>
+                     <div className="rounded-xl border border-slate-200 bg-white p-3"><p className="text-[11px] uppercase tracking-wide text-slate-400">Worked today</p><p className="mt-1 text-lg font-bold text-slate-800">{formatDuration(liveTodayTotalSeconds)}</p><p className="text-[11px] text-slate-500">All sessions</p></div>
+                   </div>
                   <Button variant="outline" className="mt-4 h-11 w-full border-red-300 text-red-600 hover:bg-red-50" onClick={() => setFlow("ending")}> <X className="mr-2 h-4 w-4" />End Day</Button>
                 </div>
               </CardContent>
