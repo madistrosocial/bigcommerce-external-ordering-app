@@ -344,7 +344,7 @@ export interface IStorage {
   getProductsByBrandId(brandId: number): Promise<Product[]>;
   getProductsByCategoryId(categoryId: number): Promise<Product[]>;
   getSalesReportSummary(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string[]; page: number; limit: number; sortBy: string; sortDir: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
-  getSalesReportInventoryKeys(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string[] }): Promise<Array<{ bc_product_id: number; variant_id: number | null }>>;
+  getSalesReportInventoryKeys(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string[] }): Promise<Array<{ bc_product_id: number; variant_id: number | null; sku: string | null }>>;
   getSalesReportDetails(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string[]; page: number; limit: number; sortBy: string; sortDir: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
   getSalesReportStats(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string[] }): Promise<{ totalProducts: number; totalVariants: number; totalQtySold: number; totalSaleAmount: number; totalCurrentStock: number }>;
   getRecentExportLogs(limit?: number): Promise<Record<string, unknown>[]>;
@@ -4552,7 +4552,7 @@ export class DatabaseStorage implements IStorage {
     bcProductIds?: number[];
     skuFilter?: string;
     bcStatusFilter?: string[];
-  }): Promise<Array<{ bc_product_id: number; variant_id: number | null }>> {
+  }): Promise<Array<{ bc_product_id: number; variant_id: number | null; sku: string | null }>> {
     const { dateFrom, dateTo, bcProductIds, skuFilter, bcStatusFilter } = opts;
     const dateFromCond = dateFrom
       ? `AND li.order_date >= '${dateFrom}'::date`
@@ -4575,7 +4575,10 @@ export class DatabaseStorage implements IStorage {
       : "";
 
     const result = await db.execute(sql.raw(`
-      SELECT DISTINCT li.bigcommerce_product_id AS bc_product_id, li.variant_id
+      SELECT
+        li.bigcommerce_product_id AS bc_product_id,
+        li.variant_id,
+        MAX(NULLIF(li.sku, '')) AS sku
       FROM bc_order_line_items li
       LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
       WHERE 1=1
@@ -4584,10 +4587,12 @@ export class DatabaseStorage implements IStorage {
       ${dateToCond}
       ${productCond}
       ${skuCond}
+      GROUP BY li.bigcommerce_product_id, li.variant_id
     `));
     return (result.rows as any[]).map(row => ({
       bc_product_id: Number(row.bc_product_id),
       variant_id: row.variant_id == null ? null : Number(row.variant_id),
+      sku: row.sku == null ? null : String(row.sku),
     }));
   }
 

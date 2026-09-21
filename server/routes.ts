@@ -9639,6 +9639,7 @@ export async function registerRoutes(
   type SalesReportInventoryKey = {
     bc_product_id: number;
     variant_id: number | null;
+    sku?: string | null;
   };
 
   async function fetchLiveSalesReportInventory(
@@ -9662,9 +9663,16 @@ export async function registerRoutes(
       const payload = await response.json();
       for (const product of payload.data ?? []) {
         const productId = Number(product.id);
-        inventory.set(`${productId}:product`, Number(product.inventory_level ?? 0));
+        if (product.inventory_level !== null && product.inventory_level !== undefined && product.inventory_level !== "") {
+          inventory.set(`${productId}:product`, Number(product.inventory_level));
+        }
         for (const variant of product.variants ?? []) {
-          inventory.set(`${productId}:${Number(variant.id)}`, Number(variant.inventory_level ?? 0));
+          const variantStock = variant.inventory_level;
+          if (variantStock !== null && variantStock !== undefined && variantStock !== "") {
+            inventory.set(`${productId}:${Number(variant.id)}`, Number(variantStock));
+            const sku = String(variant.sku ?? "").trim().toLowerCase();
+            if (sku) inventory.set(`${productId}:sku:${sku}`, Number(variantStock));
+          }
         }
       }
     }
@@ -9678,10 +9686,13 @@ export async function registerRoutes(
     return rows.map(row => {
       const productId = Number(row.bc_product_id);
       const variantId = row.variant_id == null ? null : Number(row.variant_id);
+      const sku = String(row.sku ?? "").trim().toLowerCase();
       const liveStock = variantId == null
-        ? inventory.get(`${productId}:product`)
-        : inventory.get(`${productId}:${variantId}`) ?? inventory.get(`${productId}:product`);
-      return { ...row, current_stock: liveStock ?? 0 };
+        ? (sku ? inventory.get(`${productId}:sku:${sku}`) : undefined) ?? inventory.get(`${productId}:product`)
+        : inventory.get(`${productId}:${variantId}`)
+          ?? (sku ? inventory.get(`${productId}:sku:${sku}`) : undefined)
+          ?? inventory.get(`${productId}:product`);
+      return liveStock === undefined ? row : { ...row, current_stock: liveStock };
     });
   }
 
@@ -9728,6 +9739,7 @@ export async function registerRoutes(
           (result.rows as Record<string, unknown>[]).map(row => ({
             bc_product_id: Number(row.bc_product_id),
             variant_id: row.variant_id == null ? null : Number(row.variant_id),
+            sku: row.sku == null ? null : String(row.sku),
           })),
         );
         result.rows = applyLiveSalesReportInventory(result.rows as Record<string, unknown>[], inventory);
@@ -9765,9 +9777,12 @@ export async function registerRoutes(
       const inventory = await fetchLiveSalesReportInventory(inventoryKeys);
       const totalCurrentStock = inventoryKeys.reduce((total, key) => {
         const productId = Number(key.bc_product_id);
+        const sku = String(key.sku ?? "").trim().toLowerCase();
         const liveStock = key.variant_id == null
-          ? inventory.get(`${productId}:product`)
-          : inventory.get(`${productId}:${Number(key.variant_id)}`) ?? inventory.get(`${productId}:product`);
+          ? (sku ? inventory.get(`${productId}:sku:${sku}`) : undefined) ?? inventory.get(`${productId}:product`)
+          : inventory.get(`${productId}:${Number(key.variant_id)}`)
+            ?? (sku ? inventory.get(`${productId}:sku:${sku}`) : undefined)
+            ?? inventory.get(`${productId}:product`);
         return total + (liveStock ?? 0);
       }, 0);
       res.json({ ...stats, totalCurrentStock, dateFrom, dateTo });
