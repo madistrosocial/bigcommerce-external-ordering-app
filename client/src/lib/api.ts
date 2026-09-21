@@ -1,4 +1,217 @@
-ketingRequest("/marketing/sender-settings", { method: "PUT", body: JSON.stringify(data) });
+// API client for backend calls
+
+export interface Product {
+  id: number;
+  name: string;
+  sku: string;
+  price: string;
+  cost_price?: string | null;
+  image: string;
+  description: string;
+  stock_level: number;
+  is_pinned: boolean;
+  bigcommerce_id: number;
+  variants: any[];
+  min_purchase_quantity?: number | null;
+  max_purchase_quantity?: number | null;
+}
+
+export interface User {
+  id: number;
+  username: string;
+  name: string;
+  role: 'admin' | 'agent';
+  is_enabled: boolean;
+  allow_bigcommerce_search: boolean;
+  default_landing_page?: string;
+  auth_token?: string;
+}
+
+export interface OrderItem {
+  product_id: number;
+  bigcommerce_product_id?: number;
+  variant_id?: number;
+  variant_option_values?: any[];
+  quantity: number;
+  price_at_sale: string;
+  name: string;
+  sku: string;
+  image: string;
+}
+
+export interface Order {
+  id?: number;
+  customer_name: string;
+  customer_email?: string;
+  status: 'draft' | 'pending_sync' | 'failed' | 'synced';
+  sync_error?: string;
+  order_note?: string;
+  customer_note?: string;
+  items: OrderItem[];
+  total: string;
+  date?: string;
+  created_by_user_id: number;
+  created_by_name?: string;
+  created_by_username?: string;
+  bigcommerce_order_id?: number;
+  bigcommerce_customer_id?: number;
+  billing_address?: any;
+}
+
+export interface DropshipProduct {
+  id: number;
+  vendor_id: number;
+  vendor_sku: string;
+  vendor_product_id?: string | null;
+  title: string;
+  description: string;
+  brand?: string | null;
+  upc?: string | null;
+  inventory: number;
+  cost?: string | null;
+  tier_data: unknown[];
+  image_data: unknown[];
+  vendor_category?: string | null;
+  vendor_subcategory?: string | null;
+  is_closeout: boolean;
+  vendor_modified_at?: string | null;
+  bigcommerce_product_id?: number | null;
+  status: "available" | "queued" | "mapped" | "unavailable" | "error" | string;
+  raw_data: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DropshipSyncLog {
+  id: number;
+  vendor_id: number;
+  status: "running" | "completed" | "failed" | string;
+  started_at: string;
+  completed_at?: string | null;
+  duration_ms?: number | null;
+  products_processed: number;
+  products_created: number;
+  products_updated: number;
+  error_count: number;
+  error_summary?: string | null;
+  detail: Record<string, unknown>;
+}
+
+const API_BASE = '/api';
+
+/**
+ * Returns auth headers derived from the session stored in localStorage.
+ * Every protected API call must include these headers so the backend can
+ * validate the caller without requiring a separate session cookie.
+ */
+export function getAuthHeaders(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem('vansales_user');
+    if (!raw) return {};
+    const user = JSON.parse(raw);
+    if (!user?.auth_token) return {};
+    return {
+      Authorization: `Bearer ${user.auth_token}`,
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function dropshipRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...getAuthHeaders(), ...(init.headers || {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || body.message || "Dropshipping request failed");
+  return body as T;
+}
+
+export function getKoleConnection() {
+  return dropshipRequest<{
+    vendor: { id: number; code: string; name: string; provider: string };
+    hasCredentials: boolean;
+    displayName: string;
+    lastTestedAt: string | null;
+    lastTestOk: boolean | null;
+  }>("/dropshipping/kole/connection");
+}
+
+export function saveKoleConnection(data: { accountId?: string; apiKey?: string; displayName?: string }) {
+  return dropshipRequest<{ ok: boolean; hasCredentials: boolean; displayName: string }>("/dropshipping/kole/connection", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export function testKoleConnection() {
+  return dropshipRequest<{ ok: boolean; message: string }>("/dropshipping/kole/connection/test", { method: "POST" });
+}
+
+export function getKoleProducts(params: {
+  page?: number; limit?: number; search?: string; category?: string; subcategory?: string;
+  inStock?: boolean; closeout?: boolean; imported?: boolean; status?: string;
+}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "" && value !== false) query.set(key, String(value));
+  }
+  return dropshipRequest<{
+    rows: DropshipProduct[];
+    total: number;
+    page: number;
+    limit: number;
+    categories: string[];
+    subcategories: string[];
+  }>(`/dropshipping/kole/products?${query.toString()}`);
+}
+
+export function getKoleProduct(id: number) {
+  return dropshipRequest<DropshipProduct>(`/dropshipping/kole/products/${id}`);
+}
+
+export function updateKoleProductStatus(id: number, status: string) {
+  return dropshipRequest<DropshipProduct>(`/dropshipping/kole/products/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function syncKoleCatalog() {
+  return dropshipRequest<{
+    ok: boolean;
+    productsProcessed: number;
+    productsCreated: number;
+    productsUpdated: number;
+    errorCount: number;
+    log: DropshipSyncLog;
+  }>("/dropshipping/kole/sync", { method: "POST" });
+}
+
+export function getKoleSyncLogs() {
+  return dropshipRequest<DropshipSyncLog[]>("/dropshipping/kole/sync-logs");
+}
+
+// ─── Marketing ────────────────────────────────────────────────────────────────
+
+async function marketingRequest(path: string, init: RequestInit = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...getAuthHeaders(), ...(init.headers || {}) },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Marketing request failed");
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+export const getMarketingDashboard = () => marketingRequest("/marketing/dashboard");
+export const getMarketingSenderSettings = () => marketingRequest("/marketing/sender-settings");
+export const getMarketingProviderStatus = () => marketingRequest("/marketing/provider-status");
+export const saveMarketingSenderSettings = (data: { emails: string[]; defaultEmail: string }) =>
+  marketingRequest("/marketing/sender-settings", { method: "PUT", body: JSON.stringify(data) });
 
 export const getAdminZohoCredentials = () => marketingRequest("/admin/zoho-credentials");
 export const saveAdminZohoCredentials = (data: {

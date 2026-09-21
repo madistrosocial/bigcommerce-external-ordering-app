@@ -1,4 +1,3628 @@
-eator_name: rows[0].creator_name,
+import { db } from "../db";
+ import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertInventoryRemoveLog, type InventoryRemoveLog, type InventoryLogRow, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type CrmReactivationStage, type CrmReactivationCase, type CrmReactivationHistory, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, type MarketingProductList, type MarketingProductListItem, type MarketingDeliveryLog, type AttendanceSession, type InsertAttendanceSession, type AttendanceCheckpoint, type InsertAttendanceCheckpoint, type AttendanceException, type InsertAttendanceException, type DropshipProduct, type InsertDropshipProduct, type DropshipSyncLog, type DropshipVendor, type InsertDropshipSyncLog, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, inventoryRemoveLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, crmReactivationStages, crmReactivationCases, crmReactivationHistory, attendanceSessions, attendanceLocationCheckpoints, attendanceExceptions, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, dropshipVendors, dropshipProducts, dropshipSyncLogs, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingProductLists, marketingProductListItems, marketingDeliveryLogs, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
+import { eq, desc, and, inArray, notInArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import { normalizeMarketingProductDisplayOptions, DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS } from "@shared/marketing-products";
+import { attendanceAuditLog } from "@shared/schema";
+import type { AttendanceAuditLog, InsertAttendanceAuditLog } from "@shared/schema";
+
+const MARKETING_US_STATE_NAMES: Record<string, string> = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
+  CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
+  HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa",
+  KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+  MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi",
+  MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire",
+  NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina",
+  ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania",
+  RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee",
+  TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington",
+  WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+};
+
+export interface IStorage {
+  // User operations
+  getUser(id: number): Promise<User | undefined>;
+  getUsersByIds(ids: number[]): Promise<Pick<User, 'id' | 'name'>[]>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  createUser(user: InsertUser): Promise<User>;
+  getAllAgents(): Promise<User[]>;
+  getAllAdmins(): Promise<User[]>;
+  getAllUsers(): Promise<User[]>;
+  updateUserStatus(id: number, is_enabled: boolean): Promise<void>;
+  updateUserPermission(id: number, allow_bigcommerce_search: boolean): Promise<void>;
+  updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User>;
+  setAttendanceHomeLocation(id: number, latitude: string, longitude: string): Promise<User>;
+  clearAttendanceHomeLocation(id: number): Promise<void>;
+
+  // Product operations
+  getAllProducts(): Promise<Product[]>;
+  getPinnedProducts(): Promise<Product[]>;
+  getPromotionProducts(): Promise<Product[]>;
+  getProductByBigCommerceId(bcId: number): Promise<Product | undefined>;
+  createProduct(product: InsertProduct): Promise<Product>;
+  updateProductPin(id: number, is_pinned: boolean): Promise<void>;
+  updateProductPromotion(id: number, is_promotion: boolean): Promise<void>;
+  updateProduct(id: number, updates: Partial<InsertProduct>): Promise<void>;
+  updateProductByBigCommerceId(bcId: number, updates: Partial<InsertProduct>): Promise<void>;
+
+  // Order operations
+  createOrder(order: InsertOrder): Promise<Order>;
+  getOrder(id: number): Promise<Order | undefined>;
+  getOrdersByUser(userId: number): Promise<Order[]>;
+  getPendingSyncOrders(): Promise<Order[]>;
+  getDraftOrders(userId?: number): Promise<Order[]>;
+  updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void>;
+  updateOrderNote(id: number, note: string): Promise<void>;
+  updateOrderCustomerNote(id: number, customerNote: string): Promise<void>;
+  getConsolidatedOrders(params: { page: number; limit: number; search?: string; createdBy?: number | null; syncStatus?: string; bcStatus?: string; dateFrom?: Date | null; dateTo?: Date | null; salesChannel?: "salesapp" | "allorders"; }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }>;
+  getOrderDetail(id: number): Promise<any | null>;
+  updateOrderSyncError(id: number, error: string): Promise<void>;
+  updateOrderForSubmission(id: number, updates: { bigcommerce_customer_id: number; billing_address: any; status: string }): Promise<void>;
+  deleteOrder(id: number): Promise<void>;
+  getOrdersByBcCustomerId(bcCustomerId: number, statuses: string[]): Promise<Order[]>;
+  getAllOrders(): Promise<Order[]>;
+
+  // Setting operations
+  getSetting(key: string): Promise<any>;
+  setSetting(key: string, value: any): Promise<void>;
+
+  // Dropshipping operations
+  getDropshipVendorByCode(code: string): Promise<DropshipVendor | undefined>;
+  ensureDropshipVendor(data: { code: string; name: string; provider: string }): Promise<DropshipVendor>;
+  getDropshipProducts(opts: { vendorId: number; page: number; limit: number; search?: string; category?: string; subcategory?: string; inStock?: boolean; closeout?: boolean; imported?: boolean; status?: string }): Promise<{ rows: DropshipProduct[]; total: number }>;
+  getDropshipProductFacets(vendorId: number): Promise<{ categories: string[]; subcategories: string[] }>;
+  getDropshipProduct(id: number): Promise<DropshipProduct | undefined>;
+  upsertDropshipProducts(entries: InsertDropshipProduct[]): Promise<{ created: number; updated: number }>;
+  markDropshipProductsUnavailable(vendorId: number, seenSkus: string[]): Promise<void>;
+  updateDropshipProductStatus(id: number, status: string): Promise<DropshipProduct | undefined>;
+  createDropshipSyncLog(data: { vendor_id: number }): Promise<DropshipSyncLog>;
+  finishDropshipSyncLog(id: number, data: Partial<InsertDropshipSyncLog>): Promise<DropshipSyncLog | undefined>;
+  getDropshipSyncLogs(vendorId: number, limit?: number): Promise<DropshipSyncLog[]>;
+
+  // Price history cache operations
+  getCachedPriceHistory(customerId: number, bcProductId: number): Promise<PriceHistoryCacheEntry[]>;
+  savePriceHistoryCacheEntries(entries: InsertPriceHistoryCache[]): Promise<void>;
+  getPriceHistoryForSync(afterMs: number | null, limit: number): Promise<PriceHistoryCacheEntry[]>;
+
+  // Inventory push log operations
+  createInventoryPushLog(entry: InsertInventoryPushLog): Promise<InventoryPushLog>;
+  getInventoryPushLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<{ rows: InventoryPushLog[]; total: number }>;
+  getInventoryPushLogUsernames(): Promise<string[]>;
+  getInventoryPushLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<InventoryPushLog[]>;
+  createInventoryRemoveLog(entry: InsertInventoryRemoveLog): Promise<InventoryRemoveLog>;
+  getInventoryLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string; type?: "add" | "remove" }): Promise<{ rows: InventoryLogRow[]; total: number }>;
+  getInventoryLogUsernames(): Promise<string[]>;
+  getInventoryLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string; type?: "add" | "remove" }): Promise<InventoryLogRow[]>;
+
+  // Inventory audit task operations
+  createOrUpdateAuditTask(opts: { sku: string; product_id: number; variant_id: number; product_name: string; variant_name: string; quantity_added: number; system_qty: number; created_by: number; source?: string }): Promise<InventoryAuditTask>;
+  getAuditKPIs(): Promise<{ totalPendingTasks: number; skusToAudit: number; totalPendingQty: number; lastAuditAt: Date | null; lastAuditBy: string | null }>;
+  getAuditQueue(opts: { page: number; limit: number; search?: string; status?: string; source?: string; dateFrom?: string; dateTo?: string }): Promise<{ groups: any[]; total: number }>;
+  getAuditTasksForProduct(productId: number, status?: string): Promise<InventoryAuditTask[]>;
+  getAuditTask(id: number): Promise<InventoryAuditTask | undefined>;
+  completeAuditTask(id: number, data: { physical_qty: number; variance: number; reason: string; notes?: string; completed_by: number; skuvault_result?: any }): Promise<InventoryAuditTask>;
+  failAuditTask(id: number): Promise<void>;
+
+  // Product link log operations
+  createProductLinkLog(entry: InsertProductLinkLog): Promise<ProductLinkLog>;
+  getProductLinkLogs(limit?: number): Promise<ProductLinkLog[]>;
+
+  // RBAC operations
+  getAllRoles(): Promise<Role[]>;
+  getRoleById(id: number): Promise<Role | undefined>;
+  createRole(role: InsertRole): Promise<Role>;
+  deleteRole(id: number): Promise<void>;
+  getAllPermissions(): Promise<Permission[]>;
+  createPermission(perm: InsertPermission): Promise<Permission>;
+  deletePermission(id: number): Promise<void>;
+  getPermissionsForRole(roleId: number): Promise<Permission[]>;
+  addPermissionToRole(entry: InsertRolePermission): Promise<void>;
+  removePermissionFromRole(roleId: number, permissionId: number): Promise<void>;
+  getPermissionsForUser(userId: number): Promise<Permission[]>;
+  addPermissionToUser(entry: InsertUserPermission): Promise<void>;
+  removePermissionFromUser(userId: number, permissionId: number): Promise<void>;
+  getUserPermissionStrings(userId: number): Promise<string[]>;
+  setUserRole(userId: number, roleId: number | null): Promise<void>;
+  updateRole(id: number, data: Partial<{ name: string; description: string | null }>): Promise<Role>;
+
+  // ShipStation export history
+  createShipstationExportHistory(entry: InsertShipstationExportHistory): Promise<ShipstationExportHistory>;
+  getShipstationExportHistory(limit?: number): Promise<ShipstationExportHistory[]>;
+  getShipstationExportHistoryById(id: number): Promise<ShipstationExportHistory | undefined>;
+
+  // Promo SKU tracker
+  getAllPromoSkus(): Promise<PromoFreeSkuTracker[]>;
+  getPromoSkuById(id: number): Promise<PromoFreeSkuTracker | undefined>;
+  getPromoSkuBySku(sku: string): Promise<PromoFreeSkuTracker | undefined>;
+  createPromoSku(entry: InsertPromoFreeSkuTracker): Promise<PromoFreeSkuTracker>;
+  updatePromoSku(id: number, data: Partial<InsertPromoFreeSkuTracker>): Promise<PromoFreeSkuTracker>;
+  deletePromoSku(id: number): Promise<void>;
+
+  // CRM operations
+  getCrmCustomers(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; limit?: number; offset?: number; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null; last_action_date?: string | null; last_action_type?: string | null })[]; total: number }>;
+  getHealthThresholds(): Promise<{ healthy_days: number; watch_days: number; at_risk_days: number }>;
+  setHealthThresholds(t: { healthy_days: number; watch_days: number; at_risk_days: number }): Promise<void>;
+  getCrmCustomerById(id: number): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null }) | undefined>;
+  getCrmCustomerByBcId(bcId: number): Promise<CrmCustomer | undefined>;
+  searchCrmCustomersForPos(query: string, limit?: number): Promise<Array<{
+    bigcommerce_customer_id: number;
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone: string | null;
+    company: string | null;
+    customer_group_id: number | null;
+    customer_group_name: string | null;
+  }>>;
+  getPosCustomerDirectoryPage(opts: {
+    updatedSince?: Date;
+    updatedUntil?: Date;
+    cursor?: number;
+    limit?: number;
+  }): Promise<{
+    rows: Array<{
+      id: number;
+      bigcommerce_customer_id: number;
+      first_name: string;
+      last_name: string;
+      email: string;
+      phone: string | null;
+      company: string | null;
+      customer_group_id: number | null;
+      customer_group_name: string | null;
+      is_active: boolean;
+      updated_at: Date;
+    }>;
+    hasMore: boolean;
+    nextCursor: number | null;
+  }>;
+  upsertCrmCustomer(data: InsertCrmCustomer): Promise<CrmCustomer>;
+  getCrmCustomerCount(): Promise<number>;
+  getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null; last_action_date?: string | null; last_action_type?: string | null })[]>;
+  updateCrmCustomerMasterFields(id: number, data: { primary_rep_id?: number | null; secondary_rep_id?: number | null; customer_type?: string; account_type?: string; inactive_reason?: string | null; inactive_at?: Date | null; inactive_notes?: string | null; inactivated_by_user_id?: number | null; is_active?: boolean }): Promise<void>;
+  getCrmFilterOptions(): Promise<{ groups: string[]; states: string[]; reps: { id: number; name: string }[] }>;
+  getCrmOrdersByBcCustomerId(bcCustomerId: number, limit?: number): Promise<CrmOrder[]>;
+  upsertCrmOrder(data: InsertCrmOrder): Promise<CrmOrder>;
+  getCrmOrderCount(): Promise<number>;
+  updateCrmCustomerStats(bcCustomerId: number, stats: { lifetime_orders: number; lifetime_revenue: string; last_order_date: Date | null }): Promise<void>;
+  recalculateCrmCustomerStats(): Promise<{ updated: number; customers_in_orders: number; duration_ms: number }>;
+  getCrmSalesRep(customerId: number): Promise<CrmSalesRep | undefined>;
+  setCrmSalesRep(data: InsertCrmSalesRep): Promise<CrmSalesRep>;
+  removeCrmSalesRep(customerId: number): Promise<void>;
+  // CRM Notes
+  createCrmNote(data: InsertCrmNote): Promise<CrmNote>;
+  getCrmNotes(customerId: number): Promise<(CrmNote & { created_by_name?: string | null })[]>;
+  getCrmNoteById(id: number): Promise<CrmNote | undefined>;
+  updateCrmNote(id: number, data: { note?: string; note_type?: string; order_id?: number | null }): Promise<CrmNote>;
+  deleteCrmNote(id: number): Promise<void>;
+  getAllCrmNotes(opts: { search?: string; type?: string; createdBy?: number; customerId?: number; orderId?: number; customerGroup?: string; state?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<{ notes: any[]; total: number }>;
+  getCrmNotesKpis(opts?: { search?: string; createdBy?: number; customerGroup?: string; state?: string; dateFrom?: string; dateTo?: string }): Promise<{ notesToday: number; followUps: number; salesCalls: number; issues: number; internalNotes: number }>;
+  // CRM Timeline
+  getCrmTimeline(customerId: number): Promise<any[]>;
+  // CRM Reactivation
+  ensureReactivationStages(): Promise<CrmReactivationStage[]>;
+  getReactivationStages(includeInactive?: boolean): Promise<CrmReactivationStage[]>;
+  saveReactivationStages(stages: Array<Partial<CrmReactivationStage> & { name: string }>): Promise<CrmReactivationStage[]>;
+  getReactivationCustomers(opts: { search?: string; group?: string; state?: string; health?: string; rep?: number; stageId?: number; source?: string; overdue?: boolean; sortBy?: string; sortDir?: string; limit?: number; offset?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<{ customers: any[]; total: number; summary: { stage_id: number; count: number; expected_value: string; overdue: number }[] }>;
+  getReactivationCase(customerId: number): Promise<{ case: CrmReactivationCase | null; stage: CrmReactivationStage | null; owner_name: string | null; history: any[] }>;
+  updateReactivationCase(customerId: number, userId: number, data: { stage_id?: number; owner_user_id?: number | null; pledge_status?: string; pledge_notes?: string | null; expected_order_date?: Date | null; expected_value?: string | null; next_action_date?: Date | null; next_action_note?: string | null }): Promise<any>;
+  // CRM Metrics
+  getCrmMetrics(opts: { search?: string; group?: string; state?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; customerType?: string; addressType?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number; inactive: number; by_account_type: Record<string, number> }>;
+  // CRM Todos (rows in crm_customer_notes with activity_type='todo')
+  getCrmTodos(opts: { userId?: number; allUsers?: boolean; status?: string; customerId?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<any[]>;
+  createCrmTodo(data: { customer_id?: number | null; title: string; note: string; priority?: string; due_date?: Date | null; assigned_to_user_id?: number | null; reminder_at?: Date | null; created_by: number }): Promise<any>;
+  updateCrmTodo(id: number, data: { title?: string; note?: string; priority?: string; due_date?: Date | null; assigned_to_user_id?: number | null; reminder_at?: Date | null; todo_status?: string; completed_at?: Date | null }): Promise<any>;
+  deleteCrmTodo(id: number): Promise<void>;
+  // CRM Users list
+  getCrmUsers(): Promise<{ id: number; name: string }[]>;
+  createCustomerSignup(entry: InsertCustomerSignup): Promise<CustomerSignup>;
+  getCustomerSignups(opts: { userId?: number; signedUpByUserId?: number; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<{ rows: (CustomerSignup & { crm_customer_id?: number | null; primary_rep_name?: string | null })[]; total: number }>;
+  getCustomerSignupAttempt(key: string): Promise<CustomerSignupAttempt | undefined>;
+  createCustomerSignupAttempt(key: string, createdByUserId: number, requestData: unknown): Promise<boolean>;
+  setCustomerSignupAttemptCustomerId(key: string, customerId: number): Promise<void>;
+  completeCustomerSignupAttempt(key: string, result: unknown): Promise<void>;
+  // CRM Order Notes (mirror update)
+  updateCrmOrderNotes(bcOrderId: number, data: { staff_notes?: string; customer_order_notes?: string }): Promise<void>;
+  // CRM Audit Log
+  createCrmAuditLog(data: InsertCrmAuditLog): Promise<void>;
+  getCrmAuditEntries(opts: { customerIds?: number[]; actions?: string[]; limit?: number }): Promise<any[]>;
+  // CRM Table resets
+  truncateCrmCustomers(): Promise<void>;
+  truncateCrmOrders(): Promise<void>;
+
+  // Attendance
+  getAttendanceHomeLocation(userId: number): Promise<{ latitude: string | null; longitude: string | null; setAt: Date | null }>;
+  getAttendanceById(id: number): Promise<AttendanceSession | undefined>;
+  getActiveAttendanceForUser(userId: number): Promise<AttendanceSession | undefined>;
+  getAttendanceSessionsForDate(userId: number, workDate: string): Promise<AttendanceSession[]>;
+  getAttendanceHistoryForUser(userId: number, limit?: number): Promise<AttendanceSession[]>;
+  createAttendance(data: InsertAttendanceSession): Promise<AttendanceSession>;
+  updateAttendance(id: number, data: Partial<InsertAttendanceSession>): Promise<AttendanceSession | undefined>;
+  approveAttendanceSecondSession(userId: number, workDate: string, actorUserId: number): Promise<AttendanceSession | undefined>;
+  createAttendanceCheckpoint(data: InsertAttendanceCheckpoint): Promise<AttendanceCheckpoint>;
+  getAttendanceCheckpoints(attendanceId: number): Promise<AttendanceCheckpoint[]>;
+  getAttendanceRecords(opts: { from?: string; to?: string; userId?: number; status?: string; startMethod?: string; reviewStatus?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+  getAttendanceAuditHistory(attendanceId: number): Promise<AttendanceAuditLog[]>;
+  createAttendanceAuditLog(data: InsertAttendanceAuditLog): Promise<AttendanceAuditLog>;
+  updateAttendanceReview(id: number, data: { review_status: string; approved_by?: number | null; approved_at?: Date | null; locked_at?: Date | null }): Promise<AttendanceSession | undefined>;
+  createAttendanceException(data: InsertAttendanceException): Promise<AttendanceException>;
+  getAttendanceExceptions(opts: { status?: string; from?: string; to?: string; userId?: number; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+  reviewAttendanceException(id: number, data: { status: string; reviewed_by: number; review_notes?: string | null }): Promise<AttendanceException | undefined>;
+
+  // POS Enhancements — Price Override Audit
+  createPosPriceOverrideAudit(entry: InsertPosPriceOverrideAudit): Promise<PosPriceOverrideAudit>;
+  getPosPriceOverrideAudit(opts: { userId?: number; customerId?: number; sku?: string; dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ rows: PosPriceOverrideAudit[]; total: number }>;
+
+  // POS Enhancements — Store Credit Usage
+  createPosStoreCreditUsage(entry: InsertPosStoreCreditUsage): Promise<PosStoreCreditUsage>;
+  getPosStoreCreditUsage(opts: { customerId?: number; cashierId?: number; orderSearch?: string; dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ rows: PosStoreCreditUsage[]; total: number }>;
+
+  // Store Credit Ledger
+  createStoreCreditLedger(entry: InsertStoreCreditLedger): Promise<StoreCreditLedgerEntry>;
+  getCrmIdByBcCustomerId(bcCustomerId: number): Promise<number | null>;
+  setCustomerStoreCreditBalance(crmId: number, newBalance: number): Promise<void>;
+  getStoreCreditLedger(opts: { customerId?: number; issuedBy?: number; dateFrom?: string; dateTo?: string; search?: string; type?: string; limit?: number; offset?: number }): Promise<{ rows: StoreCreditLedgerEntry[]; total: number }>;
+  updateCustomerStoreCreditBalance(customerId: number, delta: number): Promise<void>;
+
+  // Email Templates
+  getEmailTemplate(key: string): Promise<EmailTemplate | undefined>;
+  upsertEmailTemplate(key: string, data: { name: string; subject_template: string; body: string; template_type?: string; category?: string; is_active?: boolean; updated_by?: number }): Promise<EmailTemplate>;
+  getMarketingTemplates(opts?: { search?: string; category?: string; includeArchived?: boolean }): Promise<EmailTemplate[]>;
+  getMarketingTemplateById(id: number): Promise<EmailTemplate | undefined>;
+  archiveMarketingTemplate(id: number, userId: number, archived: boolean): Promise<EmailTemplate | undefined>;
+
+  // Marketing
+  getMarketingDashboard(): Promise<any>;
+  getMarketingCampaigns(opts?: { search?: string; status?: string; limit?: number; offset?: number }): Promise<{ campaigns: any[]; total: number }>;
+  getMarketingCampaign(id: number): Promise<any | undefined>;
+  getMarketingProductLists(opts?: { search?: string }): Promise<any[]>;
+  getMarketingProductList(id: number): Promise<any | undefined>;
+  createMarketingProductList(data: { name: string; description?: string; created_by: number }): Promise<any>;
+  updateMarketingProductList(id: number, data: { name?: string; description?: string }, userId: number): Promise<any | undefined>;
+  deleteMarketingProductList(id: number, userId: number): Promise<void>;
+  addMarketingProductListItems(listId: number, products: Array<Record<string, unknown>>): Promise<any | undefined>;
+  removeMarketingProductListItem(listId: number, itemId: number): Promise<void>;
+  createMarketingDeliveryLog(data: { delivery_type: "campaign" | "order_form"; campaign_id?: number | null; customer_id?: number | null; source_key?: string | null; recipient_email: string; product_titles: string[]; sent_at?: Date; initiated_by?: number | null }): Promise<MarketingDeliveryLog>;
+  getMarketingDeliveryLogs(opts?: { delivery_type?: "campaign" | "order_form"; campaign_id?: number; customer_id?: number; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+  getMarketingDeliveryLog(id: number): Promise<any | undefined>;
+  createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; sender_email?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any>;
+  updateMarketingCampaign(id: number, data: Record<string, unknown> & { customer_ids?: number[] }, userId: number): Promise<any | undefined>;
+  deleteMarketingCampaign(id: number, userId: number): Promise<void>;
+  updateMarketingCampaignStatus(id: number, status: string, userId: number): Promise<any | undefined>;
+  claimMarketingCampaign(id: number): Promise<any | undefined>;
+  getMarketingQueueCampaigns(): Promise<any[]>;
+  prepareMarketingRecipients(campaignId: number): Promise<{ eligible: number; suppressed: number; unsubscribed: number }>;
+  claimMarketingRecipient(id: number): Promise<any | undefined>;
+  resetMarketingFailedRecipients(campaignId: number): Promise<void>;
+  markMarketingRecipientSent(id: number, providerMessageId?: string | null): Promise<void>;
+  markMarketingRecipientFailed(id: number, reason: string, retryable?: boolean): Promise<void>;
+  recordMarketingEvent(data: { campaign_id: number; recipient_id?: number | null; event_type: string; detail?: Record<string, unknown>; provider_event_id?: string | null }): Promise<void>;
+  completeMarketingCampaign(id: number): Promise<any | undefined>;
+  getMarketingRecipients(campaignId: number, opts?: { status?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+  getMarketingRecipient(id: number): Promise<any | undefined>;
+  getMarketingAnalytics(opts?: { campaignId?: number; dateFrom?: string; dateTo?: string }): Promise<any>;
+  markMarketingTestSent(campaignId: number): Promise<void>;
+  getMarketingCustomerPreference(customerId: number): Promise<any>;
+  upsertMarketingCustomerPreference(customerId: number, data: { email_subscribed: boolean; userId?: number }): Promise<any>;
+  getMarketingSuppressions(customerId?: number): Promise<any[]>;
+  createMarketingSuppression(data: { customerId: number; email?: string; reason: string; source?: string; createdBy?: number }): Promise<any>;
+  revokeMarketingSuppression(id: number, userId: number, detail?: string): Promise<any | undefined>;
+  getMarketingAudiencePreview(filters: Record<string, unknown>, limit?: number): Promise<{ customers: any[]; total: number; suppressed: number }>;
+  getMarketingAutomations(opts?: { status?: string; search?: string }): Promise<any[]>;
+  getMarketingAutomation(id: number): Promise<any | undefined>;
+  createMarketingAutomation(data: { name: string; description?: string; trigger_type: string; trigger_config?: Record<string, unknown>; frequency_days?: number; created_by: number; steps: Array<{ action_type: string; action_config?: Record<string, unknown> }> }): Promise<any>;
+  updateMarketingAutomation(id: number, data: Record<string, unknown>, userId: number): Promise<any | undefined>;
+  updateMarketingAutomationStatus(id: number, status: string, userId: number): Promise<any | undefined>;
+  getMarketingAutomationExecutions(id: number, limit?: number): Promise<any[]>;
+  createMarketingAutomationExecution(data: { automationId: number; customerId: number; triggerEvent: string; dedupeKey: string }): Promise<any | undefined>;
+  updateMarketingAutomationExecution(id: number, data: Record<string, unknown>): Promise<void>;
+  getMarketingAudiences(opts?: { search?: string; type?: string }): Promise<any[]>;
+  getMarketingAudience(id: number): Promise<any | undefined>;
+  createMarketingAudience(data: { name: string; description?: string; audience_type: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; contact_ids?: number[]; created_by: number }): Promise<any>;
+  updateMarketingAudience(id: number, data: { name?: string; description?: string; audience_type?: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; contact_ids?: number[] }, userId: number): Promise<any | undefined>;
+  deleteMarketingAudience(id: number, userId: number): Promise<void>;
+  getMarketingAudienceCustomers(opts?: { search?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number; limit: number; offset: number }>;
+  getMarketingContacts(opts?: { search?: string; type?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number; limit: number; offset: number }>;
+  importMarketingContacts(records: Array<{ email: string; first_name?: string; last_name?: string; company?: string; phone?: string; contact_type: string }>, userId: number): Promise<{ imported: number; duplicates: number }>;
+  deactivateMarketingContact(id: number): Promise<void>;
+  getMarketingAudienceMembers(audienceId: number, opts?: { search?: string; source?: string; status?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+
+  // Reports — legacy (orders table)
+  getSalesReport(opts: { view: string; dateFrom?: string; dateTo?: string; search?: string; status?: string; page?: number; limit?: number; sortBy?: string; sortDir?: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
+  logReportExport(data: InsertReportExportLog): Promise<void>;
+
+  // Reports — BC Order Line Items mirror
+  getSyncedBcOrderIds(dateFrom?: string, dateTo?: string): Promise<Set<number>>;
+  insertBcOrderLineItems(items: InsertBcOrderLineItem[]): Promise<void>;
+  getBcOrderLineItemsCount(): Promise<number>;
+  getBcOrderLineItemsPriceAudit(): Promise<{ totalLineItems: number; checkoutPricedLineItems: number; zeroPricedLineItems: number; missingPriceLineItems: number; legacyLineItems: number }>;
+  truncateBcOrderLineItems(): Promise<void>;
+  getCrmOrdersForLineItemSync(since?: string): Promise<Array<{ bigcommerce_order_id: number; order_date: Date | null; customer_name: string | null; customer_email: string | null; bigcommerce_customer_id: number | null }>>;
+  searchProductsForReport(query: string, limit?: number): Promise<Product[]>;
+  searchLineItemsByQuery(query: string, limit?: number, options?: { skuOnly?: boolean }): Promise<Array<{ bigcommerce_product_id: number; product_name: string; brand_name: string; sku: string; variant_label: string | null }>>;
+  getProductsByBrandId(brandId: number): Promise<Product[]>;
+  getProductsByCategoryId(categoryId: number): Promise<Product[]>;
+  getSalesReportSummary(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string[]; page: number; limit: number; sortBy: string; sortDir: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
+  getSalesReportInventoryKeys(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string[] }): Promise<Array<{ bc_product_id: number; variant_id: number | null }>>;
+  getSalesReportDetails(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string[]; page: number; limit: number; sortBy: string; sortDir: string }): Promise<{ rows: Record<string, unknown>[]; total: number }>;
+  getSalesReportStats(opts: { dateFrom?: string; dateTo?: string; bcProductIds?: number[]; skuFilter?: string; bcStatusFilter?: string[] }): Promise<{ totalProducts: number; totalVariants: number; totalQtySold: number; totalSaleAmount: number; totalCurrentStock: number }>;
+  getRecentExportLogs(limit?: number): Promise<Record<string, unknown>[]>;
+}
+
+export class DatabaseStorage implements IStorage {
+  private marketingDeliveryLogsBackfilled = false;
+
+  // User operations
+  async getUser(id: number): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.id, id));
+    return result[0];
+  }
+
+  async getUsersByIds(ids: number[]): Promise<Pick<User, 'id' | 'name'>[]> {
+    if (ids.length === 0) return [];
+    return db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids));
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.username, username));
+    return result[0];
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const result = await db.insert(users).values([user]).returning();
+    return result[0];
+  }
+
+  async getAllAgents(): Promise<User[]> {
+    return db.select().from(users).where(eq(users.role, 'agent'));
+  }
+
+  async getAllAdmins(): Promise<User[]> {
+    return db.select().from(users).where(eq(users.role, 'admin'));
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return db.select().from(users);
+  }
+
+  async getCustomerSignupAttempt(key: string): Promise<CustomerSignupAttempt | undefined> {
+    const [attempt] = await db.select().from(customerSignupAttempts).where(eq(customerSignupAttempts.idempotency_key, key));
+    return attempt;
+  }
+
+  async createCustomerSignupAttempt(key: string, createdByUserId: number, requestData: unknown): Promise<boolean> {
+    const result = await db.insert(customerSignupAttempts).values({
+      idempotency_key: key,
+      created_by_user_id: createdByUserId,
+      request_data: requestData,
+    }).onConflictDoNothing().returning({ key: customerSignupAttempts.idempotency_key });
+    return result.length === 1;
+  }
+
+  async setCustomerSignupAttemptCustomerId(key: string, customerId: number): Promise<void> {
+    await db.update(customerSignupAttempts).set({
+      bigcommerce_customer_id: customerId,
+      status: "tracking",
+      updated_at: new Date(),
+    }).where(eq(customerSignupAttempts.idempotency_key, key));
+  }
+
+  async completeCustomerSignupAttempt(key: string, result: unknown): Promise<void> {
+    await db.update(customerSignupAttempts).set({
+      status: "completed",
+      result,
+      updated_at: new Date(),
+    }).where(eq(customerSignupAttempts.idempotency_key, key));
+  }
+
+  async createCustomerSignup(entry: InsertCustomerSignup): Promise<CustomerSignup> {
+    const result = await db.insert(customerSignups).values(entry).onConflictDoUpdate({
+      target: customerSignups.bigcommerce_customer_id,
+      set: {
+        first_name: entry.first_name,
+        last_name: entry.last_name,
+        email: entry.email,
+        company: entry.company,
+        customer_group_id: entry.customer_group_id,
+        customer_group_name: entry.customer_group_name,
+        attribution: entry.attribution,
+        shipping_address: entry.shipping_address,
+        signed_up_by_user_id: entry.signed_up_by_user_id,
+        signed_up_by_name: entry.signed_up_by_name,
+        primary_rep_id: entry.primary_rep_id,
+      },
+    }).returning();
+    return result[0];
+  }
+
+  async getCustomerSignups(opts: { userId?: number; signedUpByUserId?: number; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<{ rows: (CustomerSignup & { crm_customer_id?: number | null; primary_rep_name?: string | null })[]; total: number }> {
+    const { userId, signedUpByUserId, dateFrom, dateTo, limit = 50, offset = 0 } = opts;
+    const conditions = [];
+    if (userId !== undefined) conditions.push(eq(customerSignups.signed_up_by_user_id, userId));
+    if (signedUpByUserId !== undefined) conditions.push(eq(customerSignups.signed_up_by_user_id, signedUpByUserId));
+    if (dateFrom) conditions.push(gte(customerSignups.created_at, new Date(`${dateFrom}T00:00:00`)));
+    if (dateTo) {
+      const end = new Date(`${dateTo}T00:00:00`);
+      end.setDate(end.getDate() + 1);
+      conditions.push(lt(customerSignups.created_at, end));
+    }
+    const where = conditions.length ? and(...conditions) : undefined;
+    const primaryRepUser = alias(users, "signup_primary_rep_user");
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(customerSignups).where(where),
+      db.select({
+        signup: customerSignups,
+        crm_customer_id: customersMirror.id,
+        primary_rep_name: primaryRepUser.name,
+      })
+        .from(customerSignups)
+        .leftJoin(customersMirror, eq(customersMirror.bigcommerce_customer_id, customerSignups.bigcommerce_customer_id))
+        .leftJoin(primaryRepUser, eq(primaryRepUser.id, customerSignups.primary_rep_id))
+        .where(where)
+        .orderBy(desc(customerSignups.created_at))
+        .limit(limit)
+        .offset(offset),
+    ]);
+    return {
+      rows: rows.map((row) => ({ ...row.signup, crm_customer_id: row.crm_customer_id ?? null, primary_rep_name: row.primary_rep_name ?? null })),
+      total: countRows[0]?.count ?? 0,
+    };
+  }
+
+  async updateUserStatus(id: number, is_enabled: boolean): Promise<void> {
+    await db.update(users).set({ is_enabled }).where(eq(users.id, id));
+  }
+
+  async updateUserPermission(id: number, allow_bigcommerce_search: boolean): Promise<void> {
+    await db.update(users).set({ allow_bigcommerce_search }).where(eq(users.id, id));
+  }
+
+  async updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User> {
+    const result = await db.update(users).set(data).where(eq(users.id, id)).returning();
+    return result[0];
+  }
+
+  async setAttendanceHomeLocation(id: number, latitude: string, longitude: string): Promise<User> {
+    const [updated] = await db.update(users).set({
+      attendance_home_latitude: latitude,
+      attendance_home_longitude: longitude,
+      attendance_home_set_at: new Date(),
+    }).where(eq(users.id, id)).returning();
+    return updated;
+  }
+
+  async clearAttendanceHomeLocation(id: number): Promise<void> {
+    await db.update(users).set({
+      attendance_home_latitude: null,
+      attendance_home_longitude: null,
+      attendance_home_set_at: null,
+    }).where(eq(users.id, id));
+  }
+
+  // Product operations
+  async getAllProducts(): Promise<Product[]> {
+    return db.select().from(products).orderBy(desc(products.is_pinned));
+  }
+
+  async getPinnedProducts(): Promise<Product[]> {
+    return db.select().from(products).where(eq(products.is_pinned, true));
+  }
+
+  async getPromotionProducts(): Promise<Product[]> {
+    return db.select().from(products).where(eq(products.is_promotion, true));
+  }
+
+  async getProductByBigCommerceId(bcId: number): Promise<Product | undefined> {
+    const result = await db.select().from(products).where(eq(products.bigcommerce_id, bcId));
+    return result[0];
+  }
+
+  async createProduct(product: InsertProduct): Promise<Product> {
+    const result = await db.insert(products).values([product]).returning();
+    return result[0];
+  }
+
+  async updateProductPin(id: number, is_pinned: boolean): Promise<void> {
+    await db.update(products).set({ is_pinned }).where(eq(products.id, id));
+  }
+
+  async updateProductPromotion(id: number, is_promotion: boolean): Promise<void> {
+    await db.update(products).set({ is_promotion }).where(eq(products.id, id));
+  }
+
+  async updateProduct(id: number, updates: Partial<InsertProduct>): Promise<void> {
+    await db.update(products).set(updates).where(eq(products.id, id));
+  }
+
+  async updateProductByBigCommerceId(bcId: number, updates: Partial<InsertProduct>): Promise<void> {
+    await db.update(products).set(updates).where(eq(products.bigcommerce_id, bcId));
+  }
+
+  // Order operations
+  async createOrder(order: InsertOrder): Promise<Order> {
+    const result = await db.insert(orders).values([order]).returning();
+    return result[0];
+  }
+
+  async getOrder(id: number): Promise<Order | undefined> {
+    const result = await db.select().from(orders).where(eq(orders.id, id));
+    return result[0];
+  }
+
+  async getOrdersByUser(userId: number): Promise<Order[]> {
+    return db.select().from(orders).where(eq(orders.created_by_user_id, userId)).orderBy(desc(orders.date));
+  }
+
+  async getPendingSyncOrders(): Promise<Order[]> {
+    return db.select().from(orders).where(eq(orders.status, 'pending_sync'));
+  }
+
+  async getDraftOrders(userId?: number): Promise<Order[]> {
+    const whereClause = userId == null
+      ? eq(orders.status, "draft")
+      : and(eq(orders.status, "draft"), eq(orders.created_by_user_id, userId));
+    const rows = await db
+      .select({
+        order: orders,
+        created_by_name: users.name,
+        created_by_username: users.username,
+      })
+      .from(orders)
+      .leftJoin(users, eq(orders.created_by_user_id, users.id))
+      .where(whereClause)
+      .orderBy(desc(orders.date));
+
+    return rows.map(({ order, created_by_name, created_by_username }) => ({
+      ...order,
+      created_by_name: created_by_name ?? undefined,
+      created_by_username: created_by_username ?? undefined,
+    }));
+  }
+
+  async updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void> {
+    await db.update(orders).set({ 
+      status, 
+      ...(bcOrderId && { bigcommerce_order_id: bcOrderId }) 
+    }).where(eq(orders.id, id));
+  }
+
+  async updateOrderNote(id: number, note: string): Promise<void> {
+    await db.update(orders).set({ order_note: note }).where(eq(orders.id, id));
+  }
+
+  async updateOrderCustomerNote(id: number, customerNote: string): Promise<void> {
+    await db.update(orders).set({ customer_note: customerNote }).where(eq(orders.id, id));
+  }
+
+  async updateOrderSyncError(id: number, error: string): Promise<void> {
+    await db.update(orders).set({ 
+      status: 'failed',
+      sync_error: error 
+    }).where(eq(orders.id, id));
+  }
+
+  async updateOrderForSubmission(id: number, updates: { bigcommerce_customer_id: number; billing_address: any; status: string }): Promise<void> {
+    await db.update(orders).set({
+      bigcommerce_customer_id: updates.bigcommerce_customer_id,
+      billing_address: updates.billing_address,
+      status: updates.status
+    }).where(eq(orders.id, id));
+  }
+
+  async deleteOrder(id: number): Promise<void> {
+    await db.delete(orders).where(eq(orders.id, id));
+  }
+
+  async getAllOrders(): Promise<Order[]> {
+    return db.select().from(orders).orderBy(desc(orders.date));
+  }
+
+  async getConsolidatedOrders(params: {
+    page: number; limit: number; search?: string;
+    createdBy?: number | null; syncStatus?: string; bcStatus?: string;
+    dateFrom?: Date | null; dateTo?: Date | null;
+    salesChannel?: "salesapp" | "allorders";
+  }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }> {
+    const { page, limit, search, createdBy, syncStatus, bcStatus, dateFrom, dateTo, salesChannel = "salesapp" } = params;
+    const offset = (page - 1) * limit;
+
+    // ── All Orders mode: pull from customerOrdersMirror (BC-synced data) ──────
+    if (salesChannel === "allorders") {
+      const conds: any[] = [];
+      if (search) {
+        const q = `%${search}%`;
+        conds.push(or(
+          ilike(customerOrdersMirror.customer_name, q),
+          ilike(customerOrdersMirror.customer_email, q),
+          sql`CAST(${customerOrdersMirror.bigcommerce_order_id} AS TEXT) ILIKE ${q}`,
+          sql`CAST(${customerOrdersMirror.order_number} AS TEXT) ILIKE ${q}`,
+          ilike(customersMirror.phone, q),
+        ));
+      }
+      if (bcStatus)   conds.push(eq(customerOrdersMirror.status, bcStatus));
+      if (dateFrom)   conds.push(sql`${customerOrdersMirror.order_date} >= ${dateFrom}`);
+      if (dateTo)     conds.push(sql`${customerOrdersMirror.order_date} <= ${dateTo}`);
+      const where = conds.length > 0 ? and(...conds) : undefined;
+
+      const [rows, [countRow], [kpiRow]] = await Promise.all([
+        db.select({
+          id: customerOrdersMirror.id,
+          customer_name: customerOrdersMirror.customer_name,
+          customer_email: customerOrdersMirror.customer_email,
+          bigcommerce_customer_id: customerOrdersMirror.bigcommerce_customer_id,
+          billing_address: sql<null>`NULL::jsonb`,
+          status: customerOrdersMirror.status,
+          bc_status: customerOrdersMirror.status,
+          sync_error: sql<null>`NULL::text`,
+          order_note: customerOrdersMirror.staff_notes,
+          customer_note: customerOrdersMirror.customer_order_notes,
+          items: sql<string>`'[]'::json`,
+          total: customerOrdersMirror.order_total,
+          date: customerOrdersMirror.order_date,
+          created_by_user_id: sql<null>`NULL::int`,
+          bigcommerce_order_id: customerOrdersMirror.bigcommerce_order_id,
+          created_by_name: sql<null>`NULL::text`,
+          company: customersMirror.company,
+          crm_customer_id: customersMirror.id,
+          is_bc_mirror: sql<boolean>`TRUE`,
+        })
+        .from(customerOrdersMirror)
+        .leftJoin(customersMirror, eq(customerOrdersMirror.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+        .where(where)
+        .orderBy(sql`${customerOrdersMirror.order_date} DESC NULLS LAST`)
+        .limit(limit).offset(offset),
+
+        db.select({ count: sql<number>`COUNT(*)` })
+          .from(customerOrdersMirror)
+          .leftJoin(customersMirror, eq(customerOrdersMirror.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+          .where(where),
+
+        db.select({
+          total:               sql<number>`COUNT(*)`,
+          revenue:             sql<string>`COALESCE(SUM(${customerOrdersMirror.order_total}), 0)`,
+          completed:           sql<number>`COUNT(*) FILTER (WHERE ${customerOrdersMirror.status} = 'Completed')`,
+          awaitingFulfillment: sql<number>`COUNT(*) FILTER (WHERE ${customerOrdersMirror.status} = 'Awaiting Fulfillment')`,
+          cancelled:           sql<number>`COUNT(*) FILTER (WHERE ${customerOrdersMirror.status} = 'Cancelled')`,
+        })
+        .from(customerOrdersMirror)
+        .leftJoin(customersMirror, eq(customerOrdersMirror.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+        .where(where),
+      ]);
+
+      return {
+        orders: rows,
+        total: Number(countRow?.count ?? 0),
+        kpis: {
+          total:               Number(kpiRow?.total               ?? 0),
+          revenue:             parseFloat(String(kpiRow?.revenue  ?? "0")),
+          successful:          0, pending: 0, failed: 0,
+          completed:           Number(kpiRow?.completed           ?? 0),
+          awaitingFulfillment: Number(kpiRow?.awaitingFulfillment ?? 0),
+          cancelled:           Number(kpiRow?.cancelled           ?? 0),
+        },
+      };
+    }
+
+    // ── Sales App mode: pull from local orders table ──────────────────────────
+    const conds: any[] = [sql`${orders.status} != 'draft'`];
+    if (search) {
+      const q = `%${search}%`;
+      conds.push(or(
+        ilike(orders.customer_name, q),
+        ilike(orders.customer_email, q),
+        sql`CAST(${orders.bigcommerce_order_id} AS TEXT) ILIKE ${q}`,
+        sql`CAST(${orders.id} AS TEXT) ILIKE ${q}`,
+        ilike(customersMirror.phone, q),
+      ));
+    }
+    if (createdBy != null) conds.push(eq(orders.created_by_user_id, createdBy));
+    if (syncStatus)        conds.push(eq(orders.status, syncStatus));
+    if (dateFrom)          conds.push(sql`${orders.date} >= ${dateFrom}`);
+    if (dateTo)            conds.push(sql`${orders.date} <= ${dateTo}`);
+
+    const bcStatusCond = bcStatus ? eq(customerOrdersMirror.status, bcStatus) : undefined;
+    const where = conds.length > 0 ? and(...conds) : undefined;
+    const fullWhere = bcStatusCond ? and(where, bcStatusCond) : where;
+
+    const baseQuery = () => db.from(orders)
+      .leftJoin(users, eq(orders.created_by_user_id, users.id))
+      .leftJoin(customersMirror, eq(orders.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+      .leftJoin(customerOrdersMirror, eq(orders.bigcommerce_order_id, customerOrdersMirror.bigcommerce_order_id));
+
+    const [rows, [countRow], [kpiRow]] = await Promise.all([
+      db.select({
+        id: orders.id,
+        customer_name: orders.customer_name,
+        customer_email: orders.customer_email,
+        bigcommerce_customer_id: orders.bigcommerce_customer_id,
+        billing_address: orders.billing_address,
+        status: orders.status,
+        bc_status: customerOrdersMirror.status,
+        sync_error: orders.sync_error,
+        order_note: orders.order_note,
+        customer_note: orders.customer_note,
+        items: orders.items,
+        total: orders.total,
+        date: orders.date,
+        created_by_user_id: orders.created_by_user_id,
+        bigcommerce_order_id: orders.bigcommerce_order_id,
+        created_by_name: users.name,
+        company: customersMirror.company,
+        crm_customer_id: customersMirror.id,
+        is_bc_mirror: sql<boolean>`FALSE`,
+      })
+      .from(orders)
+      .leftJoin(users, eq(orders.created_by_user_id, users.id))
+      .leftJoin(customersMirror, eq(orders.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+      .leftJoin(customerOrdersMirror, eq(orders.bigcommerce_order_id, customerOrdersMirror.bigcommerce_order_id))
+      .where(fullWhere)
+      .orderBy(desc(orders.date))
+      .limit(limit).offset(offset),
+
+      db.select({ count: sql<number>`COUNT(*)` })
+        .from(orders)
+        .leftJoin(customersMirror, eq(orders.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+        .leftJoin(customerOrdersMirror, eq(orders.bigcommerce_order_id, customerOrdersMirror.bigcommerce_order_id))
+        .where(fullWhere),
+
+      db.select({
+        total:      sql<number>`COUNT(*)`,
+        revenue:    sql<string>`COALESCE(SUM(${orders.total}), 0)`,
+        successful: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'synced')`,
+        pending:    sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'pending_sync')`,
+        failed:     sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'failed')`,
+      })
+      .from(orders)
+      .leftJoin(customersMirror, eq(orders.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+      .leftJoin(customerOrdersMirror, eq(orders.bigcommerce_order_id, customerOrdersMirror.bigcommerce_order_id))
+      .where(fullWhere),
+    ]);
+
+    return {
+      orders: rows,
+      total: Number(countRow?.count ?? 0),
+      kpis: {
+        total:               Number(kpiRow?.total      ?? 0),
+        revenue:             parseFloat(String(kpiRow?.revenue ?? "0")),
+        successful:          Number(kpiRow?.successful ?? 0),
+        pending:             Number(kpiRow?.pending    ?? 0),
+        failed:              Number(kpiRow?.failed     ?? 0),
+        completed: 0, awaitingFulfillment: 0, cancelled: 0,
+      },
+    };
+  }
+
+  async getOrderDetail(id: number): Promise<any | null> {
+    const [row] = await db.select({
+      id: orders.id,
+      customer_name: orders.customer_name,
+      customer_email: orders.customer_email,
+      bigcommerce_customer_id: orders.bigcommerce_customer_id,
+      billing_address: orders.billing_address,
+      status: orders.status,
+      sync_error: orders.sync_error,
+      order_note: orders.order_note,
+      customer_note: orders.customer_note,
+      items: orders.items,
+      total: orders.total,
+      date: orders.date,
+      created_by_user_id: orders.created_by_user_id,
+      bigcommerce_order_id: orders.bigcommerce_order_id,
+      google_sheets_logged: orders.google_sheets_logged,
+      created_by_name: users.name,
+      company: customersMirror.company,
+      crm_customer_id: customersMirror.id,
+    })
+    .from(orders)
+    .leftJoin(users, eq(orders.created_by_user_id, users.id))
+    .leftJoin(customersMirror, eq(orders.bigcommerce_customer_id, customersMirror.bigcommerce_customer_id))
+    .where(eq(orders.id, id));
+    return row ?? null;
+  }
+
+  async getOrdersByBcCustomerId(bcCustomerId: number, statuses: string[]): Promise<Order[]> {
+    return db.select().from(orders)
+      .where(and(eq(orders.bigcommerce_customer_id, bcCustomerId), inArray(orders.status, statuses)))
+      .orderBy(desc(orders.date));
+  }
+
+  // Setting operations
+  async getSetting(key: string): Promise<any> {
+    const result = await db.select().from(settings).where(eq(settings.key, key));
+    return result[0];
+  }
+
+  async setSetting(key: string, value: any): Promise<void> {
+    await db.insert(settings).values({ key, value })
+      .onConflictDoUpdate({ target: settings.key, set: { value } });
+  }
+
+  // ── Dropshipping ─────────────────────────────────────────────────────────
+
+  async getDropshipVendorByCode(code: string): Promise<DropshipVendor | undefined> {
+    const rows = await db.select().from(dropshipVendors).where(eq(dropshipVendors.code, code)).limit(1);
+    return rows[0];
+  }
+
+  async ensureDropshipVendor(data: { code: string; name: string; provider: string }): Promise<DropshipVendor> {
+    const existing = await this.getDropshipVendorByCode(data.code);
+    if (existing) return existing;
+    const rows = await db.insert(dropshipVendors).values(data).returning();
+    return rows[0];
+  }
+
+  async getDropshipProducts(opts: {
+    vendorId: number; page: number; limit: number; search?: string; category?: string;
+    subcategory?: string; inStock?: boolean; closeout?: boolean; imported?: boolean; status?: string;
+  }): Promise<{ rows: DropshipProduct[]; total: number }> {
+    const conditions = [eq(dropshipProducts.vendor_id, opts.vendorId)];
+    if (opts.search?.trim()) {
+      const term = `%${opts.search.trim()}%`;
+      conditions.push(or(
+        ilike(dropshipProducts.vendor_sku, term),
+        ilike(dropshipProducts.title, term),
+        ilike(dropshipProducts.upc, term),
+      )!);
+    }
+    if (opts.category) conditions.push(eq(dropshipProducts.vendor_category, opts.category));
+    if (opts.subcategory) conditions.push(eq(dropshipProducts.vendor_subcategory, opts.subcategory));
+    if (opts.inStock) conditions.push(gt(dropshipProducts.inventory, 0));
+    if (opts.closeout) conditions.push(eq(dropshipProducts.is_closeout, true));
+    if (opts.imported) conditions.push(isNotNull(dropshipProducts.bigcommerce_product_id));
+    if (opts.status) conditions.push(eq(dropshipProducts.status, opts.status));
+    const where = and(...conditions);
+    const limit = Math.min(Math.max(opts.limit || 25, 1), 100);
+    const offset = Math.max(opts.page - 1, 0) * limit;
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(dropshipProducts).where(where),
+      db.select().from(dropshipProducts).where(where)
+        .orderBy(asc(dropshipProducts.title), asc(dropshipProducts.vendor_sku))
+        .limit(limit).offset(offset),
+    ]);
+    return { rows, total: Number(countRows[0]?.count ?? 0) };
+  }
+
+  async getDropshipProductFacets(vendorId: number): Promise<{ categories: string[]; subcategories: string[] }> {
+    const [categoryRows, subcategoryRows] = await Promise.all([
+      db.selectDistinct({ value: dropshipProducts.vendor_category })
+        .from(dropshipProducts)
+        .where(and(eq(dropshipProducts.vendor_id, vendorId), isNotNull(dropshipProducts.vendor_category)))
+        .orderBy(asc(dropshipProducts.vendor_category)),
+      db.selectDistinct({ value: dropshipProducts.vendor_subcategory })
+        .from(dropshipProducts)
+        .where(and(eq(dropshipProducts.vendor_id, vendorId), isNotNull(dropshipProducts.vendor_subcategory)))
+        .orderBy(asc(dropshipProducts.vendor_subcategory)),
+    ]);
+    return {
+      categories: categoryRows.map((row) => row.value).filter((value): value is string => Boolean(value)),
+      subcategories: subcategoryRows.map((row) => row.value).filter((value): value is string => Boolean(value)),
+    };
+  }
+
+  async getDropshipProduct(id: number): Promise<DropshipProduct | undefined> {
+    const rows = await db.select().from(dropshipProducts).where(eq(dropshipProducts.id, id)).limit(1);
+    return rows[0];
+  }
+
+  async upsertDropshipProducts(entries: InsertDropshipProduct[]): Promise<{ created: number; updated: number }> {
+    let created = 0;
+    let updated = 0;
+    for (const entry of entries) {
+      const existing = await db.select({ id: dropshipProducts.id })
+        .from(dropshipProducts)
+        .where(and(eq(dropshipProducts.vendor_id, entry.vendor_id), eq(dropshipProducts.vendor_sku, entry.vendor_sku)))
+        .limit(1);
+      await db.insert(dropshipProducts).values(entry).onConflictDoUpdate({
+        target: [dropshipProducts.vendor_id, dropshipProducts.vendor_sku],
+        set: {
+          vendor_product_id: entry.vendor_product_id,
+          title: entry.title,
+          description: entry.description,
+          brand: entry.brand,
+          upc: entry.upc,
+          inventory: entry.inventory,
+          cost: entry.cost,
+          tier_data: entry.tier_data,
+          image_data: entry.image_data,
+          vendor_category: entry.vendor_category,
+          vendor_subcategory: entry.vendor_subcategory,
+          is_closeout: entry.is_closeout,
+          vendor_modified_at: entry.vendor_modified_at,
+          raw_data: entry.raw_data,
+          updated_at: new Date(),
+          status: sql`CASE WHEN ${dropshipProducts.status} IN ('queued', 'mapped') THEN ${dropshipProducts.status} ELSE 'available' END`,
+        },
+      });
+      if (existing.length > 0) updated++;
+      else created++;
+    }
+    return { created, updated };
+  }
+
+  async markDropshipProductsUnavailable(vendorId: number, seenSkus: string[]): Promise<void> {
+    const conditions = [eq(dropshipProducts.vendor_id, vendorId)];
+    if (seenSkus.length > 0) conditions.push(notInArray(dropshipProducts.vendor_sku, seenSkus));
+    await db.update(dropshipProducts)
+      .set({ status: "unavailable", inventory: 0, updated_at: new Date() })
+      .where(and(...conditions));
+  }
+
+  async updateDropshipProductStatus(id: number, status: string): Promise<DropshipProduct | undefined> {
+    const rows = await db.update(dropshipProducts)
+      .set({ status, updated_at: new Date() })
+      .where(eq(dropshipProducts.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  async createDropshipSyncLog(data: { vendor_id: number }): Promise<DropshipSyncLog> {
+    const rows = await db.insert(dropshipSyncLogs).values(data).returning();
+    return rows[0];
+  }
+
+  async finishDropshipSyncLog(id: number, data: Partial<InsertDropshipSyncLog>): Promise<DropshipSyncLog | undefined> {
+    const rows = await db.update(dropshipSyncLogs)
+      .set(data)
+      .where(eq(dropshipSyncLogs.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  async getDropshipSyncLogs(vendorId: number, limit = 50): Promise<DropshipSyncLog[]> {
+    return db.select().from(dropshipSyncLogs)
+      .where(eq(dropshipSyncLogs.vendor_id, vendorId))
+      .orderBy(desc(dropshipSyncLogs.started_at))
+      .limit(Math.min(Math.max(limit, 1), 100));
+  }
+
+  async getCachedPriceHistory(customerId: number, bcProductId: number): Promise<PriceHistoryCacheEntry[]> {
+    return db.select().from(priceHistoryCache)
+      .where(and(
+        eq(priceHistoryCache.customer_id, customerId),
+        eq(priceHistoryCache.product_id, bcProductId)
+      ))
+      .orderBy(desc(priceHistoryCache.created_at))
+      .limit(20);
+  }
+
+  async savePriceHistoryCacheEntries(entries: InsertPriceHistoryCache[]): Promise<void> {
+    for (const entry of entries) {
+      const exists = await db.select({ id: priceHistoryCache.id })
+        .from(priceHistoryCache)
+        .where(and(
+          eq(priceHistoryCache.customer_id, entry.customer_id),
+          eq(priceHistoryCache.product_id, entry.product_id),
+          eq(priceHistoryCache.order_id, entry.order_id)
+        ))
+        .limit(1);
+      if (exists.length === 0) {
+        await db.insert(priceHistoryCache).values(entry);
+      }
+    }
+  }
+
+  async getPriceHistoryForSync(afterMs: number | null, limit: number): Promise<PriceHistoryCacheEntry[]> {
+    if (afterMs) {
+      const afterDate = new Date(afterMs);
+      return db.select().from(priceHistoryCache)
+        .where(gt(priceHistoryCache.created_at, afterDate))
+        .orderBy(asc(priceHistoryCache.created_at))
+        .limit(limit);
+    }
+    return db.select().from(priceHistoryCache)
+      .orderBy(asc(priceHistoryCache.created_at))
+      .limit(limit);
+  }
+
+  async createInventoryPushLog(entry: InsertInventoryPushLog): Promise<InventoryPushLog> {
+    const result = await db.insert(inventoryPushLogs).values(entry).returning();
+    return result[0];
+  }
+
+  async createInventoryRemoveLog(entry: InsertInventoryRemoveLog): Promise<InventoryRemoveLog> {
+    const result = await db.insert(inventoryRemoveLogs).values(entry).returning();
+    return result[0];
+  }
+
+  async getInventoryPushLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<{ rows: InventoryPushLog[]; total: number }> {
+    const { page, limit, search, username, dateFrom, dateTo } = opts;
+    const offset = page * limit;
+    const conditions = [];
+    if (search) conditions.push(or(ilike(inventoryPushLogs.product_name, `%${search}%`), ilike(inventoryPushLogs.sku, `%${search}%`))!);
+    if (username) conditions.push(eq(inventoryPushLogs.username, username));
+    if (dateFrom) conditions.push(gte(inventoryPushLogs.created_at, new Date(dateFrom)));
+    if (dateTo) {
+      const end = new Date(dateTo);
+      end.setDate(end.getDate() + 1);
+      conditions.push(lt(inventoryPushLogs.created_at, end));
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const [countRes, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(inventoryPushLogs).where(where),
+      db.select().from(inventoryPushLogs).where(where).orderBy(desc(inventoryPushLogs.created_at)).limit(limit).offset(offset),
+    ]);
+    return { rows: rows as InventoryPushLog[], total: countRes[0]?.count ?? 0 };
+  }
+
+  async getInventoryPushLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string }): Promise<InventoryPushLog[]> {
+    const { search, username, dateFrom, dateTo } = opts;
+    const conditions = [];
+    if (search) conditions.push(or(ilike(inventoryPushLogs.product_name, `%${search}%`), ilike(inventoryPushLogs.sku, `%${search}%`))!);
+    if (username) conditions.push(eq(inventoryPushLogs.username, username));
+    if (dateFrom) conditions.push(gte(inventoryPushLogs.created_at, new Date(dateFrom)));
+    if (dateTo) {
+      const end = new Date(dateTo);
+      end.setDate(end.getDate() + 1);
+      conditions.push(lt(inventoryPushLogs.created_at, end));
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    return db.select().from(inventoryPushLogs).where(where).orderBy(desc(inventoryPushLogs.created_at)) as Promise<InventoryPushLog[]>;
+  }
+
+  async getInventoryPushLogUsernames(): Promise<string[]> {
+    const result = await db.selectDistinct({ username: inventoryPushLogs.username })
+      .from(inventoryPushLogs)
+      .where(sql`${inventoryPushLogs.username} != ''`)
+      .orderBy(inventoryPushLogs.username);
+    return result.map(r => r.username);
+  }
+
+  async getInventoryLogs(opts: { page: number; limit: number; search?: string; username?: string; dateFrom?: string; dateTo?: string; type?: "add" | "remove" }): Promise<{ rows: InventoryLogRow[]; total: number }> {
+    const { page, limit, search, username, dateFrom, dateTo, type } = opts;
+    const buildConditions = (table: typeof inventoryPushLogs | typeof inventoryRemoveLogs) => {
+      const conditions = [];
+      if (search) conditions.push(or(ilike(table.product_name, `%${search}%`), ilike(table.sku, `%${search}%`))!);
+      if (username) conditions.push(eq(table.username, username));
+      if (dateFrom) conditions.push(gte(table.created_at, new Date(dateFrom)));
+      if (dateTo) {
+        const end = new Date(dateTo);
+        end.setDate(end.getDate() + 1);
+        conditions.push(lt(table.created_at, end));
+      }
+      return conditions.length > 0 ? and(...conditions) : undefined;
+    };
+
+    const [adds, removes] = await Promise.all([
+      db.select().from(inventoryPushLogs).where(buildConditions(inventoryPushLogs)),
+      db.select().from(inventoryRemoveLogs).where(buildConditions(inventoryRemoveLogs)),
+    ]);
+    const rows: InventoryLogRow[] = [
+      ...adds.map((log): InventoryLogRow => ({
+        id: log.id,
+        log_type: "add",
+        user_id: log.user_id,
+        username: log.username,
+        sku: log.sku,
+        product_id: log.product_id,
+        variant_id: log.variant_id,
+        product_name: log.product_name,
+        variant_name: log.variant_name,
+        previous_inventory: log.previous_inventory,
+        new_inventory: log.new_inventory,
+        quantity: log.quantity_added,
+        reason: log.reason,
+        destination: [
+          log.push_to_bigcommerce && "BigCommerce",
+          log.push_to_skuvault && "SKUVault",
+        ].filter(Boolean).join(" + "),
+        skuvault_location: log.skuvault_location,
+        created_at: log.created_at,
+      })),
+      ...removes.map((log): InventoryLogRow => ({
+        id: log.id,
+        log_type: "remove",
+        user_id: log.user_id,
+        username: log.username,
+        sku: log.sku,
+        product_id: log.product_id,
+        variant_id: log.variant_id,
+        product_name: log.product_name,
+        variant_name: log.variant_name,
+        previous_inventory: log.previous_inventory,
+        new_inventory: log.new_inventory,
+        quantity: log.quantity_removed,
+        reason: log.reason,
+        destination: [
+          log.remove_from_bigcommerce && "BigCommerce",
+          log.remove_from_skuvault && "SKUVault",
+        ].filter(Boolean).join(" + "),
+        skuvault_location: log.skuvault_location,
+        created_at: log.created_at,
+      })),
+    ].sort((a, b) => {
+      const dateDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      return dateDiff || b.id - a.id;
+    });
+
+    const filteredRows = type ? rows.filter((row) => row.log_type === type) : rows;
+    const offset = page * limit;
+    return { rows: filteredRows.slice(offset, offset + limit), total: filteredRows.length };
+  }
+
+  async getInventoryLogUsernames(): Promise<string[]> {
+    const [pushUsers, removeUsers] = await Promise.all([
+      this.getInventoryPushLogUsernames(),
+      db.selectDistinct({ username: inventoryRemoveLogs.username })
+        .from(inventoryRemoveLogs)
+        .where(sql`${inventoryRemoveLogs.username} != ''`)
+        .orderBy(inventoryRemoveLogs.username),
+    ]);
+    return [...new Set([...pushUsers, ...removeUsers.map((row) => row.username)])].sort();
+  }
+
+  async getInventoryLogsForExport(opts: { search?: string; username?: string; dateFrom?: string; dateTo?: string; type?: "add" | "remove" }): Promise<InventoryLogRow[]> {
+    return (await this.getInventoryLogs({ page: 0, limit: 100000, ...opts })).rows;
+  }
+
+  // ── Inventory audit task methods ──────────────────────────────────────────
+
+  async createOrUpdateAuditTask(opts: { sku: string; product_id: number; variant_id: number; product_name: string; variant_name: string; quantity_added: number; system_qty: number; created_by: number; source?: string; skuvault_location?: string | null }): Promise<InventoryAuditTask> {
+    const { sku, product_id, variant_id, product_name, variant_name, quantity_added, system_qty, created_by, source = "manual_push", skuvault_location } = opts;
+    const now = new Date();
+    // Try to find an existing pending task for this SKU
+    const existing = await db.select().from(inventoryAuditTasks)
+      .where(and(eq(inventoryAuditTasks.sku, sku), eq(inventoryAuditTasks.status, "pending")))
+      .limit(1);
+    if (existing.length > 0) {
+      // Accumulate the push
+      const task = existing[0];
+      const updated = await db.update(inventoryAuditTasks)
+        .set({
+          total_push_qty: (task.total_push_qty ?? 0) + quantity_added,
+          push_count: (task.push_count ?? 0) + 1,
+          last_push_at: now,
+          system_qty,
+          product_name: product_name || task.product_name,
+          variant_name: variant_name || task.variant_name,
+          ...(skuvault_location ? { skuvault_location } : {}),
+        })
+        .where(eq(inventoryAuditTasks.id, task.id))
+        .returning();
+      return updated[0];
+    }
+    // Create new pending task
+    const created = await db.insert(inventoryAuditTasks).values({
+      sku, product_id, variant_id, product_name, variant_name,
+      status: "pending", source,
+      total_push_qty: quantity_added, push_count: 1,
+      last_push_at: now, system_qty,
+      created_by,
+      skuvault_location: skuvault_location ?? null,
+    }).returning();
+    return created[0];
+  }
+
+  async getAuditKPIs(): Promise<{ totalPendingTasks: number; skusToAudit: number; totalPendingQty: number; lastAuditAt: Date | null; lastAuditBy: string | null }> {
+    const [pendingAgg, lastCompleted] = await Promise.all([
+      db.select({
+        product_count: sql<number>`COUNT(DISTINCT product_id)::int`,
+        sku_count: sql<number>`COUNT(*)::int`,
+        total_qty: sql<number>`COALESCE(SUM(total_push_qty),0)::int`,
+      }).from(inventoryAuditTasks).where(eq(inventoryAuditTasks.status, "pending")),
+      db.select({
+        completed_at: inventoryAuditTasks.completed_at,
+        completed_by_id: inventoryAuditTasks.completed_by,
+      }).from(inventoryAuditTasks)
+        .where(eq(inventoryAuditTasks.status, "completed"))
+        .orderBy(desc(inventoryAuditTasks.completed_at)).limit(1),
+    ]);
+    const agg = pendingAgg[0];
+    let lastAuditBy: string | null = null;
+    if (lastCompleted[0]?.completed_by_id) {
+      const u = await db.select({ name: users.name, username: users.username })
+        .from(users).where(eq(users.id, lastCompleted[0].completed_by_id)).limit(1);
+      lastAuditBy = u[0]?.name || u[0]?.username || null;
+    }
+    return {
+      totalPendingTasks: agg?.product_count ?? 0,
+      skusToAudit: agg?.sku_count ?? 0,
+      totalPendingQty: agg?.total_qty ?? 0,
+      lastAuditAt: lastCompleted[0]?.completed_at ?? null,
+      lastAuditBy,
+    };
+  }
+
+  async getAuditQueue(opts: { page: number; limit: number; search?: string; status?: string; source?: string; dateFrom?: string; dateTo?: string }): Promise<{ groups: any[]; total: number }> {
+    const { page, limit, search, status = "pending", source, dateFrom, dateTo } = opts;
+    const conditions: any[] = [eq(inventoryAuditTasks.status, status)];
+    if (search) conditions.push(or(ilike(inventoryAuditTasks.sku, `%${search}%`), ilike(inventoryAuditTasks.product_name, `%${search}%`))!);
+    if (source) conditions.push(eq(inventoryAuditTasks.source, source));
+    if (dateFrom) conditions.push(gte(inventoryAuditTasks.last_push_at, new Date(dateFrom)));
+    if (dateTo) {
+      const end = new Date(dateTo); end.setDate(end.getDate() + 1);
+      conditions.push(lt(inventoryAuditTasks.last_push_at, end));
+    }
+    const where = and(...conditions);
+
+    // Count distinct products
+    const [countRes, rawGroups] = await Promise.all([
+      db.select({ cnt: sql<number>`COUNT(DISTINCT product_id)::int` })
+        .from(inventoryAuditTasks).where(where),
+      db.select({
+        product_id: inventoryAuditTasks.product_id,
+        product_name: inventoryAuditTasks.product_name,
+        sku_count: sql<number>`COUNT(*)::int`,
+        total_push_qty: sql<number>`COALESCE(SUM(total_push_qty),0)::int`,
+        last_push_at: sql<Date>`MAX(last_push_at)`,
+        source: inventoryAuditTasks.source,
+        status: inventoryAuditTasks.status,
+      }).from(inventoryAuditTasks).where(where)
+        .groupBy(inventoryAuditTasks.product_id, inventoryAuditTasks.product_name, inventoryAuditTasks.source, inventoryAuditTasks.status)
+        .orderBy(sql`MAX(last_push_at) DESC`)
+        .limit(limit).offset(page * limit),
+    ]);
+
+    // For each group, get the sku group prefix from the first SKU
+    const groups = rawGroups.map((g) => ({
+      ...g,
+      sku_group: null as string | null, // populated below
+    }));
+
+    // Fetch sku_group (first 8 chars of sku) for display
+    for (const group of groups) {
+      const firstSku = await db.select({ sku: inventoryAuditTasks.sku })
+        .from(inventoryAuditTasks)
+        .where(and(eq(inventoryAuditTasks.product_id, group.product_id), eq(inventoryAuditTasks.status, status)))
+        .limit(1);
+      group.sku_group = firstSku[0]?.sku?.slice(0, 8).toUpperCase() ?? null;
+    }
+
+    return { groups, total: countRes[0]?.cnt ?? 0 };
+  }
+
+  async getAuditTasksForProduct(productId: number, status?: string): Promise<InventoryAuditTask[]> {
+    const conditions: any[] = [eq(inventoryAuditTasks.product_id, productId)];
+    if (status) conditions.push(eq(inventoryAuditTasks.status, status));
+    return db.select().from(inventoryAuditTasks)
+      .where(and(...conditions))
+      .orderBy(asc(inventoryAuditTasks.variant_name)) as Promise<InventoryAuditTask[]>;
+  }
+
+  async getAuditTask(id: number): Promise<InventoryAuditTask | undefined> {
+    const result = await db.select().from(inventoryAuditTasks)
+      .where(eq(inventoryAuditTasks.id, id)).limit(1);
+    return result[0] as InventoryAuditTask | undefined;
+  }
+
+  async completeAuditTask(id: number, data: { physical_qty: number; variance: number; reason: string; notes?: string; completed_by: number; skuvault_result?: any; skuvault_location?: string | null }): Promise<InventoryAuditTask> {
+    const result = await db.update(inventoryAuditTasks).set({
+      status: "completed",
+      physical_qty: data.physical_qty,
+      variance: data.variance,
+      reason: data.reason,
+      notes: data.notes || null,
+      completed_by: data.completed_by,
+      completed_at: new Date(),
+      skuvault_result: data.skuvault_result ?? null,
+      ...(data.skuvault_location != null ? { skuvault_location: data.skuvault_location } : {}),
+    }).where(eq(inventoryAuditTasks.id, id)).returning();
+    return result[0] as InventoryAuditTask;
+  }
+
+  async failAuditTask(id: number): Promise<void> {
+    await db.update(inventoryAuditTasks).set({ status: "failed" })
+      .where(eq(inventoryAuditTasks.id, id));
+  }
+
+  async createProductLinkLog(entry: InsertProductLinkLog): Promise<ProductLinkLog> {
+    const result = await db.insert(productLinkLogs).values(entry).returning();
+    return result[0];
+  }
+
+  async getProductLinkLogs(limit = 200): Promise<ProductLinkLog[]> {
+    return db.select().from(productLinkLogs)
+      .orderBy(desc(productLinkLogs.created_at))
+      .limit(limit);
+  }
+
+  // ── RBAC ──────────────────────────────────────────────────────────────────
+
+  async getAllRoles(): Promise<Role[]> {
+    return db.select().from(roles).orderBy(asc(roles.name));
+  }
+
+  async getRoleById(id: number): Promise<Role | undefined> {
+    const result = await db.select().from(roles).where(eq(roles.id, id));
+    return result[0];
+  }
+
+  async createRole(role: InsertRole): Promise<Role> {
+    const result = await db.insert(roles).values(role).returning();
+    return result[0];
+  }
+
+  async deleteRole(id: number): Promise<void> {
+    await db.delete(roles).where(eq(roles.id, id));
+  }
+
+  async getAllPermissions(): Promise<Permission[]> {
+    return db.select().from(permissions).orderBy(asc(permissions.module), asc(permissions.action));
+  }
+
+  async createPermission(perm: InsertPermission): Promise<Permission> {
+    const result = await db.insert(permissions).values(perm).returning();
+    return result[0];
+  }
+
+  async deletePermission(id: number): Promise<void> {
+    await db.delete(permissions).where(eq(permissions.id, id));
+  }
+
+  async getPermissionsForRole(roleId: number): Promise<Permission[]> {
+    const rps = await db.select({ permission_id: rolePermissions.permission_id })
+      .from(rolePermissions)
+      .where(eq(rolePermissions.role_id, roleId));
+    if (rps.length === 0) return [];
+    const ids = rps.map((r) => r.permission_id);
+    return db.select().from(permissions).where(inArray(permissions.id, ids));
+  }
+
+  async addPermissionToRole(entry: InsertRolePermission): Promise<void> {
+    await db.insert(rolePermissions).values(entry).onConflictDoNothing();
+  }
+
+  async removePermissionFromRole(roleId: number, permissionId: number): Promise<void> {
+    await db.delete(rolePermissions)
+      .where(and(eq(rolePermissions.role_id, roleId), eq(rolePermissions.permission_id, permissionId)));
+  }
+
+  async getPermissionsForUser(userId: number): Promise<Permission[]> {
+    const ups = await db.select({ permission_id: userPermissions.permission_id })
+      .from(userPermissions)
+      .where(eq(userPermissions.user_id, userId));
+    if (ups.length === 0) return [];
+    const ids = ups.map((u) => u.permission_id);
+    return db.select().from(permissions).where(inArray(permissions.id, ids));
+  }
+
+  async addPermissionToUser(entry: InsertUserPermission): Promise<void> {
+    await db.insert(userPermissions).values(entry).onConflictDoNothing();
+  }
+
+  async removePermissionFromUser(userId: number, permissionId: number): Promise<void> {
+    await db.delete(userPermissions)
+      .where(and(eq(userPermissions.user_id, userId), eq(userPermissions.permission_id, permissionId)));
+  }
+
+  async getUserPermissionStrings(userId: number): Promise<string[]> {
+    const user = await this.getUser(userId);
+    if (!user) return [];
+    const directPerms = await this.getPermissionsForUser(userId);
+    let rolePerms: Permission[] = [];
+    if (user.role_id) {
+      rolePerms = await this.getPermissionsForRole(user.role_id);
+    }
+    const all = [...directPerms, ...rolePerms];
+    return [...new Set(all.map((p) => `${p.module}:${p.action}`))];
+  }
+
+  async setUserRole(userId: number, roleId: number | null): Promise<void> {
+    await db.update(users).set({ role_id: roleId }).where(eq(users.id, userId));
+  }
+
+  async updateRole(id: number, data: Partial<{ name: string; description: string | null }>): Promise<Role> {
+    const result = await db.update(roles).set(data).where(eq(roles.id, id)).returning();
+    return result[0];
+  }
+
+  // ShipStation export history
+  async createShipstationExportHistory(entry: InsertShipstationExportHistory): Promise<ShipstationExportHistory> {
+    const result = await db.insert(shipstationExportHistory).values([entry]).returning();
+    return result[0];
+  }
+
+  async getShipstationExportHistory(limit = 100): Promise<ShipstationExportHistory[]> {
+    return db.select().from(shipstationExportHistory).orderBy(desc(shipstationExportHistory.created_at)).limit(limit);
+  }
+
+  async getShipstationExportHistoryById(id: number): Promise<ShipstationExportHistory | undefined> {
+    const result = await db.select().from(shipstationExportHistory).where(eq(shipstationExportHistory.id, id));
+    return result[0];
+  }
+
+  // Promo SKU tracker
+  async getAllPromoSkus(): Promise<PromoFreeSkuTracker[]> {
+    return db.select().from(promoFreeSkuTracker).where(eq(promoFreeSkuTracker.is_active, true)).orderBy(asc(promoFreeSkuTracker.product_name));
+  }
+
+  async getPromoSkuById(id: number): Promise<PromoFreeSkuTracker | undefined> {
+    const result = await db.select().from(promoFreeSkuTracker).where(eq(promoFreeSkuTracker.id, id));
+    return result[0];
+  }
+
+  async getPromoSkuBySku(sku: string): Promise<PromoFreeSkuTracker | undefined> {
+    const result = await db.select().from(promoFreeSkuTracker).where(eq(promoFreeSkuTracker.sku, sku));
+    return result[0];
+  }
+
+  async createPromoSku(entry: InsertPromoFreeSkuTracker): Promise<PromoFreeSkuTracker> {
+    const result = await db.insert(promoFreeSkuTracker).values([entry]).returning();
+    return result[0];
+  }
+
+  async updatePromoSku(id: number, data: Partial<InsertPromoFreeSkuTracker>): Promise<PromoFreeSkuTracker> {
+    const result = await db.update(promoFreeSkuTracker).set({ ...data, updated_at: new Date() }).where(eq(promoFreeSkuTracker.id, id)).returning();
+    return result[0];
+  }
+
+  async deletePromoSku(id: number): Promise<void> {
+    await db.delete(promoFreeSkuTracker).where(eq(promoFreeSkuTracker.id, id));
+  }
+
+  // ─── CRM operations ──────────────────────────────────────────────────────────
+
+  private buildCrmWhereClause(
+    search?: string,
+    group?: string,
+    state?: string,
+    health?: string,
+    customerType?: string,
+    addressType?: string,
+    primaryRep?: number | "unassigned",
+    secondaryRep?: number | "unassigned",
+    accountType?: string,
+    status?: string, // 'active' | 'inactive' | 'both'; default 'active'
+  ) {
+    const conditions: any[] = [];
+    if (search?.trim()) {
+      const s = `%${search.trim()}%`;
+      conditions.push(or(
+        ilike(customersMirror.company, s),
+        ilike(customersMirror.first_name, s),
+        ilike(customersMirror.last_name, s),
+        sql`concat_ws(' ', ${customersMirror.first_name}, ${customersMirror.last_name}) ILIKE ${s}`,
+        sql`concat_ws(' ', ${customersMirror.last_name}, ${customersMirror.first_name}) ILIKE ${s}`,
+        ilike(customersMirror.email, s),
+        ilike(customersMirror.phone, s),
+        sql`coalesce(${customersMirror.shipping_address}->>'city', ${customersMirror.billing_address}->>'city') ILIKE ${s}`,
+      ));
+    }
+    if (group) conditions.push(eq(customersMirror.customer_group_name, group));
+    if (state) {
+      if (state === "Unknown") {
+        conditions.push(sql`(coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') IS NULL OR coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = '')`);
+      } else {
+        conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${state}`);
+      }
+    }
+    if (health) conditions.push(eq(customersMirror.account_health, health));
+    if (customerType) conditions.push(eq(customersMirror.customer_type, customerType));
+    if (addressType) conditions.push(eq(customersMirror.address_type, addressType));
+    if (primaryRep === "unassigned") {
+      conditions.push(isNull(customersMirror.primary_rep_id));
+    } else if (primaryRep !== undefined) {
+      conditions.push(eq(customersMirror.primary_rep_id, Number(primaryRep)));
+    }
+    if (secondaryRep === "unassigned") {
+      conditions.push(isNull(customersMirror.secondary_rep_id));
+    } else if (secondaryRep !== undefined) {
+      conditions.push(eq(customersMirror.secondary_rep_id, Number(secondaryRep)));
+    }
+    // ERP account_type filter (customer / vendor / internal)
+    if (accountType) conditions.push(eq(customersMirror.account_type, accountType));
+    // Active/inactive filter — default to active-only for backward compat
+    if (!status || status === 'active') {
+      conditions.push(isNull(customersMirror.inactive_at));
+    } else if (status === 'inactive') {
+      conditions.push(isNotNull(customersMirror.inactive_at));
+    }
+    // status === 'both' → no filter
+    if (conditions.length === 0) return undefined;
+    if (conditions.length === 1) return conditions[0];
+    return and(...conditions);
+  }
+
+  async getHealthThresholds(): Promise<{ healthy_days: number; watch_days: number; at_risk_days: number }> {
+    const defaults = { healthy_days: 30, watch_days: 60, at_risk_days: 90 };
+    const row = await this.getSetting("crm_health_thresholds");
+    if (!row?.value) return defaults;
+    try { return { ...defaults, ...row.value }; } catch { return defaults; }
+  }
+
+  async setHealthThresholds(t: { healthy_days: number; watch_days: number; at_risk_days: number }): Promise<void> {
+    await this.setSetting("crm_health_thresholds", t);
+  }
+
+  private buildCrmOrderBy(sortBy?: string, sortDir?: string) {
+    const dir = sortDir === "asc" ? asc : desc;
+    switch (sortBy) {
+      case "company":
+        return sortDir === "asc"
+          ? sql`${customersMirror.company} ASC NULLS LAST`
+          : sql`${customersMirror.company} DESC NULLS LAST`;
+      case "first_name": return dir(customersMirror.first_name);
+      case "state":
+        return sortDir === "asc"
+          ? sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') ASC NULLS LAST`
+          : sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') DESC NULLS LAST`;
+      case "customer_group_name":
+        return sortDir === "asc"
+          ? sql`${customersMirror.customer_group_name} ASC NULLS LAST`
+          : sql`${customersMirror.customer_group_name} DESC NULLS LAST`;
+      case "lifetime_revenue": return dir(customersMirror.lifetime_revenue);
+      case "lifetime_orders": return dir(customersMirror.lifetime_orders);
+      case "days_since_order":
+        return sortDir === "asc"
+          ? sql`${customersMirror.last_order_date} DESC NULLS LAST`
+          : sql`${customersMirror.last_order_date} ASC NULLS LAST`;
+      case "customer_type":
+        return sortDir === "asc"
+          ? sql`${customersMirror.customer_type} ASC NULLS LAST`
+          : sql`${customersMirror.customer_type} DESC NULLS LAST`;
+      case "address_type":
+        return sortDir === "asc"
+          ? sql`${customersMirror.address_type} ASC NULLS LAST`
+          : sql`${customersMirror.address_type} DESC NULLS LAST`;
+      case "primary_rep_name":
+        return sortDir === "asc"
+          ? sql`primary_rep_user.name ASC NULLS LAST`
+          : sql`primary_rep_user.name DESC NULLS LAST`;
+      case "secondary_rep_name":
+        return sortDir === "asc"
+          ? sql`secondary_rep_user.name ASC NULLS LAST`
+          : sql`secondary_rep_user.name DESC NULLS LAST`;
+      case "city":
+        return sortDir === "asc"
+          ? sql`coalesce(${customersMirror.shipping_address}->>'city', ${customersMirror.billing_address}->>'city') ASC NULLS LAST`
+          : sql`coalesce(${customersMirror.shipping_address}->>'city', ${customersMirror.billing_address}->>'city') DESC NULLS LAST`;
+      case "last_follow_up":
+        return sortDir === "asc"
+          ? sql`(SELECT n.created_at FROM crm_customer_notes n WHERE n.customer_id = customers_mirror.id ORDER BY n.created_at DESC LIMIT 1) ASC NULLS LAST`
+          : sql`(SELECT n.created_at FROM crm_customer_notes n WHERE n.customer_id = customers_mirror.id ORDER BY n.created_at DESC LIMIT 1) DESC NULLS LAST`;
+      default:
+        return sortDir === "asc"
+          ? sql`${customersMirror.last_order_date} ASC NULLS LAST`
+          : sql`${customersMirror.last_order_date} DESC NULLS LAST`;
+    }
+  }
+
+  private buildCrmRepConditions(assignedRep?: number | "unassigned", visibilityScope?: string, visibilityUserId?: number): any[] {
+    const conds: any[] = [];
+    if (visibilityScope && visibilityUserId) {
+      if (visibilityScope === "ASSIGNED_ONLY") {
+        conds.push(eq(customerSalesRep.assigned_user_id, visibilityUserId));
+      } else if (visibilityScope === "ASSIGNED_AND_UNASSIGNED") {
+        conds.push(or(
+          eq(customerSalesRep.assigned_user_id, visibilityUserId),
+          isNull(customerSalesRep.id),
+        ));
+      }
+    }
+    if (assignedRep === "unassigned") {
+      conds.push(isNull(customerSalesRep.id));
+    } else if (assignedRep !== undefined) {
+      conds.push(eq(customerSalesRep.assigned_user_id, Number(assignedRep)));
+    }
+    return conds;
+  }
+
+  async getCrmCustomers(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; limit?: number; offset?: number; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<{ customers: (CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null })[]; total: number }> {
+    const { search, group, state, health, customerType, addressType, primaryRep, secondaryRep,
+            sortBy = "last_order_date", sortDir = "desc", limit = 50, offset = 0,
+            assignedRep, visibilityScope, visibilityUserId, accountType, status } = opts;
+    const primaryRepUser = alias(users, "primary_rep_user");
+    const secondaryRepUser = alias(users, "secondary_rep_user");
+    const baseWhere = this.buildCrmWhereClause(search, group, state, health, customerType, addressType, primaryRep, secondaryRep, accountType, status);
+    const repConds = this.buildCrmRepConditions(assignedRep, visibilityScope, visibilityUserId);
+    const needsRepJoin = repConds.length > 0;
+    const allConds = [...(baseWhere ? [baseWhere] : []), ...repConds];
+    const where = allConds.length === 0 ? undefined : allConds.length === 1 ? allConds[0] : and(...allConds);
+    const orderExpr = this.buildCrmOrderBy(sortBy, sortDir);
+    const countRows = needsRepJoin
+      ? await db.select({ count: sql<number>`count(*)::int` }).from(customersMirror).leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id)).where(where)
+      : await db.select({ count: sql<number>`count(*)::int` }).from(customersMirror).where(where);
+    const total = countRows[0]?.count ?? 0;
+    const rows = await db.select({
+      c: customersMirror,
+      rep_name: users.name,
+      primary_rep_name: primaryRepUser.name,
+      secondary_rep_name: secondaryRepUser.name,
+      last_action_date: sql<string | null>`(SELECT n.created_at FROM crm_customer_notes n WHERE n.customer_id = customers_mirror.id ORDER BY n.created_at DESC LIMIT 1)`,
+      last_action_type: sql<string | null>`(SELECT n.note_type FROM crm_customer_notes n WHERE n.customer_id = customers_mirror.id ORDER BY n.created_at DESC LIMIT 1)`,
+    })
+      .from(customersMirror)
+      .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+      .leftJoin(users, eq(users.id, customerSalesRep.assigned_user_id))
+      .leftJoin(primaryRepUser, eq(primaryRepUser.id, customersMirror.primary_rep_id))
+      .leftJoin(secondaryRepUser, eq(secondaryRepUser.id, customersMirror.secondary_rep_id))
+      .where(where)
+      .orderBy(orderExpr as any)
+      .limit(limit)
+      .offset(offset);
+    return {
+      customers: rows.map(r => ({
+        ...r.c,
+        sales_rep_name: r.rep_name ?? null,
+        primary_rep_name: r.primary_rep_name ?? null,
+        secondary_rep_name: r.secondary_rep_name ?? null,
+        last_action_date: r.last_action_date ?? null,
+        last_action_type: r.last_action_type ?? null,
+      })),
+      total,
+    };
+  }
+
+  async getCrmCustomerById(id: number): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null }) | undefined> {
+    const primaryRepUser = alias(users, "primary_rep_user");
+    const secondaryRepUser = alias(users, "secondary_rep_user");
+    const rows = await db.select({
+      c: customersMirror,
+      rep_name: users.name,
+      primary_rep_name: primaryRepUser.name,
+      secondary_rep_name: secondaryRepUser.name,
+    })
+      .from(customersMirror)
+      .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+      .leftJoin(users, eq(users.id, customerSalesRep.assigned_user_id))
+      .leftJoin(primaryRepUser, eq(primaryRepUser.id, customersMirror.primary_rep_id))
+      .leftJoin(secondaryRepUser, eq(secondaryRepUser.id, customersMirror.secondary_rep_id))
+      .where(eq(customersMirror.id, id));
+    if (!rows[0]) return undefined;
+    return {
+      ...rows[0].c,
+      sales_rep_name: rows[0].rep_name ?? null,
+      primary_rep_name: rows[0].primary_rep_name ?? null,
+      secondary_rep_name: rows[0].secondary_rep_name ?? null,
+    };
+  }
+
+  async getCrmCustomerByBcId(bcId: number): Promise<CrmCustomer | undefined> {
+    const result = await db.select().from(customersMirror).where(eq(customersMirror.bigcommerce_customer_id, bcId));
+    return result[0];
+  }
+
+  async searchCrmCustomersForPos(query: string, limit = 10): Promise<Array<{
+    bigcommerce_customer_id: number;
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone: string | null;
+    company: string | null;
+    customer_group_id: number | null;
+    customer_group_name: string | null;
+  }>> {
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+    const pattern = `%${trimmed}%`;
+    return db.select({
+      bigcommerce_customer_id: customersMirror.bigcommerce_customer_id,
+      first_name: customersMirror.first_name,
+      last_name: customersMirror.last_name,
+      email: customersMirror.email,
+      phone: customersMirror.phone,
+      company: customersMirror.company,
+      customer_group_id: customersMirror.customer_group_id,
+      customer_group_name: customersMirror.customer_group_name,
+    })
+      .from(customersMirror)
+      .where(or(
+        ilike(customersMirror.company, pattern),
+        ilike(customersMirror.first_name, pattern),
+        ilike(customersMirror.last_name, pattern),
+        sql`concat_ws(' ', ${customersMirror.first_name}, ${customersMirror.last_name}) ILIKE ${pattern}`,
+        sql`concat_ws(' ', ${customersMirror.last_name}, ${customersMirror.first_name}) ILIKE ${pattern}`,
+        ilike(customersMirror.email, pattern),
+        ilike(customersMirror.phone, pattern),
+      ))
+      .orderBy(asc(customersMirror.first_name), asc(customersMirror.last_name), asc(customersMirror.bigcommerce_customer_id))
+      .limit(limit);
+  }
+
+  async getPosCustomerDirectoryPage(opts: {
+    updatedSince?: Date;
+    updatedUntil?: Date;
+    cursor?: number;
+    limit?: number;
+  }): Promise<{
+    rows: Array<{
+      id: number;
+      bigcommerce_customer_id: number;
+      first_name: string;
+      last_name: string;
+      email: string;
+      phone: string | null;
+      company: string | null;
+      customer_group_id: number | null;
+      customer_group_name: string | null;
+      is_active: boolean;
+      updated_at: Date;
+    }>;
+    hasMore: boolean;
+    nextCursor: number | null;
+  }> {
+    const limit = Math.min(Math.max(opts.limit ?? 500, 1), 1000);
+    const conditions: any[] = [];
+    if (opts.updatedSince) conditions.push(gt(customersMirror.updated_at, opts.updatedSince));
+    if (opts.updatedUntil) conditions.push(lte(customersMirror.updated_at, opts.updatedUntil));
+    if (opts.cursor !== undefined) conditions.push(gt(customersMirror.id, opts.cursor));
+    const where = conditions.length === 0
+      ? undefined
+      : conditions.length === 1
+        ? conditions[0]
+        : and(...conditions);
+    const rows = await db.select({
+      id: customersMirror.id,
+      bigcommerce_customer_id: customersMirror.bigcommerce_customer_id,
+      first_name: customersMirror.first_name,
+      last_name: customersMirror.last_name,
+      email: customersMirror.email,
+      phone: customersMirror.phone,
+      company: customersMirror.company,
+      customer_group_id: customersMirror.customer_group_id,
+      customer_group_name: customersMirror.customer_group_name,
+      is_active: customersMirror.is_active,
+      updated_at: customersMirror.updated_at,
+    })
+      .from(customersMirror)
+      .where(where)
+      .orderBy(asc(customersMirror.id))
+      .limit(limit + 1);
+    const pageRows = rows.slice(0, limit);
+    return {
+      rows: pageRows,
+      hasMore: rows.length > limit,
+      nextCursor: pageRows.length > 0 ? pageRows[pageRows.length - 1].id : null,
+    };
+  }
+
+  async upsertCrmCustomer(data: InsertCrmCustomer): Promise<CrmCustomer> {
+    const result = await db.insert(customersMirror).values(data)
+      .onConflictDoUpdate({
+        target: customersMirror.bigcommerce_customer_id,
+        // NOTE: SalesCore-only ERP columns (account_type, inactive_*, inactivated_by_user_id)
+        // are intentionally excluded here — BC sync must never overwrite them.
+        set: {
+          company: data.company,
+          first_name: data.first_name,
+          last_name: data.last_name,
+          email: data.email,
+          phone: data.phone,
+          customer_group_id: data.customer_group_id,
+          customer_group_name: data.customer_group_name,
+          billing_address: data.billing_address,
+          shipping_address: data.shipping_address,
+          created_date: data.created_date,
+          store_credit_balance: data.store_credit_balance,
+          address_type: data.address_type,
+          updated_at: new Date(),
+        },
+      }).returning();
+    return result[0];
+  }
+
+  async getCrmCustomerCount(): Promise<number> {
+    // Use fast approximate count from pg statistics (near-instant on large tables)
+    const result = await db.execute(sql.raw(
+      `SELECT COALESCE(n_live_tup, 0)::int AS cnt FROM pg_stat_user_tables WHERE relname = 'customers_mirror' LIMIT 1`
+    ));
+    const approx = (result.rows[0] as any)?.cnt;
+    if (approx != null && approx > 0) return approx;
+    // Fallback to exact count only when table is empty or stats not yet available
+    const exact = await db.select({ count: sql<number>`count(*)::int` }).from(customersMirror);
+    return exact[0]?.count ?? 0;
+  }
+
+  async getAllCrmCustomersForExport(opts: { search?: string; group?: string; state?: string; health?: string; customerType?: string; addressType?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; sortBy?: string; sortDir?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<(CrmCustomer & { sales_rep_name?: string | null; primary_rep_name?: string | null; secondary_rep_name?: string | null })[]> {
+    const { search, group, state, health, customerType, addressType, primaryRep, secondaryRep,
+            sortBy = "last_order_date", sortDir = "desc",
+            assignedRep, visibilityScope, visibilityUserId, accountType, status } = opts;
+    const primaryRepUser = alias(users, "primary_rep_user");
+    const secondaryRepUser = alias(users, "secondary_rep_user");
+    const baseWhere = this.buildCrmWhereClause(search, group, state, health, customerType, addressType, primaryRep, secondaryRep, accountType, status);
+    const repConds = this.buildCrmRepConditions(assignedRep, visibilityScope, visibilityUserId);
+    const allConds = [...(baseWhere ? [baseWhere] : []), ...repConds];
+    const where = allConds.length === 0 ? undefined : allConds.length === 1 ? allConds[0] : and(...allConds);
+    const orderExpr = this.buildCrmOrderBy(sortBy, sortDir);
+    const rows = await db.select({
+      c: customersMirror,
+      rep_name: users.name,
+      primary_rep_name: primaryRepUser.name,
+      secondary_rep_name: secondaryRepUser.name,
+      last_action_date: sql<string | null>`(SELECT n.created_at FROM crm_customer_notes n WHERE n.customer_id = customers_mirror.id ORDER BY n.created_at DESC LIMIT 1)`,
+      last_action_type: sql<string | null>`(SELECT n.note_type FROM crm_customer_notes n WHERE n.customer_id = customers_mirror.id ORDER BY n.created_at DESC LIMIT 1)`,
+    })
+      .from(customersMirror)
+      .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+      .leftJoin(users, eq(users.id, customerSalesRep.assigned_user_id))
+      .leftJoin(primaryRepUser, eq(primaryRepUser.id, customersMirror.primary_rep_id))
+      .leftJoin(secondaryRepUser, eq(secondaryRepUser.id, customersMirror.secondary_rep_id))
+      .where(where)
+      .orderBy(orderExpr as any);
+    return rows.map(r => ({
+      ...r.c,
+      sales_rep_name: r.rep_name ?? null,
+      primary_rep_name: r.primary_rep_name ?? null,
+      secondary_rep_name: r.secondary_rep_name ?? null,
+      last_action_date: r.last_action_date ?? null,
+      last_action_type: r.last_action_type ?? null,
+    }));
+  }
+
+  async updateCrmCustomerMasterFields(id: number, data: {
+    primary_rep_id?: number | null;
+    secondary_rep_id?: number | null;
+    customer_type?: string;
+    account_type?: string;
+    inactive_reason?: string | null;
+    inactive_at?: Date | null;
+    inactive_notes?: string | null;
+    inactivated_by_user_id?: number | null;
+    is_active?: boolean;
+  }): Promise<void> {
+    const updates: Record<string, any> = { updated_at: new Date() };
+    if ('primary_rep_id' in data) updates.primary_rep_id = data.primary_rep_id ?? null;
+    if ('secondary_rep_id' in data) updates.secondary_rep_id = data.secondary_rep_id ?? null;
+    if (data.customer_type !== undefined) updates.customer_type = data.customer_type;
+    if (data.account_type !== undefined) updates.account_type = data.account_type;
+    if ('inactive_reason' in data) updates.inactive_reason = data.inactive_reason ?? null;
+    if ('inactive_at' in data) updates.inactive_at = data.inactive_at ?? null;
+    if ('inactive_notes' in data) updates.inactive_notes = data.inactive_notes ?? null;
+    if ('inactivated_by_user_id' in data) updates.inactivated_by_user_id = data.inactivated_by_user_id ?? null;
+    if ('is_active' in data) updates.is_active = data.is_active;
+    await db.update(customersMirror).set(updates).where(eq(customersMirror.id, id));
+  }
+
+  async getCrmFilterOptions(): Promise<{ groups: string[]; states: string[]; reps: { id: number; name: string }[] }> {
+    const [groupRows, stateRows, repRows] = await Promise.all([
+      db.selectDistinct({ name: customersMirror.customer_group_name })
+        .from(customersMirror)
+        .where(isNotNull(customersMirror.customer_group_name))
+        .orderBy(asc(customersMirror.customer_group_name)),
+      db.selectDistinct({
+        state: sql<string>`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state')`,
+      })
+        .from(customersMirror)
+        .where(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') IS NOT NULL AND coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') != ''`)
+        .orderBy(sql`1`),
+      db.selectDistinct({ id: users.id, name: users.name })
+        .from(customerSalesRep)
+        .innerJoin(users, eq(users.id, customerSalesRep.assigned_user_id))
+        .orderBy(asc(users.name)),
+    ]);
+    return {
+      groups: (groupRows.map(r => r.name).filter(Boolean) as string[]),
+      states: (stateRows.map(r => r.state).filter(Boolean) as string[]).sort(),
+      reps: repRows.map(r => ({ id: r.id!, name: r.name! })),
+    };
+  }
+
+  async getCrmOrdersByBcCustomerId(bcCustomerId: number, limit = 10000): Promise<CrmOrder[]> {
+    return db.select().from(customerOrdersMirror)
+      .where(eq(customerOrdersMirror.bigcommerce_customer_id, bcCustomerId))
+      .orderBy(sql`${customerOrdersMirror.order_date} DESC NULLS LAST`)
+      .limit(limit);
+  }
+
+  async upsertCrmOrder(data: InsertCrmOrder): Promise<CrmOrder> {
+    const result = await db.insert(customerOrdersMirror).values(data)
+      .onConflictDoUpdate({
+        target: customerOrdersMirror.bigcommerce_order_id,
+        set: {
+          bigcommerce_customer_id: data.bigcommerce_customer_id,
+          order_number: data.order_number,
+          order_date: data.order_date,
+          order_total: data.order_total,
+          status: data.status,
+          payment_status: data.payment_status,
+          customer_name: data.customer_name,
+          customer_email: data.customer_email,
+          staff_notes: data.staff_notes,
+          customer_order_notes: data.customer_order_notes,
+          updated_at: new Date(),
+        },
+      }).returning();
+    return result[0];
+  }
+
+  async getCrmOrderCount(): Promise<number> {
+    const result = await db.execute(sql.raw(
+      `SELECT COALESCE(n_live_tup, 0)::int AS cnt FROM pg_stat_user_tables WHERE relname = 'customer_orders_mirror' LIMIT 1`
+    ));
+    const approx = (result.rows[0] as any)?.cnt;
+    if (approx != null && approx > 0) return approx;
+    const exact = await db.select({ count: sql<number>`count(*)::int` }).from(customerOrdersMirror);
+    return exact[0]?.count ?? 0;
+  }
+
+  async updateCrmCustomerStats(bcCustomerId: number, stats: { lifetime_orders: number; lifetime_revenue: string; last_order_date: Date | null }): Promise<void> {
+    await db.update(customersMirror).set({
+      lifetime_orders: stats.lifetime_orders,
+      lifetime_revenue: stats.lifetime_revenue,
+      last_order_date: stats.last_order_date,
+      updated_at: new Date(),
+    }).where(eq(customersMirror.bigcommerce_customer_id, bcCustomerId));
+  }
+
+  async getCrmSalesRep(customerId: number): Promise<CrmSalesRep | undefined> {
+    const result = await db.select().from(customerSalesRep).where(eq(customerSalesRep.customer_id, customerId));
+    return result[0];
+  }
+
+  async setCrmSalesRep(data: InsertCrmSalesRep): Promise<CrmSalesRep> {
+    await db.delete(customerSalesRep).where(eq(customerSalesRep.customer_id, data.customer_id));
+    const result = await db.insert(customerSalesRep).values(data).returning();
+    return result[0];
+  }
+
+  async removeCrmSalesRep(customerId: number): Promise<void> {
+    await db.delete(customerSalesRep).where(eq(customerSalesRep.customer_id, customerId));
+  }
+
+  async recalculateCrmCustomerStats(): Promise<{ updated: number; customers_in_orders: number; duration_ms: number }> {
+    const start = Date.now();
+
+    const countRes = await db
+      .select({ n: sql<number>`count(distinct ${customerOrdersMirror.bigcommerce_customer_id})::int` })
+      .from(customerOrdersMirror);
+    const customers_in_orders = countRes[0]?.n ?? 0;
+
+    // Load configured thresholds
+    const thresholds = await this.getHealthThresholds();
+    const healthyDays = thresholds.healthy_days;
+    const watchDays   = thresholds.watch_days;
+    const atRiskDays  = thresholds.at_risk_days;
+
+    // Update customers that have orders — compute stats + account_health in single pass
+    const result = await db.execute(sql`
+      UPDATE customers_mirror cm
+      SET
+        lifetime_orders  = agg.order_count,
+        lifetime_revenue = agg.total_revenue,
+        last_order_date  = agg.last_order,
+        account_health   = CASE
+          WHEN agg.last_order IS NULL THEN 'Lost'
+          WHEN (EXTRACT(EPOCH FROM (NOW() - agg.last_order)) / 86400)::int <= ${healthyDays} THEN 'Healthy'
+          WHEN (EXTRACT(EPOCH FROM (NOW() - agg.last_order)) / 86400)::int <= ${watchDays} THEN 'Watch'
+          WHEN (EXTRACT(EPOCH FROM (NOW() - agg.last_order)) / 86400)::int <= ${atRiskDays} THEN 'At Risk'
+          ELSE 'Lost'
+        END,
+        updated_at       = NOW()
+      FROM (
+        SELECT
+          bigcommerce_customer_id,
+          COUNT(*)::int                 AS order_count,
+          COALESCE(SUM(order_total), 0) AS total_revenue,
+          MAX(order_date)               AS last_order
+        FROM customer_orders_mirror
+        GROUP BY bigcommerce_customer_id
+      ) agg
+      WHERE cm.bigcommerce_customer_id = agg.bigcommerce_customer_id
+    `);
+
+    // Customers with no orders at all → Lost
+    await db.execute(sql`
+      UPDATE customers_mirror
+      SET account_health = 'Lost', updated_at = NOW()
+      WHERE bigcommerce_customer_id NOT IN (
+        SELECT DISTINCT bigcommerce_customer_id FROM customer_orders_mirror
+      )
+    `);
+
+    const updated = Number((result as any).count ?? (result as any).rowCount ?? 0);
+    const duration_ms = Date.now() - start;
+    return { updated, customers_in_orders, duration_ms };
+  }
+
+  // ─── CRM Notes ────────────────────────────────────────────────────────────────
+
+  async createCrmNote(data: InsertCrmNote): Promise<CrmNote> {
+    const result = await db.insert(crmCustomerNotes).values(data).returning();
+    return result[0];
+  }
+
+  async getCrmNotes(customerId: number): Promise<(CrmNote & { created_by_name?: string | null })[]> {
+    const rows = await db.select({ n: crmCustomerNotes, u: users })
+      .from(crmCustomerNotes)
+      .leftJoin(users, eq(users.id, crmCustomerNotes.created_by))
+      .where(and(eq(crmCustomerNotes.customer_id, customerId), eq(crmCustomerNotes.activity_type, 'note')))
+      .orderBy(desc(crmCustomerNotes.created_at));
+    return rows.map(r => ({ ...r.n, created_by_name: r.u?.name ?? null }));
+  }
+
+  async getCrmNoteById(id: number): Promise<CrmNote | undefined> {
+    const rows = await db.select().from(crmCustomerNotes).where(eq(crmCustomerNotes.id, id)).limit(1);
+    return rows[0];
+  }
+
+  async updateCrmNote(id: number, data: { note?: string; note_type?: string; order_id?: number | null }): Promise<CrmNote> {
+    const result = await db.update(crmCustomerNotes)
+      .set({ ...data, updated_at: new Date() })
+      .where(eq(crmCustomerNotes.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteCrmNote(id: number): Promise<void> {
+    await db.delete(crmCustomerNotes).where(eq(crmCustomerNotes.id, id));
+  }
+
+  async getAllCrmNotes(opts: { search?: string; type?: string; createdBy?: number; customerId?: number; orderId?: number; customerGroup?: string; state?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<{ notes: any[]; total: number }> {
+    const { search, type, createdBy, customerId, orderId, customerGroup, state, dateFrom, dateTo, limit = 50, offset = 0 } = opts;
+    const conditions: any[] = [];
+
+    if (search?.trim()) {
+      const s = `%${search.trim()}%`;
+      conditions.push(or(
+        ilike(customersMirror.company, s),
+        ilike(customersMirror.first_name, s),
+        ilike(customersMirror.last_name, s),
+        ilike(crmCustomerNotes.note, s),
+      ));
+    }
+    if (type) conditions.push(eq(crmCustomerNotes.note_type, type));
+    if (createdBy) conditions.push(eq(crmCustomerNotes.created_by, createdBy));
+    if (customerId) conditions.push(eq(crmCustomerNotes.customer_id, customerId));
+    if (orderId) conditions.push(eq(crmCustomerNotes.order_id, orderId));
+    if (customerGroup) conditions.push(eq(customersMirror.customer_group_name, customerGroup));
+    if (state) {
+      conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${state}`);
+    }
+    if (dateFrom) conditions.push(sql`${crmCustomerNotes.created_at} >= ${dateFrom}::timestamptz`);
+    if (dateTo) conditions.push(sql`${crmCustomerNotes.created_at} <= ${dateTo}::timestamptz + interval '1 day'`);
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(crmCustomerNotes)
+        .innerJoin(customersMirror, eq(customersMirror.id, crmCustomerNotes.customer_id))
+        .leftJoin(users, eq(users.id, crmCustomerNotes.created_by))
+        .where(where),
+      db.select({
+        n: crmCustomerNotes,
+        customer_company: customersMirror.company,
+        customer_first_name: customersMirror.first_name,
+        customer_last_name: customersMirror.last_name,
+        customer_bc_id: customersMirror.bigcommerce_customer_id,
+        customer_group_name: customersMirror.customer_group_name,
+        billing_address: customersMirror.billing_address,
+        shipping_address: customersMirror.shipping_address,
+        created_by_name: users.name,
+      })
+        .from(crmCustomerNotes)
+        .innerJoin(customersMirror, eq(customersMirror.id, crmCustomerNotes.customer_id))
+        .leftJoin(users, eq(users.id, crmCustomerNotes.created_by))
+        .where(where)
+        .orderBy(desc(crmCustomerNotes.created_at))
+        .limit(limit)
+        .offset(offset),
+    ]);
+
+    return {
+      notes: rows.map(r => ({
+        ...r.n,
+        customer_company: r.customer_company,
+        customer_first_name: r.customer_first_name,
+        customer_last_name: r.customer_last_name,
+        customer_bc_id: r.customer_bc_id,
+        customer_group_name: r.customer_group_name,
+        created_by_name: r.created_by_name ?? null,
+      })),
+      total: countRows[0]?.count ?? 0,
+    };
+  }
+
+  async getCrmNotesKpis(opts: {
+    search?: string; createdBy?: number; customerGroup?: string;
+    state?: string; dateFrom?: string; dateTo?: string;
+  } = {}): Promise<{ notesToday: number; followUps: number; salesCalls: number; issues: number; internalNotes: number }> {
+    const { search, createdBy, customerGroup, state, dateFrom, dateTo } = opts;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const baseConds: any[] = [];
+    if (search?.trim()) {
+      const s = `%${search.trim()}%`;
+      baseConds.push(or(
+        ilike(customersMirror.company, s),
+        ilike(customersMirror.first_name, s),
+        ilike(customersMirror.last_name, s),
+        ilike(crmCustomerNotes.note, s),
+      ));
+    }
+    if (createdBy) baseConds.push(eq(crmCustomerNotes.created_by, createdBy));
+    if (customerGroup) baseConds.push(eq(customersMirror.customer_group_name, customerGroup));
+    if (state) baseConds.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${state}`);
+    if (dateFrom) baseConds.push(sql`${crmCustomerNotes.created_at} >= ${dateFrom}::timestamptz`);
+    if (dateTo) baseConds.push(sql`${crmCustomerNotes.created_at} <= ${dateTo}::timestamptz + interval '1 day'`);
+
+    const todayConds = [...baseConds, sql`${crmCustomerNotes.created_at} >= ${todayStart.toISOString()}::timestamptz`];
+    const baseWhere = baseConds.length > 0 ? and(...baseConds) : undefined;
+    const todayWhere = and(...todayConds);
+
+    const [todayCount, typeRows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(crmCustomerNotes)
+        .innerJoin(customersMirror, eq(customersMirror.id, crmCustomerNotes.customer_id))
+        .where(todayWhere),
+      db.select({ type: crmCustomerNotes.note_type, count: sql<number>`count(*)::int` })
+        .from(crmCustomerNotes)
+        .innerJoin(customersMirror, eq(customersMirror.id, crmCustomerNotes.customer_id))
+        .where(baseWhere)
+        .groupBy(crmCustomerNotes.note_type),
+    ]);
+
+    const typeCounts: Record<string, number> = {};
+    for (const r of typeRows) typeCounts[r.type] = r.count;
+
+    return {
+      notesToday: todayCount[0]?.count ?? 0,
+      followUps: typeCounts['Follow Up'] ?? 0,
+      salesCalls: typeCounts['Sales'] ?? 0,
+      issues: typeCounts['Issue'] ?? 0,
+      internalNotes: typeCounts['Internal'] ?? 0,
+    };
+  }
+
+  // ─── CRM Timeline ─────────────────────────────────────────────────────────────
+
+  async getCrmTimeline(customerId: number): Promise<any[]> {
+    const custRow = await db.select({ bc_id: customersMirror.bigcommerce_customer_id })
+      .from(customersMirror).where(eq(customersMirror.id, customerId)).limit(1);
+    if (!custRow[0]) return [];
+    const bcId = custRow[0].bc_id;
+
+    const auditActions = [
+      'sales_rep_assigned', 'sales_rep_removed', 'sales_rep_reassigned',
+      'primary_rep_assigned', 'primary_rep_changed', 'primary_rep_removed',
+      'secondary_rep_assigned', 'secondary_rep_changed', 'secondary_rep_removed',
+      'customer_type_changed', 'address_type_updated',
+      'note_created', 'note_edited', 'note_deleted',
+      'order_note_created', 'staff_note_updated', 'customer_note_updated',
+      'draft_invoice_sent', 'order_form_sent',
+    ];
+
+    const [orders, notes, auditRows] = await Promise.all([
+      db.select().from(customerOrdersMirror)
+        .where(eq(customerOrdersMirror.bigcommerce_customer_id, bcId))
+        .orderBy(desc(customerOrdersMirror.order_date))
+        .limit(50),
+      db.select({ n: crmCustomerNotes, u: users })
+        .from(crmCustomerNotes)
+        .leftJoin(users, eq(users.id, crmCustomerNotes.created_by))
+        .where(eq(crmCustomerNotes.customer_id, customerId))
+        .orderBy(desc(crmCustomerNotes.created_at)),
+      db.select({ a: crmAuditLog, u: users })
+        .from(crmAuditLog)
+        .leftJoin(users, eq(users.id, crmAuditLog.user_id))
+        .where(and(
+          eq(crmAuditLog.customer_id, customerId),
+          inArray(crmAuditLog.action, auditActions),
+        ))
+        .orderBy(desc(crmAuditLog.created_at))
+        .limit(50),
+    ]);
+
+    const timeline: any[] = [
+      ...orders.map(o => ({
+        id: `order-${o.id}`,
+        type: 'order',
+        date: o.order_date?.toISOString() ?? o.created_at.toISOString(),
+        order_number: o.order_number,
+        order_total: o.order_total,
+        status: o.status,
+        bc_order_id: o.bigcommerce_order_id,
+        staff_notes: o.staff_notes,
+        customer_order_notes: o.customer_order_notes,
+      })),
+      ...notes.map(row => ({
+        id: `note-${row.n.id}`,
+        type: 'note',
+        date: row.n.created_at.toISOString(),
+        note_id: row.n.id,
+        note_type: row.n.note_type,
+        note_content: row.n.note,
+        order_id: row.n.order_id,
+        created_by_name: row.u?.name ?? null,
+      })),
+      ...auditRows.map(row => ({
+        id: `audit-${row.a.id}`,
+        type: 'audit',
+        date: row.a.created_at.toISOString(),
+        action: row.a.action,
+        detail: row.a.detail,
+        user_id: row.a.user_id,
+        user_name: row.u?.name ?? null,
+      })),
+    ];
+
+    return timeline.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }
+
+  // ─── CRM Reactivation ─────────────────────────────────────────────────────────
+
+  async ensureReactivationStages(): Promise<CrmReactivationStage[]> {
+    const existing = await this.getReactivationStages(true);
+    if (existing.length > 0) return existing;
+
+    const defaults = [
+      { name: "New", color: "#64748b", position: 0, is_active: true, is_default: true },
+      { name: "Contacted", color: "#2563eb", position: 1, is_active: true, is_default: false },
+      { name: "Engaged", color: "#7c3aed", position: 2, is_active: true, is_default: false },
+      { name: "Pledge Secured", color: "#d97706", position: 3, is_active: true, is_default: false },
+      { name: "Reactivated", color: "#059669", position: 4, is_active: true, is_default: false },
+      { name: "Closed", color: "#dc2626", position: 5, is_active: true, is_default: false },
+    ];
+    for (const stage of defaults) {
+      await db.insert(crmReactivationStages).values(stage).onConflictDoNothing({ target: crmReactivationStages.name });
+    }
+    return this.getReactivationStages(true);
+  }
+
+  async getReactivationStages(includeInactive = false): Promise<CrmReactivationStage[]> {
+    const rows = await db.select().from(crmReactivationStages)
+      .where(includeInactive ? undefined : eq(crmReactivationStages.is_active, true))
+      .orderBy(asc(crmReactivationStages.position), asc(crmReactivationStages.id));
+    return rows;
+  }
+
+  async saveReactivationStages(stages: Array<Partial<CrmReactivationStage> & { name: string }>): Promise<CrmReactivationStage[]> {
+    const cleaned = stages.map((stage, index) => ({
+      id: stage.id,
+      name: String(stage.name ?? "").trim(),
+      color: String(stage.color ?? "#64748b"),
+      position: Number.isInteger(stage.position) ? Number(stage.position) : index,
+      is_active: stage.is_active !== false,
+      is_default: stage.is_default === true,
+    }));
+    if (!cleaned.length || cleaned.some(stage => !stage.name)) throw new Error("At least one named stage is required");
+    if (cleaned.filter(stage => stage.is_active).length === 0) throw new Error("At least one active stage is required");
+    const defaultCount = cleaned.filter(stage => stage.is_default && stage.is_active).length;
+    if (defaultCount > 1) throw new Error("Only one default stage is allowed");
+    if (defaultCount === 0) {
+      const firstActive = cleaned.find(stage => stage.is_active);
+      if (firstActive) firstActive.is_default = true;
+    }
+
+    const existing = await this.getReactivationStages(true);
+    const submittedIds = new Set(cleaned.flatMap(stage => stage.id ? [stage.id] : []));
+    await db.update(crmReactivationStages).set({ is_default: false, updated_at: new Date() });
+    for (const stage of cleaned) {
+      const values = {
+        name: stage.name,
+        color: stage.color,
+        position: stage.position,
+        is_active: stage.is_active,
+        is_default: stage.is_default,
+        updated_at: new Date(),
+      };
+      if (stage.id && existing.some(current => current.id === stage.id)) {
+        await db.update(crmReactivationStages).set(values).where(eq(crmReactivationStages.id, stage.id));
+      } else {
+        await db.insert(crmReactivationStages).values(values);
+      }
+    }
+    for (const stage of existing) {
+      if (!submittedIds.has(stage.id)) {
+        await db.update(crmReactivationStages)
+          .set({ is_active: false, is_default: false, updated_at: new Date() })
+          .where(eq(crmReactivationStages.id, stage.id));
+      }
+    }
+    return this.getReactivationStages(true);
+  }
+
+  async getReactivationCustomers(opts: { search?: string; group?: string; state?: string; health?: string; rep?: number; stageId?: number; source?: string; overdue?: boolean; sortBy?: string; sortDir?: string; limit?: number; offset?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<{ customers: any[]; total: number; summary: { stage_id: number; count: number; expected_value: string; overdue: number }[] }> {
+    const { search, group, state, health, rep, stageId, source = "at_risk", overdue, sortBy = "last_order_date", sortDir = "asc", limit = 50, offset = 0, visibilityScope, visibilityUserId } = opts;
+    const stages = await this.ensureReactivationStages();
+    const defaultStage = stages.find(stage => stage.is_default && stage.is_active) ?? stages.find(stage => stage.is_active) ?? stages[0];
+    if (!defaultStage) throw new Error("No reactivation stages configured");
+    const healthFilter = health && ["At Risk", "Lost", "Watch", "Healthy"].includes(health) ? [health] : ["At Risk", "Lost"];
+    const conditions: any[] = [];
+
+    if (source === "inactive") conditions.push(isNotNull(customersMirror.inactive_at));
+    else if (source === "all") conditions.push(or(inArray(customersMirror.account_health, healthFilter), isNotNull(customersMirror.inactive_at)));
+    else conditions.push(inArray(customersMirror.account_health, healthFilter));
+    if (health) conditions.push(inArray(customersMirror.account_health, healthFilter));
+
+    if (search?.trim()) {
+      const s = `%${search.trim()}%`;
+      conditions.push(or(
+        ilike(customersMirror.company, s),
+        ilike(customersMirror.first_name, s),
+        ilike(customersMirror.last_name, s),
+        ilike(customersMirror.email, s),
+        ilike(sql`concat_ws(' ', ${customersMirror.first_name}, ${customersMirror.last_name})`, s),
+      ));
+    }
+    if (group) conditions.push(eq(customersMirror.customer_group_name, group));
+    if (state) {
+      if (state === "Unknown") {
+        conditions.push(sql`(coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') IS NULL OR coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = '')`);
+      } else {
+        conditions.push(sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') = ${state}`);
+      }
+    }
+    if (rep) conditions.push(eq(customerSalesRep.assigned_user_id, rep));
+    if (stageId) conditions.push(eq(crmReactivationCases.stage_id, stageId));
+    if (overdue) conditions.push(sql`${crmReactivationCases.next_action_date} IS NOT NULL AND ${crmReactivationCases.next_action_date} < now()`);
+    conditions.push(...this.buildCrmRepConditions(undefined, visibilityScope, visibilityUserId));
+    const where = and(...conditions);
+    const ownerUser = alias(users, "reactivation_owner");
+    const caseStage = alias(crmReactivationStages, "reactivation_stage");
+    const orderColumn = sortBy === "company" ? customersMirror.company
+      : sortBy === "first_name" ? customersMirror.first_name
+      : sortBy === "lifetime_orders" ? customersMirror.lifetime_orders
+      : sortBy === "lifetime_revenue" ? customersMirror.lifetime_revenue
+      : sortBy === "next_action_date" ? crmReactivationCases.next_action_date
+      : customersMirror.last_order_date;
+    const orderExpr = sortDir === "desc" ? desc(orderColumn as any) : asc(orderColumn as any);
+
+    const fromQuery = (selection: any) => selection
+      .from(customersMirror)
+      .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+      .leftJoin(users, eq(users.id, customerSalesRep.assigned_user_id))
+      .leftJoin(crmReactivationCases, eq(crmReactivationCases.customer_id, customersMirror.id))
+      .leftJoin(caseStage, eq(caseStage.id, crmReactivationCases.stage_id))
+      .leftJoin(ownerUser, eq(ownerUser.id, crmReactivationCases.owner_user_id));
+
+    const [countRows, rows, summaryRecords] = await Promise.all([
+      fromQuery(db.select({ count: sql<number>`count(distinct ${customersMirror.id})::int` })).where(where),
+      fromQuery(db.select({
+        c: customersMirror,
+        rep_name: users.name,
+        reactivation_case_id: crmReactivationCases.id,
+        reactivation_stage_id: crmReactivationCases.stage_id,
+        reactivation_stage_name: caseStage.name,
+        reactivation_stage_color: caseStage.color,
+        reactivation_stage_position: caseStage.position,
+        reactivation_owner_id: crmReactivationCases.owner_user_id,
+        reactivation_owner_name: ownerUser.name,
+        pledge_status: crmReactivationCases.pledge_status,
+        pledge_notes: crmReactivationCases.pledge_notes,
+        expected_order_date: crmReactivationCases.expected_order_date,
+        expected_value: crmReactivationCases.expected_value,
+        next_action_date: crmReactivationCases.next_action_date,
+        next_action_note: crmReactivationCases.next_action_note,
+        reactivation_updated_at: crmReactivationCases.updated_at,
+      })).where(where).orderBy(orderExpr as any).limit(limit).offset(offset),
+      fromQuery(db.select({
+        customer_id: customersMirror.id,
+        stage_id: crmReactivationCases.stage_id,
+        expected_value: crmReactivationCases.expected_value,
+        next_action_date: crmReactivationCases.next_action_date,
+      })).where(where),
+    ]);
+    const summaryByStage = new Map<number, { stage_id: number; count: number; expected_value: number; overdue: number }>();
+    for (const record of summaryRecords) {
+      const stageIdForSummary = record.stage_id ?? defaultStage.id;
+      if (!summaryByStage.has(record.customer_id)) {
+        const current = summaryByStage.get(stageIdForSummary) ?? { stage_id: stageIdForSummary, count: 0, expected_value: 0, overdue: 0 };
+        current.count += 1;
+        current.expected_value += Number(record.expected_value ?? 0);
+        if (record.next_action_date && new Date(record.next_action_date).getTime() < Date.now()) current.overdue += 1;
+        summaryByStage.set(stageIdForSummary, current);
+      }
+    }
+
+    return {
+      customers: rows.map((row: any) => ({
+        ...row.c,
+        sales_rep_name: row.rep_name ?? null,
+        reactivation_case_id: row.reactivation_case_id ?? null,
+        reactivation_stage_id: row.reactivation_stage_id ?? defaultStage.id,
+        reactivation_stage_name: row.reactivation_stage_name ?? defaultStage.name,
+        reactivation_stage_color: row.reactivation_stage_color ?? defaultStage.color,
+        reactivation_stage_position: row.reactivation_stage_position ?? defaultStage.position,
+        reactivation_owner_id: row.reactivation_owner_id ?? null,
+        reactivation_owner_name: row.reactivation_owner_name ?? row.rep_name ?? null,
+        pledge_status: row.pledge_status ?? "not_started",
+        pledge_notes: row.pledge_notes ?? null,
+        expected_order_date: row.expected_order_date ?? null,
+        expected_value: row.expected_value ?? null,
+        next_action_date: row.next_action_date ?? null,
+        next_action_note: row.next_action_note ?? null,
+        reactivation_updated_at: row.reactivation_updated_at ?? null,
+      })),
+      total: countRows[0]?.count ?? 0,
+      summary: Array.from(summaryByStage.values()).map(summary => ({ ...summary, expected_value: summary.expected_value.toFixed(2) })),
+    };
+  }
+
+  async getReactivationCase(customerId: number): Promise<{ case: CrmReactivationCase | null; stage: CrmReactivationStage | null; owner_name: string | null; history: any[] }> {
+    const ownerUser = alias(users, "reactivation_case_owner");
+    const current = await db.select({
+      case: crmReactivationCases,
+      stage: crmReactivationStages,
+      owner_name: ownerUser.name,
+    }).from(crmReactivationCases)
+      .leftJoin(crmReactivationStages, eq(crmReactivationStages.id, crmReactivationCases.stage_id))
+      .leftJoin(ownerUser, eq(ownerUser.id, crmReactivationCases.owner_user_id))
+      .where(eq(crmReactivationCases.customer_id, customerId))
+      .limit(1);
+    const fromStage = alias(crmReactivationStages, "reactivation_history_from");
+    const toStage = alias(crmReactivationStages, "reactivation_history_to");
+    const history = await db.select({
+      h: crmReactivationHistory,
+      from_stage_name: fromStage.name,
+      to_stage_name: toStage.name,
+    }).from(crmReactivationHistory)
+      .leftJoin(fromStage, eq(fromStage.id, crmReactivationHistory.from_stage_id))
+      .leftJoin(toStage, eq(toStage.id, crmReactivationHistory.to_stage_id))
+      .where(eq(crmReactivationHistory.customer_id, customerId))
+      .orderBy(desc(crmReactivationHistory.created_at));
+    return {
+      case: current[0]?.case ?? null,
+      stage: current[0]?.stage ?? null,
+      owner_name: current[0]?.owner_name ?? null,
+      history: history.map(row => ({ ...row.h, from_stage_name: row.from_stage_name, to_stage_name: row.to_stage_name })),
+    };
+  }
+
+  async updateReactivationCase(customerId: number, userId: number, data: { stage_id?: number; owner_user_id?: number | null; pledge_status?: string; pledge_notes?: string | null; expected_order_date?: Date | null; expected_value?: string | null; next_action_date?: Date | null; next_action_note?: string | null }): Promise<any> {
+    const stages = await this.ensureReactivationStages();
+    const defaultStage = stages.find(stage => stage.is_default && stage.is_active) ?? stages.find(stage => stage.is_active) ?? stages[0];
+    if (!defaultStage) throw new Error("No reactivation stages configured");
+    const existing = await db.select().from(crmReactivationCases)
+      .where(eq(crmReactivationCases.customer_id, customerId)).limit(1);
+    const before = existing[0] ?? null;
+    const nextStageId = data.stage_id ?? before?.stage_id ?? defaultStage.id;
+    const nextStage = stages.find(stage => stage.id === nextStageId);
+    if (!nextStage) throw new Error("Invalid reactivation stage");
+    if (!nextStage.is_active && nextStage.id !== before?.stage_id) throw new Error("Cannot move a case to an archived stage");
+
+    const values: Record<string, any> = {
+      stage_id: nextStageId,
+      updated_by: userId,
+      updated_at: new Date(),
+    };
+    for (const field of ["owner_user_id", "pledge_status", "pledge_notes", "expected_order_date", "expected_value", "next_action_date", "next_action_note"] as const) {
+      if (field in data) values[field] = data[field] ?? null;
+    }
+
+    let saved: CrmReactivationCase;
+    if (before) {
+      const result = await db.update(crmReactivationCases).set(values).where(eq(crmReactivationCases.id, before.id)).returning();
+      saved = result[0];
+    } else {
+      const result = await db.insert(crmReactivationCases).values({
+        customer_id: customerId,
+        stage_id: nextStageId,
+        owner_user_id: data.owner_user_id ?? null,
+        pledge_status: data.pledge_status ?? "not_started",
+        pledge_notes: data.pledge_notes ?? null,
+        expected_order_date: data.expected_order_date ?? null,
+        expected_value: data.expected_value ?? null,
+        next_action_date: data.next_action_date ?? null,
+        next_action_note: data.next_action_note ?? null,
+        created_by: userId,
+        updated_by: userId,
+      }).returning();
+      saved = result[0];
+    }
+
+    const changedFields = Object.keys(data).filter(field => (before as any)?.[field] !== (data as any)[field]);
+    const action = before && before.stage_id !== nextStageId ? "reactivation_stage_changed" : before ? "reactivation_case_updated" : "reactivation_case_created";
+    await db.insert(crmReactivationHistory).values({
+      case_id: saved.id,
+      customer_id: customerId,
+      from_stage_id: before?.stage_id ?? null,
+      to_stage_id: nextStageId,
+      action,
+      detail: { changed_fields: changedFields, pledge_status: saved.pledge_status, next_action_date: saved.next_action_date },
+      user_id: userId,
+    });
+    return this.getReactivationCase(customerId);
+  }
+
+  // ─── CRM Metrics ──────────────────────────────────────────────────────────────
+
+  async getCrmMetrics(opts: { search?: string; group?: string; state?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; customerType?: string; addressType?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number; inactive: number; by_account_type: Record<string, number> }> {
+    const { search, group, state, primaryRep, secondaryRep, customerType, addressType, assignedRep, visibilityScope, visibilityUserId, accountType, status } = opts;
+    // Base where using 'both' status so we can separately count inactive
+    const baseWhere = this.buildCrmWhereClause(search, group, state, undefined, customerType, addressType, primaryRep, secondaryRep, accountType, status ?? 'both');
+    const repConds = this.buildCrmRepConditions(assignedRep, visibilityScope, visibilityUserId);
+    const needsRepJoin = repConds.length > 0;
+    const allConds = [...(baseWhere ? [baseWhere] : []), ...repConds];
+    const where = allConds.length === 0 ? undefined : allConds.length === 1 ? allConds[0] : and(...allConds);
+
+    const [healthRows, accountTypeRows, inactiveRows] = await Promise.all([
+      needsRepJoin
+        ? db.select({ account_health: customersMirror.account_health, count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+            .where(where ? and(where, isNull(customersMirror.inactive_at)) : isNull(customersMirror.inactive_at))
+            .groupBy(customersMirror.account_health)
+        : db.select({ account_health: customersMirror.account_health, count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .where(where ? and(where, isNull(customersMirror.inactive_at)) : isNull(customersMirror.inactive_at))
+            .groupBy(customersMirror.account_health),
+      needsRepJoin
+        ? db.select({ account_type: customersMirror.account_type, count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+            .where(where)
+            .groupBy(customersMirror.account_type)
+        : db.select({ account_type: customersMirror.account_type, count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .where(where)
+            .groupBy(customersMirror.account_type),
+      needsRepJoin
+        ? db.select({ count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+            .where(where ? and(where, isNotNull(customersMirror.inactive_at)) : isNotNull(customersMirror.inactive_at))
+        : db.select({ count: sql<number>`count(*)::int` })
+            .from(customersMirror)
+            .where(where ? and(where, isNotNull(customersMirror.inactive_at)) : isNotNull(customersMirror.inactive_at)),
+    ]);
+
+    const counts: Record<string, number> = {};
+    for (const r of healthRows) counts[r.account_health ?? '__null__'] = r.count;
+
+    const healthy = counts['Healthy'] ?? 0;
+    const watch = counts['Watch'] ?? 0;
+    const at_risk = counts['At Risk'] ?? 0;
+    const lost = (counts['Lost'] ?? 0) + (counts['__null__'] ?? 0);
+    const total = healthy + watch + at_risk + lost;
+    const inactive = inactiveRows[0]?.count ?? 0;
+
+    const by_account_type: Record<string, number> = {};
+    for (const r of accountTypeRows) by_account_type[r.account_type ?? 'customer'] = r.count;
+
+    return { total, healthy, watch, at_risk, lost, needs_follow_up: at_risk + lost, inactive, by_account_type };
+  }
+
+  // ─── CRM Todos (rows in crm_customer_notes with activity_type='todo') ─────────
+
+  async getCrmTodos(opts: { userId?: number; allUsers?: boolean; status?: string; customerId?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<any[]> {
+    const { userId, allUsers, status, customerId, visibilityScope, visibilityUserId } = opts;
+    const assignedUser = alias(users, "assigned_user");
+    const createdUser = alias(users, "created_user");
+    const conditions: any[] = [eq(crmCustomerNotes.activity_type, 'todo')];
+    if (customerId) conditions.push(eq(crmCustomerNotes.customer_id, customerId));
+    if (!allUsers && userId) conditions.push(eq(crmCustomerNotes.assigned_to_user_id, userId));
+    if (status === 'pending') conditions.push(isNull(crmCustomerNotes.completed_at));
+    if (status === 'completed') conditions.push(isNotNull(crmCustomerNotes.completed_at));
+    const where = conditions.length === 1 ? conditions[0] : and(...conditions);
+
+    const rows = await db.select({
+      n: crmCustomerNotes,
+      customer_company: customersMirror.company,
+      customer_first_name: customersMirror.first_name,
+      customer_last_name: customersMirror.last_name,
+      customer_bc_id: customersMirror.bigcommerce_customer_id,
+      assigned_to_name: assignedUser.name,
+      created_by_name: createdUser.name,
+    })
+      .from(crmCustomerNotes)
+      .leftJoin(customersMirror, eq(customersMirror.id, crmCustomerNotes.customer_id))
+      .leftJoin(assignedUser, eq(assignedUser.id, crmCustomerNotes.assigned_to_user_id))
+      .leftJoin(createdUser, eq(createdUser.id, crmCustomerNotes.created_by))
+      .where(where)
+      .orderBy(sql`${crmCustomerNotes.due_date} ASC NULLS LAST`, desc(crmCustomerNotes.created_at));
+
+    const now = new Date();
+    return rows.map(r => {
+      const isOverdue = r.n.due_date && !r.n.completed_at && new Date(r.n.due_date) < now;
+      return {
+        ...r.n,
+        customer_company: r.customer_company ?? null,
+        customer_first_name: r.customer_first_name ?? null,
+        customer_last_name: r.customer_last_name ?? null,
+        customer_bc_id: r.customer_bc_id ?? null,
+        assigned_to_name: r.assigned_to_name ?? null,
+        created_by_name: r.created_by_name ?? null,
+        is_overdue: !!isOverdue,
+        todo_status: r.n.completed_at ? 'completed' : 'pending',
+      };
+    });
+  }
+
+  async createCrmTodo(data: { customer_id?: number | null; title: string; note: string; priority?: string; due_date?: Date | null; assigned_to_user_id?: number | null; reminder_at?: Date | null; created_by: number }): Promise<any> {
+    const result = await db.insert(crmCustomerNotes).values({
+      customer_id: data.customer_id as any,
+      activity_type: 'todo',
+      title: data.title,
+      note: data.note,
+      priority: data.priority ?? 'medium',
+      due_date: data.due_date ?? null,
+      assigned_to_user_id: data.assigned_to_user_id ?? null,
+      reminder_at: data.reminder_at ?? null,
+      todo_status: 'pending',
+      created_by: data.created_by,
+      note_type: 'To Do',
+    }).returning();
+    return result[0];
+  }
+
+  async updateCrmTodo(id: number, data: { title?: string; note?: string; priority?: string; due_date?: Date | null; assigned_to_user_id?: number | null; reminder_at?: Date | null; todo_status?: string; completed_at?: Date | null }): Promise<any> {
+    const updates: Record<string, any> = { updated_at: new Date() };
+    if (data.title !== undefined) updates.title = data.title;
+    if (data.note !== undefined) updates.note = data.note;
+    if (data.priority !== undefined) updates.priority = data.priority;
+    if ('due_date' in data) updates.due_date = data.due_date ?? null;
+    if ('assigned_to_user_id' in data) updates.assigned_to_user_id = data.assigned_to_user_id ?? null;
+    if ('reminder_at' in data) updates.reminder_at = data.reminder_at ?? null;
+    if ('completed_at' in data) updates.completed_at = data.completed_at ?? null;
+    if (data.todo_status !== undefined) updates.todo_status = data.todo_status;
+    const result = await db.update(crmCustomerNotes).set(updates).where(eq(crmCustomerNotes.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteCrmTodo(id: number): Promise<void> {
+    await db.delete(crmCustomerNotes).where(and(eq(crmCustomerNotes.id, id), eq(crmCustomerNotes.activity_type, 'todo')));
+  }
+
+  // ─── CRM Users ────────────────────────────────────────────────────────────────
+
+  async getCrmUsers(): Promise<{ id: number; name: string }[]> {
+    const rows = await db.select({ id: users.id, name: users.name })
+      .from(users)
+      .where(eq(users.is_enabled, true))
+      .orderBy(asc(users.name));
+    return rows.map(r => ({ id: r.id, name: r.name ?? '' }));
+  }
+
+  // ─── Attendance ──────────────────────────────────────────────────────────────
+
+  async getAttendanceHomeLocation(userId: number): Promise<{ latitude: string | null; longitude: string | null; setAt: Date | null }> {
+    const [row] = await db.select({
+      latitude: users.attendance_home_latitude,
+      longitude: users.attendance_home_longitude,
+      setAt: users.attendance_home_set_at,
+    }).from(users).where(eq(users.id, userId)).limit(1);
+    return {
+      latitude: row?.latitude ?? null,
+      longitude: row?.longitude ?? null,
+      setAt: row?.setAt ?? null,
+    };
+  }
+
+  async getAttendanceById(id: number): Promise<AttendanceSession | undefined> {
+    const rows = await db.select().from(attendanceSessions).where(eq(attendanceSessions.id, id)).limit(1);
+    return rows[0];
+  }
+
+  async getActiveAttendanceForUser(userId: number): Promise<AttendanceSession | undefined> {
+    const rows = await db.select().from(attendanceSessions)
+      .where(and(eq(attendanceSessions.user_id, userId), eq(attendanceSessions.status, "active")))
+      .orderBy(desc(attendanceSessions.time_in))
+      .limit(1);
+    return rows[0];
+  }
+
+  async getAttendanceSessionsForDate(userId: number, workDate: string): Promise<AttendanceSession[]> {
+    return db.select().from(attendanceSessions)
+      .where(and(eq(attendanceSessions.user_id, userId), eq(attendanceSessions.work_date, workDate)))
+      .orderBy(asc(attendanceSessions.session_number), asc(attendanceSessions.time_in), asc(attendanceSessions.created_at));
+  }
+
+  async getAttendanceHistoryForUser(userId: number, limit = 30): Promise<AttendanceSession[]> {
+    return db.select().from(attendanceSessions)
+      .where(eq(attendanceSessions.user_id, userId))
+      .orderBy(desc(attendanceSessions.time_in), desc(attendanceSessions.created_at))
+      .limit(Math.min(Math.max(limit, 1), 100));
+  }
+
+  async createAttendance(data: InsertAttendanceSession): Promise<AttendanceSession> {
+    const rows = await db.insert(attendanceSessions).values(data as any).returning();
+    return rows[0];
+  }
+
+  async updateAttendance(id: number, data: Partial<InsertAttendanceSession>): Promise<AttendanceSession | undefined> {
+    const rows = await db.update(attendanceSessions)
+      .set({ ...data, updated_at: new Date() } as any)
+      .where(eq(attendanceSessions.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  async approveAttendanceSecondSession(userId: number, workDate: string, actorUserId: number): Promise<AttendanceSession | undefined> {
+    const sessions = await this.getAttendanceSessionsForDate(userId, workDate);
+    if (sessions.length !== 1) return undefined;
+    const first = sessions[0];
+    if (first.session_number !== 1 || first.status === "active" || first.second_session_approved) return undefined;
+    return this.updateAttendance(first.id, {
+      second_session_approved: true,
+      second_session_approved_by: actorUserId,
+      second_session_approved_at: new Date(),
+    });
+  }
+
+  async createAttendanceCheckpoint(data: InsertAttendanceCheckpoint): Promise<AttendanceCheckpoint> {
+    const rows = await db.insert(attendanceLocationCheckpoints).values(data as any).returning();
+    return rows[0];
+  }
+
+  async getAttendanceCheckpoints(attendanceId: number): Promise<AttendanceCheckpoint[]> {
+    return db.select().from(attendanceLocationCheckpoints)
+      .where(eq(attendanceLocationCheckpoints.attendance_id, attendanceId))
+      .orderBy(asc(attendanceLocationCheckpoints.captured_at));
+  }
+
+  async getAttendanceRecords(opts: { from?: string; to?: string; userId?: number; status?: string; startMethod?: string; reviewStatus?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }> {
+    const conditions: any[] = [];
+    if (opts.from) conditions.push(gte(attendanceSessions.work_date, opts.from));
+    if (opts.to) conditions.push(lte(attendanceSessions.work_date, opts.to));
+    if (opts.userId) conditions.push(eq(attendanceSessions.user_id, opts.userId));
+    if (opts.status && opts.status !== "all") conditions.push(eq(attendanceSessions.status, opts.status));
+    if (opts.startMethod && opts.startMethod !== "all") conditions.push(eq(attendanceSessions.start_method, opts.startMethod));
+    if (opts.reviewStatus && opts.reviewStatus !== "all") {
+      if (opts.reviewStatus === "missing_time_out") {
+        conditions.push(and(isNotNull(attendanceSessions.time_in), isNull(attendanceSessions.time_out)));
+      } else {
+        conditions.push(eq(attendanceSessions.review_status, opts.reviewStatus));
+      }
+    }
+    const where = conditions.length ? and(...conditions) : undefined;
+    const [rows, countRows] = await Promise.all([
+      db.select({
+        attendance: attendanceSessions,
+        employee_name: users.name,
+        employee_username: users.username,
+      })
+        .from(attendanceSessions)
+        .leftJoin(users, eq(users.id, attendanceSessions.user_id))
+        .where(where)
+        .orderBy(desc(attendanceSessions.work_date), desc(attendanceSessions.time_in))
+         .limit(Math.min(Math.max(opts.limit ?? 100, 1), 5000))
+        .offset(Math.max(opts.offset ?? 0, 0)),
+      db.select({ count: sql<number>`count(*)` }).from(attendanceSessions).where(where),
+    ]);
+    return {
+      rows: rows.map(row => ({ ...row.attendance, employee_name: row.employee_name, employee_username: row.employee_username })),
+      total: Number(countRows[0]?.count ?? 0),
+    };
+  }
+
+  async getAttendanceAuditHistory(attendanceId: number): Promise<AttendanceAuditLog[]> {
+    return db.select().from(attendanceAuditLog)
+      .where(eq(attendanceAuditLog.attendance_id, attendanceId))
+      .orderBy(desc(attendanceAuditLog.created_at));
+  }
+
+  async createAttendanceAuditLog(data: InsertAttendanceAuditLog): Promise<AttendanceAuditLog> {
+    const rows = await db.insert(attendanceAuditLog).values(data as any).returning();
+    return rows[0];
+  }
+
+  async updateAttendanceReview(id: number, data: { review_status: string; approved_by?: number | null; approved_at?: Date | null; locked_at?: Date | null }): Promise<AttendanceSession | undefined> {
+    const rows = await db.update(attendanceSessions)
+      .set({ ...data, updated_at: new Date() } as any)
+      .where(eq(attendanceSessions.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  async createAttendanceException(data: InsertAttendanceException): Promise<AttendanceException> {
+    const rows = await db.insert(attendanceExceptions).values(data as any).returning();
+    return rows[0];
+  }
+
+  async getAttendanceExceptions(opts: { status?: string; from?: string; to?: string; userId?: number; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }> {
+    const conditions: any[] = [];
+    if (opts.status && opts.status !== "all") conditions.push(eq(attendanceExceptions.status, opts.status));
+    if (opts.from) conditions.push(gte(attendanceExceptions.detected_at, new Date(`${opts.from}T00:00:00Z`)));
+    if (opts.to) {
+      const end = new Date(`${opts.to}T00:00:00Z`);
+      end.setUTCDate(end.getUTCDate() + 1);
+      conditions.push(lt(attendanceExceptions.detected_at, end));
+    }
+    if (opts.userId) conditions.push(eq(attendanceExceptions.user_id, opts.userId));
+    const where = conditions.length ? and(...conditions) : undefined;
+    const [rows, countRows] = await Promise.all([
+      db.select({
+        exception: attendanceExceptions,
+        employee_name: users.name,
+        employee_username: users.username,
+        work_date: attendanceSessions.work_date,
+        start_method: attendanceSessions.start_method,
+        time_in: attendanceSessions.time_in,
+        time_out: attendanceSessions.time_out,
+      })
+        .from(attendanceExceptions)
+        .leftJoin(users, eq(users.id, attendanceExceptions.user_id))
+        .leftJoin(attendanceSessions, eq(attendanceSessions.id, attendanceExceptions.attendance_id))
+        .where(where)
+        .orderBy(desc(attendanceExceptions.detected_at))
+        .limit(Math.min(Math.max(opts.limit ?? 100, 1), 500))
+        .offset(Math.max(opts.offset ?? 0, 0)),
+      db.select({ count: sql<number>`count(*)` }).from(attendanceExceptions).where(where),
+    ]);
+    return {
+      rows: rows.map(row => ({
+        ...row.exception,
+        employee_name: row.employee_name,
+        employee_username: row.employee_username,
+        work_date: row.work_date,
+        start_method: row.start_method,
+        time_in: row.time_in,
+        time_out: row.time_out,
+      })),
+      total: Number(countRows[0]?.count ?? 0),
+    };
+  }
+
+  async reviewAttendanceException(id: number, data: { status: string; reviewed_by: number; review_notes?: string | null }): Promise<AttendanceException | undefined> {
+    const rows = await db.update(attendanceExceptions).set({
+      status: data.status,
+      reviewed_by: data.reviewed_by,
+      reviewed_at: new Date(),
+      review_notes: data.review_notes ?? null,
+    }).where(eq(attendanceExceptions.id, id)).returning();
+    return rows[0];
+  }
+
+  // ─── CRM Order Notes ──────────────────────────────────────────────────────────
+
+  async updateCrmOrderNotes(bcOrderId: number, data: { staff_notes?: string; customer_order_notes?: string }): Promise<void> {
+    await db.update(customerOrdersMirror)
+      .set({ ...data, updated_at: new Date() })
+      .where(eq(customerOrdersMirror.bigcommerce_order_id, bcOrderId));
+  }
+
+  // ─── CRM Audit Log ────────────────────────────────────────────────────────────
+
+  async createCrmAuditLog(data: InsertCrmAuditLog): Promise<void> {
+    await db.insert(crmAuditLog).values(data);
+  }
+
+  async getCrmAuditEntries(opts: { customerIds?: number[]; actions?: string[]; limit?: number }): Promise<any[]> {
+    const { customerIds, actions, limit = 500 } = opts;
+    if (customerIds && customerIds.length === 0) return [];
+    const conditions: any[] = [];
+    if (customerIds?.length) conditions.push(inArray(crmAuditLog.customer_id, customerIds));
+    if (actions?.length) conditions.push(inArray(crmAuditLog.action, actions));
+    const rows = await db.select({ a: crmAuditLog, u: users, c: customersMirror })
+      .from(crmAuditLog)
+      .leftJoin(users, eq(users.id, crmAuditLog.user_id))
+      .leftJoin(customersMirror, eq(customersMirror.id, crmAuditLog.customer_id))
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(crmAuditLog.created_at))
+      .limit(limit);
+    return rows.map(({ a, u, c }) => ({
+      ...a,
+      user_name: u?.name ?? u?.username ?? null,
+      customer_company: c?.company ?? null,
+      customer_first_name: c?.first_name ?? "",
+      customer_last_name: c?.last_name ?? "",
+      customer_email: c?.email ?? "",
+    }));
+  }
+
+  async truncateCrmCustomers(): Promise<void> {
+    await db.delete(customersMirror);
+  }
+
+  async truncateCrmOrders(): Promise<void> {
+    await db.delete(customerOrdersMirror);
+  }
+
+  async getBcOrderLineItemsCount(): Promise<number> {
+    const result = await db.execute(sql.raw(
+      `SELECT COALESCE(n_live_tup, 0)::int AS cnt FROM pg_stat_user_tables WHERE relname = 'bc_order_line_items' LIMIT 1`
+    ));
+    const approx = (result.rows[0] as any)?.cnt;
+    if (approx != null && approx > 0) return approx;
+    const exact = await db.select({ count: sql<number>`count(*)::int` }).from(bcOrderLineItems);
+    return exact[0]?.count ?? 0;
+  }
+
+  async getBcOrderLineItemsPriceAudit(): Promise<{
+    totalLineItems: number;
+    checkoutPricedLineItems: number;
+    zeroPricedLineItems: number;
+    missingPriceLineItems: number;
+    legacyLineItems: number;
+  }> {
+    const result = await db.execute(sql.raw(`
+      SELECT
+        COUNT(*)::int AS total_line_items,
+        COUNT(*) FILTER (WHERE price_source IN ('base_price', 'price_ex_tax'))::int AS checkout_priced_line_items,
+        COUNT(*) FILTER (WHERE price_source IN ('base_price', 'price_ex_tax') AND base_price = 0)::int AS zero_priced_line_items,
+        COUNT(*) FILTER (WHERE price_source = 'missing')::int AS missing_price_line_items,
+        COUNT(*) FILTER (WHERE price_source = 'legacy')::int AS legacy_line_items
+      FROM bc_order_line_items
+    `));
+    const row = result.rows[0] as any;
+    return {
+      totalLineItems: Number(row?.total_line_items ?? 0),
+      checkoutPricedLineItems: Number(row?.checkout_priced_line_items ?? 0),
+      zeroPricedLineItems: Number(row?.zero_priced_line_items ?? 0),
+      missingPriceLineItems: Number(row?.missing_price_line_items ?? 0),
+      legacyLineItems: Number(row?.legacy_line_items ?? 0),
+    };
+  }
+
+  async truncateBcOrderLineItems(): Promise<void> {
+    await db.delete(bcOrderLineItems);
+  }
+
+  async getCrmOrdersForLineItemSync(since?: string): Promise<Array<{ bigcommerce_order_id: number; order_date: Date | null; customer_name: string | null; customer_email: string | null; bigcommerce_customer_id: number | null }>> {
+    let q = db.select({
+      bigcommerce_order_id: customerOrdersMirror.bigcommerce_order_id,
+      order_date: customerOrdersMirror.order_date,
+      customer_name: customerOrdersMirror.customer_name,
+      customer_email: customerOrdersMirror.customer_email,
+      bigcommerce_customer_id: customerOrdersMirror.bigcommerce_customer_id,
+    }).from(customerOrdersMirror);
+    if (since) {
+      return q.where(sql`${customerOrdersMirror.order_date} >= ${since}::date`).orderBy(desc(customerOrdersMirror.order_date)) as unknown as any;
+    }
+    return q.orderBy(desc(customerOrdersMirror.order_date)) as unknown as any;
+  }
+
+  // ─── POS Enhancements — Price Override Audit ───────────────────────────────
+
+  async createPosPriceOverrideAudit(entry: InsertPosPriceOverrideAudit): Promise<PosPriceOverrideAudit> {
+    const result = await db.insert(posPriceOverrideAudit).values(entry).returning();
+    return result[0];
+  }
+
+  async getPosPriceOverrideAudit(opts: { userId?: number; customerId?: number; sku?: string; dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ rows: PosPriceOverrideAudit[]; total: number }> {
+    const { userId, customerId, sku, dateFrom, dateTo, sortBy = "created_at", sortDir = "desc", limit = 50, offset = 0 } = opts;
+    const conditions: any[] = [];
+    if (userId) conditions.push(eq(posPriceOverrideAudit.user_id, userId));
+    if (customerId) conditions.push(eq(posPriceOverrideAudit.customer_id, customerId));
+    if (sku?.trim()) conditions.push(ilike(posPriceOverrideAudit.sku, `%${sku.trim()}%`));
+    if (dateFrom) conditions.push(sql`${posPriceOverrideAudit.created_at} >= ${dateFrom}::timestamptz`);
+    if (dateTo) conditions.push(sql`${posPriceOverrideAudit.created_at} <= ${dateTo}::timestamptz + interval '1 day'`);
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const sortColMap: Record<string, any> = {
+      created_at: posPriceOverrideAudit.created_at,
+      loss_amount: posPriceOverrideAudit.loss_amount,
+      sku: posPriceOverrideAudit.sku,
+      product_cost: posPriceOverrideAudit.product_cost,
+      selling_price: posPriceOverrideAudit.selling_price,
+    };
+    const sortCol = sortColMap[sortBy] ?? posPriceOverrideAudit.created_at;
+    const orderFn = sortDir === "asc" ? asc : desc;
+
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(posPriceOverrideAudit).where(where),
+      db.select().from(posPriceOverrideAudit).where(where).orderBy(orderFn(sortCol)).limit(limit).offset(offset),
+    ]);
+
+    return { rows, total: countRows[0]?.count ?? 0 };
+  }
+
+  // ─── POS Enhancements — Store Credit Usage ─────────────────────────────────
+
+  async createPosStoreCreditUsage(entry: InsertPosStoreCreditUsage): Promise<PosStoreCreditUsage> {
+    const result = await db.insert(posStoreCreditUsage).values(entry).returning();
+    return result[0];
+  }
+
+  async getPosStoreCreditUsage(opts: { customerId?: number; cashierId?: number; orderSearch?: string; dateFrom?: string; dateTo?: string; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ rows: PosStoreCreditUsage[]; total: number }> {
+    const { customerId, cashierId, orderSearch, dateFrom, dateTo, sortBy = "created_at", sortDir = "desc", limit = 50, offset = 0 } = opts;
+    const conditions: any[] = [];
+    if (customerId) conditions.push(eq(posStoreCreditUsage.customer_id, customerId));
+    if (cashierId) conditions.push(eq(posStoreCreditUsage.cashier_id, cashierId));
+    if (orderSearch?.trim()) {
+      const s = orderSearch.trim();
+      conditions.push(or(
+        sql`${posStoreCreditUsage.bigcommerce_order_id}::text ilike ${`%${s}%`}`,
+        sql`${posStoreCreditUsage.order_id}::text ilike ${`%${s}%`}`,
+      ));
+    }
+    if (dateFrom) conditions.push(sql`${posStoreCreditUsage.created_at} >= ${dateFrom}::timestamptz`);
+    if (dateTo) conditions.push(sql`${posStoreCreditUsage.created_at} <= ${dateTo}::timestamptz + interval '1 day'`);
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const sortColMap: Record<string, any> = {
+      created_at: posStoreCreditUsage.created_at,
+      credit_used: posStoreCreditUsage.credit_used,
+      final_order_total: posStoreCreditUsage.final_order_total,
+    };
+    const sortCol = sortColMap[sortBy] ?? posStoreCreditUsage.created_at;
+    const orderFn = sortDir === "asc" ? asc : desc;
+
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(posStoreCreditUsage).where(where),
+      db.select().from(posStoreCreditUsage).where(where).orderBy(orderFn(sortCol)).limit(limit).offset(offset),
+    ]);
+
+    return { rows, total: countRows[0]?.count ?? 0 };
+  }
+  // ─── Store Credit Ledger ──────────────────────────────────────────────────────
+
+  async createStoreCreditLedger(entry: InsertStoreCreditLedger): Promise<StoreCreditLedgerEntry> {
+    const result = await db.insert(storeCreditLedger).values(entry).returning();
+    return result[0];
+  }
+
+  async getStoreCreditLedger(opts: { customerId?: number; issuedBy?: number; dateFrom?: string; dateTo?: string; search?: string; type?: string; limit?: number; offset?: number }): Promise<{ rows: StoreCreditLedgerEntry[]; total: number }> {
+    const { customerId, issuedBy, dateFrom, dateTo, search, type, limit = 50, offset = 0 } = opts;
+    const conditions: any[] = [];
+    const customerDisplayName = sql<string | null>`
+      COALESCE(
+        NULLIF(BTRIM(${customersMirror.company}), ''),
+        NULLIF(BTRIM(CONCAT_WS(' ', ${customersMirror.first_name}, ${customersMirror.last_name})), ''),
+        NULLIF(BTRIM(${customersMirror.email}), '')
+      )
+    `;
+    if (customerId) conditions.push(eq(storeCreditLedger.customer_id, customerId));
+    if (issuedBy) conditions.push(eq(storeCreditLedger.issued_by, issuedBy));
+    if (dateFrom) conditions.push(sql`${storeCreditLedger.created_at} >= ${dateFrom}::timestamptz`);
+    if (dateTo) conditions.push(sql`${storeCreditLedger.created_at} <= ${dateTo}::timestamptz + interval '1 day'`);
+    if (type && type !== "all" && type !== "usage") conditions.push(eq(storeCreditLedger.type, type));
+    if (search?.trim()) {
+      const s = `%${search.trim()}%`;
+      conditions.push(or(
+        ilike(storeCreditLedger.issued_by_name, s),
+        ilike(storeCreditLedger.reason, s),
+        sql`${storeCreditLedger.bigcommerce_order_id}::text ilike ${s}`,
+        ilike(customersMirror.company, s),
+        ilike(customersMirror.first_name, s),
+        ilike(customersMirror.last_name, s),
+        ilike(customersMirror.email, s),
+        sql`CONCAT_WS(' ', ${customersMirror.first_name}, ${customersMirror.last_name}) ilike ${s}`,
+      ));
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const [countRows, rows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(storeCreditLedger)
+        .leftJoin(customersMirror, eq(storeCreditLedger.customer_id, customersMirror.id))
+        .where(where),
+      db.select({
+        id: storeCreditLedger.id,
+        customer_id: storeCreditLedger.customer_id,
+        bigcommerce_customer_id: storeCreditLedger.bigcommerce_customer_id,
+        bigcommerce_order_id: storeCreditLedger.bigcommerce_order_id,
+        order_id: storeCreditLedger.order_id,
+        type: storeCreditLedger.type,
+        amount: storeCreditLedger.amount,
+        tax: storeCreditLedger.tax,
+        reason: storeCreditLedger.reason,
+        products: storeCreditLedger.products,
+        issued_by: storeCreditLedger.issued_by,
+        issued_by_name: storeCreditLedger.issued_by_name,
+        created_at: storeCreditLedger.created_at,
+        customer_name: customerDisplayName,
+      })
+        .from(storeCreditLedger)
+        .leftJoin(customersMirror, eq(storeCreditLedger.customer_id, customersMirror.id))
+        .where(where)
+        .orderBy(desc(storeCreditLedger.created_at))
+        .limit(limit)
+        .offset(offset),
+    ]);
+    return { rows, total: countRows[0]?.count ?? 0 };
+  }
+
+  async updateCustomerStoreCreditBalance(customerId: number, delta: number): Promise<void> {
+    await db.update(customersMirror)
+      .set({ store_credit_balance: sql`GREATEST(0, COALESCE(store_credit_balance, 0) + ${delta.toFixed(2)}::numeric)` })
+      .where(eq(customersMirror.id, customerId));
+  }
+
+  async getCrmIdByBcCustomerId(bcCustomerId: number): Promise<number | null> {
+    const rows = await db
+      .select({ id: customersMirror.id })
+      .from(customersMirror)
+      .where(eq(customersMirror.bigcommerce_customer_id, bcCustomerId))
+      .limit(1);
+    return rows[0]?.id ?? null;
+  }
+
+  async setCustomerStoreCreditBalance(crmId: number, newBalance: number): Promise<void> {
+    await db.update(customersMirror)
+      .set({ store_credit_balance: newBalance.toFixed(2) })
+      .where(eq(customersMirror.id, crmId));
+  }
+
+  // ─── Email Templates ──────────────────────────────────────────────────────────
+
+  async getEmailTemplate(key: string): Promise<EmailTemplate | undefined> {
+    const rows = await db.select().from(emailTemplates).where(eq(emailTemplates.key, key));
+    return rows[0];
+  }
+
+  async upsertEmailTemplate(key: string, data: { name: string; subject_template: string; body: string; template_type?: string; category?: string; is_active?: boolean; updated_by?: number }): Promise<EmailTemplate> {
+    const existing = await this.getEmailTemplate(key);
+    if (existing) {
+      const rows = await db.update(emailTemplates)
+        .set({ ...data, updated_at: new Date() })
+        .where(eq(emailTemplates.key, key))
+        .returning();
+      return rows[0];
+    }
+    const rows = await db.insert(emailTemplates).values({ key, ...data }).returning();
+    return rows[0];
+  }
+
+  // ─── Marketing ───────────────────────────────────────────────────────────────
+
+  private async getMarketingAudienceCount(audienceId: number): Promise<number> {
+    const audience = await db.select().from(marketingAudiences).where(eq(marketingAudiences.id, audienceId)).limit(1);
+    if (!audience[0]) return 0;
+    if (audience[0].audience_type === "manual") {
+      const rows = await db.select({ count: sql<number>`count(*)::int` })
+        .from(marketingAudienceMembers).where(eq(marketingAudienceMembers.audience_id, audienceId));
+      return rows[0]?.count ?? 0;
+    }
+    return this.getMarketingDynamicCustomerCount((audience[0].dynamic_filters ?? {}) as Record<string, unknown>);
+  }
+
+  private async getMarketingDynamicCustomerCount(filters: Record<string, unknown>): Promise<number> {
+    const preview = await this.getMarketingAudiencePreview(filters, 0);
+    return preview.total;
+  }
+
+  async getMarketingDashboard(): Promise<any> {
+    const [statusRows, totals, recent, activity, audienceRows] = await Promise.all([
+      db.select({ status: marketingCampaigns.status, count: sql<number>`count(*)::int` })
+        .from(marketingCampaigns).groupBy(marketingCampaigns.status),
+      db.select({
+        recipients: sql<number>`coalesce(sum(${marketingCampaigns.recipient_count}), 0)::int`,
+        sent: sql<number>`coalesce(sum(${marketingCampaigns.sent_count}), 0)::int`,
+        delivered: sql<number>`coalesce(sum(${marketingCampaigns.delivered_count}), 0)::int`,
+        opened: sql<number>`coalesce(sum(${marketingCampaigns.opened_count}), 0)::int`,
+        clicked: sql<number>`coalesce(sum(${marketingCampaigns.clicked_count}), 0)::int`,
+      }).from(marketingCampaigns),
+      db.select({ c: marketingCampaigns, creator_name: users.name })
+        .from(marketingCampaigns).leftJoin(users, eq(users.id, marketingCampaigns.created_by))
+        .orderBy(desc(marketingCampaigns.updated_at)).limit(8),
+      db.select({ a: marketingCampaignActivity, user_name: users.name, campaign_name: marketingCampaigns.name })
+        .from(marketingCampaignActivity)
+        .leftJoin(users, eq(users.id, marketingCampaignActivity.user_id))
+        .leftJoin(marketingCampaigns, eq(marketingCampaigns.id, marketingCampaignActivity.campaign_id))
+        .orderBy(desc(marketingCampaignActivity.created_at)).limit(8),
+      db.select({ id: marketingAudiences.id }).from(marketingAudiences),
+    ]);
+    const byStatus: Record<string, number> = {};
+    for (const row of statusRows) byStatus[row.status] = row.count;
+    const total = totals[0] ?? { recipients: 0, sent: 0, delivered: 0, opened: 0, clicked: 0 };
+    const audienceCounts = await Promise.all(audienceRows.map(row => this.getMarketingAudienceCount(row.id)));
+    return {
+      totalCampaigns: Object.values(byStatus).reduce((sum, n) => sum + n, 0),
+      draftCampaigns: byStatus.draft ?? 0,
+      activeCampaigns: (byStatus.ready ?? 0) + (byStatus.scheduled ?? 0) + (byStatus.sending ?? 0),
+      sentCampaigns: byStatus.sent ?? 0,
+      scheduledCampaigns: byStatus.scheduled ?? 0,
+      totalRecipients: total.recipients,
+      sentRecipients: total.sent,
+      deliveredRecipients: total.delivered,
+      openedRecipients: total.opened,
+      clickedRecipients: total.clicked,
+      openRate: total.delivered ? Math.round((total.opened / total.delivered) * 1000) / 10 : 0,
+      clickRate: total.delivered ? Math.round((total.clicked / total.delivered) * 1000) / 10 : 0,
+      audienceCount: audienceRows.length,
+      audienceMembers: audienceCounts.reduce((sum, n) => sum + n, 0),
+      recentCampaigns: recent.map(row => ({ ...row.c, creator_name: row.creator_name })),
+      recentActivity: activity.map(row => ({ ...row.a, user_name: row.user_name, campaign_name: row.campaign_name })),
+    };
+  }
+
+  async getMarketingCampaigns(opts: { search?: string; status?: string; limit?: number; offset?: number } = {}): Promise<{ campaigns: any[]; total: number }> {
+    const { search, status, limit = 50, offset = 0 } = opts;
+    const conditions: any[] = [];
+    if (search?.trim()) {
+      const term = `%${search.trim()}%`;
+      conditions.push(or(ilike(marketingCampaigns.name, term), ilike(marketingCampaigns.subject_line, term)));
+    }
+    if (status && status !== "all") conditions.push(eq(marketingCampaigns.status, status));
+    const where = conditions.length ? and(...conditions) : undefined;
+    const [rows, countRows] = await Promise.all([
+      db.select({ c: marketingCampaigns, creator_name: users.name, audience_name: marketingAudiences.name })
+        .from(marketingCampaigns)
+        .leftJoin(users, eq(users.id, marketingCampaigns.created_by))
+        .leftJoin(marketingAudiences, eq(marketingAudiences.id, marketingCampaigns.audience_id))
+        .where(where).orderBy(desc(marketingCampaigns.updated_at)).limit(limit).offset(offset),
+      db.select({ count: sql<number>`count(*)::int` }).from(marketingCampaigns).where(where),
+    ]);
+    return { campaigns: rows.map(row => ({ ...row.c, creator_name: row.creator_name, audience_name: row.audience_name })), total: countRows[0]?.count ?? 0 };
+  }
+
+  async getMarketingCampaign(id: number): Promise<any | undefined> {
+    const rows = await db.select({ c: marketingCampaigns, creator_name: users.name, audience_name: marketingAudiences.name })
+      .from(marketingCampaigns)
+      .leftJoin(users, eq(users.id, marketingCampaigns.created_by))
+      .leftJoin(marketingAudiences, eq(marketingAudiences.id, marketingCampaigns.audience_id))
+      .where(eq(marketingCampaigns.id, id)).limit(1);
+    if (!rows[0]) return undefined;
+    const [activity, recipients] = await Promise.all([
+      db.select({ a: marketingCampaignActivity, user_name: users.name })
+        .from(marketingCampaignActivity).leftJoin(users, eq(users.id, marketingCampaignActivity.user_id))
+        .where(eq(marketingCampaignActivity.campaign_id, id)).orderBy(desc(marketingCampaignActivity.created_at)),
+      db.select({
+        id: customersMirror.id, company: customersMirror.company, first_name: customersMirror.first_name,
+        last_name: customersMirror.last_name, email: customersMirror.email,
+      }).from(marketingCampaignRecipients)
+        .innerJoin(customersMirror, eq(customersMirror.id, marketingCampaignRecipients.customer_id))
+        .where(eq(marketingCampaignRecipients.campaign_id, id)).limit(100),
+    ]);
+     const campaign = {
+       ...rows[0].c,
+       product_snapshots: Array.isArray(rows[0].c.product_snapshots) ? rows[0].c.product_snapshots : [],
+       product_display_options: normalizeMarketingProductDisplayOptions(rows[0].c.product_display_options),
+       creator_name: rows[0].creator_name,
+       audience_name: rows[0].audience_name,
+     };
+    let audienceCount = 0;
+    if (campaign.audience_type === "selected_customers") {
+      const countRows = await db.select({ count: sql<number>`count(*)::int` }).from(marketingCampaignRecipients)
+        .where(eq(marketingCampaignRecipients.campaign_id, id));
+      audienceCount = countRows[0]?.count ?? 0;
+    } else if (campaign.audience_type === "saved_audience" && campaign.audience_id) {
+      audienceCount = await this.getMarketingAudienceCount(campaign.audience_id);
+    } else if (campaign.audience_type === "customer_group") {
+      audienceCount = await this.getMarketingDynamicCustomerCount(
+        (campaign.audience_config ?? {}) as Record<string, unknown>,
+      );
+    } else if (campaign.audience_type === "all_eligible") {
+      audienceCount = await this.getMarketingDynamicCustomerCount({});
+    }
+    return { ...campaign, audience_count: audienceCount, recipients, activity: activity.map(row => ({ ...row.a, user_name: row.user_name })) };
+  }
+
+  async createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; sender_email?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any> {
+    const customerIds = [...new Set((data.customer_ids ?? []).filter(Number.isInteger))];
+    const recipientCount = !data.audience_type
+      ? 0
+      : data.audience_type === "selected_customers"
+      ? customerIds.length
+      : data.audience_type === "saved_audience" && data.audience_id
+        ? await this.getMarketingAudienceCount(data.audience_id)
+        : data.audience_type === "customer_group"
+          ? await this.getMarketingDynamicCustomerCount((data.audience_config ?? {}) as Record<string, unknown>)
+          : data.audience_type === "all_eligible"
+            ? await this.getMarketingDynamicCustomerCount({})
+            : 0;
+    const result = await db.transaction(async (tx) => {
+      const [campaign] = await tx.insert(marketingCampaigns).values({
+        name: data.name.trim(),
+        internal_description: data.internal_description ?? "",
+        campaign_type: data.campaign_type ?? "email",
+        subject_line: data.subject_line ?? "",
+        preview_text: data.preview_text ?? "",
+        message_content: data.message_content ?? "",
+        sender_email: data.sender_email ?? "",
+        audience_type: data.audience_type,
+        audience_id: data.audience_id ?? null,
+        audience_config: data.audience_config ?? {},
+         template_id: data.template_id ?? null,
+         product_snapshots: Array.isArray(data.product_snapshots) ? data.product_snapshots : [],
+         product_display_options: normalizeMarketingProductDisplayOptions(data.product_display_options ?? DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS),
+        scheduled_at: data.scheduled_at ?? null,
+         timezone: data.timezone ?? "UTC",
+        created_by: data.created_by,
+        recipient_count: recipientCount,
+      }).returning();
+      if (customerIds.length) {
+        await tx.insert(marketingCampaignRecipients).values(customerIds.map(customer_id => ({ campaign_id: campaign.id, customer_id })));
+      }
+      await tx.insert(marketingCampaignActivity).values({ campaign_id: campaign.id, user_id: data.created_by, action: "created", detail: {} });
+      return campaign;
+    });
+    return this.getMarketingCampaign(result.id);
+  }
+
+  async updateMarketingCampaign(id: number, data: Record<string, unknown> & { customer_ids?: number[] }, userId: number): Promise<any | undefined> {
+    const [current] = await db.select().from(marketingCampaigns).where(eq(marketingCampaigns.id, id)).limit(1);
+    if (!current) return undefined;
+     const allowed = ["name", "internal_description", "campaign_type", "subject_line", "preview_text", "message_content", "sender_email", "audience_type", "audience_id", "audience_config", "template_id", "product_snapshots", "product_display_options", "scheduled_at", "timezone"] as const;
+    const update: Record<string, unknown> = {};
+    for (const key of allowed) if (key in data) update[key] = data[key];
+    if ("scheduled_at" in update) {
+      const rawScheduledAt = update.scheduled_at;
+      if (rawScheduledAt === null || rawScheduledAt === undefined || rawScheduledAt === "") {
+        update.scheduled_at = null;
+      } else {
+        const scheduledAt = rawScheduledAt instanceof Date
+          ? rawScheduledAt
+          : new Date(String(rawScheduledAt));
+        if (Number.isNaN(scheduledAt.getTime())) throw new Error("Invalid scheduled time");
+        update.scheduled_at = scheduledAt;
+      }
+    }
+     if ("product_snapshots" in data) {
+       update.product_snapshots = Array.isArray(data.product_snapshots) ? data.product_snapshots : [];
+     }
+     if ("product_display_options" in data) {
+       update.product_display_options = normalizeMarketingProductDisplayOptions(data.product_display_options);
+     }
+    const audienceType = String(data.audience_type ?? current.audience_type);
+    const audienceId = data.audience_id !== undefined ? (Number(data.audience_id) || null) : current.audience_id;
+    const audienceConfig = (data.audience_config ?? current.audience_config ?? {}) as Record<string, unknown>;
+    if (!audienceType) {
+      update.recipient_count = 0;
+    } else if (audienceType !== "selected_customers") {
+      update.recipient_count = audienceType === "saved_audience" && audienceId
+        ? await this.getMarketingAudienceCount(audienceId)
+        : audienceType === "customer_group"
+          ? await this.getMarketingDynamicCustomerCount(audienceConfig)
+          : audienceType === "all_eligible"
+            ? await this.getMarketingDynamicCustomerCount({})
+            : 0;
+    } else if (data.customer_ids) {
+      update.recipient_count = [...new Set(data.customer_ids.filter(Number.isInteger))].length;
+    }
+    update.updated_at = new Date();
+    const result = await db.transaction(async tx => {
+      if (audienceType !== "selected_customers" || data.customer_ids) {
+        const customerIds = [...new Set((data.customer_ids ?? []).filter(Number.isInteger))];
+        await tx.delete(marketingCampaignRecipients).where(eq(marketingCampaignRecipients.campaign_id, id));
+        if (audienceType === "selected_customers" && customerIds.length) {
+          await tx.insert(marketingCampaignRecipients).values(customerIds.map(customer_id => ({ campaign_id: id, customer_id })));
+        }
+      }
+      const [updated] = await tx.update(marketingCampaigns).set(update as any).where(eq(marketingCampaigns.id, id)).returning();
+      if (updated) await tx.insert(marketingCampaignActivity).values({ campaign_id: id, user_id: userId, action: "edited", detail: {} });
+      return updated;
+    });
+    if (!result) return undefined;
+    return this.getMarketingCampaign(id);
+  }
+
+  async deleteMarketingCampaign(id: number, userId: number): Promise<void> {
+    await db.insert(marketingCampaignActivity).values({ campaign_id: id, user_id: userId, action: "deleted", detail: {} }).catch(() => {});
+    await db.delete(marketingCampaigns).where(eq(marketingCampaigns.id, id));
+  }
+
+  async updateMarketingCampaignStatus(id: number, status: string, userId: number): Promise<any | undefined> {
+    const result = await db.update(marketingCampaigns).set({
+      status, updated_at: new Date(),
+      ...(status === "queued" ? { queued_at: new Date(), last_error: null } : {}),
+      ...(status === "sent" ? { sent_at: new Date() } : {}),
+    }).where(eq(marketingCampaigns.id, id)).returning();
+    if (!result[0]) return undefined;
+    await db.insert(marketingCampaignActivity).values({ campaign_id: id, user_id: userId, action: `status_${status}`, detail: { status } });
+    return this.getMarketingCampaign(id);
+  }
+
+  async getMarketingAudiences(opts: { search?: string; type?: string } = {}): Promise<any[]> {
+    const conditions: any[] = [];
+    if (opts.search?.trim()) conditions.push(ilike(marketingAudiences.name, `%${opts.search.trim()}%`));
+    if (opts.type && opts.type !== "all") conditions.push(eq(marketingAudiences.audience_type, opts.type));
+    const rows = await db.select({ a: marketingAudiences, creator_name: users.name })
+      .from(marketingAudiences).leftJoin(users, eq(users.id, marketingAudiences.created_by))
+      .where(conditions.length ? and(...conditions) : undefined).orderBy(desc(marketingAudiences.updated_at));
+    return Promise.all(rows.map(async row => ({ ...row.a, creator_name: row.creator_name, member_count: await this.getMarketingAudienceCount(row.a.id) })));
+  }
+
+  async getMarketingProductLists(opts: { search?: string } = {}): Promise<any[]> {
+    const conditions = opts.search?.trim()
+      ? ilike(marketingProductLists.name, `%${opts.search.trim()}%`)
+      : undefined;
+    const rows = await db.select({
+      list: marketingProductLists,
+      creator_name: users.name,
+      item_count: sql<number>`count(${marketingProductListItems.id})::int`,
+    }).from(marketingProductLists)
+      .leftJoin(users, eq(users.id, marketingProductLists.created_by))
+      .leftJoin(marketingProductListItems, eq(marketingProductListItems.list_id, marketingProductLists.id))
+      .where(conditions)
+      .groupBy(marketingProductLists.id, users.name)
+      .orderBy(desc(marketingProductLists.updated_at));
+    return rows.map(row => ({ ...row.list, creator_name: row.creator_name, item_count: row.item_count }));
+  }
+
+  async getMarketingProductList(id: number): Promise<any | undefined> {
+    const [rows, items] = await Promise.all([
+      db.select({ list: marketingProductLists, creator_name: users.name })
+        .from(marketingProductLists)
+        .leftJoin(users, eq(users.id, marketingProductLists.created_by))
+        .where(eq(marketingProductLists.id, id))
+        .limit(1),
+      db.select().from(marketingProductListItems)
+        .where(eq(marketingProductListItems.list_id, id))
+        .orderBy(asc(marketingProductListItems.created_at)),
+    ]);
+    if (!rows[0]) return undefined;
+    return { ...rows[0].list, creator_name: rows[0].creator_name, items };
+  }
+
+  async createMarketingProductList(data: { name: string; description?: string; created_by: number }): Promise<any> {
+    const [created] = await db.insert(marketingProductLists).values({
+      name: data.name.trim(),
+      description: String(data.description ?? "").trim(),
+      created_by: data.created_by,
+    }).returning();
+    return this.getMarketingProductList(created.id);
+  }
+
+  async updateMarketingProductList(id: number, data: { name?: string; description?: string }, _userId: number): Promise<any | undefined> {
+    const update: Record<string, unknown> = { updated_at: new Date() };
+    if (data.name !== undefined) update.name = data.name.trim();
+    if (data.description !== undefined) update.description = String(data.description).trim();
+    const [updated] = await db.update(marketingProductLists)
+      .set(update)
+      .where(eq(marketingProductLists.id, id))
+      .returning({ id: marketingProductLists.id });
+    return updated ? this.getMarketingProductList(updated.id) : undefined;
+  }
+
+  async deleteMarketingProductList(id: number, _userId: number): Promise<void> {
+    await db.delete(marketingProductLists).where(eq(marketingProductLists.id, id));
+  }
+
+  async addMarketingProductListItems(listId: number, productRows: Array<Record<string, unknown>>): Promise<any | undefined> {
+    const list = await this.getMarketingProductList(listId);
+    if (!list) return undefined;
+    const items = productRows
+      .map(product => ({
+        list_id: listId,
+        product_id: Number(product.id ?? product.bigcommerce_id),
+        product_snapshot: product,
+      }))
+      .filter(item => Number.isInteger(item.product_id) && item.product_id > 0);
+    if (items.length) {
+      await db.insert(marketingProductListItems)
+        .values(items)
+        .onConflictDoUpdate({
+          target: [marketingProductListItems.list_id, marketingProductListItems.product_id],
+          set: { product_snapshot: sql`excluded.product_snapshot` },
+        });
+      await db.update(marketingProductLists).set({ updated_at: new Date() }).where(eq(marketingProductLists.id, listId));
+    }
+    return this.getMarketingProductList(listId);
+  }
+
+  async removeMarketingProductListItem(listId: number, itemId: number): Promise<void> {
+    await db.delete(marketingProductListItems).where(and(
+      eq(marketingProductListItems.id, itemId),
+      eq(marketingProductListItems.list_id, listId),
+    ));
+    await db.update(marketingProductLists).set({ updated_at: new Date() }).where(eq(marketingProductLists.id, listId));
+  }
+
+  async createMarketingDeliveryLog(data: {
+    delivery_type: "campaign" | "order_form";
+    campaign_id?: number | null;
+    customer_id?: number | null;
+    source_key?: string | null;
+    recipient_email: string;
+    product_titles: string[];
+    sent_at?: Date;
+    initiated_by?: number | null;
+  }): Promise<MarketingDeliveryLog> {
+    const productTitles = Array.from(new Set((data.product_titles ?? [])
+      .map(title => String(title ?? "").trim())
+      .filter(Boolean)));
+    const [created] = await db.insert(marketingDeliveryLogs).values({
+      delivery_type: data.delivery_type,
+      campaign_id: data.campaign_id ?? null,
+      customer_id: data.customer_id ?? null,
+      source_key: data.source_key ?? null,
+      recipient_email: String(data.recipient_email ?? "").trim(),
+      product_titles: productTitles,
+      sent_at: data.sent_at ?? new Date(),
+      initiated_by: data.initiated_by ?? null,
+    }).returning();
+    return created;
+  }
+
+  async getMarketingDeliveryLogs(opts: {
+    delivery_type?: "campaign" | "order_form";
+    campaign_id?: number;
+    customer_id?: number;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<{ rows: any[]; total: number }> {
+    await this.backfillMarketingDeliveryLogs();
+    const conditions: any[] = [];
+    if (opts.delivery_type) conditions.push(eq(marketingDeliveryLogs.delivery_type, opts.delivery_type));
+    if (opts.campaign_id) conditions.push(eq(marketingDeliveryLogs.campaign_id, opts.campaign_id));
+    if (opts.customer_id) conditions.push(eq(marketingDeliveryLogs.customer_id, opts.customer_id));
+    const where = conditions.length ? and(...conditions) : undefined;
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
+    const offset = Math.max(opts.offset ?? 0, 0);
+    const [rows, countRows] = await Promise.all([
+      db.select({
+        log: marketingDeliveryLogs,
+        campaign_name: marketingCampaigns.name,
+        initiated_by_name: users.name,
+        initiated_by_username: users.username,
+        customer_company: customersMirror.company,
+        customer_first_name: customersMirror.first_name,
+        customer_last_name: customersMirror.last_name,
+        customer_email: customersMirror.email,
+      }).from(marketingDeliveryLogs)
+        .leftJoin(marketingCampaigns, eq(marketingCampaigns.id, marketingDeliveryLogs.campaign_id))
+        .leftJoin(users, eq(users.id, marketingDeliveryLogs.initiated_by))
+        .leftJoin(customersMirror, eq(customersMirror.id, marketingDeliveryLogs.customer_id))
+        .where(where)
+        .orderBy(desc(marketingDeliveryLogs.sent_at), desc(marketingDeliveryLogs.id))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: sql<number>`count(*)::int` }).from(marketingDeliveryLogs).where(where),
+    ]);
+    return {
+      rows: rows.map(row => ({
+        ...row.log,
+        campaign_name: row.campaign_name ?? null,
+        initiated_by_name: row.initiated_by_name ?? row.initiated_by_username ?? null,
+        customer_name: row.customer_company || [row.customer_first_name, row.customer_last_name].filter(Boolean).join(" ") || row.customer_email || row.log.recipient_email,
+        customer_email: row.customer_email ?? row.log.recipient_email,
+      })),
+      total: Number(countRows[0]?.count ?? 0),
+    };
+  }
+
+  async getMarketingDeliveryLog(id: number): Promise<any | undefined> {
+    const [row] = await db.select({
+      log: marketingDeliveryLogs,
+      campaign_name: marketingCampaigns.name,
+      initiated_by_name: users.name,
+      initiated_by_username: users.username,
+      customer_company: customersMirror.company,
+      customer_first_name: customersMirror.first_name,
+      customer_last_name: customersMirror.last_name,
+      customer_email: customersMirror.email,
+    }).from(marketingDeliveryLogs)
+      .leftJoin(marketingCampaigns, eq(marketingCampaigns.id, marketingDeliveryLogs.campaign_id))
+      .leftJoin(users, eq(users.id, marketingDeliveryLogs.initiated_by))
+      .leftJoin(customersMirror, eq(customersMirror.id, marketingDeliveryLogs.customer_id))
+      .where(eq(marketingDeliveryLogs.id, id))
+      .limit(1);
+    if (!row) return undefined;
+    return {
+      ...row.log,
+      campaign_name: row.campaign_name ?? null,
+      initiated_by_name: row.initiated_by_name ?? row.initiated_by_username ?? null,
+      customer_name: row.customer_company || [row.customer_first_name, row.customer_last_name].filter(Boolean).join(" ") || row.customer_email || row.log.recipient_email,
+      customer_email: row.customer_email ?? row.log.recipient_email,
+    };
+  }
+
+  private async backfillMarketingDeliveryLogs(): Promise<void> {
+    if (this.marketingDeliveryLogsBackfilled) return;
+    this.marketingDeliveryLogsBackfilled = true;
+    try {
+      const campaignRows = await db.select({
+        recipient: marketingCampaignRecipients,
+        campaign: marketingCampaigns,
+        existing_id: marketingDeliveryLogs.id,
+      }).from(marketingCampaignRecipients)
+        .innerJoin(marketingCampaigns, eq(marketingCampaigns.id, marketingCampaignRecipients.campaign_id))
+        .leftJoin(marketingDeliveryLogs, eq(marketingDeliveryLogs.source_key, sql`'campaign-recipient:' || ${marketingCampaignRecipients.id}`))
+        .where(and(eq(marketingCampaignRecipients.status, "sent"), isNull(marketingDeliveryLogs.id)));
+      for (const row of campaignRows) {
+        const snapshots = Array.isArray(row.campaign.product_snapshots) ? row.campaign.product_snapshots as any[] : [];
+        await this.createMarketingDeliveryLog({
+          delivery_type: "campaign",
+          campaign_id: row.recipient.campaign_id,
+          customer_id: row.recipient.customer_id,
+          source_key: `campaign-recipient:${row.recipient.id}`,
+          recipient_email: row.recipient.email,
+          product_titles: snapshots.map(product => String(product?.name ?? "").trim()).filter(Boolean),
+          sent_at: row.recipient.sent_at ?? row.recipient.created_at,
+          initiated_by: row.campaign.created_by,
+        });
+      }
+
+      const orderFormRows = await db.select({ audit: crmAuditLog })
+        .from(crmAuditLog)
+        .leftJoin(marketingDeliveryLogs, eq(marketingDeliveryLogs.source_key, sql`'order-form-audit:' || ${crmAuditLog.id}`))
+        .where(and(eq(crmAuditLog.action, "order_form_sent"), isNull(marketingDeliveryLogs.id)));
+      for (const row of orderFormRows) {
+        const detail = row.audit.detail && typeof row.audit.detail === "object" ? row.audit.detail as any : {};
+        const titles = Array.isArray(detail.product_titles) ? detail.product_titles.map((title: unknown) => String(title ?? "").trim()).filter(Boolean) : [];
+        await this.createMarketingDeliveryLog({
+          delivery_type: "order_form",
+          customer_id: row.audit.customer_id,
+          source_key: `order-form-audit:${row.audit.id}`,
+          recipient_email: String(detail.recipient_email ?? ""),
+          product_titles: titles,
+          sent_at: detail.sent_at ? new Date(detail.sent_at) : row.audit.created_at,
+          initiated_by: row.audit.user_id,
+        });
+      }
+    } catch (error: any) {
+      this.marketingDeliveryLogsBackfilled = false;
+      console.error("[marketing] delivery log backfill failed:", error?.message ?? error);
+    }
+  }
+
+  async getMarketingAudience(id: number): Promise<any | undefined> {
+    const rows = await db.select({ a: marketingAudiences, creator_name: users.name })
+      .from(marketingAudiences).leftJoin(users, eq(users.id, marketingAudiences.created_by))
+      .where(eq(marketingAudiences.id, id)).limit(1);
+    if (!rows[0]) return undefined;
+    const count = await this.getMarketingAudienceCount(id);
+    const [members, memberIds] = await Promise.all([
+      this.getMarketingAudienceMembers(id, { limit: 200 }),
+      db.select({ customer_id: marketingAudienceMembers.customer_id, contact_id: marketingAudienceMembers.marketing_contact_id })
+        .from(marketingAudienceMembers).where(eq(marketingAudienceMembers.audience_id, id)),
+    ]);
+    return {
+      ...rows[0].a,
+      creator_name: rows[0].creator_name,
       member_count: count,
       members: members.rows,
       member_customer_ids: memberIds.flatMap(member => member.customer_id ? [member.customer_id] : []),
