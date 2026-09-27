@@ -43,6 +43,7 @@ interface BulkOrderImportResult {
   customer_email: string | null;
   source_file_name: string;
   missing_file_name: string;
+  customer_mismatch_warning?: string | null;
   source_row_count: number;
   drafted_item_count: number;
   missing_item_count: number;
@@ -220,11 +221,12 @@ export default function BulkOrder() {
       setSelectedAddress(null);
       setFileInputKey(key => key + 1);
       await queryClient.invalidateQueries({ queryKey: ["bulk-order-imports"] });
+      const summary = imported.order_id
+        ? `Draft #${imported.order_id} created; ${imported.missing_quantity} units are missing.`
+        : "No requested units were in stock, so no empty draft was created.";
       toast({
-        title: "Bulk Order processed",
-        description: imported.order_id
-          ? `Draft #${imported.order_id} created; ${imported.missing_quantity} units are missing.`
-          : "No requested units were in stock, so no empty draft was created.",
+        title: imported.customer_mismatch_warning ? "Bulk Order processed with warning" : "Bulk Order processed",
+        description: [imported.customer_mismatch_warning, summary].filter(Boolean).join(" "),
       });
     },
     onError: error => {
@@ -553,6 +555,11 @@ export default function BulkOrder() {
                     : "No units were available, so an empty POS draft was not created."}
                   {" · "}{result.missing_quantity} missing units across {result.missing_item_count} lines
                 </p>
+                {result.customer_mismatch_warning && (
+                  <p role="status" className="mt-1 text-sm text-amber-700">
+                    {result.customer_mismatch_warning}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex flex-wrap gap-2">

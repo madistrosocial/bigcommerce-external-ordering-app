@@ -2236,25 +2236,18 @@ export async function registerRoutes(
       const matchesSelectedName = (value?: string) => Boolean(
         value && identityNames.some(name => normalizeCustomerKey(name) === normalizeCustomerKey(value)),
       );
-      if (parsed.customerName && !matchesSelectedName(parsed.customerName)) {
-        return res.status(400).json({
-          error: "The Customer Name in the Order Form does not match the selected BigCommerce customer.",
-        });
-      }
       const crmEmail = String(crmCustomer.email ?? "").trim();
       const selectedEmail = bcEmail || crmEmail;
-      if (parsed.customerEmail && selectedEmail
-        && parsed.customerEmail.trim().toLowerCase() !== selectedEmail.toLowerCase()) {
-        return res.status(400).json({
-          error: "The Customer Email in the Order Form does not match the selected BigCommerce customer.",
-        });
-      }
-      if (!parsed.customerEmail && !parsed.customerName && !fileHasGenericName
-        && !matchesSelectedName(fileNameCustomer)) {
-        return res.status(400).json({
-          error: "The customer name in the filename does not match the selected customer.",
-        });
-      }
+      const customerMismatch = Boolean(
+        (parsed.customerName && !matchesSelectedName(parsed.customerName))
+        || (parsed.customerEmail && selectedEmail
+          && parsed.customerEmail.trim().toLowerCase() !== selectedEmail.toLowerCase())
+        || (!parsed.customerEmail && !parsed.customerName && !fileHasGenericName
+          && !matchesSelectedName(fileNameCustomer)),
+      );
+      const customerMismatchWarning = customerMismatch
+        ? "Selected POS customer doesn't match the form. The draft will use this customer."
+        : null;
 
       const addressesResponse = await importBcFetch(
         `/v3/customers/addresses?customer_id:in=${bigcommerceCustomerId}&limit=250`,
@@ -2446,6 +2439,7 @@ export async function registerRoutes(
         customer_email: customerEmail,
         source_file_name: fileName,
         missing_file_name: missingFileName,
+        customer_mismatch_warning: customerMismatchWarning,
         source_row_count: parsed.items.length,
         drafted_item_count: orderItems.length,
         missing_item_count: missingItems.length,
