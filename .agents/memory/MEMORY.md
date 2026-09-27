@@ -47,3 +47,4 @@
 - [Focused JSX patching](focused-jsx-patching.md) — use small, exact hunks for compressed JSX so one context mismatch does not block unrelated edits.
 - [Failed workflow stale process](workflow-stale-process.md) — EADDRINUSE can coexist with a healthy old dev server; verify the listener before retrying.
 - [Constant Contact authorization and campaigns](constant-contact-campaign-api.md) — OAuth boundaries, aggregate-readiness limits, and on-demand contact reconciliation population rules.
+- [Cross-platform npm optional lock entries](npm-optional-lockfile.md) — `npm ci` may require platform-specific optional records omitted by the host install.
