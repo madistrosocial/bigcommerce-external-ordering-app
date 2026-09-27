@@ -2231,10 +2231,8 @@ export async function registerRoutes(
       if (!await assertCrmCustomerAccess(storage, crmCustomer.id, authUser.id, authUser.role, res)) return;
 
       const crmFullName = [crmCustomer.first_name, crmCustomer.last_name].filter(Boolean).join(" ").trim();
-      const identityNames = [bcNames[0], bcNames[1], crmCustomer.company, crmFullName]
-        .filter((value): value is string => Boolean(value?.trim()));
       const matchesSelectedName = (value?: string) => Boolean(
-        value && identityNames.some(name => normalizeCustomerKey(name) === normalizeCustomerKey(value)),
+        value && bcNames.some(name => normalizeCustomerKey(name) === normalizeCustomerKey(value)),
       );
       const crmEmail = String(crmCustomer.email ?? "").trim();
       const selectedEmail = bcEmail || crmEmail;

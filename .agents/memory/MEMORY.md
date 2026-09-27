@@ -48,3 +48,4 @@
 - [Failed workflow stale process](workflow-stale-process.md) — EADDRINUSE can coexist with a healthy old dev server; verify the listener before retrying.
 - [Constant Contact authorization and campaigns](constant-contact-campaign-api.md) — OAuth boundaries, aggregate-readiness limits, and on-demand contact reconciliation population rules.
 - [Cross-platform npm optional lock entries](npm-optional-lockfile.md) — `npm ci` may require platform-specific optional records omitted by the host install.
+- [Bulk Order customer override](bulk-order-customer-override.md) — the selected POS customer is authoritative; form identity mismatches warn but do not block the draft.

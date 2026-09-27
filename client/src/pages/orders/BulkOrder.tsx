@@ -17,7 +17,7 @@ import { getAuthHeaders } from "@/lib/api";
 import * as api from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/hooks/use-toast";
-import { customerNameFromOrderFormFileName } from "@shared/bulk-order-csv";
+import { customerNameFromOrderFormFileName, parseBulkOrderCsv } from "@shared/bulk-order-csv";
 
 interface BulkOrderImportRecord {
   id: number;
@@ -52,7 +52,7 @@ interface BulkOrderImportResult {
   created_at: string;
 }
 
-interface WorkbookPreview {
+interface OrderFormPreview {
   customer_name: string | null;
   customer_email: string | null;
   completed_item_count: number;
@@ -73,6 +73,14 @@ function displayCustomerName(customer: api.BigCommerceCustomer): string {
     || customer.company?.trim()
     || customer.email
     || `Customer #${customer.id}`;
+}
+
+function normalizeCustomerIdentity(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function formatCustomerAddress(address: api.BigCommerceAddress): string {
@@ -102,7 +110,7 @@ export default function BulkOrder() {
   const [fileName, setFileName] = useState("");
   const [csvContents, setCsvContents] = useState("");
   const [xlsxBase64, setXlsxBase64] = useState("");
-  const [workbookPreview, setWorkbookPreview] = useState<WorkbookPreview | null>(null);
+  const [orderFormPreview, setOrderFormPreview] = useState<OrderFormPreview | null>(null);
   const [previewingFile, setPreviewingFile] = useState(false);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [customerSearch, setCustomerSearch] = useState("");
@@ -148,6 +156,34 @@ export default function BulkOrder() {
     return matches.length === 1 ? matches[0] : null;
   }, [customerQuery.data, lookupTerm]);
 
+  const customerMismatchWarning = useMemo(() => {
+    if (!selectedCustomer || !fileName) return null;
+
+    const formName = orderFormPreview?.customer_name?.trim() ?? "";
+    const formEmail = orderFormPreview?.customer_email?.trim() ?? "";
+    const selectedNames = [
+      displayCustomerName(selectedCustomer),
+      selectedCustomer.company ?? "",
+    ].filter(Boolean);
+    const matchesSelectedName = (value: string) => selectedNames.some(
+      name => normalizeCustomerIdentity(name) === normalizeCustomerIdentity(value),
+    );
+    const selectedEmail = String(selectedCustomer.email ?? "").trim();
+    const fileNameCustomer = customerNameFromOrderFormFileName(fileName);
+    const genericFileName = ["", "order", "orderform", "bulkorder"].includes(
+      normalizeCustomerIdentity(fileNameCustomer),
+    );
+    const mismatch = Boolean(
+      (formName && !matchesSelectedName(formName))
+      || (formEmail && selectedEmail && formEmail.toLowerCase() !== selectedEmail.toLowerCase())
+      || (!formEmail && !formName && !genericFileName && !matchesSelectedName(fileNameCustomer)),
+    );
+
+    return mismatch
+      ? "Selected POS customer doesn't match the form. The draft will use this customer."
+      : null;
+  }, [fileName, orderFormPreview, selectedCustomer]);
+
   useEffect(() => {
     if (!selectedCustomer) {
       setCustomerAddresses([]);
@@ -187,7 +223,7 @@ export default function BulkOrder() {
       if (!fileName || !hasContent || !selectedCustomer || !selectedAddress) {
         throw new Error("Choose an Order Form, POS customer, and shipping address.");
       }
-      if (xlsxBase64 && !workbookPreview?.completed_item_count) {
+      if (xlsxBase64 && !orderFormPreview?.completed_item_count) {
         throw new Error("Enter at least one quantity in the XLSX workbook before creating a draft.");
       }
       const response = await fetch("/api/orders/bulk-imports", {
@@ -214,7 +250,7 @@ export default function BulkOrder() {
       setFileName("");
       setCsvContents("");
       setXlsxBase64("");
-      setWorkbookPreview(null);
+      setOrderFormPreview(null);
       setSelectedCustomer(null);
       setCustomerSearch("");
       setCustomerAddresses([]);
@@ -255,7 +291,7 @@ export default function BulkOrder() {
     setFileName(file.name);
     setCsvContents("");
     setXlsxBase64("");
-    setWorkbookPreview(null);
+    setOrderFormPreview(null);
     setSelectedCustomer(null);
     setCustomerAddresses([]);
     setSelectedAddress(null);
@@ -266,7 +302,23 @@ export default function BulkOrder() {
       if (isCsv) {
         const text = await file.text();
         setCsvContents(text);
-        setCustomerSearch(customerNameFromOrderFormFileName(file.name));
+        let preview: OrderFormPreview | null = null;
+        try {
+          const parsed = parseBulkOrderCsv(text, { allowEmptyItems: true });
+          preview = {
+            customer_name: parsed.customerName ?? null,
+            customer_email: parsed.customerEmail ?? null,
+            completed_item_count: parsed.items.length,
+          };
+        } catch {
+          // Keep the file selectable; the import endpoint will report CSV validation errors.
+        }
+        setOrderFormPreview(preview);
+        setCustomerSearch(
+          preview?.customer_email
+          || preview?.customer_name
+          || customerNameFromOrderFormFileName(file.name),
+        );
       } else {
         const base64 = arrayBufferToBase64(await file.arrayBuffer());
         const response = await fetch("/api/orders/bulk-imports/preview", {
@@ -277,9 +329,9 @@ export default function BulkOrder() {
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || "Could not read this XLSX workbook.");
 
-        const preview = data as WorkbookPreview;
+        const preview = data as OrderFormPreview;
         setXlsxBase64(base64);
-        setWorkbookPreview(preview);
+        setOrderFormPreview(preview);
         setCustomerSearch(
           preview.customer_email
           || preview.customer_name
@@ -290,7 +342,7 @@ export default function BulkOrder() {
       setFileName("");
       setCsvContents("");
       setXlsxBase64("");
-      setWorkbookPreview(null);
+      setOrderFormPreview(null);
       toast({
         title: "Could not read this Order Form",
         description: error instanceof Error ? error.message : "Please choose a valid CSV or XLSX file.",
@@ -379,15 +431,15 @@ export default function BulkOrder() {
                   <Loader2 className="h-4 w-4 animate-spin" /> Reading workbook details…
                 </p>
               )}
-              {workbookPreview && (
+              {orderFormPreview && (
                 <div className="rounded-md border bg-muted/30 p-3 text-sm">
                   <div className="font-medium">
-                    Workbook customer: {workbookPreview.customer_name || "Name not found"}
+                    Order Form customer: {orderFormPreview.customer_name || "Name not found"}
                   </div>
                   <div className="text-muted-foreground">
-                    {workbookPreview.customer_email || "Email not found"}
+                    {orderFormPreview.customer_email || "Email not found"}
                   </div>
-                  {!workbookPreview.completed_item_count && (
+                  {!orderFormPreview.completed_item_count && (
                     <div className="mt-2 text-amber-700">
                       No quantities are filled in yet. Complete at least one Qty cell before creating a draft.
                     </div>
@@ -468,6 +520,11 @@ export default function BulkOrder() {
                   )}
                 </div>
               )}
+              {customerMismatchWarning && (
+                <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {customerMismatchWarning}
+                </p>
+              )}
               {exactCustomerMatch && !selectedCustomer && (
                 <p className="text-xs text-muted-foreground">Select the matching POS customer.</p>
               )}
@@ -528,7 +585,7 @@ export default function BulkOrder() {
                 || addressesLoading
                 || Boolean(addressesError)
                 || previewingFile
-                || (Boolean(xlsxBase64) && !workbookPreview?.completed_item_count)
+                || (Boolean(xlsxBase64) && !orderFormPreview?.completed_item_count)
                 || importMutation.isPending
               }
             >
