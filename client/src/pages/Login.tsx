@@ -6,8 +6,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Truck, ShieldCheck, UserCircle } from "lucide-react";
-import { login as apiLogin, getMyPermissions } from "@/lib/api";
+import { Truck, ShieldCheck, UserCircle, Mail, ArrowLeft, Loader2 } from "lucide-react";
+import { login as apiLogin, getMyPermissions, requestPublicPasswordReset, type User } from "@/lib/api";
 import { LANDING_OPTIONS } from "@/pages/admin/AdminUsers";
 import { queryClient } from "@/lib/queryClient";
 
@@ -59,6 +59,9 @@ export default function Login() {
   const [, setLocation] = useLocation();
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  const [resetRequested, setResetRequested] = useState(false);
   const [businessLogo, setBusinessLogo] = useState<string | null>(null);
   // Tracks whether a fresh login flow is handling the redirect, so the
   // already-logged-in useEffect doesn't fire concurrently and override it.
@@ -76,7 +79,7 @@ export default function Login() {
     }
   }, [currentUser, setLocation]);
 
-  const doRedirect = async (user: NonNullable<ReturnType<typeof useStore>["currentUser"]>) => {
+  const doRedirect = async (user: User) => {
     redirectingRef.current = true;
     login(user);
     const preferred = user.default_landing_page || "/dashboard";
@@ -117,6 +120,19 @@ export default function Login() {
     window.location.replace("/");
   };
 
+  const handleForgotPassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setIsSendingReset(true);
+    try {
+      await requestPublicPasswordReset(username);
+      setResetRequested(true);
+    } catch (err: any) {
+      setError(err.message || "Unable to request a password reset");
+    } finally {
+      setIsSendingReset(false);
+    }
+  };
+
   const demoLogin = async (demoRole: 'admin' | 'agent') => {
     setIsLoading(true);
     setError("");
@@ -153,9 +169,38 @@ export default function Login() {
             )}
           </div>
           <CardTitle className="text-2xl font-heading uppercase tracking-wide">Sales | Midatlantic Distribution</CardTitle>
-          <CardDescription>Enter your credentials to access the system</CardDescription>
+          <CardDescription>{isForgotPassword ? "Enter your account email to receive a reset link" : "Enter your credentials to access the system"}</CardDescription>
         </CardHeader>
         <CardContent>
+          {isForgotPassword ? (
+            resetRequested ? (
+              <div className="space-y-4 text-center">
+                <Mail className="mx-auto h-10 w-10 text-blue-600" />
+                <p className="text-sm text-slate-600">If an enabled account matches that email, a password reset link is on its way. Check your inbox and spam folder.</p>
+                <Button type="button" variant="outline" onClick={() => { setIsForgotPassword(false); setResetRequested(false); setError(""); }} data-testid="button-back-to-login">
+                  <ArrowLeft className="mr-2 h-4 w-4" /> Back to sign in
+                </Button>
+              </div>
+            ) : (
+              <form onSubmit={handleForgotPassword} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="forgot-username">Email address</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-2.5 h-5 w-5 text-slate-400" />
+                    <Input id="forgot-username" type="email" placeholder="email@company.com" className="pl-10" value={username} onChange={(e) => setUsername(e.target.value)} disabled={isSendingReset} autoComplete="email" data-testid="input-forgot-username" />
+                  </div>
+                </div>
+                {error && <div className="text-sm text-red-500 bg-red-50 p-2 rounded border border-red-200" data-testid="text-forgot-error">{error}</div>}
+                <Button type="submit" className="w-full" disabled={isSendingReset} data-testid="button-send-forgot-password">
+                  {isSendingReset && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isSendingReset ? "Sending…" : "Send reset link"}
+                </Button>
+                <Button type="button" variant="ghost" className="w-full" onClick={() => { setIsForgotPassword(false); setError(""); }} disabled={isSendingReset} data-testid="button-cancel-forgot-password">
+                  Back to sign in
+                </Button>
+              </form>
+            )
+          ) : (
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="username">Username</Label>
@@ -199,14 +244,15 @@ export default function Login() {
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
+          )}
         </CardContent>
-        <CardFooter className="justify-center pt-0">
-          <button
-            type="button"
-            onClick={handleForceLogout}
-            className="text-xs text-slate-500 underline underline-offset-2 hover:text-red-600"
-            data-testid="button-login-force-logout"
-          >
+        <CardFooter className="justify-center gap-4 pt-0">
+          {!isForgotPassword && (
+            <button type="button" onClick={() => { setIsForgotPassword(true); setError(""); }} className="text-xs text-blue-600 underline underline-offset-2 hover:text-blue-800" data-testid="button-forgot-password">
+              Forgot password?
+            </button>
+          )}
+          <button type="button" onClick={handleForceLogout} className="text-xs text-slate-500 underline underline-offset-2 hover:text-red-600" data-testid="button-login-force-logout">
             Clear saved session
           </button>
         </CardFooter>

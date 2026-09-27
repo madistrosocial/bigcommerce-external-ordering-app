@@ -415,6 +415,8 @@ export default function OrdersList() {
   // Without orders:view, users see only their own Sales App orders (enforced on server too)
   const canViewAll = hasPermission("orders", "view");
   const canExport  = hasPermission("orders", "export");
+  const [brandId, setBrandId] = useState(() => new URLSearchParams(window.location.search).get("brandId") || "");
+  const [brandName] = useState(() => new URLSearchParams(window.location.search).get("brandName") || "");
 
   // ── Store Credit + Email dialog state ───────────────────────────────────────
   const [storeCreditOrder, setStoreCreditOrder] = useState<ConsolidatedOrder | null>(null);
@@ -449,8 +451,8 @@ export default function OrdersList() {
   const [createdBy, setCreatedBy] = useState("");   // "" | "me" | userId string
   const [syncStatus, setSyncStatus] = useState(""); // "" | "synced" | "pending_sync" | "failed"
   const [bcStatus, setBcStatus] = useState("");     // "" | BC status string
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState(() => new URLSearchParams(window.location.search).get("dateFrom") || "");
+  const [dateTo, setDateTo] = useState(() => new URLSearchParams(window.location.search).get("dateTo") || "");
   const [page, setPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [exporting, setExporting] = useState(false);
@@ -476,13 +478,13 @@ export default function OrdersList() {
   };
 
   const hasAnyFilter = !!(
-    debouncedSearch || bcStatus || dateFrom || dateTo ||
+    debouncedSearch || bcStatus || dateFrom || dateTo || brandId ||
     (salesChannel === "salesapp" && (createdBy || syncStatus))
   );
 
   const clearFilters = () => {
     setSearch(""); setDebouncedSearch(""); setCreatedBy("");
-    setSyncStatus(""); setBcStatus(""); setDateFrom(""); setDateTo("");
+    setSyncStatus(""); setBcStatus(""); setDateFrom(""); setDateTo(""); setBrandId("");
     setPage(1);
   };
 
@@ -510,11 +512,12 @@ export default function OrdersList() {
     syncStatus: salesChannel === "salesapp" ? syncStatus : "",
     bcStatus,
     dateFrom, dateTo,
+    brandId,
     salesChannel,
   });
 
   const { data, isLoading } = useQuery<OrdersData>({
-    queryKey: ["orders", "consolidated", salesChannel, page, debouncedSearch, resolvedCreatedBy, syncStatus, bcStatus, dateFrom, dateTo],
+    queryKey: ["orders", "consolidated", salesChannel, page, debouncedSearch, resolvedCreatedBy, syncStatus, bcStatus, dateFrom, dateTo, brandId],
     queryFn: async () => {
       const r = await fetch(`/api/orders/consolidated?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load orders");
@@ -545,7 +548,7 @@ export default function OrdersList() {
         search: debouncedSearch,
         createdBy: salesChannel === "salesapp" ? resolvedCreatedBy : "",
         syncStatus: salesChannel === "salesapp" ? syncStatus : "",
-        bcStatus, dateFrom, dateTo, salesChannel,
+        bcStatus, dateFrom, dateTo, brandId, salesChannel,
       });
       const r = await fetch(`/api/orders/consolidated?${exportParams}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Export failed");
@@ -645,7 +648,9 @@ export default function OrdersList() {
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="min-w-0">
             <h1 className="text-lg font-bold text-slate-800">Sales History</h1>
-            <p className="text-xs text-slate-400 mt-0.5">{total.toLocaleString()} orders</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {total.toLocaleString()} orders{brandId ? ` · ${brandName || `Brand ${brandId}`}` : ""}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             {/* Sales Channel toggle — only shown to users with orders:view */}

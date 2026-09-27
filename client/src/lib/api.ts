@@ -16,10 +16,84 @@ export interface Product {
   max_purchase_quantity?: number | null;
 }
 
+export interface Product360Range {
+  dateFrom: string;
+  dateTo: string;
+}
+
+export interface Product360Overview {
+  range: Product360Range;
+  metrics: Record<string, number | string | null>;
+  trend: Record<string, unknown>[];
+  fastSellers: Record<string, unknown>[];
+  profitDrivers: Record<string, unknown>[];
+  restockAlerts: Record<string, unknown>[];
+  slowMovers: Record<string, unknown>[];
+  brandPerformance: Record<string, unknown>[];
+  inventoryStatus: Record<string, unknown>[];
+  salesVelocity: Record<string, unknown>[];
+  replenishmentPriority: Record<string, unknown>[];
+  recentActivity: Record<string, unknown>[];
+  brandOptions: string[];
+  categoryOptions: string[];
+  categoryPerformance: Record<string, unknown>[];
+  categoryWarning?: string;
+}
+
+export interface Product360ProductsResponse {
+  range: Product360Range;
+  rows: Record<string, unknown>[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface Product360Detail {
+  range: Product360Range;
+  product: Record<string, unknown>;
+  trend: Record<string, unknown>[];
+  variants: Record<string, unknown>[];
+  customers: Record<string, unknown>[];
+  history: Record<string, unknown>[];
+}
+
+function product360Request<T>(path: string): Promise<T> {
+  return fetch(`${API_BASE}${path}`, { headers: getAuthHeaders() }).then(async (res) => {
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "Product 360 request failed");
+    return body as T;
+  });
+}
+
+export function getProduct360Overview(query: { dateFrom?: string; dateTo?: string; brand?: string; category?: string } = {}) {
+  const params = new URLSearchParams();
+  if (query.dateFrom) params.set("dateFrom", query.dateFrom);
+  if (query.dateTo) params.set("dateTo", query.dateTo);
+  if (query.brand) params.set("brand", query.brand);
+  if (query.category) params.set("category", query.category);
+  return product360Request<Product360Overview>(`/product-360/overview?${params.toString()}`);
+}
+
+export function getProduct360Products(query: Record<string, string | number | undefined> = {}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  return product360Request<Product360ProductsResponse>(`/product-360/products?${params.toString()}`);
+}
+
+export function getProduct360Detail(id: number, query: { dateFrom?: string; dateTo?: string } = {}) {
+  const params = new URLSearchParams();
+  if (query.dateFrom) params.set("dateFrom", query.dateFrom);
+  if (query.dateTo) params.set("dateTo", query.dateTo);
+  return product360Request<Product360Detail>(`/product-360/products/${id}?${params.toString()}`);
+}
+
 export interface User {
   id: number;
   username: string;
   name: string;
+  avatar_data?: string | null;
   role: 'admin' | 'agent';
   is_enabled: boolean;
   allow_bigcommerce_search: boolean;
@@ -56,6 +130,7 @@ export interface Order {
   bigcommerce_order_id?: number;
   bigcommerce_customer_id?: number;
   billing_address?: any;
+  bulk_order_import_id?: number;
 }
 
 export interface DropshipProduct {
@@ -97,6 +172,27 @@ export interface DropshipSyncLog {
   detail: Record<string, unknown>;
 }
 
+export interface DropshipDashboardBrand {
+  id: number;
+  name: string;
+  today: number;
+  yesterday: number;
+  thisMonth: number;
+  total: number;
+}
+
+export interface DropshipDashboard {
+  timezone: string;
+  dates: { today: string; yesterday: string; monthStart: string };
+  pinnedBrands: DropshipDashboardBrand[];
+  dataFreshness: {
+    lineItemCount: number;
+    lastFullSync: string | null;
+    lastIncrementalSync: string | null;
+    autoSyncEnabled: boolean;
+  };
+}
+
 const API_BASE = '/api';
 
 /**
@@ -136,6 +232,21 @@ export function getKoleConnection() {
     lastTestedAt: string | null;
     lastTestOk: boolean | null;
   }>("/dropshipping/kole/connection");
+}
+
+export function getDropshipDashboard() {
+  return dropshipRequest<DropshipDashboard>("/dropshipping/dashboard");
+}
+
+export function getDropshipDashboardBrands() {
+  return dropshipRequest<Array<{ id: number; name: string }>>("/dropshipping/dashboard/brands");
+}
+
+export function saveDropshipDashboardPins(brandIds: number[]) {
+  return dropshipRequest<{ pinnedBrands: Array<{ id: number; name: string }> }>("/dropshipping/dashboard/pins", {
+    method: "PUT",
+    body: JSON.stringify({ brandIds }),
+  });
 }
 
 export function saveKoleConnection(data: { accountId?: string; apiKey?: string; displayName?: string }) {
@@ -208,6 +319,71 @@ async function marketingRequest(path: string, init: RequestInit = {}) {
 }
 
 export const getMarketingDashboard = () => marketingRequest("/marketing/dashboard");
+export const getMarketingAudienceReadiness = () => marketingRequest("/marketing/audience-readiness");
+export interface MarketingAudienceReconciliationSummary {
+  ccContactRecords: number;
+  ccCollectionTotal: number | null;
+  ccReportedTotal: number | null;
+  activeCrmCustomers: number;
+  matchedEmailGroups: number;
+  ccOnlyEmailGroups: number;
+  crmOnlyEmailGroups: number;
+  emailGroupsWithDifferentRecordCounts: number;
+  ccRecordsWithoutValidEmail: number;
+  crmCustomersWithoutValidEmail: number;
+  exportedRows: number;
+}
+export async function exportMarketingAudienceReconciliation(): Promise<{
+  blob: Blob;
+  filename: string;
+  summary: MarketingAudienceReconciliationSummary;
+}> {
+  const res = await fetch(`${API_BASE}/marketing/audience-readiness/reconciliation.csv`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Could not export the contact reconciliation.");
+  }
+  const getCount = (name: string) => {
+    const value = Number(res.headers.get(`X-Reconciliation-${name}`));
+    return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  };
+  const reportedTotalHeader = res.headers.get("X-Reconciliation-cc-reported-total");
+  const reportedTotalValue = reportedTotalHeader ? Number(reportedTotalHeader) : NaN;
+  const collectionTotalHeader = res.headers.get("X-Reconciliation-cc-collection-total");
+  const collectionTotalValue = collectionTotalHeader ? Number(collectionTotalHeader) : NaN;
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const filename = disposition.match(/filename="?([^";]+)"?/)?.[1]
+    ?? `constant-contact-crm-discrepancy-${new Date().toISOString().slice(0, 10)}.csv`;
+  return {
+    blob: await res.blob(),
+    filename,
+    summary: {
+      ccContactRecords: getCount("cc-contact-records"),
+      ccCollectionTotal: Number.isSafeInteger(collectionTotalValue) && collectionTotalValue >= 0 ? collectionTotalValue : null,
+      ccReportedTotal: Number.isSafeInteger(reportedTotalValue) && reportedTotalValue >= 0 ? reportedTotalValue : null,
+      activeCrmCustomers: getCount("active-crm-customers"),
+      matchedEmailGroups: getCount("matched-email-groups"),
+      ccOnlyEmailGroups: getCount("cc-only-email-groups"),
+      crmOnlyEmailGroups: getCount("crm-only-email-groups"),
+      emailGroupsWithDifferentRecordCounts: getCount("email-groups-with-different-record-counts"),
+      ccRecordsWithoutValidEmail: getCount("cc-records-without-valid-email"),
+      crmCustomersWithoutValidEmail: getCount("crm-customers-without-valid-email"),
+      exportedRows: getCount("exported-rows"),
+    },
+  };
+}
+export interface MarketingConstantContactOptOutImportResult {
+  checkedAt: string;
+  providerOptOutCount: number;
+  invalidEmailCount: number;
+  importedCount: number;
+  alreadySuppressedCount: number;
+  matchedCrmCustomerCount: number;
+}
+export const importMarketingConstantContactOptOuts = () =>
+  marketingRequest("/marketing/constant-contact/import-opt-outs", { method: "POST", body: "{}" }) as Promise<MarketingConstantContactOptOutImportResult>;
 export const getMarketingSenderSettings = () => marketingRequest("/marketing/sender-settings");
 export const getMarketingProviderStatus = () => marketingRequest("/marketing/provider-status");
 export const saveMarketingSenderSettings = (data: { emails: string[]; defaultEmail: string }) =>
@@ -220,6 +396,47 @@ export const saveAdminZohoCredentials = (data: {
 }) => marketingRequest("/admin/zoho-credentials", { method: "PUT", body: JSON.stringify(data) });
 export const clearAdminZohoCredentials = () =>
   marketingRequest("/admin/zoho-credentials", { method: "DELETE" });
+export const getAdminConstantContactStatus = () => marketingRequest("/admin/constant-contact/status");
+export const verifyAdminConstantContact = () =>
+  marketingRequest("/admin/constant-contact/verify", { method: "POST" });
+export async function startAdminConstantContactAuthorization(): Promise<string> {
+  const res = await fetch(`${API_BASE}/admin/constant-contact/oauth/start`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Could not start Constant Contact authorization");
+  }
+  const authorizationUrl = res.headers.get("Location");
+  if (!authorizationUrl) {
+    throw new Error("The Constant Contact authorization URL was not returned.");
+  }
+  return authorizationUrl;
+}
+export const getZohoCrmStatus = () => marketingRequest("/zoho-crm/status");
+export const getAdminZohoCrmCredentials = () => marketingRequest("/admin/zoho-crm-credentials");
+export const saveZohoCrmCredentials = (data: { credentials: Record<string, string>; clear?: string[] }) =>
+  marketingRequest("/admin/zoho-crm-credentials", { method: "PUT", body: JSON.stringify(data) });
+export const clearZohoCrmCredentials = () =>
+  marketingRequest("/admin/zoho-crm-credentials", { method: "DELETE" });
+export const getZohoAccountMappings = (params: { search?: string; status?: string; relationshipType?: string; page?: number; limit?: number } = {}) =>
+  marketingRequest(`/zoho-crm/mappings?search=${encodeURIComponent(params.search || "")}&status=${encodeURIComponent(params.status || "all")}&relationshipType=${encodeURIComponent(params.relationshipType || "all")}&page=${params.page || 1}&limit=${params.limit || 50}`);
+export const searchZohoAccounts = (search: string) =>
+  marketingRequest(`/zoho-crm/accounts?search=${encodeURIComponent(search)}`);
+export const saveZohoAccountMapping = (data: {
+  customerId: number;
+  zohoAccountId: string;
+  zohoAccountName: string;
+  zohoAccountEmail?: string | null;
+  zohoAccountPhone?: string | null;
+  relationshipType: string;
+}) => marketingRequest("/zoho-crm/mappings", { method: "POST", body: JSON.stringify(data) });
+export const deleteZohoAccountMapping = (id: number) =>
+  marketingRequest(`/zoho-crm/mappings/${id}`, { method: "DELETE" });
+export const refreshZohoAccountMappings = () =>
+  marketingRequest("/zoho-crm/mappings/refresh", { method: "POST" });
 export const getMarketingCampaigns = (params: { search?: string; status?: string } = {}) =>
   marketingRequest(`/marketing/campaigns?search=${encodeURIComponent(params.search || "")}&status=${encodeURIComponent(params.status || "all")}`);
 export const getMarketingCampaign = (id: number) => marketingRequest(`/marketing/campaigns/${id}`);
@@ -247,6 +464,28 @@ export const getMarketingAnalytics = (params: { campaignId?: number; dateFrom?: 
   marketingRequest(`/marketing/analytics?${new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== "") as string[][]).toString()}`);
 export const getMarketingAudiences = () => marketingRequest("/marketing/audiences");
 export const getMarketingAudience = (id: number) => marketingRequest(`/marketing/audiences/${id}`);
+export const getMarketingConstantContactLists = () => marketingRequest("/marketing/constant-contact/lists");
+export const importMarketingConstantContactList = (list_id: string) =>
+  marketingRequest("/marketing/audiences/import-constant-contact", { method: "POST", body: JSON.stringify({ list_id }) });
+export const getMarketingConstantContactAudienceMembers = (id: number) =>
+  marketingRequest(`/marketing/audiences/${id}/constant-contact-members`);
+export const updateMarketingConstantContactAudienceMembers = (id: number, data: { add_customer_ids?: number[]; remove_contact_ids?: string[] }) =>
+  marketingRequest(`/marketing/audiences/${id}/constant-contact-members`, { method: "POST", body: JSON.stringify(data) });
+export async function exportMarketingConstantContactMissing(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/marketing/audiences/${id}/constant-contact-missing.csv`, { headers: getAuthHeaders() });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Could not export missing Constant Contact contacts.");
+  }
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const filename = disposition.match(/filename="?([^";]+)"?/)?.[1] ?? `constant-contact-missing-${id}.csv`;
+  const url = URL.createObjectURL(await res.blob());
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 export const getMarketingProductLists = (search = "") =>
   marketingRequest(`/marketing/product-lists?search=${encodeURIComponent(search)}`);
 export const getMarketingProductList = (id: number) => marketingRequest(`/marketing/product-lists/${id}`);
@@ -447,9 +686,15 @@ export interface ProductListResult {
 
 export type AgentSearchResult = DirectVariantResult | ProductListResult;
 
-export async function agentBigCommerceSearch(query: string, userId: number): Promise<AgentSearchResult> {
+export async function agentBigCommerceSearch(
+  query: string,
+  userId: number,
+  categoryIds: number[] = [],
+): Promise<AgentSearchResult> {
+  const params = new URLSearchParams({ query, userId: String(userId) });
+  if (categoryIds.length > 0) params.set("categoryIds", categoryIds.join(","));
   const res = await fetch(
-    `${API_BASE}/agent/bigcommerce/search?query=${encodeURIComponent(query)}&userId=${userId}`,
+    `${API_BASE}/agent/bigcommerce/search?${params.toString()}`,
     { headers: getAuthHeaders() }
   );
   if (!res.ok) {
@@ -485,6 +730,77 @@ export async function login(username: string, password: string): Promise<User> {
     throw new Error(error.error || 'Login failed');
   }
   return res.json();
+}
+
+export async function getAccountProfile(): Promise<User> {
+  const res = await fetch(`${API_BASE}/account/profile`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error || "Failed to load account settings");
+  }
+  return res.json();
+}
+
+export async function updateAccountProfile(data: { name: string; username: string; avatar_data?: string | null }): Promise<User> {
+  const res = await fetch(`${API_BASE}/account/profile`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error || "Failed to update account settings");
+  }
+  return res.json();
+}
+
+export async function updateAccountPassword(password: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/account/password`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error || "Failed to update password");
+  }
+}
+
+export async function requestPasswordResetEmail(): Promise<void> {
+  const res = await fetch(`${API_BASE}/account/password-reset/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error || "Failed to send password reset email");
+  }
+}
+
+export async function requestPublicPasswordReset(username: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/auth/password-reset/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username }),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error || "Unable to request a password reset");
+  }
+}
+
+export async function resetPassword(token: string, password: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/auth/password-reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error || "Failed to reset password");
+  }
 }
 
 // ─── Orders ───────────────────────────────────────────────────────────────────
@@ -779,6 +1095,41 @@ export async function searchBigCommerceCustomers(query: string): Promise<BigComm
   return data;
 }
 
+export async function searchBulkOrderCustomers(query: string): Promise<BigCommerceCustomer[]> {
+  const res = await fetch(
+    `${API_BASE}/orders/bulk-imports/customers/search?query=${encodeURIComponent(query)}`,
+    { headers: getAuthHeaders() },
+  );
+  if (!res.ok) throw new Error("Customer search failed");
+  return res.json();
+}
+
+export interface GlobalSearchResult {
+  customers: Array<{
+    id: number;
+    bigcommerce_customer_id: number;
+    name: string;
+    email: string;
+    address: string;
+  }>;
+  orders: Array<{
+    bigcommerce_order_id: number;
+    customer_name: string;
+    status: string | null;
+    total: string | number | null;
+    date: string | null;
+  }>;
+}
+
+export async function searchGlobal(query: string, signal?: AbortSignal): Promise<GlobalSearchResult> {
+  const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`, {
+    headers: getAuthHeaders(),
+    signal,
+  });
+  if (!res.ok) throw new Error("Search failed");
+  return res.json();
+}
+
 export async function searchPosCustomers(query: string): Promise<BigCommerceCustomer[]> {
   const res = await fetch(
     `${API_BASE}/pos/customers/search?query=${encodeURIComponent(query)}`,
@@ -1000,12 +1351,20 @@ export interface BcCategoryProductsResult {
 }
 
 export async function getBcCategoryProducts(
-  categoryId: number,
+  categoryIds: number | number[],
   page: number,
   limit: number,
+  search = "",
 ): Promise<BcCategoryProductsResult> {
+  const ids = Array.isArray(categoryIds) ? categoryIds : [categoryIds];
+  const params = new URLSearchParams({
+    categoryIds: ids.join(","),
+    page: String(page),
+    limit: String(limit),
+  });
+  if (search.trim()) params.set("search", search.trim());
   const res = await fetch(
-    `${API_BASE}/bigcommerce/category-products?categoryId=${categoryId}&page=${page}&limit=${limit}`,
+    `${API_BASE}/bigcommerce/category-products?${params.toString()}`,
     { headers: getAuthHeaders() },
   );
   if (!res.ok) throw new Error("Failed to fetch category products");

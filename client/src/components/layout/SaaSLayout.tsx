@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getKoleConnection, getUsersSummary } from "@/lib/api";
+import { getKoleConnection, getUsersSummary, searchGlobal, type GlobalSearchResult } from "@/lib/api";
 import { useLocation } from "wouter";
 import { useStore } from "@/lib/store";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -9,9 +9,19 @@ import {
   LayoutDashboard, Monitor, ShoppingBag, Package, BookOpen,
   ShoppingCart, Settings, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, LogOut, Truck, Wifi, WifiOff, Menu, X,
-  Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart, Mail, Megaphone, KeyRound, Clock3, PackageOpen,
+  User, Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart, Mail, Megaphone, KeyRound, Link2, Clock3, PackageOpen, Search, Loader2,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 // ─── Nav types ────────────────────────────────────────────────────────────────
 
@@ -36,6 +46,8 @@ function isPathInGroup(group: NavGroup, location: string): boolean {
 export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useLocation();
   const { currentUser, isOfflineMode, setOfflineMode, toggleOfflineMode, logout } = useStore();
+  const userInitials = (currentUser?.name || currentUser?.username || "U")
+    .split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
   const { hasPermission } = usePermissions();
   const { data: dropshipConnection } = useQuery({
     queryKey: ["dropship-connection"],
@@ -54,6 +66,11 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     try { return localStorage.getItem("vansales_business_logo") || null; } catch { return null; }
   });
   const prevLocation = useRef(location);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState("");
+  const [globalSearchResults, setGlobalSearchResults] = useState<GlobalSearchResult | null>(null);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/public/business-logo")
@@ -90,6 +107,42 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     return () => { window.removeEventListener("online", handleOnline); window.removeEventListener("offline", handleOffline); };
   }, [setOfflineMode, toast]);
 
+  useEffect(() => {
+    const query = globalSearchQuery.trim();
+    if (query.length < 2) {
+      setGlobalSearchResults(null);
+      setGlobalSearchLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setGlobalSearchLoading(true);
+      try {
+        const results = await searchGlobal(query, controller.signal);
+        setGlobalSearchResults(results);
+        setGlobalSearchOpen(true);
+      } catch (error: any) {
+        if (error?.name !== "AbortError") setGlobalSearchResults({ customers: [], orders: [] });
+      } finally {
+        if (!controller.signal.aborted) setGlobalSearchLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [globalSearchQuery]);
+
+  useEffect(() => {
+    const handleOutsideSearchClick = (event: MouseEvent) => {
+      if (!searchRef.current?.contains(event.target as Node)) setGlobalSearchOpen(false);
+    };
+    document.addEventListener("mousedown", handleOutsideSearchClick);
+    return () => document.removeEventListener("mousedown", handleOutsideSearchClick);
+  }, []);
+
   const handleLogout = () => { logout(); setLocation("/"); };
   const setCollapsedPersist = (v: boolean) => {
     setCollapsed(v);
@@ -113,6 +166,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
       });
     }
   };
+  const openSearchResult = (path: string) => {
+    setGlobalSearchQuery("");
+    setGlobalSearchResults(null);
+    setGlobalSearchOpen(false);
+    navigate(path);
+  };
 
   const isChromeless = CHROMELESS_PATHS.includes(location) || !currentUser;
 
@@ -135,6 +194,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   // Orders children (all permission-gated)
   const ordersChildren: NavLeaf[] = [
     ...(hasPermission("orders_drafts") ? [{ label: "Drafts", path: "/orders/drafts" }] : []),
+    ...(hasPermission("orders_drafts") ? [{ label: "Bulk Order", path: "/orders/bulk" }] : []),
     ...(hasPermission("orders_all") ? [{ label: "Sales History", path: "/orders/list" }] : []),
   ];
 
@@ -152,6 +212,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("marketing") ? [{ label: "Order Form", path: "/marketing/order-form" }] : []),
     ...(hasPermission("marketing") ? [{ label: "Product Lists", path: "/marketing/product-lists" }] : []),
     ...(hasPermission("marketing", "manage_audiences") ? [{ label: "Audiences", path: "/marketing/audiences" }] : []),
+    ...(hasPermission("marketing") ? [{ label: "Audience Readiness", path: "/marketing/audience-readiness" }] : []),
     ...(hasPermission("marketing", "manage_templates") ? [{ label: "Templates", path: "/marketing/templates" }] : []),
     ...(hasPermission("marketing", "manage_automations") ? [{ label: "Automations", path: "/marketing/automations" }] : []),
     ...(hasPermission("marketing") ? [{ label: "Log", path: "/marketing/log" }] : []),
@@ -166,6 +227,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   ];
 
   const dropshippingChildren: NavLeaf[] = [
+    ...(hasPermission("dropshipping") ? [{ label: "Dashboard", path: "/dropshipping/dashboard" }] : []),
     ...(hasPermission("dropshipping") ? [{ label: dropshipDisplayName, path: "/dropshipping/kole" }] : []),
     ...(hasPermission("dropshipping") ? [{ label: "Product Catalog", path: "/dropshipping/products" }] : []),
     ...(hasPermission("dropshipping") ? [{ label: "Sync Logs", path: "/dropshipping/sync-logs" }] : []),
@@ -177,6 +239,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(canViewAllAttendance && hasPermission("attendance", "view_dashboard") ? [{ label: "Overview", path: "/attendance/overview" }] : []),
     ...(hasPermission("attendance", "view_logs") ? [{ label: "Attendance Logs", path: "/attendance/logs" }] : []),
     ...(canViewAllAttendance && hasPermission("attendance", "view_reports") ? [{ label: "Reports", path: "/attendance/reports" }] : []),
+    ...(hasPermission("attendance", "view_home_locations") ? [{ label: "Home Locations", path: "/attendance/locations" }] : []),
   ];
 
   // CRM children
@@ -194,8 +257,22 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   // Reporting children
   const reportingChildren: NavLeaf[] = [
     ...(hasPermission("reporting_sales") ? [{ label: "Sales Report", path: "/reports/sales" }] : []),
+    ...(hasPermission("reporting_exports") ? [{ label: "Exports", path: "/reports/exports" }] : []),
     ...(hasPermission("reporting_price_override_audit") ? [{ label: "Price Override Audit", path: "/reports/price-override-audit" }] : []),
   ];
+
+  const product360Children: NavLeaf[] = hasPermission("product_360")
+    ? [
+        { label: "Overview", path: "/product-360" },
+        { label: "Products", path: "/product-360/products" },
+        { label: "Sales Performance", path: "/product-360/sales" },
+        { label: "Profitability", path: "/product-360/profitability" },
+        { label: "Inventory Intelligence", path: "/product-360/inventory" },
+        { label: "Replenishment", path: "/product-360/replenishment" },
+        { label: "Customers", path: "/product-360/customers" },
+        { label: "Product History", path: "/product-360/history" },
+      ]
+    : [];
 
   // Build final nav list — only include items the user can access
   const navItems: NavGroup[] = [
@@ -206,6 +283,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(inventoryChildren.length > 0 ? [{ id: "inventory", label: "Inventory", icon: Package, children: inventoryChildren }] : []),
     ...(marketingChildren.length > 0 ? [{ id: "marketing", label: "Marketing", icon: Megaphone, children: marketingChildren }] : []),
     ...(hasPermission("catalog") ? [{ id: "catalog", label: "Catalog", icon: BookOpen, path: "/catalog" }] : []),
+    ...(product360Children.length > 0 ? [{ id: "product-360", label: "Product 360", icon: Layers, children: product360Children }] : []),
     ...(hasPermission("cart") ? [{ id: "cart", label: "Cart", icon: ShoppingCart, path: "/cart" }] : []),
     ...(dropshippingChildren.length > 0 ? [{ id: "dropshipping", label: "Dropshipping", icon: PackageOpen, children: dropshippingChildren }] : []),
     ...(toolsChildren.length > 0 ? [{ id: "tools", label: "Tools", icon: Wrench, children: toolsChildren }] : []),
@@ -224,6 +302,8 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     { label: "BC Integration", path: "/admin/integration", icon: Plug },
     { label: "SKUVault", path: "/admin/skuvault", icon: Plug },
     { label: "Zoho", path: "/admin/zoho", icon: KeyRound },
+    ...(role === "admin" ? [{ label: "Constant Contact", path: "/admin/constant-contact", icon: Mail }] : []),
+    ...(role === "admin" ? [{ label: "Zoho Account Mapping", path: "/admin/zoho/account-mapping", icon: Link2 }] : []),
     { label: "Attendance Settings", path: "/admin/attendance", icon: Clock3 },
     { label: "Price Tiers", path: "/admin/price-tiers", icon: Layers },
     { label: "Invoice Settings", path: "/admin/invoice", icon: Receipt },
@@ -261,7 +341,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
 
       {/* User card */}
       {!collapsed && (
-        <div className="px-4 py-3 border-b border-slate-800">
+        <div className="px-4 py-3 border-b border-slate-800 text-center md:hidden">
           <p className="text-xs font-semibold text-slate-100 truncate">{currentUser.name}</p>
           <p className="text-[11px] text-slate-400 capitalize">{myGroupName ?? currentUser.role}</p>
         </div>
@@ -325,7 +405,6 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
         {/* Settings section */}
         {showSettings && (
           <>
-            <div className="my-2 border-t border-slate-700" />
             <div>
               <button
                 onClick={() => {
@@ -434,11 +513,134 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
           <button onClick={() => setMobileOpen(true)} className="md:hidden p-1.5 rounded-md text-slate-500 hover:bg-slate-100 mr-2" data-testid="btn-mobile-menu">
             <Menu className="h-5 w-5" />
           </button>
-          <h1 className="text-sm font-semibold text-slate-700 tracking-wide uppercase truncate">Sales | Midatlantic Distribution</h1>
+          <h1 className="hidden sm:block min-w-0 shrink text-sm font-semibold text-slate-700 tracking-wide uppercase truncate">Sales | Midatlantic Distribution</h1>
           {isOfflineMode && (
             <span className="hidden sm:inline ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-600 uppercase tracking-wide whitespace-nowrap">Offline</span>
           )}
-          <div className="flex items-center gap-1 ml-auto" />
+          <div ref={searchRef} className="relative min-w-0 flex-1 max-w-md ml-auto mr-2 sm:mr-4">
+            <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 text-slate-400 transition-colors focus-within:border-blue-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100">
+              {globalSearchLoading ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Search className="h-4 w-4 shrink-0" />}
+              <input
+                value={globalSearchQuery}
+                onChange={(event) => {
+                  setGlobalSearchQuery(event.target.value);
+                  setGlobalSearchOpen(true);
+                }}
+                onFocus={() => { if (globalSearchQuery.trim().length >= 2) setGlobalSearchOpen(true); }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setGlobalSearchOpen(false);
+                    (event.currentTarget as HTMLInputElement).blur();
+                  }
+                  if (event.key === "Enter" && globalSearchResults?.customers[0]) {
+                    openSearchResult(`/crm/customers/${globalSearchResults.customers[0].id}`);
+                  } else if (event.key === "Enter" && globalSearchResults?.orders[0]) {
+                    openSearchResult(`/orders/bc/${globalSearchResults.orders[0].bigcommerce_order_id}`);
+                  }
+                }}
+                placeholder="Search customers or order IDs"
+                aria-label="Search customers or BigCommerce order IDs"
+                data-testid="input-global-search"
+                className="min-w-0 flex-1 bg-transparent px-2 text-xs text-slate-700 outline-none placeholder:text-slate-400"
+              />
+            </div>
+            {globalSearchOpen && globalSearchQuery.trim().length >= 2 && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[min(26rem,calc(100vh-5rem))] overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-xl">
+                {globalSearchLoading && (
+                  <div className="px-3 py-4 text-center text-xs text-slate-500">Searching…</div>
+                )}
+                {!globalSearchLoading && globalSearchResults && globalSearchResults.customers.length === 0 && globalSearchResults.orders.length === 0 && (
+                  <div className="px-3 py-4 text-center text-xs text-slate-500">No customers or orders found.</div>
+                )}
+                {!globalSearchLoading && globalSearchResults && globalSearchResults.customers.length > 0 && (
+                  <div>
+                    <p className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Customers</p>
+                    {globalSearchResults.customers.map((customer) => (
+                      <button
+                        key={`customer-${customer.id}`}
+                        onClick={() => openSearchResult(`/crm/customers/${customer.id}`)}
+                        className="flex w-full items-start gap-2 rounded px-2 py-2 text-left hover:bg-blue-50"
+                        data-testid={`global-search-customer-${customer.id}`}
+                      >
+                        <User className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-semibold text-slate-700">{customer.name}</span>
+                          <span className="block truncate text-[11px] text-slate-500">{customer.email}</span>
+                          {customer.address && <span className="block truncate text-[11px] text-slate-400">{customer.address}</span>}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!globalSearchLoading && globalSearchResults && globalSearchResults.orders.length > 0 && (
+                  <div className="mt-1 border-t border-slate-100 pt-1">
+                    <p className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Orders</p>
+                    {globalSearchResults.orders.map((order) => (
+                      <button
+                        key={`order-${order.bigcommerce_order_id}`}
+                        onClick={() => openSearchResult(`/orders/bc/${order.bigcommerce_order_id}`)}
+                        className="flex w-full items-center gap-2 rounded px-2 py-2 text-left hover:bg-blue-50"
+                        data-testid={`global-search-order-${order.bigcommerce_order_id}`}
+                      >
+                        <ShoppingBag className="h-4 w-4 shrink-0 text-emerald-500" />
+                        <span className="min-w-0">
+                          <span className="block text-xs font-semibold text-slate-700">Order #{order.bigcommerce_order_id}</span>
+                          <span className="block truncate text-[11px] text-slate-500">{order.customer_name}{order.status ? ` · ${order.status}` : ""}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-11 w-11 rounded-full bg-slate-100 p-0 text-slate-600 hover:bg-blue-100 hover:text-blue-700"
+                  aria-label={`Open user menu for ${currentUser.name}`}
+                  data-testid="btn-user-menu"
+                >
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src={currentUser.avatar_data || undefined} alt="" />
+                    <AvatarFallback className="bg-blue-100 text-sm font-semibold text-blue-700">{userInitials}</AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52 shadow-lg">
+                <DropdownMenuLabel className="py-3 text-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <Avatar className="h-20 w-20 border-2 border-slate-100 shadow-sm">
+                      <AvatarImage src={currentUser.avatar_data || undefined} alt={`${currentUser.name} profile photo`} />
+                      <AvatarFallback className="bg-blue-100 text-xl font-semibold text-blue-700">{userInitials}</AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm truncate">{currentUser.name}</span>
+                    <span className="text-xs font-normal text-slate-400 capitalize">
+                      {myGroupName ?? currentUser.role}
+                    </span>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={toggleOfflineMode} data-testid="menu-toggle-offline">
+                  {isOfflineMode ? <WifiOff className="mr-2 h-4 w-4" /> : <Wifi className="mr-2 h-4 w-4" />}
+                  Offline Mode: {isOfflineMode ? "ON" : "OFF"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                 <DropdownMenuItem onClick={() => navigate("/settings")} data-testid="menu-account-settings">
+                   <Settings className="mr-2 h-4 w-4" />
+                   User settings
+                 </DropdownMenuItem>
+                 <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="text-red-600" data-testid="menu-logout">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Sign Out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </header>
 
         {isOfflineMode && (

@@ -6,11 +6,13 @@ export const DEFAULT_ATTENDANCE_TIMEZONE = "America/New_York";
 export const ATTENDANCE_PERMISSION_DEFINITIONS = [
   { module: "attendance", action: "view", description: "Attendance: access and use the module" },
   { module: "attendance", action: "clock", description: "Attendance: start and end your own day" },
+  { module: "attendance", action: "clock_offsite", description: "Attendance: start a shift off-site without location verification" },
   { module: "attendance", action: "view_own", description: "Attendance: view your own history" },
   { module: "attendance", action: "view_dashboard", description: "Attendance: view the management overview" },
   { module: "attendance", action: "view_all", description: "Attendance: view all employee attendance records" },
   { module: "attendance", action: "view_logs", description: "Attendance: view detailed attendance logs" },
   { module: "attendance", action: "view_reports", description: "Attendance: view attendance reports" },
+  { module: "attendance", action: "view_home_locations", description: "Attendance: view saved employee home locations" },
   { module: "attendance", action: "manage_settings", description: "Attendance: manage warehouse and payroll settings" },
   { module: "attendance", action: "manage", description: "Attendance: manage attendance records" },
   { module: "attendance", action: "approve", description: "Attendance: approve and lock attendance records" },

@@ -307,6 +307,7 @@ function PermissionsTab() {
     { module: "orders",      action: "view_all_drafts", description: "View draft orders created by all users" },
     { module: "crm",         action: "notes_edit", description: "Edit staff and customer notes on orders" },
     { module: "reporting_sales",                  action: "view", description: "Access Sales Report in Reporting" },
+    { module: "reporting_exports",                action: "view", description: "Access live BigCommerce product exports in Reporting" },
     { module: "reporting_price_override_audit",   action: "view", description: "Access Price Override Audit report" },
   ];
 

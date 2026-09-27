@@ -131,6 +131,7 @@ export default function Catalog() {
   const [bcResult, setBcResult] = useState<api.AgentSearchResult | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const searchRequestIdRef = useRef(0);
 
   // ── Discount / qty state ──
   const [discounts, setDiscounts] = useState<Record<string, DiscountState>>({});
@@ -138,8 +139,8 @@ export default function Catalog() {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
 
   // ── Category browse state ──
-  const [selectedCatId, setSelectedCatId] = useState<number | null>(null);
-  const [selectedSubCatId, setSelectedSubCatId] = useState<number | null>(null);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
+  const [expandedCategoryIds, setExpandedCategoryIds] = useState<number[]>([]);
   const [catDropOpen, setCatDropOpen] = useState(false);
   const [catPage, setCatPage] = useState(1);
   const [listPage, setListPage] = useState(1);
@@ -151,6 +152,9 @@ export default function Catalog() {
   const { currentUser, addToCart, cart } = useStore();
   const { toast } = useToast();
   const canSearchBigCommerce = currentUser?.allow_bigcommerce_search || false;
+  const hasSelectedCategories = selectedCategoryIds.length > 0;
+  const isCategoryMode = hasSelectedCategories && (!search.trim() || !canSearchBigCommerce);
+  const categoryQueryText = !canSearchBigCommerce ? search.trim() : "";
 
   // ── Queries ──
   const { data: allProducts = [] } = useQuery({
@@ -169,12 +173,10 @@ export default function Catalog() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const activeCatId = selectedSubCatId ?? selectedCatId;
-
   const { data: catData, isLoading: catLoading, isFetching: catFetching } = useQuery({
-    queryKey: ["cat-products", activeCatId, catPage, pageSize],
-    queryFn: () => api.getBcCategoryProducts(activeCatId!, catPage, pageSize),
-    enabled: activeCatId != null,
+    queryKey: ["cat-products", selectedCategoryIds, catPage, pageSize, categoryQueryText],
+    queryFn: () => api.getBcCategoryProducts(selectedCategoryIds, catPage, pageSize, categoryQueryText),
+    enabled: isCategoryMode,
     placeholderData: (prev: any) => prev,
   });
 
@@ -190,25 +192,48 @@ export default function Catalog() {
     [allCategories],
   );
 
-  const subCats = useMemo(
-    () =>
-      selectedCatId
-        ? allCategories
-            .filter((c) => c.parent_id === selectedCatId)
-            .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
-        : [],
-    [allCategories, selectedCatId],
-  );
+  const subCatsByParentId = useMemo(() => {
+    const grouped = new Map<number, api.BcCategory[]>();
+    for (const category of allCategories) {
+      if (category.parent_id === 0) continue;
+      const children = grouped.get(category.parent_id) ?? [];
+      children.push(category);
+      grouped.set(category.parent_id, children);
+    }
+    for (const children of grouped.values()) {
+      children.sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+    }
+    return grouped;
+  }, [allCategories]);
 
-  const selectedCat = allCategories.find((c) => c.id === selectedCatId);
-  const selectedSubCat = allCategories.find((c) => c.id === selectedSubCatId);
+  const selectedCategoryLabel = selectedCategoryIds.length === 0
+    ? "All Categories"
+    : selectedCategoryIds.length === 1
+      ? allCategories.find((category) => category.id === selectedCategoryIds[0])?.name ?? "1 selected"
+      : `${selectedCategoryIds.length} selected`;
+  const categoryGridTitle = selectedCategoryIds.length === 1
+    ? allCategories.find((category) => category.id === selectedCategoryIds[0])?.name
+    : `${selectedCategoryIds.length} categories`;
+  const toggleCategory = (categoryId: number) => {
+    setSelectedCategoryIds((selected) =>
+      selected.includes(categoryId)
+        ? selected.filter((id) => id !== categoryId)
+        : [...selected, categoryId].sort((a, b) => a - b),
+    );
+  };
+  const toggleCategoryExpanded = (categoryId: number) => {
+    setExpandedCategoryIds((expanded) =>
+      expanded.includes(categoryId)
+        ? expanded.filter((id) => id !== categoryId)
+        : [...expanded, categoryId],
+    );
+  };
 
   const catProducts = catData?.products ?? [];
   const catTotalPages = catData?.total_pages ?? 1;
   const catTotal = catData?.total ?? 0;
 
   // ── List mode (pinned / BC search results) ──
-  const isCategoryMode = selectedCatId != null;
 
   const pinnedFiltered = useMemo(
     () =>
@@ -259,7 +284,7 @@ export default function Catalog() {
 
   useEffect(() => {
     setCatPage(1);
-  }, [selectedCatId, selectedSubCatId]);
+  }, [selectedCategoryIds, categoryQueryText]);
 
   useEffect(() => {
     setListPage(1);
@@ -277,23 +302,34 @@ export default function Catalog() {
 
   // BC search debounce
   useEffect(() => {
-    if (!canSearchBigCommerce || !currentUser) return;
-    if (!search.trim()) { setBcResult(null); return; }
+    const requestId = ++searchRequestIdRef.current;
+    if (!canSearchBigCommerce || !currentUser) {
+      setIsSearching(false);
+      return;
+    }
+    if (!search.trim()) {
+      setBcResult(null);
+      setIsSearching(false);
+      return;
+    }
+    setBcResult(null);
+    setIsSearching(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
-      setIsSearching(true);
       try {
-        const result = await api.agentBigCommerceSearch(search.trim(), currentUser.id);
-        setBcResult(result);
+        const result = await api.agentBigCommerceSearch(search.trim(), currentUser.id, selectedCategoryIds);
+        if (searchRequestIdRef.current === requestId) setBcResult(result);
       } catch (error: any) {
-        toast({ title: "Search failed", description: error.message, variant: "destructive" });
-        setBcResult(null);
+        if (searchRequestIdRef.current === requestId) {
+          toast({ title: "Search failed", description: error.message, variant: "destructive" });
+          setBcResult(null);
+        }
       } finally {
-        setIsSearching(false);
+        if (searchRequestIdRef.current === requestId) setIsSearching(false);
       }
     }, 400);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [search, canSearchBigCommerce, currentUser?.id]);
+  }, [search, canSearchBigCommerce, currentUser?.id, selectedCategoryIds]);
 
   useEffect(() => {
     if (bcResult?.resultType === "variant") {
@@ -808,13 +844,10 @@ export default function Catalog() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-2.5 h-5 w-5 text-slate-400" />
             <Input
-              placeholder={canSearchBigCommerce ? "Search by name, SKU, or scan barcode…" : "Search pinned products…"}
               className="pl-10 bg-white"
               value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                if (e.target.value) { setSelectedCatId(null); setSelectedSubCatId(null); }
-              }}
+              placeholder={hasSelectedCategories && !canSearchBigCommerce ? "Search selected categories…" : canSearchBigCommerce ? "Search by name, SKU, or scan barcode…" : "Search pinned products…"}
+              onChange={(e) => setSearch(e.target.value)}
               data-testid="input-search"
             />
             {isSearching && <Loader2 className="absolute right-3 top-2.5 h-5 w-5 animate-spin text-slate-400" />}
@@ -829,41 +862,77 @@ export default function Catalog() {
               data-testid="btn-category-dropdown"
             >
               <span className="truncate max-w-[110px] uppercase tracking-wide text-xs">
-                {catsLoading ? "Loading…" : selectedCat ? selectedCat.name : "All Categories"}
+                {catsLoading ? "Loading…" : selectedCategoryLabel}
               </span>
               <ChevronDown className={`h-4 w-4 text-slate-400 shrink-0 transition-transform ${catDropOpen ? "rotate-180" : ""}`} />
             </Button>
-            {selectedCatId && (
+            {hasSelectedCategories && (
               <button
                 className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 z-10"
-                onClick={(e) => { e.stopPropagation(); setSelectedCatId(null); setSelectedSubCatId(null); }}
+                onClick={(e) => { e.stopPropagation(); setSelectedCategoryIds([]); }}
                 data-testid="btn-clear-category"
-                title="Clear category"
+                title="Clear selected categories"
               >
                 <X className="h-2.5 w-2.5" />
               </button>
             )}
             {catDropOpen && (
-              <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-xl shadow-xl z-50 max-h-72 overflow-y-auto">
+              <div className="absolute right-0 top-full mt-1 w-64 max-w-[90vw] bg-white border rounded-xl shadow-xl z-50 max-h-80 overflow-y-auto">
                 <button
                   className="w-full text-left px-3 py-2 text-xs uppercase tracking-wide hover:bg-slate-50 border-b text-slate-400 italic"
-                  onClick={() => { setSelectedCatId(null); setSelectedSubCatId(null); setCatDropOpen(false); }}
+                  onClick={() => { setSelectedCategoryIds([]); setSearch(""); setCatDropOpen(false); }}
                 >
                   — Pinned Products —
                 </button>
                 {topLevelCats.length === 0 && !catsLoading && (
                   <p className="px-3 py-4 text-sm text-slate-400 text-center">No categories found</p>
                 )}
-                {topLevelCats.map((cat) => (
-                  <button
-                    key={cat.id}
-                    className={`w-full text-left px-3 py-2.5 text-xs uppercase tracking-wide hover:bg-slate-50 border-b last:border-0 font-medium ${selectedCatId === cat.id ? "bg-primary/5 text-primary" : "text-slate-700"}`}
-                    onClick={() => { setSelectedCatId(cat.id); setSelectedSubCatId(null); setCatDropOpen(false); setSearch(""); }}
-                    data-testid={`option-cat-${cat.id}`}
-                  >
-                    {cat.name}
-                  </button>
-                ))}
+                {topLevelCats.map((cat) => {
+                  const children = subCatsByParentId.get(cat.id) ?? [];
+                  const expanded = expandedCategoryIds.includes(cat.id);
+                  return (
+                    <div key={cat.id} className="border-b last:border-0">
+                      <div className={`flex items-center gap-2 px-3 py-2.5 text-xs uppercase tracking-wide font-medium ${selectedCategoryIds.includes(cat.id) ? "bg-primary/5 text-primary" : "text-slate-700"}`}>
+                        <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2" data-testid={`option-cat-${cat.id}`}>
+                          <input
+                            type="checkbox"
+                            checked={selectedCategoryIds.includes(cat.id)}
+                            onChange={() => toggleCategory(cat.id)}
+                            className="h-4 w-4 shrink-0 accent-slate-800"
+                            aria-label={`Select ${cat.name}`}
+                            data-testid={`checkbox-cat-${cat.id}`}
+                          />
+                          <span className="min-w-0 truncate">{cat.name}</span>
+                        </label>
+                        {children.length > 0 && (
+                          <button
+                            type="button"
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded hover:bg-slate-100"
+                            onClick={() => toggleCategoryExpanded(cat.id)}
+                            aria-label={`${expanded ? "Collapse" : "Expand"} ${cat.name} subcategories`}
+                            aria-expanded={expanded}
+                            data-testid={`toggle-category-${cat.id}`}
+                          >
+                            <ChevronRight className={`h-4 w-4 transition-transform ${expanded ? "rotate-90" : ""}`} />
+                          </button>
+                        )}
+                      </div>
+                      {expanded && children.map((child) => (
+                        <label key={child.id} className={`flex cursor-pointer items-center gap-2 border-t border-slate-100 bg-slate-50/70 px-3 py-2 pl-8 text-[11px] uppercase tracking-wide ${selectedCategoryIds.includes(child.id) ? "text-primary" : "text-slate-600"}`} data-testid={`option-subcat-${child.id}`}>
+                          <input
+                            type="checkbox"
+                            checked={selectedCategoryIds.includes(child.id)}
+                            onChange={() => toggleCategory(child.id)}
+                            className="h-4 w-4 shrink-0 accent-slate-800"
+                            aria-label={`Select ${child.name}`}
+                            data-testid={`checkbox-subcat-${child.id}`}
+                          />
+                          <span className="min-w-0 truncate">{child.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -891,28 +960,6 @@ export default function Catalog() {
           </p>
         )}
 
-        {/* Sub-category pill buttons */}
-        {isCategoryMode && subCats.length > 0 && (
-          <div className="flex gap-1.5 flex-wrap mt-2">
-            <button
-              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors uppercase tracking-wide ${selectedSubCatId === null ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-300 hover:border-slate-400"}`}
-              onClick={() => setSelectedSubCatId(null)}
-              data-testid="btn-subcat-all"
-            >
-              All {selectedCat?.name}
-            </button>
-            {subCats.map((sc) => (
-              <button
-                key={sc.id}
-                className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors uppercase tracking-wide ${selectedSubCatId === sc.id ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-300 hover:border-slate-400"}`}
-                onClick={() => setSelectedSubCatId(selectedSubCatId === sc.id ? null : sc.id)}
-                data-testid={`btn-subcat-${sc.id}`}
-              >
-                {sc.name}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* ── Category browse grid ── */}
@@ -925,7 +972,7 @@ export default function Catalog() {
         catTotal,
         setCatPage,
         true,
-        selectedSubCat?.name ?? selectedCat?.name,
+        categoryGridTitle,
       )}
 
       {/* ── BC exact match (SKU / UPC) ── */}

@@ -20,20 +20,30 @@
 - [Marketing editor media](marketing-editor-media.md) — local marketing images use bounded inline data URLs with server-side HTML validation; product clicks use signed redirects.
 - [Marketing sender settings](marketing-sender-settings.md) — reusable From addresses are separate from SMTP credentials; legacy campaigns fall back to the existing invoice sender.
 - [Order Form email templates](order-form-email-templates.md) — sender, subject, and body are user-editable; customer placeholders resolve server-side per recipient.
-- [Marketing Order Form architecture](marketing-order-form.md) — per-customer files use CRM visibility/audit/timeline and fresh BigCommerce variant inventory; no parallel customer system.
+- [Marketing Order Form architecture](marketing-order-form.md) — CRM identity stays authoritative; XLSX imports must ignore merged group-header cells and blank quantities.
 - [Zoho marketing delivery boundary](zoho-marketing-delivery.md) — ZeptoMail is transactional-only; compliant campaign delivery requires Zoho Campaigns/Email API access.
 - [Attendance accounting baseline](attendance-accounting-baseline.md) — ledger excludes weekends and observed US holidays; short hours use an 8-hour weekday expectation until schedules are configurable.
+- [Attendance breaks and daily notes](attendance-breaks-notes.md) — breaks pause the same session; daily notes are stored once per employee/work date.
 - [Stale session recovery](stale-session-recovery.md) — invalid saved auth must fail safely and expose a cache-clearing force-logout path.
 - [Attendance review and audit](attendance-review-audit.md) — completion state stays separate from manager approval; corrections preserve reasoned old/new history.
 - [Attendance location maps](attendance-location-maps.md) — admin views use validated Google Maps links; employee APIs keep raw coordinates hidden.
 - [Draft invoice safety](draft-invoice-safety.md) — draft PDFs must stay visibly non-final and never expose staff notes or SMTP credentials.
 - [Dropshipping phase boundaries](dropshipping-phase-boundaries.md) — vendor catalog ingestion stays separate from BigCommerce/SkuVault side effects until an explicit import/order phase.
+- [Dropship brand dashboard counts](dropship-brand-dashboard-counts.md) — brand metrics count distinct synced BigCommerce orders by current local product-brand mapping, not vendor fulfillment state.
 - [Dropshipping display labels](dropshipping-display-labels.md) — vendor provider identity stays server-side; user-facing labels are persisted placeholders editable from the connector.
 - [ShipStation dropship automation](shipstation-dropship-automation.md) — product tags can flow to order tags, but shipment splitting needs separate product or routing configuration.
 - [GitHub push authentication](github-push-auth.md) — Git HTTPS push may reject the installed GitHub integration; use its authenticated Git data API for branch-only updates.
 - [BigCommerce customer search filters](bigcommerce-customer-search-filters.md) — this store rejects v3 company:like and phone:like; use cached v2 directory filtering for those fields.
+- [BigCommerce live catalog API origin](bc-live-export-api-origin.md) — catalog calls use the canonical BigCommerce origin; an optional API-base override may be an internal non-catalog URL.
+- [BigCommerce product fixed shipping](bc-product-fixed-shipping.md) — native fixed product shipping is additive in mixed carts, not a whole-order override.
 - [Reactivation stage initialization](reactivation-stage-initialization.md) — default pipeline seeding must be conflict-safe because board and stage requests can initialize concurrently.
 - [Schema push drift](schema-push-drift.md) — never force Drizzle to truncate unrelated populated tables just to apply a new feature table.
 - [Marketing delivery log](marketing-delivery-log.md) — Campaign and Order Form sends share recipient-level sent records; CRM entries link to each stable log ID.
 - [Sales Report search performance](sales-report-search-performance.md) — debounce Product/SKU lookup and use the indexed prefix-SKU path instead of wildcard-scanning order history.
+- [Sales Report live inventory](sales-report-live-inventory.md) — resolve stock by SKU as well as variant ID, and never replace a cached value with zero on a live lookup miss.
 - [POS customer search layers](pos-customer-search-mirror.md) — device cache first, then customers_mirror with sync-on-miss; live BigCommerce calls stay post-selection or final fallback.
+- [Zoho CRM Account mapping](zoho-account-mapping.md) — Phase 1 reads Zoho Accounts only; local one-to-many mappings preserve manual decisions and CRM visibility.
+- [Product 360 category mix](product360-category-mix.md) — category IDs stay on products; category sales use the four main BigCommerce categories with primary assignment and a units/revenue toggle.
+- [Focused JSX patching](focused-jsx-patching.md) — use small, exact hunks for compressed JSX so one context mismatch does not block unrelated edits.
+- [Failed workflow stale process](workflow-stale-process.md) — EADDRINUSE can coexist with a healthy old dev server; verify the listener before retrying.
+- [Constant Contact authorization and campaigns](constant-contact-campaign-api.md) — OAuth boundaries, aggregate-readiness limits, and on-demand contact reconciliation population rules.

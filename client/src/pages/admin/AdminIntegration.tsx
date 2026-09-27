@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from "react";
-import { getAuthHeaders, getSetting, saveSetting, testBigCommerceCustomerGroup } from "@/lib/api";
+import { getAuthHeaders, getSetting, saveSetting, testBigCommerceCustomerGroup, DEFAULT_TIER_CONFIG } from "@/lib/api";
+import type { PriceTier, PriceTierConfig } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, CheckCircle2, AlertCircle, Plug, ExternalLink, CalendarClock, ImageIcon, Trash2, Upload, Globe } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Plug, ExternalLink, CalendarClock, ImageIcon, Trash2, Upload, Globe, Layers } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function AdminIntegrationPage() {
@@ -24,6 +26,9 @@ export default function AdminIntegrationPage() {
   const [customerGroupId, setCustomerGroupId] = useState("8");
   const [customerGroupName, setCustomerGroupName] = useState("Verification Pending");
   const [testingCustomerGroup, setTestingCustomerGroup] = useState(false);
+  const [googleSheetsWebhook, setGoogleSheetsWebhook] = useState("");
+  const [showInventoryCounts, setShowInventoryCounts] = useState(true);
+  const [tierConfig, setTierConfig] = useState<PriceTierConfig>(DEFAULT_TIER_CONFIG);
   const [cutoffDate, setCutoffDate] = useState("");
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<string | null>(null);
@@ -34,10 +39,13 @@ export default function AdminIntegrationPage() {
     setLoading(true);
     Promise.all([
       getSetting("bigcommerce_config").catch(() => null),
+      getSetting("google_sheets_webhook").catch(() => null),
+      getSetting("show_inventory_counts").catch(() => null),
+      getSetting("price_tier_config").catch(() => null),
       getSetting("bc_scan_cutoff_date").catch(() => null),
       getSetting("business_logo").catch(() => null),
       fetch("/api/settings/company-timezone", { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : null).catch(() => null),
-    ]).then(([cfg, cutoff, logo, tzData]) => {
+    ]).then(([cfg, webhook, inventoryCounts, savedTierConfig, cutoff, logo, tzData]) => {
       if (cfg?.value) {
         setStoreHash(cfg.value.storeHash ?? "");
         setToken(cfg.value.token ?? "");
@@ -47,6 +55,15 @@ export default function AdminIntegrationPage() {
         setClientSecret(cfg.value.clientSecret ?? "");
         setCustomerGroupId(String(cfg.value.customerGroupId ?? cfg.value.customer_group_id ?? 8));
         setCustomerGroupName(cfg.value.customerGroupName ?? cfg.value.customer_group_name ?? "Verification Pending");
+      }
+      if (webhook?.value !== undefined && webhook?.value !== null) {
+        setGoogleSheetsWebhook(String(webhook.value));
+      }
+      if (inventoryCounts?.value !== undefined && inventoryCounts?.value !== null) {
+        setShowInventoryCounts(inventoryCounts.value === true || inventoryCounts.value === "true");
+      }
+      if (savedTierConfig?.value) {
+        setTierConfig(savedTierConfig.value as PriceTierConfig);
       }
       if (cutoff?.value) {
         setCutoffDate(cutoff.value);
@@ -122,12 +139,46 @@ export default function AdminIntegrationPage() {
         customerGroupId: customerGroupId ? parseInt(customerGroupId) : 8,
         customerGroupName: customerGroupName.trim() || "Verification Pending",
       });
+      await Promise.all([
+        saveSetting("google_sheets_webhook", googleSheetsWebhook.trim()),
+        saveSetting("show_inventory_counts", showInventoryCounts),
+        saveSetting("price_tier_config", tierConfig),
+      ]);
       toast({ title: "Settings saved", description: "BigCommerce integration updated successfully." });
     } catch (err: any) {
       toast({ title: "Save failed", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
+  };
+
+  const addTier = () => {
+    if (tierConfig.tiers.length >= 10) return;
+    setTierConfig((previous) => ({
+      ...previous,
+      tiers: [...previous.tiers, {
+        id: `tier-${Date.now()}`,
+        label: "",
+        customerGroupId: 0,
+        priceListId: 0,
+        color: "#6366f1",
+        enabled: true,
+      }],
+    }));
+  };
+
+  const updateTier = (index: number, updates: Partial<PriceTier>) => {
+    setTierConfig((previous) => ({
+      ...previous,
+      tiers: previous.tiers.map((tier, tierIndex) => tierIndex === index ? { ...tier, ...updates } : tier),
+    }));
+  };
+
+  const removeTier = (index: number) => {
+    setTierConfig((previous) => ({
+      ...previous,
+      tiers: previous.tiers.filter((_, tierIndex) => tierIndex !== index),
+    }));
   };
 
   const handleTestCustomerGroup = async () => {
@@ -423,6 +474,151 @@ export default function AdminIntegrationPage() {
                   </p>
                 </div>
               </div>
+                <div className="border-t pt-4 space-y-3">
+                  <div>
+                    <p className="text-xs font-medium text-slate-700 mb-0.5">Google Sheets Backup</p>
+                    <p className="text-[11px] text-slate-400">
+                      Orders will be logged to this Google Apps Script webhook after checkout.
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="google_sheets_webhook">Google Apps Script Webhook URL</Label>
+                    <Input
+                      id="google_sheets_webhook"
+                      value={googleSheetsWebhook}
+                      onChange={(e) => setGoogleSheetsWebhook(e.target.value)}
+                      placeholder="https://script.google.com/macros/s/..."
+                      data-testid="input-sheets-webhook"
+                    />
+                  </div>
+                </div>
+                <div className="border-t pt-4 space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-medium text-slate-700 mb-0.5">Agent Visibility Settings</p>
+                      <p className="text-[11px] text-slate-400">
+                        {showInventoryCounts ? "Agents see numeric stock counts." : "Agents see only Available or Out of stock."}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={showInventoryCounts}
+                      onCheckedChange={setShowInventoryCounts}
+                      data-testid="switch-inventory-visibility"
+                    />
+                  </div>
+                </div>
+                <div className="border-t pt-4 space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-medium text-slate-700 mb-0.5 flex items-center gap-2">
+                        <Layers className="h-4 w-4 text-indigo-500" />
+                        Price Tier System
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        Configure customer-group and price-list pricing shown to agents.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={tierConfig.enabled}
+                      onCheckedChange={(enabled) => setTierConfig((previous) => ({ ...previous, enabled }))}
+                      data-testid="switch-tier-enabled"
+                    />
+                  </div>
+                  {tierConfig.enabled && (
+                    <div className="space-y-3 pl-1">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Scope Mode</Label>
+                        <Select
+                          value={tierConfig.scopeMode}
+                          onValueChange={(scopeMode) => setTierConfig((previous) => ({ ...previous, scopeMode: scopeMode as "app" | "all" }))}
+                        >
+                          <SelectTrigger className="h-8 text-xs" data-testid="select-tier-scope">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="app">Use Only App-Defined Tiers</SelectItem>
+                            <SelectItem value="all">Allow All BigCommerce Price Lists</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs">Configured Tiers ({tierConfig.tiers.length}/10)</Label>
+                        {tierConfig.tiers.length === 0 && (
+                          <p className="text-xs text-slate-400 italic">No tiers configured. Add one below.</p>
+                        )}
+                        {tierConfig.tiers.map((tier, index) => (
+                          <div key={tier.id} className="border rounded-md p-2 space-y-2" data-testid={`tier-row-${index}`}>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={tier.color}
+                                onChange={(e) => updateTier(index, { color: e.target.value })}
+                                className="w-7 h-7 rounded cursor-pointer border"
+                                title="Tier color"
+                              />
+                              <Input
+                                placeholder="Label (e.g. VIP)"
+                                value={tier.label}
+                                onChange={(e) => updateTier(index, { label: e.target.value })}
+                                className="h-7 text-xs flex-1"
+                                data-testid={`input-tier-label-${index}`}
+                              />
+                              <Switch
+                                checked={tier.enabled}
+                                onCheckedChange={(enabled) => updateTier(index, { enabled })}
+                                data-testid={`switch-tier-enabled-${index}`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeTier(index)}
+                                className="text-slate-400 hover:text-red-500"
+                                data-testid={`button-remove-tier-${index}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <Label className="text-[10px] text-slate-500">Customer Group ID</Label>
+                                <Input
+                                  type="number"
+                                  placeholder="0"
+                                  value={tier.customerGroupId || ""}
+                                  onChange={(e) => updateTier(index, { customerGroupId: parseInt(e.target.value) || 0 })}
+                                  className="h-7 text-xs"
+                                  data-testid={`input-tier-group-${index}`}
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-slate-500">Price List ID</Label>
+                                <Input
+                                  type="number"
+                                  placeholder="0"
+                                  value={tier.priceListId || ""}
+                                  onChange={(e) => updateTier(index, { priceListId: parseInt(e.target.value) || 0 })}
+                                  className="h-7 text-xs"
+                                  data-testid={`input-tier-pricelist-${index}`}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {tierConfig.tiers.length < 10 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full h-8 text-xs gap-1"
+                          onClick={addTier}
+                          data-testid="button-add-tier"
+                        >
+                          Add Price Tier
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
               <Button
                 type="submit"
                 disabled={saving}

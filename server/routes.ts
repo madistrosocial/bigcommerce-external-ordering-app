@@ -19,16 +19,54 @@ import cron from "node-cron";
 import * as FtpClientLib from "basic-ftp";
 import SftpClient from "ssh2-sftp-client";
 import { Readable } from "stream";
-import { createHmac, randomUUID, timingSafeEqual } from "crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addSkuVaultInventory, removeSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, getSkuVaultTransactionReasons, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
 import { getMarketingSenderSettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
+import { getProduct360Overview, getProduct360Products, getProduct360Detail } from "./product360";
+import {
+  buildMissingBulkOrderCsv,
+  customerNameFromOrderFormFileName,
+  parseBulkOrderCsv,
+} from "@shared/bulk-order-csv";
+import {
+  createBulkOrderSkuResolver,
+  fetchBulkOrderPriceListPrices,
+} from "./bulk-order-products";
+import {
+  decodeBulkOrderWorkbookBase64,
+  parseBulkOrderWorkbook,
+} from "./bulk-order-workbook";
 import {
   clearZohoCampaignsCredentials,
   getZohoCampaignsCredentialStatus,
   saveZohoCampaignsCredentials,
 } from "./zoho-credentials";
+import {
+  clearZohoCrmCredentials,
+  getZohoCrmCredentialStatus,
+  listZohoAccounts,
+  saveZohoCrmCredentials,
+} from "./zoho-crm";
+import {
+  CONSTANT_CONTACT_CALLBACK_PATH,
+  completeConstantContactAuthorization,
+  consumeConstantContactOAuthState,
+  addConstantContactListMembers,
+  createConstantContactAuthorizationUrl,
+  createConstantContactList,
+  generateConstantContactOAuthState,
+  getConstantContactAudienceSnapshot,
+  getConstantContactAuthorizationStatus,
+  getConstantContactReconciliationSnapshot,
+  getConstantContactUnsubscribedEmails,
+  hasConstantContactAppCredentials,
+  removeConstantContactListMembers,
+  renameConstantContactList,
+  storeConstantContactOAuthState,
+  verifyConstantContactUserPrivileges,
+} from "./constant-contact";
 import { DEFAULT_VENDOR_DISPLAY_NAME, KOLE_VENDOR, KoleImportsAdapter, toDropshipProductInsert, type KoleCredentials } from "./vendors/kole-imports";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 import { dateOnlyInTimeZone, parseDateTimeLocal } from "@shared/timezone";
@@ -567,6 +605,17 @@ export async function registerRoutes(
       created_at timestamp NOT NULL DEFAULT now(),
       updated_at timestamp NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash text NOT NULL UNIQUE,
+      expires_at timestamp NOT NULL,
+      used_at timestamp,
+      created_at timestamp NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS password_reset_tokens_user_idx ON password_reset_tokens (user_id);
+    CREATE INDEX IF NOT EXISTS password_reset_tokens_expiry_idx ON password_reset_tokens (expires_at);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data text;
     CREATE TABLE IF NOT EXISTS dropship_vendors (
       id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       code text NOT NULL UNIQUE,
@@ -634,6 +683,8 @@ export async function registerRoutes(
       IF to_regclass('public.attendance_sessions') IS NOT NULL THEN
         ALTER TABLE attendance_sessions
           ADD COLUMN IF NOT EXISTS session_number integer NOT NULL DEFAULT 1,
+          ADD COLUMN IF NOT EXISTS break_started_at timestamp,
+          ADD COLUMN IF NOT EXISTS break_seconds integer NOT NULL DEFAULT 0,
           ADD COLUMN IF NOT EXISTS second_session_approved boolean NOT NULL DEFAULT false,
           ADD COLUMN IF NOT EXISTS second_session_approved_by integer REFERENCES users(id),
           ADD COLUMN IF NOT EXISTS second_session_approved_at timestamp;
@@ -641,6 +692,19 @@ export async function registerRoutes(
           ON attendance_sessions (user_id, work_date, session_number);
       END IF;
     END $$;
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS attendance_daily_notes (
+      id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      work_date text NOT NULL,
+      note text NOT NULL DEFAULT '',
+      created_at timestamp NOT NULL DEFAULT now(),
+      updated_at timestamp NOT NULL DEFAULT now(),
+      CONSTRAINT attendance_daily_notes_user_date_unique UNIQUE (user_id, work_date)
+    );
+    CREATE INDEX IF NOT EXISTS attendance_daily_notes_user_date_idx
+      ON attendance_daily_notes (user_id, work_date);
   `));
 
   // ===== AUTH MIDDLEWARE =====
@@ -727,6 +791,78 @@ export async function registerRoutes(
   const canViewAllAttendance = async (user: any) =>
     user?.role === "admin"
     || (await storage.getUserPermissionStrings(user.id)).includes("attendance:view_all");
+
+  const isEmailAddress = (value: unknown): value is string =>
+    typeof value === "string"
+    && value.trim().length <= 254
+    && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+  const getPublicAppOrigin = (req: Request): string => {
+    const configured = String(process.env.PUBLIC_APP_URL || process.env.APP_URL || "").trim();
+    if (configured) return configured.replace(/\/+$/, "");
+    const forwardedProto = String(req.headers["x-forwarded-proto"] || req.protocol).split(",")[0].trim();
+    const forwardedHost = String(req.headers["x-forwarded-host"] || req.get("host") || "").split(",")[0].trim();
+    return `${forwardedProto || "https"}://${forwardedHost}`;
+  };
+
+  const escapeHtml = (value: string): string =>
+    value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[char] || char);
+
+  const sendPasswordResetEmail = async (
+    req: Request,
+    user: { id: number; username: string; name: string },
+  ): Promise<void> => {
+    if (!isEmailAddress(user.username)) {
+      const error = new Error("Your account does not have a valid email address.");
+      (error as any).code = "INVALID_ACCOUNT_EMAIL";
+      throw error;
+    }
+
+    const setting = await storage.getSetting("invoice_settings").catch(() => null);
+    const cfg = setting?.value ?? {};
+    const smtpHost = String(cfg.smtp_host || "").trim();
+    const smtpPort = Number(cfg.smtp_port) || 587;
+    const smtpUser = String(cfg.smtp_user || "").trim();
+    const smtpPass = String(cfg.smtp_pass || "");
+    const smtpFrom = String(cfg.smtp_from || smtpUser).trim();
+    if (!smtpHost || !smtpUser || !smtpPass) {
+      const error = new Error("Password reset email is not configured.");
+      (error as any).code = "SMTP_NOT_CONFIGURED";
+      throw error;
+    }
+
+    const rawToken = randomBytes(32).toString("hex");
+    const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    await storage.createPasswordResetToken(user.id, tokenHash, expiresAt);
+
+    const resetUrl = `${getPublicAppOrigin(req)}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: { user: smtpUser, pass: smtpPass },
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
+    });
+    await transporter.verify();
+    await transporter.sendMail({
+      from: smtpFrom,
+      to: user.username,
+      subject: "Reset your Sales account password",
+      text: [
+        `Hi ${user.name},`,
+        "",
+        "Use the link below to reset your Sales account password:",
+        resetUrl,
+        "",
+        "This link expires in 1 hour and can only be used once.",
+        "If you did not request this, you can ignore this email.",
+      ].join("\n"),
+      html: `<p>Hi ${escapeHtml(user.name)},</p><p>Use the link below to reset your Sales account password:</p><p><a href="${escapeHtml(resetUrl)}">Reset your password</a></p><p>This link expires in 1 hour and can only be used once.</p><p>If you did not request this, you can ignore this email.</p>`,
+    });
+  };
 
   // ===== KOLE IMPORTS DROPSHIPPING (PHASE 1) =====
   const getKoleSetting = async (): Promise<Record<string, any>> => {
@@ -944,6 +1080,60 @@ export async function registerRoutes(
   // ===== PRODUCT ROUTES =====
 
   // Get all products (for admin view)
+  // ── Product 360 intelligence APIs ──────────────────────────────────────────
+  // These endpoints aggregate the existing Product Master and BigCommerce
+  // order-line mirror. They intentionally do not create a second product or
+  // reporting database.
+  app.get("/api/product-360/overview", requirePermission("product_360", "view"), async (req, res) => {
+    try {
+      res.json(await getProduct360Overview({
+        dateFrom: req.query.dateFrom,
+        dateTo: req.query.dateTo,
+        brand: req.query.brand,
+        category: req.query.category,
+      }));
+    } catch (error: any) {
+      console.error("[Product 360] overview failed:", error);
+      res.status(500).json({ error: "Unable to load Product 360 overview" });
+    }
+  });
+
+  app.get("/api/product-360/products", requirePermission("product_360", "view"), async (req, res) => {
+    try {
+      res.json(await getProduct360Products(req.query));
+    } catch (error: any) {
+      console.error("[Product 360] products failed:", error);
+      res.status(500).json({ error: "Unable to load Product 360 products" });
+    }
+  });
+
+  app.get("/api/product-360/products/:id", requirePermission("product_360", "view"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid product id" });
+    try {
+      const user = (req as any).authUser;
+      const permissionStrings = user?.role === "admin" ? [] : await storage.getUserPermissionStrings(user.id);
+      const customerVisibility: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY" =
+        user?.role === "admin" || permissionStrings.includes("crm:visibility_all")
+          ? "ALL"
+          : permissionStrings.includes("crm:visibility_assigned_unassigned")
+            ? "ASSIGNED_AND_UNASSIGNED"
+            : "ASSIGNED_ONLY";
+      const result = await getProduct360Detail({
+        id,
+        dateFrom: req.query.dateFrom,
+        dateTo: req.query.dateTo,
+        customerVisibility,
+        visibilityUserId: Number(user?.id || 0),
+      });
+      if (!result.product) return res.status(404).json({ error: "Product not found" });
+      res.json(result);
+    } catch (error: any) {
+      console.error("[Product 360] detail failed:", error);
+      res.status(500).json({ error: "Unable to load Product 360 product" });
+    }
+  });
+
   app.get("/api/products", requireAdmin, async (req, res) => {
     try {
       const products = await storage.getAllProducts();
@@ -1436,10 +1626,16 @@ export async function registerRoutes(
       if (allow_bigcommerce_search !== undefined) update.allow_bigcommerce_search = allow_bigcommerce_search;
       if (default_landing_page !== undefined) update.default_landing_page = default_landing_page;
       if (password && password.trim()) {
+        if (password.trim().length < 8 || password.trim().length > 128) {
+          return res.status(400).json({ error: "Temporary password must be between 8 and 128 characters." });
+        }
         const bcrypt = await import("bcryptjs");
         update.password = await bcrypt.hash(password, 10);
       }
       const updated = await storage.updateUserDetails(id, update);
+      if (password && password.trim()) {
+        await storage.clearPasswordResetTokens(id);
+      }
       res.json(updated);
     } catch (error: any) {
       if (error.code === "23505") {
@@ -1504,6 +1700,131 @@ export async function registerRoutes(
       res.json({ ...safeUser, auth_token: issueSessionToken(user.id) });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ===== ACCOUNT SETTINGS =====
+
+  app.get("/api/account/profile", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const { password: _, ...safeUser } = user;
+      res.json(safeUser);
+    } catch (error: any) {
+      res.status(500).json({ error: "Unable to load account settings" });
+    }
+  });
+
+  app.patch("/api/account/profile", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+      const username = typeof req.body?.username === "string" ? req.body.username.trim().toLowerCase() : "";
+      const avatarData = req.body?.avatar_data == null
+        ? null
+        : typeof req.body.avatar_data === "string"
+          ? req.body.avatar_data.trim()
+          : "";
+
+      if (name.length < 2 || name.length > 120) {
+        return res.status(400).json({ error: "Name must be between 2 and 120 characters." });
+      }
+      if (!isEmailAddress(username)) {
+        return res.status(400).json({ error: "Enter a valid email address." });
+      }
+      if (avatarData && (
+        avatarData.length > 2_800_000
+        || !/^data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(avatarData)
+      )) {
+        return res.status(400).json({ error: "Profile photo must be a valid PNG, JPEG, or WebP image under 2 MB." });
+      }
+
+      const existing = await storage.getUserByUsername(username);
+      if (existing && existing.id !== user.id) {
+        return res.status(409).json({ error: "That email address is already in use." });
+      }
+
+      const updated = await storage.updateUserDetails(user.id, { name, username, avatar_data: avatarData || null });
+      const { password: _, ...safeUser } = updated;
+      res.json(safeUser);
+    } catch (error: any) {
+      if (error?.code === "23505") {
+        return res.status(409).json({ error: "That email address is already in use." });
+      }
+      res.status(500).json({ error: "Unable to update account settings" });
+    }
+  });
+
+  app.put("/api/account/password", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const password = typeof req.body?.password === "string" ? req.body.password : "";
+      if (password.length < 8 || password.length > 128) {
+        return res.status(400).json({ error: "Password must be between 8 and 128 characters." });
+      }
+
+      const passwordHash = await bcrypt.hash(password, 12);
+      await storage.updateAccountPassword(user.id, passwordHash);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[account password] update failed:", error?.message || error);
+      res.status(500).json({ error: "Unable to update your password. Please try again." });
+    }
+  });
+
+  app.post("/api/auth/password-reset/request", async (req, res) => {
+    const username = typeof req.body?.username === "string" ? req.body.username.trim().toLowerCase() : "";
+    if (!isEmailAddress(username)) {
+      return res.json({ success: true });
+    }
+
+    try {
+      const user = await storage.getUserByUsername(username);
+      if (user?.is_enabled && isEmailAddress(user.username)) {
+        await sendPasswordResetEmail(req, user);
+      }
+    } catch (error: any) {
+      console.error("[password reset] public email delivery failed:", error?.message || error);
+    }
+    return res.json({ success: true });
+  });
+
+  app.post("/api/account/password-reset/request", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      await sendPasswordResetEmail(req, user);
+      res.json({ success: true });
+    } catch (error: any) {
+      if (error?.code === "INVALID_ACCOUNT_EMAIL" || error?.code === "SMTP_NOT_CONFIGURED") {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error("[password reset] email delivery failed:", error?.message || error);
+      res.status(500).json({ error: "Unable to send the password reset email. Please try again later." });
+    }
+  });
+
+  app.post("/api/auth/password-reset", async (req, res) => {
+    try {
+      const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+      const password = typeof req.body?.password === "string" ? req.body.password : "";
+      if (!/^[a-f0-9]{64}$/i.test(token)) {
+        return res.status(400).json({ error: "This password reset link is invalid or expired." });
+      }
+      if (password.length < 8 || password.length > 128) {
+        return res.status(400).json({ error: "Password must be between 8 and 128 characters." });
+      }
+
+      const tokenHash = createHash("sha256").update(token).digest("hex");
+      const passwordHash = await bcrypt.hash(password, 12);
+      const userId = await storage.consumePasswordResetToken(tokenHash, passwordHash);
+      if (!userId) {
+        return res.status(400).json({ error: "This password reset link is invalid or expired." });
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[password reset] reset failed:", error?.message || error);
+      res.status(500).json({ error: "Unable to reset the password. Please request a new link." });
     }
   });
 
@@ -1723,6 +2044,430 @@ export async function registerRoutes(
     const permissions = await storage.getUserPermissionStrings(authUser.id);
     return permissions.includes("orders:view_all_drafts");
   };
+
+  app.get("/api/orders/bulk-imports", requirePermission("orders_drafts"), async (req, res) => {
+    try {
+      const authUser = (req as any).authUser;
+      const requestedAll = req.query.scope === "all";
+      const permissions = authUser.role === "admin"
+        ? []
+        : await storage.getUserPermissionStrings(authUser.id);
+      const canViewAll = authUser.role === "admin" || permissions.includes("orders:view_all_drafts");
+      if (requestedAll && !canViewAll) {
+        return res.status(403).json({ error: "View all drafts permission is required" });
+      }
+      res.json(await storage.getBulkOrderImports(requestedAll ? undefined : authUser.id));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/orders/bulk-imports/:id/missing-items", requirePermission("orders_drafts"), async (req, res) => {
+    try {
+      const authUser = (req as any).authUser;
+      const record = await storage.getBulkOrderImport(Number(req.params.id));
+      if (!record) return res.status(404).json({ error: "Bulk Order import not found" });
+      const permissions = authUser.role === "admin"
+        ? []
+        : await storage.getUserPermissionStrings(authUser.id);
+      const canViewAll = authUser.role === "admin" || permissions.includes("orders:view_all_drafts");
+      if (record.created_by_user_id !== authUser.id && !canViewAll) {
+        return res.status(403).json({ error: "You do not have access to this import" });
+      }
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename*=UTF-8''${encodeURIComponent(record.missing_file_name)}`,
+      );
+      res.send(record.missing_csv);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/orders/bulk-imports/preview", requirePermission("orders_drafts"), async (req, res) => {
+    const fileName = String(req.body?.fileName ?? "").split(/[\\/]/).pop()?.trim() ?? "";
+    if (!fileName.toLowerCase().endsWith(".xlsx")) {
+      return res.status(400).json({ error: "Choose an XLSX Order Form workbook." });
+    }
+
+    try {
+      const buffer = decodeBulkOrderWorkbookBase64(req.body?.xlsxBase64);
+      const parsed = await parseBulkOrderWorkbook(buffer, { allowEmptyItems: true });
+      res.json({
+        customer_name: parsed.customerName ?? null,
+        customer_email: parsed.customerEmail ?? null,
+        completed_item_count: parsed.items.length,
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Could not read this XLSX workbook." });
+    }
+  });
+
+  app.post("/api/orders/bulk-imports", requirePermission("orders_drafts"), async (req, res) => {
+    const authUser = (req as any).authUser;
+    const fileName = String(req.body?.fileName ?? "").split(/[\\/]/).pop()?.trim() ?? "";
+    const csv = typeof req.body?.csv === "string" ? req.body.csv : "";
+    const isXlsx = fileName.toLowerCase().endsWith(".xlsx");
+    const bigcommerceCustomerId = Number(req.body?.bigcommerceCustomerId);
+    const addressId = Number(req.body?.addressId);
+
+    if (!fileName || fileName.length > 255 || (!fileName.toLowerCase().endsWith(".csv") && !isXlsx)) {
+      return res.status(400).json({ error: "Choose a valid CSV or XLSX Order Form." });
+    }
+    if (!isXlsx && (!csv || Buffer.byteLength(csv, "utf8") > 4 * 1024 * 1024)) {
+      return res.status(400).json({ error: "CSV files must be non-empty and 4 MB or smaller." });
+    }
+    if (!Number.isSafeInteger(bigcommerceCustomerId) || bigcommerceCustomerId <= 0) {
+      return res.status(400).json({ error: "Select a POS customer before importing." });
+    }
+    if (!Number.isSafeInteger(addressId) || addressId <= 0) {
+      return res.status(400).json({ error: "Select a shipping address before importing." });
+    }
+
+    let workbookBuffer: Buffer | null = null;
+    let parsed: ReturnType<typeof parseBulkOrderCsv>;
+    try {
+      if (isXlsx) {
+        workbookBuffer = decodeBulkOrderWorkbookBase64(req.body?.xlsxBase64);
+        parsed = await parseBulkOrderWorkbook(workbookBuffer);
+      } else {
+        parsed = parseBulkOrderCsv(csv);
+      }
+    } catch (error: any) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    const fileHash = createHash("sha256")
+      .update(workbookBuffer ?? Buffer.from(csv, "utf8"))
+      .digest("hex");
+    try {
+      const previousImport = await storage.getBulkOrderImportByHash(authUser.id, fileHash);
+      if (previousImport) {
+        return res.status(409).json({
+          error: "This exact Order Form file was already processed. Open its existing Bulk Order entry instead of creating a duplicate draft.",
+          existing_import_id: previousImport.id,
+        });
+      }
+
+      const normalizeCustomerKey = (value: string) => value
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+      const fileNameCustomer = customerNameFromOrderFormFileName(fileName);
+      const fileHasGenericName = ["", "order", "orderform", "bulkorder"].includes(
+        normalizeCustomerKey(fileNameCustomer),
+      );
+
+      const credentials = await getBcCredentials();
+      if (!credentials) return res.status(400).json({ error: "BigCommerce is not configured." });
+      const importBcFetch = (path: string) => bcFetch(credentials.storeHash, credentials.token, path);
+
+      // Resolve the live POS-selected customer, not the CRM mirror's stored
+      // BigCommerce ID, which may be stale.
+      const bcCustomerResponse = await importBcFetch(
+        `/v3/customers?id:in=${bigcommerceCustomerId}&limit=1`,
+      );
+      const bcCustomer = (bcCustomerResponse?.data ?? []).find(
+        (candidate: any) => Number(candidate.id) === bigcommerceCustomerId,
+      );
+      if (!bcCustomer) {
+        return res.status(400).json({
+          error: "That POS customer could not be verified in BigCommerce. Search again and select a current customer.",
+        });
+      }
+
+      const bcFullName = [bcCustomer.first_name, bcCustomer.last_name].filter(Boolean).join(" ").trim();
+      const bcNames = [bcCustomer.company, bcFullName]
+        .filter((value: unknown): value is string => typeof value === "string" && Boolean(value.trim()));
+      const bcEmail = String(bcCustomer.email ?? "").trim();
+
+      // Retain CRM visibility enforcement. If the mirror's BigCommerce ID is
+      // stale, recover the CRM row by exact email or customer name.
+      let crmCustomer = await storage.getCrmCustomerByBcId(bigcommerceCustomerId);
+      if (!crmCustomer) {
+        const searchTerms = [...new Set([bcEmail, ...bcNames].filter(Boolean))];
+        for (const searchTerm of searchTerms) {
+          const searchRows = await storage.searchCrmCustomersForPos(searchTerm, 50);
+          let matches = searchRows.filter(match => {
+            if (bcEmail && String(match.email ?? "").trim().toLowerCase() === bcEmail.toLowerCase()) {
+              return true;
+            }
+            const matchNames = [
+              match.company,
+              [match.first_name, match.last_name].filter(Boolean).join(" ").trim(),
+            ].filter((value): value is string => Boolean(value?.trim()));
+            return matchNames.some(name =>
+              bcNames.some(bcName => normalizeCustomerKey(name) === normalizeCustomerKey(bcName)),
+            );
+          });
+          if (matches.length > 1) {
+            const nameMatches = matches.filter(match => {
+              const matchNames = [
+                match.company,
+                [match.first_name, match.last_name].filter(Boolean).join(" ").trim(),
+              ].filter((value): value is string => Boolean(value?.trim()));
+              return matchNames.some(name =>
+                bcNames.some(bcName => normalizeCustomerKey(name) === normalizeCustomerKey(bcName)),
+              );
+            });
+            if (nameMatches.length === 1) matches = nameMatches;
+          }
+          const linkedIds = [...new Set(matches
+            .map(match => Number(match.bigcommerce_customer_id))
+            .filter(id => Number.isSafeInteger(id) && id > 0))];
+          if (linkedIds.length === 1) {
+            crmCustomer = await storage.getCrmCustomerByBcId(linkedIds[0]);
+          }
+          if (crmCustomer) break;
+        }
+      }
+      if (!crmCustomer) {
+        return res.status(403).json({
+          error: "This BigCommerce customer is not linked to an accessible CRM customer. Ask an administrator to refresh the CRM link.",
+        });
+      }
+      if (!await assertCrmCustomerAccess(storage, crmCustomer.id, authUser.id, authUser.role, res)) return;
+
+      const crmFullName = [crmCustomer.first_name, crmCustomer.last_name].filter(Boolean).join(" ").trim();
+      const identityNames = [bcNames[0], bcNames[1], crmCustomer.company, crmFullName]
+        .filter((value): value is string => Boolean(value?.trim()));
+      const matchesSelectedName = (value?: string) => Boolean(
+        value && identityNames.some(name => normalizeCustomerKey(name) === normalizeCustomerKey(value)),
+      );
+      if (parsed.customerName && !matchesSelectedName(parsed.customerName)) {
+        return res.status(400).json({
+          error: "The Customer Name in the Order Form does not match the selected BigCommerce customer.",
+        });
+      }
+      const crmEmail = String(crmCustomer.email ?? "").trim();
+      const selectedEmail = bcEmail || crmEmail;
+      if (parsed.customerEmail && selectedEmail
+        && parsed.customerEmail.trim().toLowerCase() !== selectedEmail.toLowerCase()) {
+        return res.status(400).json({
+          error: "The Customer Email in the Order Form does not match the selected BigCommerce customer.",
+        });
+      }
+      if (!parsed.customerEmail && !parsed.customerName && !fileHasGenericName
+        && !matchesSelectedName(fileNameCustomer)) {
+        return res.status(400).json({
+          error: "The customer name in the filename does not match the selected customer.",
+        });
+      }
+
+      const addressesResponse = await importBcFetch(
+        `/v3/customers/addresses?customer_id:in=${bigcommerceCustomerId}&limit=250`,
+      );
+      const bcAddresses = Array.isArray(addressesResponse?.data) ? addressesResponse.data : [];
+      const bcAddress = bcAddresses.find((address: any) =>
+        Number(address.id) === addressId
+        && (address.customer_id == null || Number(address.customer_id) === bigcommerceCustomerId),
+      );
+      if (!bcAddress) {
+        return res.status(400).json({
+          error: "The selected shipping address is no longer available for this BigCommerce customer. Select an address again.",
+        });
+      }
+
+      const customerGroupId = Number(bcCustomer.customer_group_id ?? crmCustomer.customer_group_id) || null;
+      const customerName = String(
+        bcCustomer.company
+        || bcFullName
+        || crmCustomer.company
+        || crmFullName
+        || parsed.customerName
+        || fileNameCustomer
+        || "Customer",
+      ).trim();
+      const customerEmail = String(bcEmail || crmEmail || parsed.customerEmail || "").trim() || null;
+      const billingAddress = {
+        first_name: String(bcAddress.first_name ?? ""),
+        last_name: String(bcAddress.last_name ?? ""),
+        company: String(bcAddress.company ?? ""),
+        street_1: String(bcAddress.address1 ?? ""),
+        street_2: String(bcAddress.address2 ?? ""),
+        city: String(bcAddress.city ?? ""),
+        state: String(bcAddress.state_or_province ?? ""),
+        zip: String(bcAddress.postal_code ?? ""),
+        country: String(bcAddress.country ?? ""),
+        country_iso2: String(bcAddress.country_code ?? ""),
+        email: customerEmail,
+        phone: String(bcAddress.phone || bcCustomer.phone || ""),
+      };
+
+      // Resolve the live group before applying the same configured price-list
+      // precedence used by POS. Draft loading preserves these sale prices.
+
+      const tierSetting = await storage.getSetting("price_tier_config");
+      let tierConfig: any = {};
+      if (tierSetting?.value) {
+        try {
+          tierConfig = typeof tierSetting.value === "string" ? JSON.parse(tierSetting.value) : tierSetting.value;
+        } catch {
+          tierConfig = {};
+        }
+      }
+      const configuredTier = Array.isArray(tierConfig.tiers)
+        ? tierConfig.tiers.find((tier: any) =>
+          tier.enabled !== false
+          && Number(tier.customerGroupId) === Number(customerGroupId)
+          && Number(tier.priceListId) > 0)
+        : undefined;
+      let priceListId = Number(configuredTier?.priceListId) || null;
+
+      if (!priceListId && tierConfig.scopeMode === "all" && customerGroupId) {
+        const assignments = await importBcFetch(
+          `/v3/pricelists/assignments?customer_group_id:in=${customerGroupId}&limit=1`,
+        );
+        priceListId = Number(assignments?.data?.[0]?.price_list_id) || null;
+      }
+
+      const uniqueSkus = [...new Set(parsed.items.map(item => item.sku.trim().toUpperCase()))];
+      if (uniqueSkus.length > 250) {
+        return res.status(400).json({ error: "A single import can contain at most 250 unique SKUs." });
+      }
+      const resolveSku = createBulkOrderSkuResolver(importBcFetch);
+      const skuRecords = new Map<string, Awaited<ReturnType<typeof resolveSku>>>();
+      let nextSkuIndex = 0;
+      let skuLookupError: unknown = null;
+      const lookupWorkers = Array.from({ length: Math.min(6, uniqueSkus.length) }, async () => {
+        while (nextSkuIndex < uniqueSkus.length) {
+          const sku = uniqueSkus[nextSkuIndex++];
+          try {
+            skuRecords.set(sku, await resolveSku(sku));
+          } catch (error) {
+            skuLookupError ??= error;
+          }
+        }
+      });
+      await Promise.all(lookupWorkers);
+      if (skuLookupError) throw skuLookupError;
+
+      const priceListPrices = await fetchBulkOrderPriceListPrices(
+        priceListId,
+        [...skuRecords.values()]
+          .filter((record): record is NonNullable<typeof record> => Boolean(record?.variantId))
+          .map(record => record.variantId!),
+        importBcFetch,
+      );
+
+      const remainingStock = new Map<string, number>();
+      for (const sku of uniqueSkus) {
+        const record = skuRecords.get(sku);
+        remainingStock.set(sku, record?.stockLevel ?? 0);
+      }
+
+      const orderItems: any[] = [];
+      const missingItems: Array<{
+        item: typeof parsed.items[number];
+        missingQuantity: number;
+        stockAvailable: number;
+      }> = [];
+      const customerNotes: string[] = [];
+
+      for (const item of parsed.items) {
+        const sku = item.sku.trim().toUpperCase();
+        const product = skuRecords.get(sku);
+        const stockAvailable = product?.stockLevel ?? 0;
+        const availableNow = remainingStock.get(sku) ?? 0;
+        const fulfilledQuantity = Math.min(item.quantity, availableNow);
+        const missingQuantity = item.quantity - fulfilledQuantity;
+
+        if (fulfilledQuantity > 0 && product) {
+          const unitPrice = product.variantId
+            ? priceListPrices.get(product.variantId) ?? product.basePrice
+            : product.basePrice;
+          orderItems.push({
+            product_id: product.productId,
+            bigcommerce_product_id: product.productId,
+            variant_id: product.variantId ?? undefined,
+            variant_option_values: product.variantOptionValues,
+            quantity: fulfilledQuantity,
+            price_at_sale: unitPrice.toFixed(2),
+            name: product.name,
+            sku: product.sku || item.sku,
+            image: product.image,
+          });
+          if (item.notes) customerNotes.push(`${item.sku}: ${item.notes}`);
+          remainingStock.set(sku, availableNow - fulfilledQuantity);
+        }
+        if (missingQuantity > 0) {
+          missingItems.push({ item, missingQuantity, stockAvailable });
+        }
+      }
+
+      const total = orderItems.reduce(
+        (sum, item) => sum + Number(item.price_at_sale) * Number(item.quantity),
+        0,
+      );
+      const orderData: InsertOrder | null = orderItems.length
+        ? {
+          customer_name: customerName,
+          customer_email: customerEmail,
+          bigcommerce_customer_id: bigcommerceCustomerId,
+          billing_address: billingAddress,
+          status: "draft",
+          sync_error: null,
+          order_note: null,
+          customer_note: customerNotes.join("\n").slice(0, 5000) || null,
+          items: orderItems,
+          total: total.toFixed(2),
+          created_by_user_id: authUser.id,
+        }
+        : null;
+
+      const safeCustomerName = customerName
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/gi, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 80) || "Customer";
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const missingFileName = `Missing Items - ${safeCustomerName} - ${timestamp}.csv`;
+      const created = await storage.createBulkOrderImport(orderData, {
+        source_file_name: fileName,
+        source_file_hash: fileHash,
+        customer_name: customerName,
+        customer_email: customerEmail,
+        missing_file_name: missingFileName,
+        missing_csv: buildMissingBulkOrderCsv(parsed, missingItems),
+        source_row_count: parsed.items.length,
+        drafted_item_count: orderItems.length,
+        missing_item_count: missingItems.length,
+        missing_quantity: missingItems.reduce((sum, item) => sum + item.missingQuantity, 0),
+        created_by_user_id: authUser.id,
+      });
+
+      res.status(201).json({
+        id: created.importRecord.id,
+        order_id: created.order?.id ?? null,
+        customer_name: customerName,
+        customer_email: customerEmail,
+        source_file_name: fileName,
+        missing_file_name: missingFileName,
+        source_row_count: parsed.items.length,
+        drafted_item_count: orderItems.length,
+        missing_item_count: missingItems.length,
+        missing_quantity: missingItems.reduce((sum, item) => sum + item.missingQuantity, 0),
+        order_total: created.order?.total ?? "0.00",
+        created_at: created.importRecord.created_at,
+      });
+    } catch (error: any) {
+      if (error?.code === "23505") {
+        const existing = await storage.getBulkOrderImportByHash(authUser.id, fileHash).catch(() => undefined);
+        if (existing) {
+          return res.status(409).json({
+            error: "This exact Order Form file was already processed. Open its existing Bulk Order entry instead of creating a duplicate draft.",
+            existing_import_id: existing.id,
+          });
+        }
+      }
+      const message = String(error?.message ?? error);
+      const status = /matches more than one|valid price|valid ID/i.test(message) ? 422 : 502;
+      res.status(status).json({ error: message });
+    }
+  });
 
   app.get("/api/orders/drafts/:id/invoice-data", requireAuth, async (req, res) => {
     try {
@@ -2463,6 +3208,14 @@ export async function registerRoutes(
   app.get("/api/agent/bigcommerce/search", async (req, res) => {
     try {
       const { query, userId } = req.query;
+      const categoryIds = [
+        ...new Set(
+          String(req.query.categoryIds ?? "")
+            .split(",")
+            .map((value) => Number(value.trim()))
+            .filter((id) => Number.isInteger(id) && id > 0),
+        ),
+      ];
 
       if (!userId) {
         return res.status(401).json({ error: "User ID required" });
@@ -2570,6 +3323,13 @@ export async function registerRoutes(
         variants: [] as any[],
       });
 
+      const matchesSelectedCategory = (product: any) => {
+        if (categoryIds.length === 0) return true;
+        const productCategoryIds = product.categories ?? product.category_ids ?? [];
+        return Array.isArray(productCategoryIds) &&
+          categoryIds.some((id) => productCategoryIds.some((productId: any) => Number(productId) === id));
+      };
+
       // Fetch parent product details for a variant that was found via variants endpoint
       const buildVariantResultFromId = async (
         variant: any,
@@ -2581,6 +3341,7 @@ export async function registerRoutes(
         );
         if (!productRes.ok) throw new Error("Failed to fetch parent product");
         const pd = (await productRes.json()).data;
+        if (!matchesSelectedCategory(pd)) return null;
         return {
           resultType: "variant" as const,
           product: shapeProduct(pd),
@@ -2596,8 +3357,11 @@ export async function registerRoutes(
       });
 
       const fetchKeywordProducts = async (keyword: string): Promise<any[]> => {
+        const categoryFilter = categoryIds.length
+          ? `&categories:in=${categoryIds.join(",")}`
+          : "";
         const response = await fetch(
-          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(keyword)}&include=primary_image,variants&limit=250`,
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?keyword=${encodeURIComponent(keyword)}${categoryFilter}&include=primary_image,variants&limit=250`,
           { headers: bcHeaders },
         );
         if (!response.ok) {
@@ -2620,7 +3384,7 @@ export async function registerRoutes(
             skuData.data[0],
             skuData.data[0].product_id,
           );
-          return res.json(result);
+          if (result) return res.json(result);
         }
       }
 
@@ -2637,7 +3401,7 @@ export async function registerRoutes(
               upcData.data[0],
               upcData.data[0].product_id,
             );
-            return res.json(result);
+            if (result) return res.json(result);
           }
         }
       }
@@ -2888,11 +3652,22 @@ export async function registerRoutes(
       try {
         const {
           categoryId,
+          categoryIds: categoryIdsParam,
           page = "1",
           limit = "12",
+          search = "",
         } = req.query as Record<string, string>;
-        if (!categoryId)
-          return res.status(400).json({ error: "categoryId is required" });
+        const requestedCategoryIds = categoryIdsParam || categoryId || "";
+        const categoryIds = [
+          ...new Set(
+            requestedCategoryIds
+              .split(",")
+              .map((value) => Number(value.trim()))
+              .filter((id) => Number.isInteger(id) && id > 0),
+          ),
+        ];
+        if (categoryIds.length === 0)
+          return res.status(400).json({ error: "categoryIds is required" });
 
         const setting = await storage.getSetting("bigcommerce_config");
         let storeHash = process.env.BC_STORE_HASH;
@@ -2914,10 +3689,13 @@ export async function registerRoutes(
           Accept: "application/json",
         };
 
+        const keywordFilter = search.trim()
+          ? `&keyword=${encodeURIComponent(search.trim())}`
+          : "";
         const r = await fetch(
           `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products` +
-            `?categories:in=${categoryId}&is_visible=true&include=variants,images` +
-            `&sort=id&direction=desc&page=${page}&limit=${limit}`,
+            `?categories:in=${categoryIds.join(",")}&is_visible=true&include=variants,images` +
+            `${keywordFilter}&sort=id&direction=desc&page=${page}&limit=${limit}`,
           { headers },
         );
         if (!r.ok) throw new Error(`BigCommerce API error: ${r.statusText}`);
@@ -3451,14 +4229,18 @@ export async function registerRoutes(
   // ===== SETTINGS ROUTES =====
   app.get("/api/settings/:key", requireAuth, async (req, res) => {
     try {
-      if (req.params.key === "zoho_credentials") {
-        return res.status(403).json({ error: "Use the Admin → Zoho page to manage this protected setting." });
+      if (
+        ["zoho_credentials", "constant_contact_oauth"].includes(req.params.key)
+        || req.params.key.startsWith("constant_contact_oauth_state:")
+      ) {
+        return res.status(403).json({ error: "This protected integration setting is not available through the generic settings API." });
       }
       const sensitiveSettingKeys = new Set([
         "bigcommerce_config",
         "skuvault_config",
         "google_sheets_webhook",
         "invoice_settings",
+        "constant_contact_oauth",
       ]);
       const authUser = (req as any).authUser;
       if (sensitiveSettingKeys.has(req.params.key) && authUser?.role !== "admin") {
@@ -3504,8 +4286,11 @@ export async function registerRoutes(
   app.post("/api/settings", requireAdmin, async (req, res) => {
     try {
       const { key, value } = req.body;
-      if (key === "zoho_credentials") {
-        return res.status(400).json({ error: "Use the Admin → Zoho page to manage this protected setting." });
+      if (
+        ["zoho_credentials", "constant_contact_oauth"].includes(key)
+        || (typeof key === "string" && key.startsWith("constant_contact_oauth_state:"))
+      ) {
+        return res.status(400).json({ error: "This protected integration setting cannot be changed through the generic settings API." });
       }
       await storage.setSetting(key, value);
       res.json({ success: true });
@@ -4134,8 +4919,24 @@ export async function registerRoutes(
         search = "", createdBy = "",
         syncStatus = "", bcStatus = "",
         dateFrom = "", dateTo = "",
+        brandId: brandIdRaw = "",
         salesChannel = "salesapp",
       } = req.query as Record<string, string>;
+      const parsedBrandId = brandIdRaw ? Number(brandIdRaw) : null;
+      if (parsedBrandId != null && (!Number.isInteger(parsedBrandId) || parsedBrandId <= 0)) {
+        return res.status(400).json({ error: "Invalid BigCommerce brand ID." });
+      }
+      const orderTimezone = await getCompanyTimezone(storage);
+      const parsedDateFrom = dateFrom ? parseDateTimeLocal(`${dateFrom}T00:00`, orderTimezone) : null;
+      const parsedDateToStart = dateTo
+        ? parseDateTimeLocal(`${shiftDateOnly(dateTo, 1)}T00:00`, orderTimezone)
+        : null;
+      if ((dateFrom && !parsedDateFrom) || (dateTo && !parsedDateToStart)) {
+        return res.status(400).json({ error: "Invalid order date range." });
+      }
+      const parsedDateTo = parsedDateToStart
+        ? new Date(parsedDateToStart.getTime() - 1)
+        : null;
 
       // Restricted users: lock to their own Sales App orders regardless of params
       const effectiveCreatedBy = hasOrdersView
@@ -4152,8 +4953,9 @@ export async function registerRoutes(
         createdBy: effectiveCreatedBy,
         syncStatus: hasOrdersView ? (syncStatus || undefined) : undefined,
         bcStatus: hasOrdersView ? (bcStatus || undefined) : undefined,
-        dateFrom: dateFrom ? new Date(dateFrom) : null,
-        dateTo: dateTo ? (() => { const d = new Date(dateTo); d.setHours(23, 59, 59, 999); return d; })() : null,
+        dateFrom: parsedDateFrom,
+        dateTo: parsedDateTo,
+        brandId: parsedBrandId,
         salesChannel: effectiveSalesChannel,
       });
       res.json(result);
@@ -4816,6 +5618,137 @@ export async function registerRoutes(
     const headers = { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" };
     return { storeHash, token, headers };
   }
+
+  async function getCachedBcBrandOptions(): Promise<Array<{ id: number; name: string }>> {
+    const cacheKey = "report_bc_brands_cache";
+    const cached = await storage.getSetting(cacheKey);
+    if (cached?.value) {
+      const { data, ts } = cached.value as any;
+      if (Array.isArray(data) && Date.now() - ts < 3600_000) return data;
+    }
+
+    const { storeHash, headers } = await getBcCreds();
+    const brands: Array<{ id: number; name: string }> = [];
+    for (let page = 1; ; page++) {
+      const response = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/brands?limit=250&page=${page}`,
+        { headers },
+      );
+      if (!response.ok) throw new Error(`BigCommerce brand request failed (${response.status}).`);
+      const json = await response.json();
+      const items: any[] = json.data ?? [];
+      brands.push(...items
+        .map((brand: any) => ({ id: Number(brand.id), name: String(brand.name ?? "").trim() }))
+        .filter((brand: any) => Number.isInteger(brand.id) && brand.id > 0 && brand.name));
+      if (items.length < 250) break;
+    }
+    brands.sort((a, b) => a.name.localeCompare(b.name));
+    await storage.setSetting(cacheKey, { data: brands, ts: Date.now() });
+    return brands;
+  }
+
+  function shiftDateOnly(date: string, days: number) {
+    const shifted = new Date(`${date}T12:00:00.000Z`);
+    shifted.setUTCDate(shifted.getUTCDate() + days);
+    return shifted.toISOString().slice(0, 10);
+  }
+
+  // Pinned BigCommerce brands are stored per user; the underlying statistics
+  // use synced BigCommerce order lines joined to the current local product catalog.
+  app.get("/api/dropshipping/dashboard/brands", requirePermission("dropshipping", "view"), async (_req, res) => {
+    try {
+      res.json(await getCachedBcBrandOptions());
+    } catch (error: any) {
+      res.status(502).json({ error: error.message || "Unable to load BigCommerce brands." });
+    }
+  });
+
+  app.get("/api/dropshipping/dashboard", requirePermission("dropshipping", "view"), async (req, res) => {
+    try {
+      const authUser = (req as any).authUser;
+      const setting = await storage.getSetting(`dropship_dashboard_pins_${authUser.id}`);
+      const savedPins = Array.isArray(setting?.value) ? setting.value : [];
+      const brands = await getCachedBcBrandOptions();
+      const brandsById = new Map(brands.map((brand) => [brand.id, brand]));
+      const pins: Array<{ id: number; name: string }> = [];
+      const seenPinIds = new Set<number>();
+      for (const pin of savedPins) {
+        const id = Number((pin as any)?.id);
+        if (!Number.isInteger(id) || id <= 0 || seenPinIds.has(id)) continue;
+        seenPinIds.add(id);
+        pins.push({
+          id,
+          name: brandsById.get(id)?.name || String((pin as any).name || `Brand ${id}`),
+        });
+      }
+
+      const timezone = await getCompanyTimezone(storage);
+      const todayDate = dateOnlyInTimeZone(new Date(), timezone);
+      const yesterdayDate = shiftDateOnly(todayDate, -1);
+      const tomorrowDate = shiftDateOnly(todayDate, 1);
+      const monthStartDate = `${todayDate.slice(0, 7)}-01`;
+      const toStart = (date: string) => {
+        const result = parseDateTimeLocal(`${date}T00:00`, timezone);
+        if (!result) throw new Error("Unable to calculate the dashboard date range.");
+        return result;
+      };
+      const dateRanges = {
+        todayStart: toStart(todayDate),
+        tomorrowStart: toStart(tomorrowDate),
+        yesterdayStart: toStart(yesterdayDate),
+        monthStart: toStart(monthStartDate),
+      };
+      const statsByBrandId = await storage.getDropshipBrandOrderStats(pins.map((brand) => brand.id), dateRanges);
+      const pinnedBrands = pins.map((brand) => ({
+        ...brand,
+        ...(statsByBrandId[brand.id] ?? { today: 0, yesterday: 0, thisMonth: 0, total: 0 }),
+      }));
+      const [lineItemCount, lastFullSync, lastIncrementalSync, autoSyncSetting] = await Promise.all([
+        storage.getBcOrderLineItemsCount(),
+        storage.getSetting("crm_last_line_items_sync"),
+        storage.getSetting("crm_last_line_items_incremental_sync"),
+        storage.getSetting("crm_auto_sync_line_items"),
+      ]);
+
+      res.json({
+        timezone,
+        dates: { today: todayDate, yesterday: yesterdayDate, monthStart: monthStartDate },
+        pinnedBrands,
+        dataFreshness: {
+          lineItemCount,
+          lastFullSync: lastFullSync?.value ?? null,
+          lastIncrementalSync: lastIncrementalSync?.value ?? null,
+          autoSyncEnabled: autoSyncSetting?.value === true || autoSyncSetting?.value === "true",
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Unable to load the dropship dashboard." });
+    }
+  });
+
+  app.put("/api/dropshipping/dashboard/pins", requirePermission("dropshipping", "view"), async (req, res) => {
+    try {
+      const parsed = z.object({
+        brandIds: z.array(z.number().int().positive()).max(1000),
+      }).safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Choose valid BigCommerce brands." });
+
+      const brandIds = [...new Set(parsed.data.brandIds)];
+      const brands = await getCachedBcBrandOptions();
+      const brandsById = new Map(brands.map((brand) => [brand.id, brand]));
+      const missingId = brandIds.find((id) => !brandsById.has(id));
+      if (missingId != null) {
+        return res.status(400).json({ error: "One or more selected brands are no longer available in BigCommerce. Refresh and try again." });
+      }
+
+      const authUser = (req as any).authUser;
+      const pinnedBrands = brandIds.map((id) => brandsById.get(id)!);
+      await storage.setSetting(`dropship_dashboard_pins_${authUser.id}`, pinnedBrands);
+      res.json({ pinnedBrands });
+    } catch (error: any) {
+      res.status(502).json({ error: error.message || "Unable to save dashboard brands." });
+    }
+  });
 
   // List BC orders (paginated, sortable, filterable by status)
   app.get("/api/bigcommerce/orders/list", requireAuth, async (req, res) => {
@@ -7399,6 +8332,8 @@ export async function registerRoutes(
       { module: "crm", action: "export",                         description: "CRM: export customer list to CSV / Excel" },
       { module: "crm", action: "manage_reactivation",             description: "CRM: update reactivation stages, ownership, pledges, and follow-ups" },
       { module: "crm", action: "manage_reactivation_stages",      description: "CRM: configure reactivation pipeline stages" },
+      { module: "zoho_account_mapping", action: "view",             description: "Zoho CRM: view customer-to-Account mappings and search Accounts" },
+      { module: "zoho_account_mapping", action: "manage",           description: "Zoho CRM: refresh, create, edit, and remove Account mappings" },
     ];
     try {
       const existing = await storage.getPermissions();
@@ -7482,6 +8417,7 @@ export async function registerRoutes(
   await (async () => {
     const REPORT_PERMS: Array<{ module: string; action: string; description: string }> = [
       { module: "reporting_sales",                action: "view", description: "Reporting: Sales Report (summary + order details)" },
+      { module: "reporting_exports",              action: "view", description: "Reporting: live BigCommerce product exports" },
       { module: "reporting_price_override_audit", action: "view", description: "Reporting: Price Override Audit log" },
       { module: "reporting_store_credit_usage",   action: "view", description: "Reporting: Store Credit Usage log" },
     ];
@@ -7494,6 +8430,23 @@ export async function registerRoutes(
         }
       }
     } catch (_) { /* non-fatal */ }
+  })();
+
+  // ── Product 360 permission auto-seed ─────────────────────────────────────────
+  await (async () => {
+    const PRODUCT_360_PERMS: Array<{ module: string; action: string; description: string }> = [
+      { module: "product_360", action: "view", description: "Product 360: view product intelligence, analytics, inventory, and customer relationships" },
+      { module: "product_360", action: "export", description: "Product 360: export product performance and replenishment data" },
+    ];
+    try {
+      const existing = await storage.getAllPermissions();
+      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+      for (const p of PRODUCT_360_PERMS) {
+        if (!existingSet.has(`${p.module}:${p.action}`)) {
+          await storage.createPermission(p);
+        }
+      }
+    } catch (_) { /* non-fatal — permissions may already exist */ }
   })();
 
   // ── Marketing permission auto-seed ────────────────────────────────────────────
@@ -7545,6 +8498,205 @@ export async function registerRoutes(
     if (perms.includes("crm:visibility_assigned_only")) return { scope: "ASSIGNED_ONLY", userId };
     return { scope: "ASSIGNED_ONLY", userId };
   }
+
+  app.get("/api/orders/bulk-imports/customers/search", requirePermission("orders_drafts"), async (req, res) => {
+    try {
+      const query = String(req.query.query ?? "").trim();
+      if (query.length < 2) return res.json([]);
+
+      const user = (req as any).authUser;
+      const userId = Number(user.id);
+      const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
+      const visibility = await getCrmVisibilityScope(
+        storage,
+        userId,
+        user.role,
+        user.role !== "admin" ? perms : undefined,
+      );
+      const normalizeKey = (value: string) => value
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+      const searchCandidates = await searchPosCustomersInBigCommerce(query);
+      const candidateIds = [...new Set(searchCandidates
+        .map(candidate => Number(candidate.id))
+        .filter(id => Number.isSafeInteger(id) && id > 0))];
+      const currentCustomers: typeof searchCandidates = [];
+      if (candidateIds.length > 0) {
+        const credentials = await getBcCredentials();
+        if (!credentials) return res.status(400).json({ error: "BigCommerce is not configured." });
+        const liveResponse = await bcFetch(
+          credentials.storeHash,
+          credentials.token,
+          `/v3/customers?id:in=${candidateIds.join(",")}&limit=250`,
+        );
+        const liveById = new Map<number, any>(
+          (liveResponse?.data ?? []).map((customer: any) => [Number(customer.id), customer]),
+        );
+        const queryKey = normalizeKey(query);
+        const queryDigits = query.replace(/\D/g, "");
+        for (const candidate of searchCandidates) {
+          const liveCustomer = liveById.get(Number(candidate.id));
+          if (!liveCustomer) continue;
+
+          const liveFullName = [liveCustomer.first_name, liveCustomer.last_name]
+            .filter(Boolean)
+            .join(" ")
+            .trim();
+          const emailMatches = String(liveCustomer.email ?? "").toLowerCase().includes(query.toLowerCase());
+          const reverseName = [liveCustomer.last_name, liveCustomer.first_name].filter(Boolean).join(" ").trim();
+          const nameOrCompanyMatches = Boolean(queryKey) && [liveFullName, reverseName, liveCustomer.company]
+            .some((value: unknown) => typeof value === "string" && normalizeKey(value).includes(queryKey));
+          const livePhoneDigits = String(liveCustomer.phone ?? "").replace(/\D/g, "");
+          const phoneMatches = queryDigits.length >= 3 && livePhoneDigits.includes(queryDigits);
+          if (!emailMatches && !nameOrCompanyMatches && !phoneMatches) continue;
+
+          currentCustomers.push(toPosCustomerResponse({
+            bigcommerce_customer_id: Number(liveCustomer.id),
+            first_name: liveCustomer.first_name || "",
+            last_name: liveCustomer.last_name || "",
+            email: liveCustomer.email || "",
+            phone: liveCustomer.phone || "",
+            company: liveCustomer.company || "",
+            customer_group_id: liveCustomer.customer_group_id ?? null,
+            customer_group_name: liveCustomer.customer_group_name ?? null,
+          }));
+        }
+      }
+      const visibleCustomers: typeof currentCustomers = [];
+
+      const canSeeCrmCustomer = async (crmCustomerId: number) => {
+        if (visibility.scope === "ALL_CUSTOMERS") return true;
+        const rep = await storage.getCrmSalesRep(crmCustomerId);
+        if (visibility.scope === "ASSIGNED_ONLY") {
+          return rep?.assigned_user_id === userId;
+        }
+        if (visibility.scope === "ASSIGNED_AND_UNASSIGNED") {
+          return !rep || rep.assigned_user_id === userId;
+        }
+        return false;
+      };
+
+      for (const candidate of currentCustomers) {
+        const linkedCrmCustomer = await storage.getCrmCustomerByBcId(candidate.id);
+        if (linkedCrmCustomer) {
+          if (await canSeeCrmCustomer(linkedCrmCustomer.id)) visibleCustomers.push(candidate);
+          continue;
+        }
+
+        const candidateEmail = String(candidate.email ?? "").trim().toLowerCase();
+        const candidateFullName = [candidate.first_name, candidate.last_name].filter(Boolean).join(" ").trim();
+        const candidateNames = [candidate.company, candidateFullName]
+          .filter((value): value is string => Boolean(value?.trim()));
+        const searchTerms = [...new Set([candidateEmail, ...candidateNames].filter(Boolean))];
+        let hasVisibleCrmMatch = false;
+
+        for (const searchTerm of searchTerms) {
+          const crmResult = await storage.getCrmCustomers({
+            search: searchTerm,
+            limit: 50,
+            offset: 0,
+            visibilityScope: visibility.scope,
+            visibilityUserId: visibility.userId,
+            accountType: "customer",
+            status: "both",
+          });
+          hasVisibleCrmMatch = crmResult.customers.some((crmCustomer: any) => {
+            if (candidateEmail
+              && String(crmCustomer.email ?? "").trim().toLowerCase() === candidateEmail) {
+              return true;
+            }
+            const crmFullName = [crmCustomer.first_name, crmCustomer.last_name]
+              .filter(Boolean)
+              .join(" ")
+              .trim();
+            const crmNames = [crmCustomer.company, crmFullName]
+              .filter((value: unknown): value is string => typeof value === "string" && Boolean(value.trim()));
+            return crmNames.some(name =>
+              candidateNames.some(candidateName => normalizeKey(name) === normalizeKey(candidateName)),
+            );
+          });
+          if (hasVisibleCrmMatch) break;
+        }
+
+        if (hasVisibleCrmMatch) visibleCustomers.push(candidate);
+      }
+
+      res.json(visibleCustomers);
+    } catch (error: any) {
+      console.error("[Bulk Order customer search] Failed:", error?.message ?? error);
+      res.status(500).json({ error: "BigCommerce customer search failed." });
+    }
+  });
+
+  // Header-wide search. Customer results use the CRM visibility scope; order
+  // results are limited to numeric BigCommerce order-id searches.
+  app.get("/api/search", requireAuth, async (req, res) => {
+    try {
+      const query = String(req.query.q ?? "").trim();
+      if (query.length < 2) return res.json({ customers: [], orders: [] });
+
+      const user = (req as any).authUser;
+      const userId = Number(user.id);
+      const perms = user.role !== "admin" ? await storage.getUserPermissionStrings(userId) : [];
+      const customerScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
+
+      const hasOrdersView = user.role === "admin" || perms.includes("orders:view");
+      const isOrderIdSearch = /^\d+$/.test(query);
+      const [customerResult, orderResult] = await Promise.all([
+        storage.getCrmCustomers({
+          search: query,
+          limit: 8,
+          offset: 0,
+          visibilityScope: customerScope.scope,
+          visibilityUserId: customerScope.userId,
+          accountType: "customer",
+          status: "both",
+        }),
+        isOrderIdSearch
+          ? storage.getConsolidatedOrders({
+              page: 1,
+              limit: 8,
+              search: query,
+              createdBy: hasOrdersView ? null : userId,
+              salesChannel: hasOrdersView ? "allorders" : "salesapp",
+            })
+          : Promise.resolve({ orders: [] as any[], total: 0 }),
+      ]);
+
+      const formatAddress = (address: any) => {
+        if (!address || typeof address !== "object") return "";
+        return [
+          address.address1 ?? address.street_1 ?? address.street1,
+          address.address2 ?? address.street_2 ?? address.street2,
+          address.city,
+          [address.state_or_province ?? address.state, address.postal_code ?? address.zip].filter(Boolean).join(" "),
+        ].filter(Boolean).join(", ");
+      };
+
+      res.json({
+        customers: customerResult.customers.map((customer: any) => ({
+          id: customer.id,
+          bigcommerce_customer_id: customer.bigcommerce_customer_id,
+          name: customer.company || [customer.first_name, customer.last_name].filter(Boolean).join(" ") || customer.email,
+          email: customer.email,
+          address: formatAddress(customer.shipping_address) || formatAddress(customer.billing_address),
+        })),
+        orders: orderResult.orders
+          .filter((order: any) => order.bigcommerce_order_id != null)
+          .map((order: any) => ({
+            bigcommerce_order_id: order.bigcommerce_order_id,
+            customer_name: order.customer_name || "Unknown customer",
+            status: order.bc_status || order.status || null,
+            total: order.total ?? null,
+            date: order.date ?? null,
+          })),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Search failed" });
+    }
+  });
 
   // ── BC Customer Notes helpers ─────────────────────────────────────────────────
   const BC_GN_HEADER = "=== CUSTOMER GENERAL NOTES ===";
@@ -8417,10 +9569,10 @@ export async function registerRoutes(
       const now = new Date();
       const workDate = dateOnlyInTimeZone(now, await getCompanyTimezone(storage));
       const todaySessions = await storage.getAttendanceSessionsForDate(user.id, workDate);
-      const active = todaySessions.find(session => session.status === "active") ?? null;
+      const active = todaySessions.find(session => session.status === "active" || session.status === "on_break") ?? null;
       const todayTotalSeconds = todaySessions.reduce((total, session) => {
         if (session.status === "active" && session.time_in) {
-          return total + Math.max(0, Math.floor((now.getTime() - new Date(session.time_in).getTime()) / 1000));
+          return total + Math.max(0, Math.floor((now.getTime() - new Date(session.time_in).getTime()) / 1000) - Number(session.break_seconds ?? 0));
         }
         return total + Math.max(0, Number(session.total_seconds) || 0);
       }, 0);
@@ -8433,6 +9585,7 @@ export async function registerRoutes(
         todaySessions,
         todayTotalSeconds,
         todayAsOf: now.toISOString(),
+          dailyNote: await storage.getAttendanceDailyNote(user.id, workDate),
         secondSessionApproved,
         canStartSecondSession: todaySessions.length === 1 && !active && secondSessionApproved,
       });
@@ -8553,10 +9706,22 @@ export async function registerRoutes(
   app.post("/api/attendance/start", requirePermission("attendance", "clock"), async (req, res) => {
     try {
       const user = (req as any).authUser;
+      const requestedStartMethod = req.body?.start_method;
+      const startMethod: "warehouse" | "driving" | "offsite" | null =
+        requestedStartMethod === "warehouse" || requestedStartMethod === "driving" || requestedStartMethod === "offsite"
+          ? requestedStartMethod
+          : null;
+      if (!startMethod) return res.status(400).json({ error: "A valid start method is required." });
+      if (startMethod === "offsite" && user.role !== "admin") {
+        const permissions = await storage.getUserPermissionStrings(user.id);
+        if (!permissions.includes("attendance:clock_offsite")) {
+          return res.status(403).json({ error: "You do not have permission to start attendance off-site." });
+        }
+      }
       const now = new Date();
       const workDate = dateOnlyInTimeZone(now, await getCompanyTimezone(storage));
       const todaySessions = await storage.getAttendanceSessionsForDate(user.id, workDate);
-      const existing = todaySessions.find(session => session.status === "active");
+      const existing = todaySessions.find(session => session.status === "active" || session.status === "on_break");
       if (existing) return res.status(409).json({ error: "You already have an active attendance session.", attendance: existing });
       if (todaySessions.length >= 2) {
         return res.status(409).json({ code: "daily_session_limit_reached", error: "You have already completed the two allowed work sessions for today." });
@@ -8566,14 +9731,12 @@ export async function registerRoutes(
       if (sessionNumber === 2 && !firstSession?.second_session_approved) {
         return res.status(409).json({ code: "second_session_approval_required", error: "Your first session is complete. A manager must approve a second session before you can clock in again today." });
       }
-      const settings = await getAttendanceSettings(storage);
-      const startMethod = req.body?.start_method === "driving" ? "driving" : req.body?.start_method === "warehouse" ? "warehouse" : null;
-      if (!startMethod) return res.status(400).json({ error: "A valid start method is required." });
-      const latitude = parseCoordinate(req.body?.latitude);
-      const longitude = parseCoordinate(req.body?.longitude);
-      const accuracy = parseAccuracy(req.body?.accuracy);
+      const settings = startMethod === "offsite" ? null : await getAttendanceSettings(storage);
+      const latitude = startMethod === "offsite" ? null : parseCoordinate(req.body?.latitude);
+      const longitude = startMethod === "offsite" ? null : parseCoordinate(req.body?.longitude);
+      const accuracy = startMethod === "offsite" ? null : parseAccuracy(req.body?.accuracy);
       if (startMethod === "driving") {
-        if (!settings.routeStartEnabled) return res.status(409).json({ code: "route_start_disabled", error: "Route start is not enabled in Attendance Settings." });
+        if (!settings?.routeStartEnabled) return res.status(409).json({ code: "route_start_disabled", error: "Route start is not enabled in Attendance Settings." });
         if (latitude == null || longitude == null) return res.status(400).json({ code: "location_unavailable", error: "Your location could not be verified." });
         if (user.attendance_home_latitude == null || user.attendance_home_longitude == null) {
           return res.status(400).json({ code: "home_location_required", error: "Set your home location before starting from your route." });
@@ -8583,15 +9746,15 @@ export async function registerRoutes(
           Number(user.attendance_home_longitude),
           latitude,
           longitude,
-          settings.homeExclusionRadiusMeters,
+          settings!.homeExclusionRadiusMeters,
         )) {
           return res.status(403).json({ code: "inside_home_exclusion", error: "The system must confirm that you have begun driving to location" });
         }
       }
-      if (startMethod === "warehouse" && settings.warehouseVerificationEnabled && (latitude == null || latitude < -90 || latitude > 90 || longitude == null)) {
+      if (startMethod === "warehouse" && settings?.warehouseVerificationEnabled && (latitude == null || latitude < -90 || latitude > 90 || longitude == null)) {
         return res.status(400).json({ code: "location_unavailable", error: "Your location could not be verified." });
       }
-      if (startMethod === "warehouse" && latitude != null && longitude != null && !isInsideWarehouse(settings, latitude, longitude)) {
+      if (startMethod === "warehouse" && settings && latitude != null && longitude != null && !isInsideWarehouse(settings, latitude, longitude)) {
         return res.status(403).json({ code: "outside_warehouse", error: "You have to be at the location to log in." });
       }
       const attendance = await storage.createAttendance({
@@ -8605,9 +9768,11 @@ export async function registerRoutes(
         time_in_latitude: latitude?.toString() ?? null,
         time_in_longitude: longitude?.toString() ?? null,
         time_in_accuracy: accuracy?.toString() ?? null,
-         time_in_verification: startMethod === "driving"
-           ? "outside_home_verified"
-           : settings.warehouseVerificationEnabled ? "warehouse_verified" : "warehouse_verification_disabled",
+         time_in_verification: startMethod === "offsite"
+           ? "offsite_permission_granted"
+           : startMethod === "driving"
+             ? "outside_home_verified"
+             : settings?.warehouseVerificationEnabled ? "warehouse_verified" : "warehouse_verification_disabled",
         driving_verified: false,
       });
       await storage.createAttendanceCheckpoint({
@@ -8617,10 +9782,107 @@ export async function registerRoutes(
         longitude: longitude?.toString() ?? null,
         accuracy: accuracy?.toString() ?? null,
         checkpoint_type: "time_in",
-        capture_status: latitude != null && longitude != null ? "captured" : "unavailable",
+        capture_status: startMethod === "offsite" ? "not_required" : latitude != null && longitude != null ? "captured" : "unavailable",
         detail: { verification: attendance.time_in_verification },
       });
       res.status(201).json(attendance);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/attendance/today/note", requirePermission("attendance", "clock"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const workDate = dateOnlyInTimeZone(new Date(), await getCompanyTimezone(storage));
+      const note = String(req.body?.note ?? "").trim().slice(0, 4000);
+      const saved = await storage.saveAttendanceDailyNote(user.id, workDate, note);
+      res.json({ note: saved.note, workDate: saved.work_date, updatedAt: saved.updated_at });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/attendance/break/start", requirePermission("attendance", "clock"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const active = await storage.getActiveAttendanceForUser(user.id);
+      if (!active) return res.status(404).json({ error: "No open attendance session found." });
+      if (active.status !== "active") return res.status(409).json({ error: "Your attendance session is already on break." });
+      const now = new Date();
+      const elapsedSeconds = active.time_in
+        ? Math.max(0, Math.floor((now.getTime() - new Date(active.time_in).getTime()) / 1000))
+        : 0;
+      const workedSeconds = Math.max(0, elapsedSeconds - Number(active.break_seconds ?? 0));
+      const updated = await storage.updateAttendance(active.id, {
+        status: "on_break",
+        total_seconds: workedSeconds,
+        break_started_at: now,
+      });
+      await storage.createAttendanceCheckpoint({
+        attendance_id: active.id,
+        captured_at: now,
+        latitude: null,
+        longitude: null,
+        accuracy: null,
+        checkpoint_type: "break_start",
+        capture_status: "unavailable",
+        detail: { worked_seconds: workedSeconds },
+      });
+      await storage.createAttendanceAuditLog({
+        attendance_id: active.id,
+        actor_user_id: user.id,
+        action: "break_started",
+        changed_field: "status",
+        old_value: "active",
+        new_value: "on_break",
+        reason: "Employee started a break.",
+      });
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/attendance/break/resume", requirePermission("attendance", "clock"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const active = await storage.getActiveAttendanceForUser(user.id);
+      if (!active) return res.status(404).json({ error: "No open attendance session found." });
+      if (active.status !== "on_break" || !active.break_started_at) {
+        return res.status(409).json({ error: "Your attendance session is not currently on break." });
+      }
+      const now = new Date();
+      const currentBreakSeconds = Math.max(0, Math.floor((now.getTime() - new Date(active.break_started_at).getTime()) / 1000));
+      const breakSeconds = Number(active.break_seconds ?? 0) + currentBreakSeconds;
+      const updated = await storage.updateAttendance(active.id, {
+        status: "active",
+        break_started_at: null,
+        break_seconds: breakSeconds,
+        total_seconds: active.time_in
+          ? Math.max(0, Math.floor((now.getTime() - new Date(active.time_in).getTime()) / 1000) - breakSeconds)
+          : Number(active.total_seconds ?? 0),
+      });
+      await storage.createAttendanceCheckpoint({
+        attendance_id: active.id,
+        captured_at: now,
+        latitude: null,
+        longitude: null,
+        accuracy: null,
+        checkpoint_type: "break_end",
+        capture_status: "unavailable",
+        detail: { break_seconds: currentBreakSeconds, total_break_seconds: breakSeconds },
+      });
+      await storage.createAttendanceAuditLog({
+        attendance_id: active.id,
+        actor_user_id: user.id,
+        action: "break_ended",
+        changed_field: "status",
+        old_value: "on_break",
+        new_value: "active",
+        reason: "Employee returned from break.",
+      });
+      res.json(updated);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -8632,18 +9894,27 @@ export async function registerRoutes(
       const active = await storage.getActiveAttendanceForUser(user.id);
       if (!active) return res.status(404).json({ error: "No active attendance session found." });
       const now = new Date();
-      const latitude = parseCoordinate(req.body?.latitude);
-      const longitude = parseCoordinate(req.body?.longitude);
-      const accuracy = parseAccuracy(req.body?.accuracy);
-      const totalSeconds = active.time_in ? Math.max(0, Math.floor((now.getTime() - new Date(active.time_in).getTime()) / 1000)) : 0;
+      const offsite = active.start_method === "offsite";
+      const latitude = offsite ? null : parseCoordinate(req.body?.latitude);
+      const longitude = offsite ? null : parseCoordinate(req.body?.longitude);
+      const accuracy = offsite ? null : parseAccuracy(req.body?.accuracy);
+      const currentBreakSeconds = active.status === "on_break" && active.break_started_at
+        ? Math.max(0, Math.floor((now.getTime() - new Date(active.break_started_at).getTime()) / 1000))
+        : 0;
+      const totalBreakSeconds = Number(active.break_seconds ?? 0) + currentBreakSeconds;
+      const totalSeconds = active.time_in
+        ? Math.max(0, Math.floor((now.getTime() - new Date(active.time_in).getTime()) / 1000) - totalBreakSeconds)
+        : 0;
       const updated = await storage.updateAttendance(active.id, {
         time_out: now,
         status: "completed",
         total_seconds: totalSeconds,
+        break_started_at: null,
+        break_seconds: totalBreakSeconds,
         time_out_latitude: latitude?.toString() ?? null,
         time_out_longitude: longitude?.toString() ?? null,
         time_out_accuracy: accuracy?.toString() ?? null,
-        time_out_verification: latitude != null && longitude != null ? "captured" : "location_unavailable",
+        time_out_verification: offsite ? "offsite_no_location_required" : latitude != null && longitude != null ? "captured" : "location_unavailable",
       });
       await storage.createAttendanceCheckpoint({
         attendance_id: active.id,
@@ -8652,10 +9923,10 @@ export async function registerRoutes(
         longitude: longitude?.toString() ?? null,
         accuracy: accuracy?.toString() ?? null,
         checkpoint_type: "time_out",
-        capture_status: latitude != null && longitude != null ? "captured" : "unavailable",
+        capture_status: offsite ? "not_required" : latitude != null && longitude != null ? "captured" : "unavailable",
         detail: { verification: updated?.time_out_verification ?? "location_unavailable" },
       });
-      if (latitude == null || longitude == null) {
+      if (!offsite && (latitude == null || longitude == null)) {
         await storage.createAttendanceException({
           attendance_id: active.id,
           user_id: user.id,
@@ -8706,6 +9977,9 @@ export async function registerRoutes(
       const user = (req as any).authUser;
       const active = await storage.getActiveAttendanceForUser(user.id);
       if (!active) return res.status(404).json({ error: "No active attendance session found." });
+      if (active.start_method === "offsite") {
+        return res.json({ skipped: true, reason: "Off-site attendance does not collect location checkpoints." });
+      }
       const latitude = parseCoordinate(req.body?.latitude);
       const longitude = parseCoordinate(req.body?.longitude);
       const accuracy = parseAccuracy(req.body?.accuracy);
@@ -8772,7 +10046,7 @@ export async function registerRoutes(
           }),
       )).filter((user): user is typeof users[number] => user !== null);
       const attendanceUserIds = new Set(attendanceUsers.map(user => user.id));
-      const activeCount = recordResult.rows.filter(row => row.status === "active").length;
+      const activeCount = recordResult.rows.filter(row => row.status === "active" || row.status === "on_break").length;
       const loggedIn = new Set(recordResult.rows.filter(row => attendanceUserIds.has(row.user_id)).map(row => row.user_id));
       const totalSeconds = recordResult.rows.reduce((sum, row) => sum + Number(row.total_seconds ?? 0), 0);
       const missingTimeOutRows = recordResult.rows.filter(row => row.time_in && !row.time_out && row.work_date < today);
@@ -8860,12 +10134,14 @@ export async function registerRoutes(
       if (!canViewAll && attendance.user_id !== user.id) {
         return res.status(404).json({ error: "Attendance record not found." });
       }
-      const [employee, checkpoints, audit] = await Promise.all([
+      const [employee, checkpoints, audit, dailyNote, breakMap] = await Promise.all([
         storage.getUser(attendance.user_id),
         storage.getAttendanceCheckpoints(attendance.id),
         storage.getAttendanceAuditHistory(attendance.id),
+        storage.getAttendanceDailyNote(attendance.user_id, attendance.work_date),
+        storage.getAttendanceBreakIntervals([attendance.id]),
       ]);
-      res.json({ attendance, employee: employee ? { id: employee.id, name: employee.name, username: employee.username } : null, checkpoints, audit, can_view_all: canViewAll });
+      res.json({ attendance: { ...attendance, breaks: breakMap[attendance.id] ?? [] }, dailyNote, employee: employee ? { id: employee.id, name: employee.name, username: employee.username } : null, checkpoints, audit, can_view_all: canViewAll });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -9029,14 +10305,18 @@ export async function registerRoutes(
           const cell = day.cells[key] ?? {
             user_id: row.user_id,
             total_seconds: 0,
+            break_seconds: 0,
             time_in: null,
             time_out: null,
+             breaks: [],
             status: row.status,
             review_status: row.review_status,
           };
           cell.total_seconds += seconds;
+          cell.break_seconds += Math.max(0, Number(row.break_seconds ?? 0));
           if (row.time_in && (!cell.time_in || new Date(row.time_in) < new Date(cell.time_in))) cell.time_in = row.time_in;
           if (row.time_out && (!cell.time_out || new Date(row.time_out) > new Date(cell.time_out))) cell.time_out = row.time_out;
+           cell.breaks = [...cell.breaks, ...(row.breaks ?? [])].sort((a: any, b: any) => new Date(a.break_started_at).getTime() - new Date(b.break_started_at).getTime());
           if (row.review_status === "needs_review") cell.review_status = "needs_review";
           if (row.status === "active") cell.status = "active";
           day.cells[key] = cell;
@@ -9106,11 +10386,8 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/attendance/admin/home-locations", requirePermission("attendance", "view_dashboard"), async (_req, res) => {
+  app.get("/api/attendance/admin/home-locations", requirePermission("attendance", "view_home_locations"), async (_req, res) => {
     try {
-      if (!(await canViewAllAttendance((_req as any).authUser))) {
-        return res.status(403).json({ error: "Full attendance access is required." });
-      }
       const users = await storage.getAllUsers();
       res.json(users
         .filter(user => user.attendance_home_latitude != null && user.attendance_home_longitude != null)
@@ -9464,6 +10741,146 @@ export async function registerRoutes(
       await storage.setSetting(cacheKey, { data: cats, ts: Date.now() });
       res.json(cats);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Live BigCommerce catalog exports ────────────────────────────────────────
+  // These endpoints intentionally do not use the Sales Report's one-hour cache:
+  // exports are expected to reflect the current BigCommerce catalog.
+  async function fetchLiveBcCatalogCollection(
+    collection: "brands" | "categories",
+    storeHash: string,
+    headers: Record<string, string>,
+  ): Promise<any[]> {
+    // Match the existing BigCommerce client paths in this app. The optional
+    // API_BASE setting may point at an internal service and is not a catalog
+    // API origin.
+    const apiBase = "https://api.bigcommerce.com";
+    const rows: any[] = [];
+    for (let page = 1; page <= 500; page++) {
+      const response = await fetch(`${apiBase}/stores/${storeHash}/v3/catalog/${collection}?limit=250&page=${page}`, { headers });
+      if (!response.ok) throw new Error(`BigCommerce ${collection} request failed (${response.status})`);
+      const payload = await response.json();
+      const pageRows = Array.isArray(payload.data) ? payload.data : [];
+      rows.push(...pageRows);
+      const totalPages = Number(payload.meta?.pagination?.total_pages ?? 0);
+      if (pageRows.length < 250 || (totalPages > 0 && page >= totalPages)) break;
+    }
+    return rows;
+  }
+
+  async function getLiveBcExportOptions() {
+    const { storeHash, headers } = await getBcCreds();
+    const [rawBrands, rawCategories] = await Promise.all([
+      fetchLiveBcCatalogCollection("brands", storeHash, headers),
+      fetchLiveBcCatalogCollection("categories", storeHash, headers),
+    ]);
+    return {
+      brands: rawBrands
+        .map((brand: any) => ({ id: Number(brand.id), name: String(brand.name ?? "") }))
+        .filter((brand: any) => Number.isInteger(brand.id) && brand.id > 0 && brand.name)
+        .sort((a: any, b: any) => a.name.localeCompare(b.name)),
+      categories: rawCategories
+        .map((category: any) => ({ id: Number(category.id), name: String(category.name ?? ""), parent_id: Number(category.parent_id ?? 0) }))
+        .filter((category: any) => Number.isInteger(category.id) && category.id > 0 && category.name)
+        .sort((a: any, b: any) => a.name.localeCompare(b.name)),
+    };
+  }
+
+  app.get("/api/reports/exports/options", requirePermission("reporting_exports"), async (_req, res) => {
+    try {
+      res.json(await getLiveBcExportOptions());
+    } catch (e: any) {
+      res.status(502).json({ error: e.message || "Unable to load live BigCommerce filters" });
+    }
+  });
+
+  app.get("/api/reports/exports/products", requirePermission("reporting_exports"), async (req, res) => {
+    try {
+      const parseIds = (value: unknown) => String(value ?? "")
+        .split(",")
+        .map((id) => Number(id.trim()))
+        .filter((id) => Number.isInteger(id) && id > 0);
+      const brandIds = [...new Set(parseIds(req.query.brandIds))];
+      const categoryIds = [...new Set(parseIds(req.query.categoryIds))];
+      const { storeHash, headers } = await getBcCreds();
+      const apiBase = "https://api.bigcommerce.com";
+      const params = new URLSearchParams({ include: "variants", limit: "250" });
+      if (brandIds.length) params.set("brand_id:in", brandIds.join(","));
+      if (categoryIds.length) params.set("categories:in", categoryIds.join(","));
+
+      const [options, products] = await Promise.all([
+        getLiveBcExportOptions(),
+        (async () => {
+          const rows: any[] = [];
+          for (let page = 1; page <= 500; page++) {
+            params.set("page", String(page));
+            const response = await fetch(`${apiBase}/stores/${storeHash}/v3/catalog/products?${params.toString()}`, { headers });
+            if (!response.ok) throw new Error(`BigCommerce products request failed (${response.status})`);
+            const payload = await response.json();
+            const pageRows = Array.isArray(payload.data) ? payload.data : [];
+            rows.push(...pageRows);
+            const totalPages = Number(payload.meta?.pagination?.total_pages ?? 0);
+            if (pageRows.length < 250 || (totalPages > 0 && page >= totalPages)) break;
+          }
+          return rows;
+        })(),
+      ]);
+
+      const brandNames = new Map(options.brands.map((brand: any) => [brand.id, brand.name]));
+      const categoryNames = new Map(options.categories.map((category: any) => [category.id, category.name]));
+      const toNumberOrNull = (value: unknown): number | null => {
+        if (value === null || value === undefined || value === "") return null;
+        const number = Number(value);
+        return Number.isFinite(number) ? number : null;
+      };
+      const rows: Array<{
+        product_id: number;
+        product_title: string;
+        brand: string;
+        categories: string;
+        variant: string;
+        sku: string;
+        quantity: number | null;
+        cost: number | null;
+        price: number | null;
+      }> = [];
+
+      for (const product of products) {
+        const productBrandId = Number(product.brand_id);
+        const productCategoryIds = Array.isArray(product.categories)
+          ? product.categories.map((id: unknown) => Number(id)).filter((id: number) => Number.isInteger(id))
+          : [];
+        // Keep a local guard even when BC applies the URL filters, so the
+        // export remains correct if the API ignores an unsupported filter.
+        if (brandIds.length && !brandIds.includes(productBrandId)) continue;
+        if (categoryIds.length && !categoryIds.some((id) => productCategoryIds.includes(id))) continue;
+
+        const productTitle = String(product.name ?? "");
+        const brand = brandNames.get(productBrandId) ?? "";
+        const categories = productCategoryIds.map((id: number) => categoryNames.get(id) ?? String(id)).filter(Boolean).join(", ");
+        const variants = Array.isArray(product.variants) && product.variants.length > 0 ? product.variants : [null];
+        for (const variant of variants) {
+          const optionValues = Array.isArray(variant?.option_values)
+            ? variant.option_values.map((option: any) => String(option.label ?? option.option_display_name ?? "")).filter(Boolean)
+            : [];
+          rows.push({
+            product_id: Number(product.id),
+            product_title: productTitle,
+            brand,
+            categories,
+            variant: optionValues.join(" / ") || (variant ? String(variant.sku ?? "") : ""),
+            sku: String(variant?.sku ?? product.sku ?? ""),
+            quantity: toNumberOrNull(variant?.inventory_level ?? product.inventory_level),
+            cost: toNumberOrNull(variant?.cost_price ?? product.cost_price),
+            price: toNumberOrNull(variant?.price ?? product.price),
+          });
+        }
+      }
+
+      res.json({ rows, fetchedAt: new Date().toISOString() });
+    } catch (e: any) {
+      res.status(502).json({ error: e.message || "Unable to load live BigCommerce products" });
+    }
   });
 
   // GET /api/reports/product-search — search local product catalog
@@ -10139,6 +11556,335 @@ export async function registerRoutes(
     }
   });
 
+  const getConstantContactRedirectUri = (req: Request): string => {
+    const publicUrl = new URL(getPublicAppOrigin(req));
+    if (publicUrl.protocol !== "https:" && publicUrl.hostname !== "localhost") {
+      throw new Error("Constant Contact authorization requires a secure HTTPS app URL.");
+    }
+    return new URL(CONSTANT_CONTACT_CALLBACK_PATH, publicUrl.origin).toString();
+  };
+
+  app.get("/api/admin/constant-contact/status", requireAdmin, async (req, res) => {
+    try {
+      res.json({
+        ...(await getConstantContactAuthorizationStatus()),
+        redirectUri: getConstantContactRedirectUri(req),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Could not read Constant Contact status." });
+    }
+  });
+
+  app.post("/api/admin/constant-contact/oauth/start", requireAdmin, async (req, res) => {
+    try {
+      if (!hasConstantContactAppCredentials()) {
+        return res.status(400).json({ error: "Constant Contact API client credentials are not configured." });
+      }
+      const redirectUri = getConstantContactRedirectUri(req);
+      const state = generateConstantContactOAuthState();
+      await storeConstantContactOAuthState(state, redirectUri);
+      const authorizationUrl = createConstantContactAuthorizationUrl(redirectUri, state);
+      // Keep the one-time OAuth state out of JSON response logging.
+      res.status(204).setHeader("Location", authorizationUrl).end();
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Could not start Constant Contact authorization." });
+    }
+  });
+
+  app.get(CONSTANT_CONTACT_CALLBACK_PATH, async (req, res) => {
+    const returnedState = typeof req.query.state === "string" && req.query.state.length <= 256
+      ? req.query.state
+      : "";
+    const stateRecord = returnedState
+      ? await consumeConstantContactOAuthState(returnedState).catch(() => null)
+      : null;
+    let callbackRedirectUri = "";
+    try {
+      callbackRedirectUri = getConstantContactRedirectUri(req);
+    } catch {
+      // The state validation below will reject callbacks that do not match the
+      // public HTTPS origin used to begin authorization.
+    }
+    if (!stateRecord || stateRecord.redirectUri !== callbackRedirectUri) {
+      console.warn("[constant-contact] OAuth state validation failed:", {
+        returnedStatePresent: Boolean(returnedState),
+        serverStateConsumed: Boolean(stateRecord),
+        callbackUriMatches: Boolean(stateRecord && stateRecord.redirectUri === callbackRedirectUri),
+      });
+      return res.redirect(303, "/admin/constant-contact?oauth=invalid_state");
+    }
+    if (typeof req.query.error === "string") {
+      return res.redirect(303, "/admin/constant-contact?oauth=denied");
+    }
+
+    const code = typeof req.query.code === "string" ? req.query.code.trim() : "";
+    if (!code || code.length > 8192) {
+      return res.redirect(303, "/admin/constant-contact?oauth=failed");
+    }
+
+    try {
+      await completeConstantContactAuthorization(code, stateRecord.redirectUri);
+      return res.redirect(303, "/admin/constant-contact?oauth=connected");
+    } catch (error: any) {
+      console.error("[constant-contact] Authorization callback failed:", error?.message || "unknown error");
+      return res.redirect(303, "/admin/constant-contact?oauth=failed");
+    }
+  });
+
+  app.post("/api/admin/constant-contact/verify", requireAdmin, async (_req, res) => {
+    try {
+      res.json(await verifyConstantContactUserPrivileges());
+    } catch (error: any) {
+      res.status(502).json({ error: error.message || "Could not verify Constant Contact permissions." });
+    }
+  });
+
+  app.get("/api/admin/zoho-crm-credentials", requireAdmin, async (_req, res) => {
+    try { res.json(await getZohoCrmCredentialStatus()); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+  app.put("/api/admin/zoho-crm-credentials", requireAdmin, async (req, res) => {
+    try {
+      await saveZohoCrmCredentials({ credentials: req.body?.credentials, clear: req.body?.clear });
+      res.json(await getZohoCrmCredentialStatus());
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.delete("/api/admin/zoho-crm-credentials", requireAdmin, async (_req, res) => {
+    try {
+      await clearZohoCrmCredentials();
+      res.json(await getZohoCrmCredentialStatus());
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  // ── Zoho CRM Accounts mapping (Phase 1: read-only Zoho + local links) ────────
+  app.get("/api/zoho-crm/status", requirePermission("zoho_account_mapping", "view"), async (_req, res) => {
+    try {
+      res.json(await getZohoCrmCredentialStatus());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Unable to load Zoho CRM status" });
+    }
+  });
+
+  app.get("/api/zoho-crm/mappings", requirePermission("zoho_account_mapping", "view"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const scope = await getCrmVisibilityScope(storage, user.id, user.role);
+      const page = Math.max(Number(req.query.page) || 1, 1);
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+      const result = await storage.getZohoAccountMappings({
+        search: String(req.query.search ?? "").trim() || undefined,
+        status: String(req.query.status ?? "all"),
+        relationshipType: String(req.query.relationshipType ?? "all"),
+        limit,
+        offset: (page - 1) * limit,
+        visibilityScope: scope.scope,
+        visibilityUserId: scope.userId,
+      });
+      res.json({ ...result, page, limit });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Unable to load Zoho Account mappings" });
+    }
+  });
+
+  app.get("/api/zoho-crm/accounts", requirePermission("zoho_account_mapping", "view"), async (req, res) => {
+    try {
+      const accounts = await listZohoAccounts(String(req.query.search ?? ""));
+      res.json(accounts.slice(0, 100).map(account => ({
+        id: account.id,
+        name: account.name,
+        email: account.email,
+        phone: account.phone,
+        website: account.website,
+        bigcommerceCustomerId: account.bigcommerceCustomerId,
+      })));
+    } catch (e: any) {
+      res.status(502).json({ error: e.message || "Unable to read Zoho CRM Accounts" });
+    }
+  });
+
+  const normalizeMatchValue = (value: unknown) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
+  app.post("/api/zoho-crm/mappings", requirePermission("zoho_account_mapping", "manage"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const customerId = Number(req.body?.customerId);
+      const accountId = String(req.body?.zohoAccountId ?? "").trim();
+      const relationshipType = String(req.body?.relationshipType ?? "primary");
+      if (!Number.isInteger(customerId) || customerId <= 0) return res.status(400).json({ error: "A valid customer is required." });
+      if (!accountId) return res.status(400).json({ error: "A Zoho Account is required." });
+      if (!["primary", "additional", "location"].includes(relationshipType)) return res.status(400).json({ error: "Invalid relationship type." });
+      if (!await assertCrmCustomerAccess(storage, customerId, user.id, user.role, res)) return;
+      const customer = await storage.getCrmCustomerById(customerId);
+      if (!customer) return res.status(404).json({ error: "Customer not found." });
+
+      const existing = await storage.getZohoAccountMappingsForCustomer(customerId);
+      for (const row of existing) {
+        if (!row.manually_confirmed && row.status === "unmatched") await storage.deleteZohoAccountMapping(row.id);
+      }
+      const saved = await storage.saveZohoAccountMapping({
+        customer_id: customerId,
+        zoho_account_id: accountId,
+        zoho_account_name: String(req.body?.zohoAccountName ?? "").trim(),
+        zoho_account_email: String(req.body?.zohoAccountEmail ?? "").trim() || null,
+        zoho_account_phone: String(req.body?.zohoAccountPhone ?? "").trim() || null,
+        relationship_type: relationshipType,
+        status: "mapped",
+        match_method: "manual",
+        manually_confirmed: true,
+        last_error: null,
+        last_checked_at: new Date(),
+        mapped_by_user_id: user.id,
+      });
+      await storage.createCrmAuditLog({
+        user_id: user.id,
+        customer_id: customerId,
+        action: "zoho_account_mapping_created",
+        detail: { mapping_id: saved.id, zoho_account_id: accountId, relationship_type: relationshipType, match_method: "manual" },
+      });
+      res.json(saved);
+    } catch (e: any) {
+      const message = String(e?.message ?? "");
+      res.status(message.includes("unique") ? 409 : 400).json({ error: message || "Unable to save mapping." });
+    }
+  });
+
+  app.delete("/api/zoho-crm/mappings/:id", requirePermission("zoho_account_mapping", "manage"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const id = Number(req.params.id);
+      const mapping = await storage.getZohoAccountMapping(id);
+      if (!mapping) return res.status(404).json({ error: "Mapping not found." });
+      if (!await assertCrmCustomerAccess(storage, mapping.customer_id, user.id, user.role, res)) return;
+      await storage.deleteZohoAccountMapping(id);
+      await storage.createCrmAuditLog({
+        user_id: user.id,
+        customer_id: mapping.customer_id,
+        action: "zoho_account_mapping_removed",
+        detail: { mapping_id: id, zoho_account_id: mapping.zoho_account_id, relationship_type: mapping.relationship_type },
+      });
+      res.status(204).end();
+    } catch (e: any) {
+      res.status(400).json({ error: e.message || "Unable to remove mapping." });
+    }
+  });
+
+  app.post("/api/zoho-crm/mappings/refresh", requirePermission("zoho_account_mapping", "manage"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const scope = await getCrmVisibilityScope(storage, user.id, user.role);
+      const [accounts, customerResult, existingMappings] = await Promise.all([
+        listZohoAccounts(),
+        storage.getCrmCustomers({
+          limit: 100000,
+          offset: 0,
+          accountType: "customer",
+          status: "both",
+          visibilityScope: scope.scope,
+          visibilityUserId: scope.userId,
+        }),
+        storage.getAllZohoAccountMappings(),
+      ]);
+      const byBcId = new Map<number, typeof accounts>();
+      const byZohoId = new Map<string, typeof existingMappings[number]>();
+      const grouped = new Map<number, typeof existingMappings>();
+      for (const account of accounts) {
+        if (account.bigcommerceCustomerId != null) {
+          const rows = byBcId.get(account.bigcommerceCustomerId) ?? [];
+          rows.push(account);
+          byBcId.set(account.bigcommerceCustomerId, rows);
+        }
+      }
+      for (const mapping of existingMappings) {
+        if (mapping.zoho_account_id) byZohoId.set(mapping.zoho_account_id, mapping);
+        const rows = grouped.get(mapping.customer_id) ?? [];
+        rows.push(mapping);
+        grouped.set(mapping.customer_id, rows);
+      }
+
+      let mapped = 0;
+      let needsReview = 0;
+      let unmatched = 0;
+      let skippedManual = 0;
+      const now = new Date();
+      for (const customer of customerResult.customers) {
+        const current = grouped.get(customer.id) ?? [];
+        if (current.some(row => row.manually_confirmed)) {
+          skippedManual += 1;
+          continue;
+        }
+        let candidates = byBcId.get(customer.bigcommerce_customer_id) ?? [];
+        let method = "bigcommerce_id";
+        if (candidates.length !== 1) {
+          const email = normalizeMatchValue(customer.email);
+          const phone = normalizeMatchValue(customer.phone);
+          const company = normalizeMatchValue(customer.company);
+          const fullName = normalizeMatchValue([customer.first_name, customer.last_name].filter(Boolean).join(" "));
+          const scored = accounts.map(account => {
+            let score = 0;
+            if (email && normalizeMatchValue(account.email) === email) score += 4;
+            if (phone && normalizeMatchValue(account.phone) === phone) score += 3;
+            if (company && normalizeMatchValue(account.name) === company) score += 3;
+            if (fullName && normalizeMatchValue(account.name) === fullName) score += 2;
+            return { account, score };
+          }).filter(item => item.score > 0).sort((a, b) => b.score - a.score);
+          const highest = scored[0]?.score ?? 0;
+          candidates = highest ? scored.filter(item => item.score === highest).map(item => item.account) : [];
+          method = "secondary";
+        }
+
+        const autoRows = current.filter(row => !row.manually_confirmed);
+        for (const row of autoRows) await storage.deleteZohoAccountMapping(row.id);
+        if (candidates.length === 1) {
+          const account = candidates[0];
+          const alreadyMappedElsewhere = account.id && byZohoId.get(account.id)?.customer_id !== undefined
+            && byZohoId.get(account.id)?.customer_id !== customer.id;
+          if (alreadyMappedElsewhere) {
+            await storage.saveZohoAccountMapping({
+              customer_id: customer.id, zoho_account_id: account.id, zoho_account_name: account.name,
+              zoho_account_email: account.email, zoho_account_phone: account.phone,
+              relationship_type: "primary", status: "needs_review", match_method: method,
+              manually_confirmed: false, last_error: "Zoho Account is already mapped to another customer.",
+              last_checked_at: now, mapped_by_user_id: user.id,
+            });
+            needsReview += 1;
+          } else {
+            await storage.saveZohoAccountMapping({
+              customer_id: customer.id, zoho_account_id: account.id, zoho_account_name: account.name,
+              zoho_account_email: account.email, zoho_account_phone: account.phone,
+              relationship_type: "primary", status: "mapped", match_method: method,
+              manually_confirmed: false, last_error: null, last_checked_at: now, mapped_by_user_id: user.id,
+            });
+            mapped += 1;
+          }
+        } else if (candidates.length > 1) {
+          for (const [index, account] of candidates.entries()) {
+            try {
+              await storage.saveZohoAccountMapping({
+                customer_id: customer.id, zoho_account_id: account.id, zoho_account_name: account.name,
+                zoho_account_email: account.email, zoho_account_phone: account.phone,
+                relationship_type: index === 0 ? "primary" : "additional", status: "needs_review",
+                match_method: method, manually_confirmed: false,
+                last_error: "Multiple Zoho Accounts matched this customer.", last_checked_at: now, mapped_by_user_id: user.id,
+              });
+            } catch { /* an account already mapped elsewhere remains a review item in that relationship */ }
+          }
+          needsReview += 1;
+        } else {
+          await storage.saveZohoAccountMapping({
+            customer_id: customer.id, zoho_account_id: null, zoho_account_name: "",
+            zoho_account_email: null, zoho_account_phone: null, relationship_type: "primary",
+            status: "unmatched", match_method: "secondary", manually_confirmed: false,
+            last_error: null, last_checked_at: now, mapped_by_user_id: user.id,
+          });
+          unmatched += 1;
+        }
+      }
+      res.json({ accounts: accounts.length, customers: customerResult.customers.length, mapped, needsReview, unmatched, skippedManual });
+    } catch (e: any) {
+      res.status(502).json({ error: e.message || "Unable to refresh Zoho Account mappings." });
+    }
+  });
+
   app.put("/api/marketing/sender-settings", requirePermission("marketing", "send"), async (req, res) => {
     try {
       const requestedEmails: string[] = Array.isArray(req.body?.emails)
@@ -10688,6 +12434,483 @@ export async function registerRoutes(
     }
   });
 
+  async function syncMarketingAudienceToConstantContact(audienceId: number) {
+    const audience = await storage.getMarketingAudience(audienceId);
+    if (!audience) throw new Error("Audience not found.");
+    if (audience.audience_type === "constant_contact") {
+      throw new Error("Constant Contact lists are edited directly; they are not replaced by local audience membership.");
+    }
+    let listId = String(audience.constant_contact_list_id ?? "").trim();
+    if (!listId) {
+      const created = await createConstantContactList(audience.name, audience.description ?? "");
+      listId = created.id;
+      await storage.updateMarketingAudience(audienceId, { constant_contact_list_id: listId }, audience.created_by);
+    } else if (audience.name) {
+      await renameConstantContactList(listId, audience.name);
+    }
+
+    const localMembers: any[] = [];
+    if (audience.audience_type === "manual") {
+      let offset = 0;
+      while (true) {
+        const page = await storage.getMarketingAudienceMembers(audienceId, {
+          status: "eligible", limit: 100, offset,
+        });
+        localMembers.push(...page.rows);
+        if (localMembers.length >= page.total || !page.rows.length) break;
+        offset += page.rows.length;
+      }
+    } else {
+      const preview = await storage.getMarketingAudiencePreview(audience.dynamic_filters ?? {}, 100000);
+      localMembers.push(...preview.customers.filter((member: any) => !member.marketing_suppressed));
+    }
+
+    const provider = await getConstantContactReconciliationSnapshot();
+    const providerByEmail = new Map<string, typeof provider.contacts>();
+    for (const contact of provider.contacts) {
+      if (!contact.email) continue;
+      const matches = providerByEmail.get(contact.email) ?? [];
+      matches.push(contact);
+      providerByEmail.set(contact.email, matches);
+    }
+    const desiredIds = new Set<string>();
+    const issues: Array<{ email: string; local_id: number | null; reason: string; checked_at: string }> = [];
+    const checkedAt = new Date().toISOString();
+    for (const member of localMembers) {
+      const email = String(member.email ?? "").trim().toLowerCase();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
+      const matches = providerByEmail.get(email) ?? [];
+      if (!matches.length) {
+        issues.push({
+          email,
+          local_id: Number(member.customer_id ?? member.id) || null,
+          reason: "not_in_constant_contact",
+          checked_at: checkedAt,
+        });
+        continue;
+      }
+      const sendableMatches = matches.filter(match => match.permissionToSend !== "unsubscribed");
+      if (!sendableMatches.length) {
+        issues.push({
+          email,
+          local_id: Number(member.customer_id ?? member.id) || null,
+          reason: "constant_contact_unsubscribed",
+          checked_at: checkedAt,
+        });
+        continue;
+      }
+      for (const match of sendableMatches) if (match.contactId) desiredIds.add(match.contactId);
+    }
+    const currentIds = new Set(provider.contacts
+      .filter(contact => contact.listIds.includes(listId) && contact.contactId)
+      .map(contact => contact.contactId));
+    const toAdd = [...desiredIds].filter(id => !currentIds.has(id));
+    const toRemove = [...currentIds].filter(id => !desiredIds.has(id));
+    await addConstantContactListMembers(listId, toAdd);
+    await removeConstantContactListMembers(listId, toRemove);
+    const updated = await storage.updateMarketingAudience(audienceId, {
+      constant_contact_last_synced_at: new Date(),
+      constant_contact_sync_issues: issues,
+    }, audience.created_by);
+    return { audience: updated, addedCount: toAdd.length, removedCount: toRemove.length, missingCount: issues.length };
+  }
+
+  app.get("/api/marketing/constant-contact/lists", requirePermission("marketing"), async (_req, res) => {
+    try {
+      const [provider, audiences] = await Promise.all([
+        getConstantContactAudienceSnapshot(),
+        storage.getMarketingAudiences(),
+      ]);
+      const linked = new Map(audiences.filter((audience: any) => audience.constant_contact_list_id)
+        .map((audience: any) => [String(audience.constant_contact_list_id), Number(audience.id)]));
+      res.json(provider.lists.map(list => ({
+        ...list,
+        savedAudienceId: linked.get(list.id) ?? null,
+      })));
+    } catch (error: any) {
+      res.status(502).json({ error: error.message || "Could not load Constant Contact lists." });
+    }
+  });
+
+  app.post("/api/marketing/audiences/import-constant-contact", requirePermission("marketing", "manage_audiences"), async (req, res) => {
+    try {
+      const listId = String(req.body?.list_id ?? "").trim();
+      if (!listId) return res.status(400).json({ error: "Choose a Constant Contact list." });
+      const provider = await getConstantContactAudienceSnapshot();
+      const list = provider.lists.find(item => item.id === listId);
+      if (!list) return res.status(404).json({ error: "Constant Contact list not found." });
+      const existing = (await storage.getMarketingAudiences()).find((audience: any) => audience.constant_contact_list_id === listId);
+      if (existing) return res.json(existing);
+      const audience = await storage.createMarketingAudience({
+        name: list.name,
+        description: "Linked Constant Contact list",
+        audience_type: "constant_contact",
+        constant_contact_list_id: listId,
+        created_by: getMarketingUserId(req),
+      });
+      res.status(201).json({ ...audience, member_count: list.activeMemberCount ?? 0 });
+    } catch (error: any) {
+      res.status(502).json({ error: error.message || "Could not link this Constant Contact list." });
+    }
+  });
+
+  app.get("/api/marketing/audiences/:id/constant-contact-members", requirePermission("marketing"), async (req, res) => {
+    try {
+      const audience = await storage.getMarketingAudience(Number(req.params.id));
+      if (!audience?.constant_contact_list_id) return res.status(409).json({ error: "This saved audience is not linked to a Constant Contact list." });
+      const provider = await getConstantContactReconciliationSnapshot();
+      const members = provider.contacts.filter(contact => contact.listIds.includes(audience.constant_contact_list_id));
+      res.json({
+        rows: members.map(contact => ({
+          contact_id: contact.contactId,
+          email: contact.email,
+          permission_to_send: contact.permissionToSend || "unknown",
+        })),
+        total: members.length,
+      });
+    } catch (error: any) {
+      res.status(502).json({ error: error.message || "Could not load Constant Contact members." });
+    }
+  });
+
+  app.post("/api/marketing/audiences/:id/constant-contact-members", requirePermission("marketing", "manage_audiences"), async (req, res) => {
+    try {
+      const audience = await storage.getMarketingAudience(Number(req.params.id));
+      const listId = String(audience?.constant_contact_list_id ?? "").trim();
+      if (!listId) return res.status(409).json({ error: "This saved audience is not linked to a Constant Contact list." });
+      const addCustomerIds = Array.isArray(req.body?.add_customer_ids)
+        ? req.body.add_customer_ids.map(Number).filter(Number.isInteger)
+        : [];
+      const addMarketingContactIds = Array.isArray(req.body?.add_contact_ids)
+        ? req.body.add_contact_ids.map(Number).filter(Number.isInteger)
+        : [];
+      const removeContactIds = Array.isArray(req.body?.remove_contact_ids)
+        ? req.body.remove_contact_ids.map(String).filter(Boolean)
+        : [];
+      if (addCustomerIds.length + addMarketingContactIds.length > 100 || removeContactIds.length > 500) {
+        return res.status(400).json({ error: "Update no more than 100 local contacts and 500 Constant Contact members at a time." });
+      }
+      const [provider, crmCustomers, marketingContacts, suppressedEmailValues] = await Promise.all([
+        getConstantContactReconciliationSnapshot(),
+        storage.getActiveCrmCustomersForMarketingReconciliation(),
+        storage.getMarketingContactsByIds(addMarketingContactIds),
+        storage.getMarketingSuppressedEmails(),
+      ]);
+      const customerIds = new Set(addCustomerIds);
+      const requestedMarketingContactIds = new Set(addMarketingContactIds);
+      const providerByEmail = new Map<string, typeof provider.contacts>();
+      for (const contact of provider.contacts) {
+        if (!contact.email) continue;
+        const matches = providerByEmail.get(contact.email) ?? [];
+        matches.push(contact);
+        providerByEmail.set(contact.email, matches);
+      }
+      const suppressedEmails = new Set(suppressedEmailValues);
+      const selectedCustomers = crmCustomers.filter(customer => customerIds.has(customer.crmCustomerId));
+      const preferences = new Map<number, any>(await Promise.all(selectedCustomers.map(async customer =>
+        [customer.crmCustomerId, await storage.getMarketingCustomerPreference(customer.crmCustomerId)] as const,
+      )));
+      const missing: Array<{ email: string; local_id: number; reason: string; checked_at: string }> = [];
+      const contactIds: string[] = [];
+      const checkedAt = new Date().toISOString();
+      const addLocalContact = (localId: number, rawEmail: string, locallySuppressed: boolean) => {
+        const email = String(rawEmail ?? "").trim().toLowerCase();
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          missing.push({ email, local_id: localId, reason: "invalid_local_email", checked_at: checkedAt });
+          return;
+        }
+        if (locallySuppressed || suppressedEmails.has(email)) {
+          missing.push({ email, local_id: localId, reason: "locally_suppressed", checked_at: checkedAt });
+          return;
+        }
+        const matches = providerByEmail.get(email) ?? [];
+        const sendableMatches = matches.filter(match => match.permissionToSend !== "unsubscribed");
+        if (sendableMatches.length) contactIds.push(...sendableMatches.map(match => match.contactId).filter(Boolean));
+        else missing.push({
+          email,
+          local_id: localId,
+          reason: matches.length ? "constant_contact_unsubscribed" : "not_in_constant_contact",
+          checked_at: checkedAt,
+        });
+      };
+      for (const customer of selectedCustomers) {
+        const email = String(customer.email ?? "").trim().toLowerCase();
+        addLocalContact(
+          customer.crmCustomerId,
+          email,
+          preferences.get(customer.crmCustomerId)?.email_subscribed === false,
+        );
+      }
+      for (const contact of marketingContacts) {
+        if (!requestedMarketingContactIds.has(contact.id)) continue;
+        addLocalContact(contact.id, contact.email, false);
+      }
+      for (const contactId of addMarketingContactIds) {
+        if (!marketingContacts.some(contact => contact.id === contactId)) {
+          missing.push({ email: "", local_id: contactId, reason: "local_contact_not_found", checked_at: checkedAt });
+        }
+      }
+      for (const customerId of addCustomerIds) {
+        if (!crmCustomers.some(customer => customer.crmCustomerId === customerId)) {
+          missing.push({ email: "", local_id: customerId, reason: "local_customer_not_found", checked_at: checkedAt });
+        }
+      }
+      const listContactIds = new Set(provider.contacts
+        .filter(contact => contact.listIds.includes(listId))
+        .map(contact => contact.contactId));
+      const validRemovals = removeContactIds.filter((id: string) => listContactIds.has(id));
+      await addConstantContactListMembers(listId, contactIds);
+      await removeConstantContactListMembers(listId, validRemovals);
+      const previousIssues = Array.isArray(audience.constant_contact_sync_issues)
+        ? audience.constant_contact_sync_issues
+        : [];
+      await storage.updateMarketingAudience(Number(req.params.id), {
+        constant_contact_sync_issues: [...previousIssues, ...missing].slice(-5000),
+        constant_contact_last_synced_at: new Date(),
+      }, getMarketingUserId(req));
+      res.json({ addedCount: new Set(contactIds).size, removedCount: validRemovals.length, missing });
+    } catch (error: any) {
+      res.status(502).json({ error: error.message || "Could not update Constant Contact list membership." });
+    }
+  });
+
+  app.get("/api/marketing/audiences/:id/constant-contact-missing.csv", requirePermission("marketing"), async (req, res) => {
+    try {
+      const audience = await storage.getMarketingAudience(Number(req.params.id));
+      if (!audience) return res.status(404).json({ error: "Audience not found." });
+      const issues = Array.isArray(audience.constant_contact_sync_issues) ? audience.constant_contact_sync_issues : [];
+      const cell = (value: unknown) => {
+        let text = String(value ?? "");
+        if (/^[\u0000-\u0020]*[=+\-@]/.test(text)) text = `'${text}`;
+        return `"${text.replace(/"/g, "\"\"")}"`;
+      };
+      const rows = [["email", "local_id", "reason", "checked_at"], ...issues.map((issue: any) => [
+        issue.email, issue.local_id, issue.reason, issue.checked_at,
+      ])];
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="constant-contact-missing-${Number(req.params.id)}.csv"`);
+      res.send(`\uFEFF${rows.map(row => row.map(cell).join(",")).join("\r\n")}`);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Could not export missing Constant Contact members." });
+    }
+  });
+
+  app.get("/api/marketing/audience-readiness", requirePermission("marketing"), async (_req, res) => {
+    try {
+      const [provider, localSummary, audienceRows] = await Promise.all([
+        getConstantContactAudienceSnapshot(),
+        storage.getMarketingAudienceReadinessSummary(),
+        storage.getMarketingAudiences(),
+      ]);
+      res.json({
+        checkedAt: provider.checkedAt,
+        provider: {
+          listCount: provider.listCount,
+          lists: provider.lists,
+          segmentCount: provider.segmentCount,
+          segments: provider.segments,
+          consentCounts: provider.consentCounts,
+        },
+        local: {
+          ...localSummary,
+          audiences: audienceRows.map((audience: any) => ({
+            id: Number(audience.id),
+            name: String(audience.name ?? ""),
+            type: String(audience.audience_type ?? ""),
+            memberCount: Number(audience.member_count ?? 0),
+          })),
+        },
+      });
+    } catch (error: any) {
+      res.status(502).json({ error: error.message || "Could not load the audience readiness audit." });
+    }
+  });
+
+  app.get("/api/marketing/audience-readiness/reconciliation.csv", requirePermission("marketing"), async (_req, res) => {
+    try {
+      const [provider, crmCustomers] = await Promise.all([
+        getConstantContactReconciliationSnapshot(),
+        storage.getActiveCrmCustomersForMarketingReconciliation(),
+      ]);
+      const normalizeEmail = (value: unknown): string | null => {
+        const email = typeof value === "string" ? value.trim().toLowerCase() : "";
+        return email.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+      };
+      const ccByEmail = new Map<string, typeof provider.contacts>();
+      const ccWithoutValidEmail: typeof provider.contacts = [];
+      for (const contact of provider.contacts) {
+        const email = normalizeEmail(contact.email);
+        if (!email) {
+          ccWithoutValidEmail.push(contact);
+          continue;
+        }
+        const records = ccByEmail.get(email) ?? [];
+        records.push(contact);
+        ccByEmail.set(email, records);
+      }
+
+      const crmByEmail = new Map<string, typeof crmCustomers>();
+      const crmWithoutValidEmail: typeof crmCustomers = [];
+      for (const customer of crmCustomers) {
+        const email = normalizeEmail(customer.email);
+        if (!email) {
+          crmWithoutValidEmail.push(customer);
+          continue;
+        }
+        const records = crmByEmail.get(email) ?? [];
+        records.push(customer);
+        crmByEmail.set(email, records);
+      }
+
+      const headers = [
+        "issue",
+        "normalized_email",
+        "constant_contact_records",
+        "active_crm_customers",
+        "constant_contact_contact_ids",
+        "constant_contact_permission_to_send",
+        "crm_customer_ids",
+        "bigcommerce_customer_ids",
+        "crm_companies",
+      ];
+      const rows: unknown[][] = [];
+      let matchedEmailGroups = 0;
+      let ccOnlyEmailGroups = 0;
+      let crmOnlyEmailGroups = 0;
+      let emailGroupsWithDifferentRecordCounts = 0;
+
+      const allEmails = Array.from(new Set([...ccByEmail.keys(), ...crmByEmail.keys()])).sort();
+      for (const email of allEmails) {
+        const ccRecords = ccByEmail.get(email) ?? [];
+        const crmRecords = crmByEmail.get(email) ?? [];
+        if (ccRecords.length > 0 && crmRecords.length > 0) matchedEmailGroups++;
+        if (ccRecords.length === crmRecords.length) continue;
+
+        emailGroupsWithDifferentRecordCounts++;
+        let issue: string;
+        if (!crmRecords.length) {
+          issue = "constant_contact_only_email";
+          ccOnlyEmailGroups++;
+        } else if (!ccRecords.length) {
+          issue = "active_crm_only_email";
+          crmOnlyEmailGroups++;
+        } else {
+          issue = ccRecords.length > crmRecords.length
+            ? "more_constant_contact_records_for_email"
+            : "more_active_crm_records_for_email";
+        }
+
+        rows.push([
+          issue,
+          email,
+          ccRecords.length,
+          crmRecords.length,
+          ccRecords.map(record => record.contactId).filter(Boolean).sort().join("; "),
+          ccRecords.map(record => record.permissionToSend || "unknown").sort().join("; "),
+          crmRecords.map(record => String(record.crmCustomerId)).sort().join("; "),
+          crmRecords.map(record => String(record.bigCommerceCustomerId)).sort().join("; "),
+          crmRecords.map(record => String(record.company ?? "")).filter(Boolean).sort().join("; "),
+        ]);
+      }
+
+      for (const contact of ccWithoutValidEmail) {
+        rows.push([
+          "constant_contact_missing_or_invalid_email",
+          "",
+          1,
+          0,
+          contact.contactId,
+          contact.permissionToSend || "unknown",
+          "",
+          "",
+          "",
+        ]);
+      }
+      for (const customer of crmWithoutValidEmail) {
+        rows.push([
+          "active_crm_missing_or_invalid_email",
+          "",
+          0,
+          1,
+          "",
+          "",
+          String(customer.crmCustomerId),
+          String(customer.bigCommerceCustomerId),
+          String(customer.company ?? ""),
+        ]);
+      }
+
+      const csvCell = (value: unknown) => {
+        let text = String(value ?? "");
+        if (/^[\u0000-\u0020]*[=+\-@]/.test(text)) text = `'${text}`;
+        return `"${text.replace(/"/g, "\"\"")}"`;
+      };
+      const csv = `\uFEFF${[headers, ...rows].map(row => row.map(csvCell).join(",")).join("\r\n")}`;
+      const dateSuffix = new Date().toISOString().slice(0, 10);
+      const summary = {
+        ccContactRecords: provider.contacts.length,
+        ccReportedTotal: provider.reportedTotal,
+        activeCrmCustomers: crmCustomers.length,
+        matchedEmailGroups,
+        ccOnlyEmailGroups,
+        crmOnlyEmailGroups,
+        emailGroupsWithDifferentRecordCounts,
+        ccRecordsWithoutValidEmail: ccWithoutValidEmail.length,
+        crmCustomersWithoutValidEmail: crmWithoutValidEmail.length,
+        exportedRows: rows.length,
+      };
+
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="constant-contact-crm-discrepancy-${dateSuffix}.csv"`);
+      for (const [key, value] of Object.entries(summary)) {
+        res.setHeader(`X-Reconciliation-${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`, String(value ?? ""));
+      }
+      res.send(csv);
+    } catch (error: any) {
+      const message = String(error?.message || "");
+      console.error("[marketing] Constant Contact CRM reconciliation export failed:", message || "unknown error");
+      res.status(message.startsWith("Constant Contact") ? 502 : 500).json({
+        error: message.startsWith("Constant Contact")
+          ? message
+          : "Could not export the contact reconciliation. No contacts or CRM records were changed.",
+      });
+    }
+  });
+
+  app.post("/api/marketing/constant-contact/import-opt-outs", requirePermission("marketing", "manage_suppressions"), async (req, res) => {
+    try {
+      const sendingCampaigns = await storage.getMarketingCampaigns({ status: "sending", limit: 1 });
+      if (sendingCampaigns.total > 0) {
+        return res.status(409).json({ error: "Wait until all marketing campaigns finish before importing Constant Contact opt-outs." });
+      }
+
+      const providerSnapshot = await getConstantContactUnsubscribedEmails();
+      const result = await storage.importConstantContactOptOutSuppressions(
+        providerSnapshot.emails,
+        getMarketingUserId(req),
+      );
+      res.json({
+        checkedAt: new Date().toISOString(),
+        providerOptOutCount: providerSnapshot.emails.length,
+        invalidEmailCount: providerSnapshot.invalidEmailCount,
+        ...result,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || "");
+      if (message.startsWith("Wait until all marketing campaigns finish")) {
+        return res.status(409).json({ error: message });
+      }
+      console.error("[marketing] Constant Contact opt-out import failed:", message || "unknown error");
+      res.status(message.startsWith("Constant Contact") ? 502 : 500).json({
+        error: message.startsWith("Constant Contact")
+          ? message
+          : "Could not import Constant Contact opt-outs. No Constant Contact records were changed.",
+      });
+    }
+  });
+
   app.get("/api/marketing/campaigns", requirePermission("marketing"), async (req, res) => {
     try {
       const result = await storage.getMarketingCampaigns({
@@ -10726,6 +12949,15 @@ export async function registerRoutes(
         requestedStatus !== "draft",
       );
       if (audienceError) return res.status(400).json({ error: audienceError });
+      if (requestedStatus !== "draft") {
+        if (audienceType !== "saved_audience" || !Number(body.audience_id)) {
+          return res.status(400).json({ error: "New Constant Contact campaigns must use a saved audience linked to a Constant Contact list." });
+        }
+        const linkedAudience = await storage.getMarketingAudience(Number(body.audience_id));
+        if (!linkedAudience?.constant_contact_list_id) {
+          return res.status(400).json({ error: "Link this saved audience to a Constant Contact list before sending." });
+        }
+      }
       const campaign = await storage.createMarketingCampaign({
         name: String(body.name),
         internal_description: String(body.internal_description ?? ""),
@@ -10734,6 +12966,7 @@ export async function registerRoutes(
         preview_text: String(body.preview_text ?? ""),
          message_content: sanitizeMarketingEditorHtml(String(body.message_content ?? "")),
          sender_email: String(body.sender_email ?? "").trim(),
+        delivery_provider: "constant_contact",
         audience_type: audienceType,
         audience_id: body.audience_id ? Number(body.audience_id) : null,
         audience_config: body.audience_config ?? {},
@@ -10764,6 +12997,21 @@ export async function registerRoutes(
           true,
         );
         if (audienceError) return res.status(400).json({ error: audienceError });
+        if (
+          current.delivery_provider === "constant_contact"
+          && (
+            String(body.audience_type ?? current.audience_type) !== "saved_audience"
+            || !Number(body.audience_id ?? current.audience_id)
+          )
+        ) {
+          return res.status(400).json({ error: "New Constant Contact campaigns must use a saved audience linked to a Constant Contact list." });
+        }
+        if (current.delivery_provider === "constant_contact") {
+          const linkedAudience = await storage.getMarketingAudience(Number(body.audience_id ?? current.audience_id));
+          if (!linkedAudience?.constant_contact_list_id) {
+            return res.status(400).json({ error: "Link this saved audience to a Constant Contact list before sending." });
+          }
+        }
       }
        const updateBody = body.message_content === undefined
          ? body
@@ -10880,7 +13128,7 @@ export async function registerRoutes(
       const copy = await storage.createMarketingCampaign({
         name: `${original.name} (Copy)`, internal_description: original.internal_description, campaign_type: original.campaign_type,
         subject_line: original.subject_line, preview_text: original.preview_text, message_content: original.message_content,
-         sender_email: original.sender_email ?? "",
+          sender_email: original.sender_email ?? "", delivery_provider: "constant_contact",
         audience_type: original.audience_type, audience_id: original.audience_id, audience_config: original.audience_config,
          template_id: original.template_id,
          product_snapshots: Array.isArray(original.product_snapshots) ? original.product_snapshots : [],
@@ -10918,24 +13166,44 @@ export async function registerRoutes(
   app.post("/api/marketing/audiences", requirePermission("marketing", "manage_audiences"), async (req, res) => {
     try {
       const body = req.body ?? {};
-      if (!String(body.name ?? "").trim()) return res.status(400).json({ error: "Audience name is required" });
+      const name = String(body.name ?? "").trim();
+      if (!name) return res.status(400).json({ error: "Audience name is required" });
       const type = String(body.audience_type ?? "manual");
       if (!["manual", "dynamic"].includes(type)) return res.status(400).json({ error: "Invalid audience type" });
+      const ccList = await createConstantContactList(name, String(body.description ?? ""));
       const audience = await storage.createMarketingAudience({
-        name: String(body.name), description: String(body.description ?? ""), audience_type: type,
+        name, description: String(body.description ?? ""), audience_type: type,
         dynamic_filters: body.dynamic_filters ?? {},
+        constant_contact_list_id: ccList.id,
         customer_ids: Array.isArray(body.customer_ids) ? body.customer_ids.map(Number).filter(Number.isInteger) : [],
         contact_ids: Array.isArray(body.contact_ids) ? body.contact_ids.map(Number).filter(Number.isInteger) : [],
         created_by: getMarketingUserId(req),
       });
-      res.status(201).json(audience);
+      const synced = await syncMarketingAudienceToConstantContact(Number(audience.id));
+      res.status(201).json(synced.audience);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   app.patch("/api/marketing/audiences/:id", requirePermission("marketing", "manage_audiences"), async (req, res) => {
     try {
-      const audience = await storage.updateMarketingAudience(Number(req.params.id), req.body ?? {}, getMarketingUserId(req));
+      const id = Number(req.params.id);
+      const current = await storage.getMarketingAudience(id);
+      if (!current) return res.status(404).json({ error: "Audience not found" });
+      const body = req.body ?? {};
+      if (current.constant_contact_list_id && body.name !== undefined) {
+        await renameConstantContactList(String(current.constant_contact_list_id), String(body.name));
+      }
+      const safeUpdate = { ...body };
+      delete safeUpdate.constant_contact_list_id;
+      delete safeUpdate.constant_contact_last_synced_at;
+      delete safeUpdate.constant_contact_sync_issues;
+      if (current.audience_type === "constant_contact") safeUpdate.audience_type = "constant_contact";
+      const audience = await storage.updateMarketingAudience(id, safeUpdate, getMarketingUserId(req));
       if (!audience) return res.status(404).json({ error: "Audience not found" });
+      if (audience.audience_type !== "constant_contact") {
+        const synced = await syncMarketingAudienceToConstantContact(id);
+        return res.json(synced.audience);
+      }
       res.json(audience);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -10990,9 +13258,44 @@ export async function registerRoutes(
 
   app.get("/api/marketing/audiences/:id/members", requirePermission("marketing"), async (req, res) => {
     try {
+      const audience = await storage.getMarketingAudience(Number(req.params.id));
+      if (!audience) return res.status(404).json({ error: "Audience not found." });
+
+      const requestedLimit = Number(req.query.limit ?? 25);
+      const requestedOffset = Number(req.query.offset ?? 0);
+      const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 25;
+      const offset = Number.isFinite(requestedOffset) ? Math.max(requestedOffset, 0) : 0;
+      const source = String(req.query.source ?? "all");
+      const status = String(req.query.status ?? "all");
+      const search = String(req.query.search ?? "").trim().toLocaleLowerCase();
+
+      if (audience.audience_type === "dynamic") {
+        const preview = await storage.getMarketingAudiencePreview(audience.dynamic_filters ?? {}, 100000);
+        let rows = preview.customers.map((customer: any) => ({
+          member_id: customer.id,
+          customer_id: customer.id,
+          contact_id: null,
+          company: customer.company,
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          email: customer.email,
+          source: "crm",
+          status: customer.marketing_suppressed ? "suppressed" : "eligible",
+          contact_type: null,
+        }));
+        if (source !== "all") rows = rows.filter((row: any) => row.source === source);
+        if (status !== "all") rows = rows.filter((row: any) => row.status === status);
+        if (search) {
+          rows = rows.filter((row: any) =>
+            [row.company, row.first_name, row.last_name, row.email]
+              .some(value => String(value ?? "").toLocaleLowerCase().includes(search)),
+          );
+        }
+        return res.json({ rows: rows.slice(offset, offset + limit), total: rows.length });
+      }
+
       res.json(await storage.getMarketingAudienceMembers(Number(req.params.id), {
-        search: String(req.query.search ?? ""), source: String(req.query.source ?? "all"), status: String(req.query.status ?? "all"),
-        limit: Math.min(Number(req.query.limit ?? 25), 100), offset: Math.max(Number(req.query.offset ?? 0), 0),
+        search: String(req.query.search ?? ""), source, status, limit, offset,
       }));
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });

@@ -66,9 +66,44 @@ function hours(seconds: number | null | undefined) {
   return `${Math.floor(value / 3600)}h ${String(Math.floor((value % 3600) / 60)).padStart(2, "0")}m`;
 }
 
+function compactDuration(seconds: number) {
+  const totalMinutes = Math.floor(Math.max(0, Number(seconds) || 0) / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours ? `${hours}h ${String(minutes).padStart(2, "0")}m` : `${minutes}m`;
+}
+
+function reportDateTime(value: string | Date | null | undefined, workDate: string, fmt: ReturnType<typeof useTimeService>) {
+  if (!value) return "—";
+  const timestamp = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(timestamp.getTime())) return fmt.dateTime(value);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: fmt.tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(timestamp);
+  const dateParts = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  const localDate = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+  return localDate === workDate ? fmt.time(timestamp) : fmt.dateTime(timestamp);
+}
+
+function breakDurationSeconds(record: any, nowMs = Date.now()) {
+  const storedSeconds = Math.max(0, Number(record?.break_seconds ?? 0));
+  const intervalSeconds = (record?.breaks ?? []).reduce((total: number, item: any) => {
+    const start = new Date(item.break_started_at).getTime();
+    const end = item.break_ended_at ? new Date(item.break_ended_at).getTime() : nowMs;
+    return Number.isFinite(start) && Number.isFinite(end) && end >= start
+      ? total + Math.floor((end - start) / 1000)
+      : total;
+  }, 0);
+  return Math.max(storedSeconds, intervalSeconds);
+}
+
 function statusBadge(status: string) {
   const styles: Record<string, string> = {
     active: "border-0 bg-blue-100 text-blue-700",
+    on_break: "border-0 bg-amber-100 text-amber-700",
     completed: "border-0 bg-emerald-100 text-emerald-700",
     incomplete: "border-0 bg-orange-100 text-orange-700",
     exception: "border-0 bg-red-100 text-red-700",
@@ -208,7 +243,7 @@ function ledgerStatus(
   if (kind === "holiday") return "holiday";
   if (kind === "weekend") return "weekend";
   if (!selectedUserId && record?.loggedCount > 0) return "team";
-  if (record) return record.status === "active" ? "active" : "worked";
+   if (record) return record.status === "active" || record.status === "on_break" ? "active" : "worked";
   const today = dateOnly(new Date());
   if (date > today) return "upcoming";
   if (date === today) return "not_started";
@@ -219,7 +254,7 @@ const tabs = [
   { key: "overview", label: "Overview", icon: BarChart3, module: "attendance", action: "view_dashboard", fullAccess: true },
   { key: "logs", label: "Attendance Logs", icon: FileClock, module: "attendance", action: "view_logs" },
   { key: "reports", label: "Reports", icon: BarChart3, module: "attendance", action: "view_reports", fullAccess: true },
-  { key: "locations", label: "Home Locations", icon: MapPin, module: "attendance", action: "view_dashboard", fullAccess: true },
+  { key: "locations", label: "Home Locations", icon: MapPin, module: "attendance", action: "view_home_locations" },
   { key: "settings", label: "Settings", icon: Settings2, adminOnly: true },
 ];
 
@@ -269,14 +304,15 @@ function EmployeeRow({ row, onClick, fmt }: { row: any; onClick?: () => void; fm
   return (
     <button type="button" onClick={onClick} className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-red-200 hover:shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-50 text-xs font-bold text-red-600">{String(row.employee_name ?? "?").slice(0, 2).toUpperCase()}</div><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{row.employee_name ?? row.employee_username ?? "Employee"}</p><p className="text-xs text-slate-400">{row.work_date} · {row.start_method === "warehouse" ? "Warehouse" : "Driving"}</p></div></div>
+        <div className="flex min-w-0 items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-50 text-xs font-bold text-red-600">{String(row.employee_name ?? "?").slice(0, 2).toUpperCase()}</div><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{row.employee_name ?? row.employee_username ?? "Employee"}</p><p className="text-xs text-slate-400">{row.work_date} · {row.start_method === "warehouse" ? "Warehouse" : row.start_method === "offsite" ? "Off-site" : "Driving"}</p></div></div>
         <div className="flex items-center gap-2">{statusBadge(row.status)}<ChevronRight className="h-4 w-4 text-slate-300" /></div>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-xs">
-        <div><span className="block text-slate-400">Time in</span><span className="font-medium text-slate-700">{row.time_in ? fmt.time(row.time_in) : "—"}</span></div>
-        <div><span className="block text-slate-400">Time out</span><span className="font-medium text-slate-700">{row.time_out ? fmt.time(row.time_out) : "—"}</span></div>
+        <div><span className="block text-slate-400">Time in</span><span className="font-medium text-slate-700">{row.time_in ? fmt.dateTime(row.time_in) : "—"}</span></div>
+        <div><span className="block text-slate-400">Time out</span><span className="font-medium text-slate-700">{row.time_out ? fmt.dateTime(row.time_out) : "—"}</span></div>
         <div><span className="block text-slate-400">Total hours</span><span className="font-medium text-slate-700">{hours(row.total_seconds)}</span></div>
       </div>
+      {row.breaks?.length > 0 && <div className="mt-2 border-t border-slate-100 pt-2 text-[11px] text-slate-500"><span className="font-medium text-slate-600">Breaks: </span>{row.breaks.map((breakItem: any, index: number) => <span key={`${breakItem.break_started_at}-${index}`}>{index > 0 ? "; " : ""}{fmt.dateTime(breakItem.break_started_at)} → {breakItem.break_ended_at ? fmt.dateTime(breakItem.break_ended_at) : "In progress"}</span>)}</div>}
     </button>
   );
 }
@@ -339,7 +375,7 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   if (query.isLoading) return <Card className="rounded-xl border-slate-200"><CardContent className="p-6 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></CardContent></Card>;
   const data = query.data;
   if (!data) return null;
-  const { attendance, employee, audit = [] } = data;
+  const { attendance, dailyNote, employee, audit = [] } = data;
   const toInput = (value: string | Date | null | undefined) => formatDateTimeLocal(value, fmt.tz);
   const submitCorrection = async () => {
     const parsedTimeIn = timeIn ? parseDateTimeLocal(timeIn, fmt.tz) : null;
@@ -384,7 +420,9 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
     client.invalidateQueries({ queryKey: ["attendance", "logs"] });
   };
   return <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader className="flex flex-row items-start justify-between gap-3 pb-3"><div><CardTitle className="text-sm">{employee?.name ?? "Employee"} · {attendance.work_date}</CardTitle><div className="mt-2 flex flex-wrap items-center gap-2">{statusBadge(attendance.status)}{statusBadge(attendance.review_status ?? "not_reviewed")}</div></div><Button variant="ghost" size="sm" onClick={onClose}>Close</Button></CardHeader><CardContent className="space-y-5">
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Time In", attendance.time_in ? fmt.dateTime(attendance.time_in) : "—"], ["Time Out", attendance.time_out ? fmt.dateTime(attendance.time_out) : "—"], ["Total Hours", hours(attendance.total_seconds)], ["Start Method", attendance.start_method === "warehouse" ? "Warehouse" : "Driving"]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] text-slate-400">{label}</p><p className="mt-1 text-xs font-semibold capitalize text-slate-700">{value}</p></div>)}</div>
+     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Time In", attendance.time_in ? fmt.dateTime(attendance.time_in) : "—"], ["Time Out", attendance.time_out ? fmt.dateTime(attendance.time_out) : "—"], ["Total Hours", hours(attendance.total_seconds)], ["Start Method", attendance.start_method === "warehouse" ? "Warehouse" : attendance.start_method === "offsite" ? "Off-site" : "Driving"]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] text-slate-400">{label}</p><p className="mt-1 text-xs font-semibold capitalize text-slate-700">{value}</p></div>)}</div>
+      {attendance.breaks?.length > 0 && <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Break intervals</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{attendance.breaks.map((breakItem: any, index: number) => <div key={`${breakItem.break_started_at}-${index}`} className="rounded-lg bg-white p-2 text-xs"><p className="font-medium text-slate-700">Break {index + 1}</p><p className="mt-1 text-slate-500">Start · {fmt.dateTime(breakItem.break_started_at)}</p><p className="text-slate-500">End · {breakItem.break_ended_at ? fmt.dateTime(breakItem.break_ended_at) : "In progress"}</p></div>)}</div></div>}
+      {dailyNote && <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-blue-800">Daily attendance note</p><p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{dailyNote}</p></div>}
      <div className="grid gap-3 md:grid-cols-2">
        <Card className="rounded-xl border-slate-200 shadow-none">
          <CardHeader className="pb-2"><CardTitle className="text-xs">Time In Verification</CardTitle></CardHeader>
@@ -484,12 +522,17 @@ function Logs() {
   const expectedTeamMembers = selectedMember ? 1 : teamMembers.length;
   const selectedUserId = canViewAll ? userId : String(currentUser?.id ?? "");
   const formatDailyTime = (records: any[], field: "time_in" | "time_out") => {
-    const values = records
+      const values = records
       .map(row => row[field])
       .filter(Boolean)
-      .map(value => fmt.time(value));
+       .map(value => fmt.dateTime(value));
     if (values.length <= 1) return values[0] ?? "—";
     return `${values.slice(0, 3).join(", ")}${values.length > 3 ? ` +${values.length - 3}` : ""}`;
+  };
+  const formatDailyBreaks = (records: any[]) => {
+    const values = records.flatMap(row => (row.breaks ?? []).map((breakItem: any) => `${fmt.dateTime(breakItem.break_started_at)} → ${breakItem.break_ended_at ? fmt.dateTime(breakItem.break_ended_at) : "In progress"}`));
+    if (values.length <= 1) return values[0] ?? "—";
+    return `${values.slice(0, 2).join("; ")}${values.length > 2 ? ` +${values.length - 2}` : ""}`;
   };
   const businessDates = dates.filter(date => dayKind(date, holidayMap) === "weekday");
   const workedRows = rows.filter((row: any) => dayKind(row.work_date, holidayMap) === "weekday");
@@ -552,7 +595,7 @@ function Logs() {
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">Log status</Label><Select value={status} onValueChange={setStatus}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="active">Working</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="exception">Exception</SelectItem></SelectContent></Select></div>
-        <div className="min-w-0"><Label className="text-[11px] text-slate-500">Start method</Label><Select value={startMethod} onValueChange={setStartMethod}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All methods</SelectItem><SelectItem value="warehouse">Warehouse</SelectItem><SelectItem value="driving">Route start</SelectItem></SelectContent></Select></div>
+        <div className="min-w-0"><Label className="text-[11px] text-slate-500">Start method</Label><Select value={startMethod} onValueChange={setStartMethod}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All methods</SelectItem><SelectItem value="warehouse">Warehouse</SelectItem><SelectItem value="driving">Route start</SelectItem><SelectItem value="offsite">Off-site</SelectItem></SelectContent></Select></div>
          <div className="min-w-0"><Label className="text-[11px] text-slate-500">Review status</Label><Select value={reviewStatus} onValueChange={setReviewStatus}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All review states</SelectItem><SelectItem value="not_reviewed">Not reviewed</SelectItem><SelectItem value="needs_review">Needs review</SelectItem><SelectItem value="approved">Approved</SelectItem><SelectItem value="locked">Locked</SelectItem><SelectItem value="missing_time_out">Missing time out</SelectItem></SelectContent></Select></div>
         <div className="flex min-w-0 items-end"><Button variant="outline" className="h-9 w-full min-w-0 text-xs" onClick={clearFilters}><X className="mr-1.5 h-3.5 w-3.5 shrink-0" />Reset</Button></div>
       </div>
@@ -576,8 +619,8 @@ function Logs() {
          {query.isLoading || usersQuery.isLoading ? <div className="p-12 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /><p className="mt-2">Loading attendance ledger…</p></div> : query.isError || usersQuery.isError ? <div className="p-10 text-center text-sm text-red-600">Attendance logs could not be loaded. Try refreshing the page.</div> : !dates.length ? <div className="p-10 text-center text-sm text-slate-400">Choose a valid date range to view the ledger.</div> : (
            <>
           <div className="hidden overflow-x-auto md:block">
-             <table className="w-full min-w-[980px] text-left text-xs">
-               <thead><tr className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Day</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Time In</th><th className="px-4 py-3 font-semibold">Time Out</th><th className="px-4 py-3 font-semibold">Hours</th><th className="px-4 py-3 font-semibold">Team / note</th><th className="px-4 py-3 text-right font-semibold">Details</th></tr></thead>
+              <table className="w-full min-w-[1120px] text-left text-xs">
+                <thead><tr className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Day</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Time In</th><th className="px-4 py-3 font-semibold">Time Out</th><th className="px-4 py-3 font-semibold">Breaks</th><th className="px-4 py-3 font-semibold">Hours</th><th className="px-4 py-3 font-semibold">Team / note</th><th className="px-4 py-3 text-right font-semibold">Details</th></tr></thead>
               <tbody>
                 {dates.map(date => {
                   const summary = recordsByDate.get(date);
@@ -586,16 +629,18 @@ function Logs() {
                   const holiday = holidayMap.get(date);
                   const dateRecords = summary?.records ?? [];
                   const names = dateRecords.map((row: any) => row.employee_name || row.employee_username).filter(Boolean);
+                   const notes = dateRecords.map((row: any) => row.daily_note).filter(Boolean);
                    const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
                    const displayHours = noAttendance ? "—" : selectedMember ? hours(record?.total_seconds) : hours(summary?.totalSeconds);
                   return <tr key={date} className={`border-b border-slate-100 last:border-0 ${statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
                     <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold text-slate-800">{shortDate(date)}</span><span className="ml-2 text-[10px] text-slate-400">{date}</span></td>
                     <td className={`px-4 py-3 font-medium ${statusKey === "weekend" ? "text-slate-400" : "text-slate-600"}`}>{weekday(date)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span>{holiday && <span className="ml-2 text-[10px] text-amber-700">{holiday}</span>}</td>
-                     <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? (record?.time_in ? fmt.time(record.time_in) : "—") : formatDailyTime(dateRecords, "time_in")}</td>
-                     <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? (record?.time_out ? fmt.time(record.time_out) : "—") : formatDailyTime(dateRecords, "time_out")}</td>
+                     <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? (record?.time_in ? fmt.dateTime(record.time_in) : "—") : formatDailyTime(dateRecords, "time_in")}</td>
+                     <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? (record?.time_out ? fmt.dateTime(record.time_out) : "—") : formatDailyTime(dateRecords, "time_out")}</td>
+                     <td className="max-w-[320px] px-4 py-3 text-[11px] text-slate-500">{selectedMember ? formatDailyBreaks(record ? [record] : []) : formatDailyBreaks(dateRecords)}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</td>
-                     <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? `${record.start_method === "warehouse" ? "Warehouse" : "Route start"} · ${record.status}` : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "" : "Not expected") : (names.length ? `${names.slice(0, 3).join(", ")}${names.length > 3 ? ` +${names.length - 3}` : ""}` : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "" : "Not expected")}</td>
+                      <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? <><span>{record.start_method === "warehouse" ? "Warehouse" : record.start_method === "offsite" ? "Off-site" : "Route start"} · {record.status}</span>{record.daily_note && <span className="mt-1 block truncate text-[11px] text-blue-700" title={record.daily_note}>Note: {record.daily_note}</span>}</> : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "" : "Not expected") : (names.length ? <><span>{names.slice(0, 3).join(", ")}{names.length > 3 ? ` +${names.length - 3}` : ""}</span>{notes.length > 0 && <span className="mt-1 block truncate text-[11px] text-blue-700" title={notes.join(" | ")}>Notes available: {notes.length}</span>}</> : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "" : "Not expected")}</td>
                      <td className="px-4 py-3 text-right">{canViewAll && record && <Button variant="ghost" size="sm" className="h-7 text-[11px] text-red-600 hover:text-red-700" onClick={() => setSelectedId(record.id)}>Open log<ChevronRight className="ml-1 h-3 w-3" /></Button>}</td>
                   </tr>;
                 })}
@@ -613,10 +658,11 @@ function Logs() {
                return <div key={date} className="rounded-xl border border-slate-100 bg-white p-3">
                  <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{shortDate(date)} <span className="font-normal text-slate-400">{weekday(date)}</span></p><p className="mt-1 text-[11px] text-slate-400">{date}{holiday ? ` · ${holiday}` : ""}</p></div><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span></div>
                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                     <div><span className="block text-slate-500">Time in</span><span className="font-medium text-slate-700">{selectedMember ? (record?.time_in ? fmt.time(record.time_in) : "—") : formatDailyTime(summary?.records ?? [], "time_in")}</span></div>
-                     <div><span className="block text-slate-500">Time out</span><span className="font-medium text-slate-700">{selectedMember ? (record?.time_out ? fmt.time(record.time_out) : "—") : formatDailyTime(summary?.records ?? [], "time_out")}</span></div>
+                      <div><span className="block text-slate-500">Time in</span><span className="font-medium text-slate-700">{selectedMember ? (record?.time_in ? fmt.dateTime(record.time_in) : "—") : formatDailyTime(summary?.records ?? [], "time_in")}</span></div>
+                      <div><span className="block text-slate-500">Time out</span><span className="font-medium text-slate-700">{selectedMember ? (record?.time_out ? fmt.dateTime(record.time_out) : "—") : formatDailyTime(summary?.records ?? [], "time_out")}</span></div>
                      <div><span className="block text-slate-500">Hours</span><span className="font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</span></div>
                    </div>
+                    {(selectedMember ? record?.breaks?.length : summary?.records?.some((row: any) => row.breaks?.length)) ? <p className="mt-2 text-[11px] text-slate-500"><span className="font-medium text-slate-600">Breaks: </span>{selectedMember ? formatDailyBreaks([record]) : formatDailyBreaks(summary?.records ?? [])}</p> : null}
                   {canViewAll && record && <Button variant="outline" size="sm" className="mt-3 h-8 w-full text-xs text-red-600" onClick={() => setSelectedId(record.id)}>Open log<ChevronRight className="ml-1 h-3 w-3" /></Button>}
                </div>;
              })}
@@ -657,6 +703,7 @@ function HomeLocations() {
   const query = useQuery({
     queryKey: ["attendance", "home-locations"],
     queryFn: () => apiJson("/api/attendance/admin/home-locations"),
+    retry: false,
   });
   const [resettingId, setResettingId] = useState<number | null>(null);
 
@@ -713,12 +760,26 @@ function HomeLocations() {
 
 function Reports() {
   const fmt = useTimeService();
+  const [now, setNow] = useState(() => Date.now());
   const [period, setPeriod] = useState("pay_period");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const query = useQuery({ queryKey: ["attendance", "reports", period, from, to], queryFn: () => apiJson(`/api/attendance/admin/reports?period=${period}${from ? `&from=${from}` : ""}${to ? `&to=${to}` : ""}`) });
   const employees = query.data?.rows ?? [];
   const days = query.data?.days ?? [];
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
+  const breakTotalsByEmployee = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const day of days) {
+      for (const [userId, cell] of Object.entries(day.cells ?? {})) {
+        totals[userId] = (totals[userId] ?? 0) + breakDurationSeconds(cell, now);
+      }
+    }
+    return totals;
+  }, [days, now]);
   const exportCsv = () => {
     const csvRows = [
       ["Day", ...employees.map((employee: any) => employee.employee_name)],
@@ -727,12 +788,14 @@ function Reports() {
         ...employees.map((employee: any) => {
           const cell = day.cells?.[String(employee.user_id)];
           if (!cell) return "";
-          const timeIn = cell.time_in ? fmt.time(cell.time_in) : "—";
-          const timeOut = cell.time_out ? fmt.time(cell.time_out) : "—";
-          return `${timeIn} - ${timeOut} (${hours(cell.total_seconds)})`;
+          const timeIn = reportDateTime(cell.time_in, day.date, fmt);
+          const timeOut = reportDateTime(cell.time_out, day.date, fmt);
+          const breaks = (cell.breaks ?? []).map((breakItem: any) => `${reportDateTime(breakItem.break_started_at, day.date, fmt)} → ${breakItem.break_ended_at ? reportDateTime(breakItem.break_ended_at, day.date, fmt) : "In progress"}`).join("; ");
+          return `${timeIn} - ${timeOut} (${hours(cell.total_seconds)}; Break ${compactDuration(breakDurationSeconds(cell, now))})${breaks ? `; Breaks: ${breaks}` : ""}`;
         }),
       ]),
       ["Total worked hours", ...employees.map((employee: any) => hours(employee.total_seconds))],
+      ["Total break time", ...employees.map((employee: any) => compactDuration(breakTotalsByEmployee[String(employee.user_id)] ?? 0))],
     ];
     const csv = csvRows.map((row: unknown[]) => row.map(value => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = `attendance-report-${query.data?.from ?? "period"}.csv`; link.click(); URL.revokeObjectURL(link.href);
@@ -750,11 +813,11 @@ function Reports() {
             {employees.map((employee: any) => {
               const cell = day.cells?.[String(employee.user_id)];
               return <td key={employee.user_id} className={`min-w-[175px] px-4 py-3 align-top ${day.isWeekend ? "text-slate-500" : "text-slate-700"}`}>
-                {cell ? <><div className="font-medium">{cell.time_in ? fmt.time(cell.time_in) : "—"} <span className="text-slate-300">→</span> {cell.time_out ? fmt.time(cell.time_out) : "—"}</div><div className={`mt-1 font-semibold ${day.isWeekend ? "text-slate-600" : "text-emerald-700"}`}>{hours(cell.total_seconds)}</div></> : <span className="text-slate-300">—</span>}
+                 {cell ? <><div className="font-medium">{reportDateTime(cell.time_in, day.date, fmt)} <span className="text-slate-300">→</span> {reportDateTime(cell.time_out, day.date, fmt)}</div>{cell.breaks?.length > 0 && <div className="mt-1 text-[11px] text-slate-500">{cell.breaks.map((breakItem: any, index: number) => <div key={`${breakItem.break_started_at}-${index}`}>Break {index + 1}: {reportDateTime(breakItem.break_started_at, day.date, fmt)} → {breakItem.break_ended_at ? reportDateTime(breakItem.break_ended_at, day.date, fmt) : "In progress"}</div>)}</div>}<div className="mt-1 flex flex-wrap items-baseline gap-x-2 font-semibold"><span className={day.isWeekend ? "text-slate-600" : "text-emerald-700"}>{hours(cell.total_seconds)}</span><span className="text-red-600">Break {compactDuration(breakDurationSeconds(cell, now))}</span></div></> : <span className="text-slate-300">—</span>}
               </td>;
             })}
           </tr>)}
-        </tbody><tfoot><tr className="border-t-2 border-slate-300 bg-slate-50"><th className="sticky bottom-0 left-0 z-10 border-r border-slate-200 bg-slate-50 px-4 py-3 text-left font-bold text-slate-700">Total worked hours</th>{employees.map((employee: any) => <td key={employee.user_id} className="px-4 py-3 font-bold text-emerald-700">{hours(employee.total_seconds)}</td>)}</tr></tfoot></table></div>}
+        </tbody><tfoot><tr className="border-t-2 border-slate-300 bg-slate-50"><th className="sticky bottom-0 left-0 z-10 border-r border-slate-200 bg-slate-50 px-4 py-3 text-left font-bold text-slate-700">Total worked hours</th>{employees.map((employee: any) => <td key={employee.user_id} className="px-4 py-3"><div className="flex flex-wrap items-baseline gap-x-2 font-bold"><span className="text-emerald-700">{hours(employee.total_seconds)}</span><span className="text-red-600">Break {compactDuration(breakTotalsByEmployee[String(employee.user_id)] ?? 0)}</span></div></td>)}</tr></tfoot></table></div>}
     </CardContent></Card>
   </AdminShell>;
 }
@@ -767,8 +830,8 @@ export function AttendanceSettingsPage() {
   const [locationError, setLocationError] = useState("");
   useEffect(() => { if (query.data) setForm(query.data); }, [query.data]);
   const save = useMutation({ mutationFn: () => apiJson("/api/attendance/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) }), onSuccess: data => { setForm(data); client.invalidateQueries({ queryKey: ["attendance", "settings"] }); } });
-  if (query.isLoading || !form) return <AdminShell activeTab="settings"><Card><CardContent className="p-8 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></CardContent></Card></AdminShell>;
   if (query.isError) return <AdminShell activeTab="settings"><Card className="border-red-200"><CardContent className="p-8 text-center"><p className="text-sm font-semibold text-red-700">Attendance settings could not be loaded.</p><p className="mt-2 text-sm text-slate-500">Use an administrator account and open this page from Admin → Attendance Settings.</p><Button className="mt-5 bg-red-600 hover:bg-red-700" onClick={() => query.refetch()}>Try Again</Button></CardContent></Card></AdminShell>;
+  if (query.isLoading || !form) return <AdminShell activeTab="settings"><Card><CardContent className="p-8 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></CardContent></Card></AdminShell>;
   const set = (key: string, value: any) => setForm((current: any) => ({ ...current, [key]: value }));
   const useCurrentLocation = () => {
     setLocationError("");

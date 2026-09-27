@@ -25,9 +25,12 @@ import InventoryRemovePage from "@/pages/agent/InventoryRemove";
 import InventoryAuditPage from "@/pages/agent/InventoryAudit";
 import AdminSkuvaultPage from "@/pages/admin/AdminSkuvault";
 import AdminZohoPage from "@/pages/admin/AdminZoho";
+import AdminConstantContactPage from "@/pages/admin/AdminConstantContact";
+import ZohoAccountMappingPage from "@/pages/admin/ZohoAccountMapping";
 import PriceTiersPage from "@/pages/admin/PriceTiers";
 import MyOrders from "@/pages/agent/MyOrders";
 import DraftOrders from "@/pages/agent/DraftOrders";
+import BulkOrder from "@/pages/orders/BulkOrder";
 import AllOrders from "@/pages/agent/AllOrders";
 import OrdersList from "@/pages/orders/OrdersList";
 import OrderDetail from "@/pages/orders/OrderDetail";
@@ -56,14 +59,19 @@ import MarketingLog, { MarketingLogRoute } from "@/pages/marketing/MarketingLog"
 import PriceOverrideAuditPage from "@/pages/admin/reports/PriceOverrideAudit";
 import StoreCreditUsageReportPage from "@/pages/admin/reports/StoreCreditUsageReport";
 import SalesReportPage from "@/pages/admin/reports/SalesReport";
-import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, MarketingAudiences, MarketingSettings } from "@/pages/marketing/Marketing";
+import ExportsPage from "@/pages/admin/reports/Exports";
+import { Product360OverviewPage, Product360ProductsPage, Product360DetailPage } from "@/pages/product360/Product360";
+import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, MarketingAudiences, MarketingAudienceReadiness, MarketingSettings } from "@/pages/marketing/Marketing";
 import { MarketingAnalytics, MarketingTemplates, MarketingAutomations } from "@/pages/marketing/MarketingPhase2";
 import AttendancePage from "@/pages/attendance/Attendance";
 import AttendanceAdminPage, { AttendanceSettingsPage } from "@/pages/attendance/AttendanceAdmin";
 import KoleImportsPage from "@/pages/dropshipping/KoleImports";
+import DropshipDashboardPage from "@/pages/dropshipping/DropshipDashboard";
 import DropshipCatalogPage from "@/pages/dropshipping/DropshipCatalog";
 import DropshipSyncLogsPage from "@/pages/dropshipping/DropshipSyncLogs";
 import NotFound from "@/pages/not-found";
+import AccountSettings from "@/pages/AccountSettings";
+import ResetPassword from "@/pages/ResetPassword";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
 
@@ -126,15 +134,31 @@ function Router() {
 
       {/* Public */}
       <Route path="/" component={Login} />
+      <Route path="/reset-password" component={ResetPassword} />
 
       {/* Dashboard — any authenticated user */}
       <Route path="/dashboard">
         {() => <ProtectedRoute component={DashboardPage} />}
       </Route>
+      <Route path="/settings">
+        {() => <ProtectedRoute component={AccountSettings} />}
+      </Route>
 
       {/* ── Agent routes ── */}
       <Route path="/catalog">
         {() => <ProtectedRoute component={Catalog} role="agent" />}
+      </Route>
+      <Route path="/product-360/products/:id">
+        {() => <PermissionRoute component={Product360DetailPage} module="product_360" action="view" />}
+      </Route>
+      <Route path="/product-360/products">
+        {() => <PermissionRoute component={Product360ProductsPage} module="product_360" action="view" />}
+      </Route>
+      <Route path="/product-360/:section">
+        {() => <PermissionRoute component={Product360OverviewPage} module="product_360" action="view" />}
+      </Route>
+      <Route path="/product-360">
+        {() => <PermissionRoute component={Product360OverviewPage} module="product_360" action="view" />}
       </Route>
       <Route path="/cart">
         {() => <ProtectedRoute component={Cart} role="agent" />}
@@ -144,6 +168,9 @@ function Router() {
       </Route>
       <Route path="/orders/drafts">
         {() => <ProtectedRoute component={DraftOrders} role="agent" />}
+      </Route>
+      <Route path="/orders/bulk">
+        {() => <PermissionRoute component={BulkOrder} module="orders_drafts" />}
       </Route>
       <Route path="/orders/all">
         {() => <ProtectedRoute component={AllOrders} />}
@@ -181,7 +208,7 @@ function Router() {
         {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_reports" />}
       </Route>
       <Route path="/attendance/locations">
-        {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_dashboard" />}
+        {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_home_locations" />}
       </Route>
       <Route path="/attendance/settings">
         {() => <Redirect to="/admin/attendance" />}
@@ -220,6 +247,9 @@ function Router() {
       </Route>
       <Route path="/marketing/audiences">
         {() => <PermissionRoute component={MarketingAudiences} module="marketing" action="manage_audiences" />}
+      </Route>
+      <Route path="/marketing/audience-readiness">
+        {() => <PermissionRoute component={MarketingAudienceReadiness} module="marketing" />}
       </Route>
       <Route path="/marketing/templates">
         {() => <PermissionRoute component={MarketingTemplates} module="marketing" action="manage_templates" />}
@@ -281,6 +311,12 @@ function Router() {
       <Route path="/admin/zoho">
         {() => <ProtectedRoute component={AdminZohoPage} role="admin" />}
       </Route>
+      <Route path="/admin/constant-contact">
+        {() => <ProtectedRoute component={AdminConstantContactPage} role="admin" />}
+      </Route>
+      <Route path="/admin/zoho/account-mapping">
+        {() => <ProtectedRoute component={ZohoAccountMappingPage} role="admin" />}
+      </Route>
       <Route path="/admin/invoice">
         {() => <ProtectedRoute component={InvoiceSettingsPage} role="admin" />}
       </Route>
@@ -309,6 +345,9 @@ function Router() {
       </Route>
 
       {/* ── Dropshipping ── */}
+      <Route path="/dropshipping/dashboard">
+        {() => <PermissionRoute component={DropshipDashboardPage} module="dropshipping" />}
+      </Route>
       <Route path="/dropshipping/kole">
         {() => <PermissionRoute component={KoleImportsPage} module="dropshipping" />}
       </Route>
@@ -348,6 +387,9 @@ function Router() {
       {/* ── Reporting routes ── */}
       <Route path="/reports/sales">
         {() => <ProtectedRoute component={SalesReportPage} />}
+      </Route>
+      <Route path="/reports/exports">
+        {() => <ProtectedRoute component={ExportsPage} />}
       </Route>
       <Route path="/reports/price-override-audit">
         {() => <ProtectedRoute component={PriceOverrideAuditPage} />}

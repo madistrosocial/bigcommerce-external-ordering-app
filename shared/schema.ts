@@ -1,4 +1,5 @@
 import { pgTable, text, integer, boolean, decimal, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -37,6 +38,7 @@ export const users = pgTable("users", {
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   name: text("name").notNull(),
+  avatar_data: text("avatar_data"),
   role: text("role").notNull(), // 'admin' or 'agent'
   is_enabled: boolean("is_enabled").notNull().default(true),
   allow_bigcommerce_search: boolean("allow_bigcommerce_search").notNull().default(false),
@@ -82,6 +84,25 @@ export const orders = pgTable("orders", {
   bigcommerce_order_id: integer("bigcommerce_order_id"),
   google_sheets_logged: boolean("google_sheets_logged").notNull().default(false),
 });
+
+export const bulkOrderImports = pgTable("bulk_order_imports", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  order_id: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+  source_file_name: text("source_file_name").notNull(),
+  source_file_hash: text("source_file_hash").notNull(),
+  customer_name: text("customer_name").notNull(),
+  customer_email: text("customer_email"),
+  missing_file_name: text("missing_file_name").notNull(),
+  missing_csv: text("missing_csv").notNull(),
+  source_row_count: integer("source_row_count").notNull().default(0),
+  drafted_item_count: integer("drafted_item_count").notNull().default(0),
+  missing_item_count: integer("missing_item_count").notNull().default(0),
+  missing_quantity: integer("missing_quantity").notNull().default(0),
+  created_by_user_id: integer("created_by_user_id").notNull().references(() => users.id),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  creatorFileUnique: uniqueIndex("bulk_order_imports_creator_file_unique").on(t.created_by_user_id, t.source_file_hash),
+}));
 
 export const settings = pgTable("settings", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -269,6 +290,31 @@ export const customersMirror = pgTable("customers_mirror", {
   updated_at: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Zoho CRM Accounts are read-only in Phase 1. These rows record the local
+// relationship and matching decision without changing either source system.
+export const zohoAccountMappings = pgTable("zoho_account_mappings", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  zoho_account_id: text("zoho_account_id"),
+  zoho_account_name: text("zoho_account_name").notNull().default(""),
+  zoho_account_email: text("zoho_account_email"),
+  zoho_account_phone: text("zoho_account_phone"),
+  relationship_type: text("relationship_type").notNull().default("primary"), // primary | additional | location
+  status: text("status").notNull().default("mapped"), // mapped | unmatched | needs_review
+  match_method: text("match_method").notNull().default("manual"), // bigcommerce_id | existing_mapping | secondary | manual
+  manually_confirmed: boolean("manually_confirmed").notNull().default(false),
+  last_error: text("last_error"),
+  last_checked_at: timestamp("last_checked_at"),
+  mapped_by_user_id: integer("mapped_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  customerAccountUnique: uniqueIndex("zoho_account_mappings_customer_account_idx").on(t.customer_id, t.zoho_account_id),
+  zohoAccountUnique: uniqueIndex("zoho_account_mappings_zoho_account_idx").on(t.zoho_account_id),
+  customerIdx: index("zoho_account_mappings_customer_idx").on(t.customer_id),
+  statusIdx: index("zoho_account_mappings_status_idx").on(t.status),
+}));
+
 export const customerOrdersMirror = pgTable("customer_orders_mirror", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   bigcommerce_order_id: integer("bigcommerce_order_id").notNull().unique(),
@@ -425,9 +471,11 @@ export const attendanceSessions = pgTable("attendance_sessions", {
   session_number: integer("session_number").notNull().default(1),
   time_in: timestamp("time_in"),
   time_out: timestamp("time_out"),
-  start_method: text("start_method").notNull(), // warehouse | driving
-  status: text("status").notNull().default("active"), // active | completed | incomplete | exception
+  start_method: text("start_method").notNull(), // warehouse | driving | offsite
+  status: text("status").notNull().default("active"), // active | on_break | completed | incomplete | exception
   total_seconds: integer("total_seconds").notNull().default(0),
+  break_started_at: timestamp("break_started_at"),
+  break_seconds: integer("break_seconds").notNull().default(0),
   time_in_latitude: decimal("time_in_latitude", { precision: 10, scale: 7 }),
   time_in_longitude: decimal("time_in_longitude", { precision: 10, scale: 7 }),
   time_in_accuracy: decimal("time_in_accuracy", { precision: 10, scale: 2 }),
@@ -450,6 +498,18 @@ export const attendanceSessions = pgTable("attendance_sessions", {
 }, (t) => ({
   userDateIdx: index("attendance_sessions_user_date_idx").on(t.user_id, t.work_date),
   statusIdx: index("attendance_sessions_status_idx").on(t.status),
+}));
+
+export const attendanceDailyNotes = pgTable("attendance_daily_notes", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  work_date: text("work_date").notNull(),
+  note: text("note").notNull().default(""),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  userDateUnique: uniqueIndex("attendance_daily_notes_user_date_unique").on(t.user_id, t.work_date),
+  userDateIdx: index("attendance_daily_notes_user_date_idx").on(t.user_id, t.work_date),
 }));
 
 export const attendanceLocationCheckpoints = pgTable("attendance_location_checkpoints", {
@@ -594,6 +654,9 @@ export const marketingCampaigns = pgTable("marketing_campaigns", {
   preview_text: text("preview_text").notNull().default(""),
   message_content: text("message_content").notNull().default(""),
   sender_email: text("sender_email").notNull().default(""),
+  delivery_provider: text("delivery_provider").notNull().default("zoho"), // existing campaigns stay on their original sender
+  constant_contact_campaign_id: text("constant_contact_campaign_id"),
+  constant_contact_activity_id: text("constant_contact_activity_id"),
   audience_type: text("audience_type").notNull().default(""),
   audience_id: integer("audience_id"),
   audience_config: jsonb("audience_config").notNull().default({}),
@@ -634,6 +697,9 @@ export const marketingAudiences = pgTable("marketing_audiences", {
   description: text("description").notNull().default(""),
   audience_type: text("audience_type").notNull().default("manual"), // 'manual' | 'dynamic'
   dynamic_filters: jsonb("dynamic_filters").notNull().default({}),
+  constant_contact_list_id: text("constant_contact_list_id"),
+  constant_contact_last_synced_at: timestamp("constant_contact_last_synced_at"),
+  constant_contact_sync_issues: jsonb("constant_contact_sync_issues").notNull().default([]),
   created_by: integer("created_by").notNull().references(() => users.id),
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
@@ -753,10 +819,10 @@ export const marketingCustomerPreferences = pgTable("marketing_customer_preferen
 
 export const marketingSuppressions = pgTable("marketing_suppressions", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  customer_id: integer("customer_id").notNull().references(() => customersMirror.id, { onDelete: "cascade" }),
+  customer_id: integer("customer_id").references(() => customersMirror.id, { onDelete: "cascade" }),
   email: text("email").notNull().default(""),
   reason: text("reason").notNull(),
-  source: text("source").notNull().default("manual"), // manual | unsubscribe | bounce | complaint
+  source: text("source").notNull().default("manual"), // manual | unsubscribe | bounce | complaint | constant_contact
   created_by: integer("created_by").references(() => users.id, { onDelete: "set null" }),
   created_at: timestamp("created_at").notNull().defaultNow(),
   revoked_at: timestamp("revoked_at"),
@@ -765,6 +831,9 @@ export const marketingSuppressions = pgTable("marketing_suppressions", {
 }, (t) => ({
   activeCustomerSuppressionIdx: index("marketing_suppressions_active_customer_idx").on(t.customer_id, t.revoked_at),
   activeEmailSuppressionIdx: index("marketing_suppressions_active_email_idx").on(t.email, t.revoked_at),
+  activeConstantContactEmailIdx: uniqueIndex("marketing_suppressions_active_cc_email_idx")
+    .on(sql`lower(trim(${t.email}))`)
+    .where(sql`${t.source} = 'constant_contact' and ${t.revoked_at} is null`),
 }));
 
 export const marketingAutomations = pgTable("marketing_automations", {
@@ -831,6 +900,7 @@ export const insertCrmSalesRepSchema = createInsertSchema(customerSalesRep).omit
 export const insertCrmNoteSchema = createInsertSchema(crmCustomerNotes).omit({ id: true, created_at: true, updated_at: true });
 export const insertCrmAuditLogSchema = createInsertSchema(crmAuditLog).omit({ id: true, created_at: true });
 export const insertAttendanceSessionSchema = createInsertSchema(attendanceSessions).omit({ id: true, created_at: true, updated_at: true });
+export const insertAttendanceDailyNoteSchema = createInsertSchema(attendanceDailyNotes).omit({ id: true, created_at: true, updated_at: true });
 export const insertAttendanceCheckpointSchema = createInsertSchema(attendanceLocationCheckpoints).omit({ id: true, created_at: true });
 export const insertAttendanceExceptionSchema = createInsertSchema(attendanceExceptions).omit({ id: true });
 export const insertAttendanceAuditLogSchema = createInsertSchema(attendanceAuditLog).omit({ id: true, created_at: true });
@@ -844,6 +914,8 @@ export type Product = typeof products.$inferSelect;
 
 export type InsertOrder = z.infer<typeof insertOrderSchema>;
 export type Order = typeof orders.$inferSelect;
+export type InsertBulkOrderImport = typeof bulkOrderImports.$inferInsert;
+export type BulkOrderImport = typeof bulkOrderImports.$inferSelect;
 
 export type InsertPriceHistoryCache = z.infer<typeof insertPriceHistoryCacheSchema>;
 export type PriceHistoryCacheEntry = typeof priceHistoryCache.$inferSelect;
@@ -915,6 +987,8 @@ export type MarketingAutomationExecution = typeof marketingAutomationExecutions.
 // CRM types
 export type InsertCrmCustomer = z.infer<typeof insertCrmCustomerSchema>;
 export type CrmCustomer = typeof customersMirror.$inferSelect;
+export type InsertZohoAccountMapping = typeof zohoAccountMappings.$inferInsert;
+export type ZohoAccountMapping = typeof zohoAccountMappings.$inferSelect;
 export type InsertCrmOrder = z.infer<typeof insertCrmOrderSchema>;
 export type CrmOrder = typeof customerOrdersMirror.$inferSelect;
 export type InsertCrmSalesRep = z.infer<typeof insertCrmSalesRepSchema>;
@@ -935,6 +1009,8 @@ export type InsertCrmReactivationHistory = typeof crmReactivationHistory.$inferI
 export type CrmReactivationHistory = typeof crmReactivationHistory.$inferSelect;
 export type InsertAttendanceSession = z.infer<typeof insertAttendanceSessionSchema>;
 export type AttendanceSession = typeof attendanceSessions.$inferSelect;
+export type InsertAttendanceDailyNote = z.infer<typeof insertAttendanceDailyNoteSchema>;
+export type AttendanceDailyNote = typeof attendanceDailyNotes.$inferSelect;
 export type InsertAttendanceCheckpoint = z.infer<typeof insertAttendanceCheckpointSchema>;
 export type AttendanceCheckpoint = typeof attendanceLocationCheckpoints.$inferSelect;
 export type InsertAttendanceException = z.infer<typeof insertAttendanceExceptionSchema>;

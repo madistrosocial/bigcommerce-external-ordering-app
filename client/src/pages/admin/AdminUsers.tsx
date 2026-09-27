@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Users, ShieldCheck, ChevronRight, ArrowLeft, User, Lock, Shield, Eye, EyeOff, Save, Search, UsersRound, Home, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
+import CreateUserDialog from "@/components/admin/CreateUserDialog";
 
 function googleMapsUrl(latitude: unknown, longitude: unknown) {
   const lat = Number(latitude);
@@ -59,6 +60,7 @@ export const MODULES = [
   { key: "reports",            label: "Reports" },
   { key: "reporting_price_override_audit", label: "Reporting › Price Override Audit" },
   { key: "reporting_sales",                label: "Reporting › Sales Report" },
+  { key: "reporting_exports",              label: "Reporting › Exports" },
   { key: "tools_bc_link",      label: "Tools › BC Product Link" },
   { key: "tools_bc_link_logs", label: "Tools › Product Link Logs" },
   { key: "promo_sku_tracker",  label: "Tools › Promo SKU Tracker" },
@@ -108,11 +110,13 @@ export const MARKETING_ACTION_PERMS = [
 
 export const ATTENDANCE_ACTION_PERMS = [
   { module: "attendance", action: "clock", label: "Clock In / Out", description: "Can start and end their own attendance day." },
+  { module: "attendance", action: "clock_offsite", label: "Start Off-site", description: "Can start an attendance session without location verification. Requires Clock In / Out." },
   { module: "attendance", action: "view_own", label: "View Own History", description: "Can view their own attendance history." },
   { module: "attendance", action: "view_dashboard", label: "View Overview", description: "Can view the team Attendance management overview. Requires View All Employees." },
   { module: "attendance", action: "view_all", label: "View All Employees", description: "Unlocks team-wide Attendance views, filters, details, and management." },
   { module: "attendance", action: "view_logs", label: "View Attendance Logs", description: "Can view attendance logs; without View All Employees, only their own records are shown." },
   { module: "attendance", action: "view_reports", label: "View Reports", description: "Can view team pay-period attendance reports. Requires View All Employees." },
+  { module: "attendance", action: "view_home_locations", label: "View Home Locations", description: "Can view saved employee home locations and open them in Google Maps." },
   { module: "attendance", action: "manage_settings", label: "Manage Settings", description: "Can configure warehouse, checkpoints, and pay periods." },
   { module: "attendance", action: "manage", label: "Manage Attendance", description: "Can perform administrative attendance actions." },
   { module: "attendance", action: "audit", label: "Attendance Audit", description: "Can approve one additional work session for an employee on a date." },
@@ -291,11 +295,11 @@ function UserDetail({
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-slate-600">
-                New Password <span className="ml-1 font-normal text-slate-400">(leave blank to keep current)</span>
+                Temporary Password <span className="ml-1 font-normal text-slate-400">(leave blank to keep current)</span>
               </Label>
               <div className="relative">
                 <Input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter new password…" className="pr-10" data-testid="input-user-password" />
+                  placeholder="Enter temporary password…" minLength={8} maxLength={128} autoComplete="new-password" className="pr-10" data-testid="input-user-password" />
                 <button type="button" onClick={() => setShowPw((v) => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" tabIndex={-1}>
                   {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -780,7 +784,13 @@ export default function AdminUsersPage() {
       <header className="bg-white border-b px-4 py-3 flex items-center gap-3 shrink-0">
         <Users className="h-5 w-5 text-slate-600" />
         <h1 className="text-base font-bold text-slate-800">User Management</h1>
-        {!usersLoading && <span className="ml-auto text-xs text-slate-400">{users.length} user{users.length !== 1 ? "s" : ""}</span>}
+        <div className="ml-auto flex items-center gap-3">
+          <CreateUserDialog
+            className="h-8 px-3 text-xs"
+            onCreated={() => queryClient.invalidateQueries({ queryKey: ["admin-users-rbac"] })}
+          />
+          {!usersLoading && <span className="text-xs text-slate-400">{users.length} user{users.length !== 1 ? "s" : ""}</span>}
+        </div>
       </header>
 
       <div className="flex-1 overflow-auto px-4 py-4 space-y-3">

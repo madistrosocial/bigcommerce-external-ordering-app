@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import { storage } from "./storage";
 import { createHmac, timingSafeEqual } from "crypto";
 import { sendZohoCampaignEmail } from "./zoho-campaigns";
+import { createAndScheduleConstantContactCampaign, getConstantContactReconciliationSnapshot } from "./constant-contact";
 
 type MarketingCustomer = {
   id?: number;
@@ -271,6 +272,9 @@ export function resolveMarketingSenderEmail(campaign: any, settings: MarketingSe
 export async function sendMarketingTestEmail(campaignId: number, email: string): Promise<{ messageId?: string }> {
   const campaign = await storage.getMarketingCampaign(campaignId);
   if (!campaign) throw new Error("Campaign not found");
+  if (campaign.delivery_provider === "constant_contact") {
+    throw new Error("Constant Contact test sends are not available yet. Use a draft campaign until test-send support is configured.");
+  }
   const to = email.trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error("Enter a valid test email address.");
   const settings = await getMailSettings();
@@ -306,7 +310,50 @@ export async function processMarketingCampaign(campaignId: number, initiatedByUs
     const initiatedBy = Number(initiatedByUserId ?? campaign.created_by) || null;
     const settings = await getMailSettings();
     const from = resolveMarketingSenderEmail(campaign, await getMarketingSenderSettings(settings));
-    if (!from) throw new Error("Zoho Campaigns sender address is not configured.");
+    if (!from) throw new Error("Campaign sender address is not configured.");
+    if (campaign.delivery_provider === "constant_contact") {
+      if (campaign.audience_type !== "saved_audience" || !campaign.audience_id) {
+        throw new Error("Constant Contact campaigns must use a saved audience linked to a Constant Contact list.");
+      }
+      const audience = await storage.getMarketingAudience(Number(campaign.audience_id));
+      const listId = String(audience?.constant_contact_list_id ?? "").trim();
+      if (!listId) {
+        throw new Error("Link this saved audience to a Constant Contact list before sending.");
+      }
+      const contactSnapshot = await getConstantContactReconciliationSnapshot();
+      const suppressedEmails = new Set(await storage.getMarketingSuppressedEmails());
+      const conflictingContacts = contactSnapshot.contacts.filter(contact =>
+        contact.listIds.includes(listId) && contact.email && suppressedEmails.has(contact.email),
+      );
+      if (conflictingContacts.length) {
+        throw new Error(`This Constant Contact list contains ${conflictingContacts.length} locally suppressed contact(s). Remove them from the list before sending.`);
+      }
+
+      const html = String(campaign.message_content || "<p></p>")
+        .replace(/\{\{\s*first_name\s*\}\}|\{first_name\}/gi, '[[FIRSTNAME OR "Valued Customer"]]')
+        .replace(/\{\{\s*last_name\s*\}\}|\{last_name\}/gi, "[[LASTNAME]]")
+        .replace(/\{\{\s*email\s*\}\}|\{email\}/gi, "[[EMAIL]]")
+        .replace(/\{\{\s*company\s*\}\}|\{company\}/gi, "[[COMPANYNAME]]");
+      const providerIds = await createAndScheduleConstantContactCampaign({
+        name: `${campaign.name} (${campaign.id})`,
+        fromName: String(settings.company_name || settings.companyName || "").trim(),
+        fromEmail: from,
+        replyToEmail: from,
+        subject: campaign.subject_line || campaign.name,
+        preheader: campaign.preview_text || "",
+        html,
+        listId,
+      });
+      await storage.updateMarketingCampaign(campaignId, {
+        constant_contact_campaign_id: providerIds.campaignId,
+        constant_contact_activity_id: providerIds.activityId,
+      }, initiatedBy || campaign.created_by);
+      const providerRecipientCount = contactSnapshot.contacts.filter(contact =>
+        contact.listIds.includes(listId) && contact.permissionToSend !== "unsubscribed",
+      ).length;
+      await storage.completeConstantContactMarketingCampaign(campaignId, providerRecipientCount);
+      return;
+    }
     await storage.prepareMarketingRecipients(campaignId);
     while (true) {
       const batch = await storage.getMarketingRecipients(campaignId, { status: "all", limit: 100 });
@@ -359,9 +406,9 @@ export async function processMarketingCampaign(campaignId: number, initiatedByUs
             },
           });
           await storage.markMarketingRecipientSent(row.id, info.transmissionId);
-          const productTitles = Array.from(new Set((Array.isArray(campaign.product_snapshots) ? campaign.product_snapshots : [])
+          const productTitles: string[] = Array.from(new Set<string>((Array.isArray(campaign.product_snapshots) ? campaign.product_snapshots : [])
             .map((product: any) => String(product?.name ?? "").trim())
-            .filter(Boolean)));
+            .filter((title: string) => Boolean(title))));
           let marketingLog: any;
           try {
             marketingLog = await storage.createMarketingDeliveryLog({

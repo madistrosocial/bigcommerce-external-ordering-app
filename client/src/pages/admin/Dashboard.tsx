@@ -19,6 +19,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Product, User, PriceTierConfig, PriceTier } from "@/lib/api";
 import { DEFAULT_TIER_CONFIG } from "@/lib/api";
 import * as api from "@/lib/api";
+import CreateUserDialog from "@/components/admin/CreateUserDialog";
 import {
   Dialog,
   DialogContent,
@@ -647,67 +648,14 @@ export default function AdminDashboard() {
 
         <TabsContent value="users">
           <div className="mb-6">
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button className="w-full gap-2" data-testid="button-add-user">
-                  <Plus className="h-4 w-4" /> Add New User
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Create User Account</DialogTitle>
-                  <DialogDescription>
-                    Fill in the details to create a new user account.
-                  </DialogDescription>
-                </DialogHeader>
-                <form 
-                  className="space-y-4 py-4"
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    const formData = new FormData(e.currentTarget);
-                    const data = Object.fromEntries(formData);
-                    try {
-                      await api.createUser(data);
-                      queryClient.invalidateQueries({ queryKey: ['agents'] });
-                      queryClient.invalidateQueries({ queryKey: ['admins'] });
-                      queryClient.invalidateQueries({ queryKey: ['users'] });
-                      toast({ title: "User Created", description: `New ${data.role} account is ready.` });
-                      (e.target as HTMLFormElement).reset();
-                    } catch (err: any) {
-                      toast({ title: "Error", description: err.message, variant: "destructive" });
-                    }
-                  }}
-                >
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Full Name</Label>
-                    <Input id="name" name="name" placeholder="John Doe" required data-testid="input-user-name" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="username">Username (Email)</Label>
-                    <Input id="username" name="username" type="email" placeholder="john@example.com" required data-testid="input-user-email" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="password">Password</Label>
-                    <Input id="password" name="password" type="password" placeholder="••••••••" required data-testid="input-user-password" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="role">Role</Label>
-                    <Select name="role" defaultValue="agent">
-                      <SelectTrigger data-testid="select-role">
-                        <SelectValue placeholder="Select role" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="agent">Agent (Sales)</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <DialogFooter>
-                    <Button type="submit" data-testid="button-create-user">Create Account</Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
+            <CreateUserDialog
+              className="w-full"
+              onCreated={() => {
+                queryClient.invalidateQueries({ queryKey: ["agents"] });
+                queryClient.invalidateQueries({ queryKey: ["admins"] });
+                queryClient.invalidateQueries({ queryKey: ["users"] });
+              }}
+            />
           </div>
 
           <Tabs defaultValue="agents" className="w-full">

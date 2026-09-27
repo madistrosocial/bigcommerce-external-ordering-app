@@ -619,7 +619,7 @@ export default function DraftOrders() {
     }
     try {
       const posDraftIds = JSON.parse(localStorage.getItem("vansales_pos_draft_ids") || "[]") as number[];
-      if (order.id && posDraftIds.includes(order.id)) {
+      if (order.bulk_order_import_id || (order.id && posDraftIds.includes(order.id))) {
         toast({ title: "Draft loaded", description: "Review and submit from POS." });
         setLocation("/pos");
         return;

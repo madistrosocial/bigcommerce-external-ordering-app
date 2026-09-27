@@ -1,10 +1,18 @@
 import { db } from "../db";
- import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertInventoryRemoveLog, type InventoryRemoveLog, type InventoryLogRow, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type CrmReactivationStage, type CrmReactivationCase, type CrmReactivationHistory, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, type MarketingProductList, type MarketingProductListItem, type MarketingDeliveryLog, type AttendanceSession, type InsertAttendanceSession, type AttendanceCheckpoint, type InsertAttendanceCheckpoint, type AttendanceException, type InsertAttendanceException, type DropshipProduct, type InsertDropshipProduct, type DropshipSyncLog, type DropshipVendor, type InsertDropshipSyncLog, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, inventoryRemoveLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, crmReactivationStages, crmReactivationCases, crmReactivationHistory, attendanceSessions, attendanceLocationCheckpoints, attendanceExceptions, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, dropshipVendors, dropshipProducts, dropshipSyncLogs, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingProductLists, marketingProductListItems, marketingDeliveryLogs, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
+import { bulkOrderImports } from "@shared/schema";
+import type { BulkOrderImport, InsertBulkOrderImport } from "@shared/schema";
+ import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertInventoryRemoveLog, type InventoryRemoveLog, type InventoryLogRow, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type CrmReactivationStage, type CrmReactivationCase, type CrmReactivationHistory, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, type MarketingProductList, type MarketingProductListItem, type MarketingDeliveryLog, type AttendanceSession, type InsertAttendanceSession, type AttendanceDailyNote, type AttendanceCheckpoint, type InsertAttendanceCheckpoint, type AttendanceException, type InsertAttendanceException, type DropshipProduct, type InsertDropshipProduct, type DropshipSyncLog, type DropshipVendor, type InsertDropshipSyncLog, type ZohoAccountMapping, type InsertZohoAccountMapping, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, inventoryRemoveLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, zohoAccountMappings, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, crmReactivationStages, crmReactivationCases, crmReactivationHistory, attendanceSessions, attendanceDailyNotes, attendanceLocationCheckpoints, attendanceExceptions, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, dropshipVendors, dropshipProducts, dropshipSyncLogs, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingProductLists, marketingProductListItems, marketingDeliveryLogs, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
 import { eq, desc, and, inArray, notInArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { normalizeMarketingProductDisplayOptions, DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS } from "@shared/marketing-products";
 import { attendanceAuditLog } from "@shared/schema";
 import type { AttendanceAuditLog, InsertAttendanceAuditLog } from "@shared/schema";
+
+export type AttendanceBreakInterval = {
+  break_started_at: Date;
+  break_ended_at: Date | null;
+  duration_seconds: number | null;
+};
 
 const MARKETING_US_STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -31,7 +39,11 @@ export interface IStorage {
   getAllUsers(): Promise<User[]>;
   updateUserStatus(id: number, is_enabled: boolean): Promise<void>;
   updateUserPermission(id: number, allow_bigcommerce_search: boolean): Promise<void>;
-  updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User>;
+  updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; avatar_data: string | null; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User>;
+  updateAccountPassword(id: number, passwordHash: string): Promise<void>;
+  clearPasswordResetTokens(userId: number): Promise<void>;
+  createPasswordResetToken(userId: number, tokenHash: string, expiresAt: Date): Promise<void>;
+  consumePasswordResetToken(tokenHash: string, passwordHash: string): Promise<number | null>;
   setAttendanceHomeLocation(id: number, latitude: string, longitude: string): Promise<User>;
   clearAttendanceHomeLocation(id: number): Promise<void>;
 
@@ -52,10 +64,15 @@ export interface IStorage {
   getOrdersByUser(userId: number): Promise<Order[]>;
   getPendingSyncOrders(): Promise<Order[]>;
   getDraftOrders(userId?: number): Promise<Order[]>;
+  createBulkOrderImport(order: InsertOrder | null, record: Omit<InsertBulkOrderImport, "order_id">): Promise<{ order: Order | null; importRecord: BulkOrderImport }>;
+  getBulkOrderImports(userId?: number): Promise<any[]>;
+  getBulkOrderImport(id: number): Promise<BulkOrderImport | undefined>;
+  getBulkOrderImportByHash(userId: number, fileHash: string): Promise<BulkOrderImport | undefined>;
   updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void>;
   updateOrderNote(id: number, note: string): Promise<void>;
   updateOrderCustomerNote(id: number, customerNote: string): Promise<void>;
-  getConsolidatedOrders(params: { page: number; limit: number; search?: string; createdBy?: number | null; syncStatus?: string; bcStatus?: string; dateFrom?: Date | null; dateTo?: Date | null; salesChannel?: "salesapp" | "allorders"; }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }>;
+  getConsolidatedOrders(params: { page: number; limit: number; search?: string; createdBy?: number | null; syncStatus?: string; bcStatus?: string; dateFrom?: Date | null; dateTo?: Date | null; brandId?: number | null; salesChannel?: "salesapp" | "allorders"; }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }>;
+  getDropshipBrandOrderStats(brandIds: number[], dateRanges: { todayStart: Date; tomorrowStart: Date; yesterdayStart: Date; monthStart: Date; }): Promise<Record<number, { today: number; yesterday: number; thisMonth: number; total: number }>>;
   getOrderDetail(id: number): Promise<any | null>;
   updateOrderSyncError(id: number, error: string): Promise<void>;
   updateOrderForSubmission(id: number, updates: { bigcommerce_customer_id: number; billing_address: any; status: string }): Promise<void>;
@@ -66,6 +83,9 @@ export interface IStorage {
   // Setting operations
   getSetting(key: string): Promise<any>;
   setSetting(key: string, value: any): Promise<void>;
+  storeConstantContactOAuthState(stateHash: string, value: { expiresAt: number; redirectUri: string }): Promise<void>;
+  consumeConstantContactOAuthState(stateHash: string): Promise<{ expiresAt: number; redirectUri: string } | null>;
+  purgeExpiredConstantContactOAuthStates(now: number): Promise<void>;
 
   // Dropshipping operations
   getDropshipVendorByCode(code: string): Promise<DropshipVendor | undefined>;
@@ -209,6 +229,12 @@ export interface IStorage {
   updateReactivationCase(customerId: number, userId: number, data: { stage_id?: number; owner_user_id?: number | null; pledge_status?: string; pledge_notes?: string | null; expected_order_date?: Date | null; expected_value?: string | null; next_action_date?: Date | null; next_action_note?: string | null }): Promise<any>;
   // CRM Metrics
   getCrmMetrics(opts: { search?: string; group?: string; state?: string; primaryRep?: number | "unassigned"; secondaryRep?: number | "unassigned"; customerType?: string; addressType?: string; assignedRep?: number | "unassigned"; visibilityScope?: string; visibilityUserId?: number; accountType?: string; status?: string }): Promise<{ total: number; healthy: number; watch: number; at_risk: number; lost: number; needs_follow_up: number; inactive: number; by_account_type: Record<string, number> }>;
+  getZohoAccountMappings(opts: { search?: string; status?: string; relationshipType?: string; limit?: number; offset?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<{ rows: any[]; total: number }>;
+  getZohoAccountMapping(id: number): Promise<ZohoAccountMapping | undefined>;
+  getZohoAccountMappingsForCustomer(customerId: number): Promise<ZohoAccountMapping[]>;
+  getAllZohoAccountMappings(): Promise<ZohoAccountMapping[]>;
+  saveZohoAccountMapping(data: InsertZohoAccountMapping): Promise<ZohoAccountMapping>;
+  deleteZohoAccountMapping(id: number): Promise<void>;
   // CRM Todos (rows in crm_customer_notes with activity_type='todo')
   getCrmTodos(opts: { userId?: number; allUsers?: boolean; status?: string; customerId?: number; visibilityScope?: string; visibilityUserId?: number }): Promise<any[]>;
   createCrmTodo(data: { customer_id?: number | null; title: string; note: string; priority?: string; due_date?: Date | null; assigned_to_user_id?: number | null; reminder_at?: Date | null; created_by: number }): Promise<any>;
@@ -233,16 +259,19 @@ export interface IStorage {
 
   // Attendance
   getAttendanceHomeLocation(userId: number): Promise<{ latitude: string | null; longitude: string | null; setAt: Date | null }>;
+  getAttendanceDailyNote(userId: number, workDate: string): Promise<string>;
+  saveAttendanceDailyNote(userId: number, workDate: string, note: string): Promise<AttendanceDailyNote>;
   getAttendanceById(id: number): Promise<AttendanceSession | undefined>;
   getActiveAttendanceForUser(userId: number): Promise<AttendanceSession | undefined>;
-  getAttendanceSessionsForDate(userId: number, workDate: string): Promise<AttendanceSession[]>;
-  getAttendanceHistoryForUser(userId: number, limit?: number): Promise<AttendanceSession[]>;
+  getAttendanceSessionsForDate(userId: number, workDate: string): Promise<Array<AttendanceSession & { breaks?: AttendanceBreakInterval[] }>>;
+  getAttendanceHistoryForUser(userId: number, limit?: number): Promise<Array<AttendanceSession & { daily_note?: string; breaks?: AttendanceBreakInterval[] }>>;
   createAttendance(data: InsertAttendanceSession): Promise<AttendanceSession>;
   updateAttendance(id: number, data: Partial<InsertAttendanceSession>): Promise<AttendanceSession | undefined>;
   approveAttendanceSecondSession(userId: number, workDate: string, actorUserId: number): Promise<AttendanceSession | undefined>;
   createAttendanceCheckpoint(data: InsertAttendanceCheckpoint): Promise<AttendanceCheckpoint>;
   getAttendanceCheckpoints(attendanceId: number): Promise<AttendanceCheckpoint[]>;
-  getAttendanceRecords(opts: { from?: string; to?: string; userId?: number; status?: string; startMethod?: string; reviewStatus?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
+  getAttendanceRecords(opts: { from?: string; to?: string; userId?: number; status?: string; startMethod?: string; reviewStatus?: string; limit?: number; offset?: number }): Promise<{ rows: Array<any & { breaks?: AttendanceBreakInterval[] }>; total: number }>;
+  getAttendanceBreakIntervals(attendanceIds: number[]): Promise<Record<number, AttendanceBreakInterval[]>>;
   getAttendanceAuditHistory(attendanceId: number): Promise<AttendanceAuditLog[]>;
   createAttendanceAuditLog(data: InsertAttendanceAuditLog): Promise<AttendanceAuditLog>;
   updateAttendanceReview(id: number, data: { review_status: string; approved_by?: number | null; approved_at?: Date | null; locked_at?: Date | null }): Promise<AttendanceSession | undefined>;
@@ -286,7 +315,7 @@ export interface IStorage {
   createMarketingDeliveryLog(data: { delivery_type: "campaign" | "order_form"; campaign_id?: number | null; customer_id?: number | null; source_key?: string | null; recipient_email: string; product_titles: string[]; sent_at?: Date; initiated_by?: number | null }): Promise<MarketingDeliveryLog>;
   getMarketingDeliveryLogs(opts?: { delivery_type?: "campaign" | "order_form"; campaign_id?: number; customer_id?: number; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
   getMarketingDeliveryLog(id: number): Promise<any | undefined>;
-  createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; sender_email?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any>;
+  createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; sender_email?: string; delivery_provider?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any>;
   updateMarketingCampaign(id: number, data: Record<string, unknown> & { customer_ids?: number[] }, userId: number): Promise<any | undefined>;
   deleteMarketingCampaign(id: number, userId: number): Promise<void>;
   updateMarketingCampaignStatus(id: number, status: string, userId: number): Promise<any | undefined>;
@@ -299,6 +328,7 @@ export interface IStorage {
   markMarketingRecipientFailed(id: number, reason: string, retryable?: boolean): Promise<void>;
   recordMarketingEvent(data: { campaign_id: number; recipient_id?: number | null; event_type: string; detail?: Record<string, unknown>; provider_event_id?: string | null }): Promise<void>;
   completeMarketingCampaign(id: number): Promise<any | undefined>;
+  completeConstantContactMarketingCampaign(id: number, recipientCount: number): Promise<any | undefined>;
   getMarketingRecipients(campaignId: number, opts?: { status?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
   getMarketingRecipient(id: number): Promise<any | undefined>;
   getMarketingAnalytics(opts?: { campaignId?: number; dateFrom?: string; dateTo?: string }): Promise<any>;
@@ -306,9 +336,27 @@ export interface IStorage {
   getMarketingCustomerPreference(customerId: number): Promise<any>;
   upsertMarketingCustomerPreference(customerId: number, data: { email_subscribed: boolean; userId?: number }): Promise<any>;
   getMarketingSuppressions(customerId?: number): Promise<any[]>;
+  getMarketingSuppressedEmails(): Promise<string[]>;
   createMarketingSuppression(data: { customerId: number; email?: string; reason: string; source?: string; createdBy?: number }): Promise<any>;
+  importConstantContactOptOutSuppressions(emails: string[], userId: number): Promise<{
+    importedCount: number;
+    alreadySuppressedCount: number;
+    matchedCrmCustomerCount: number;
+  }>;
   revokeMarketingSuppression(id: number, userId: number, detail?: string): Promise<any | undefined>;
   getMarketingAudiencePreview(filters: Record<string, unknown>, limit?: number): Promise<{ customers: any[]; total: number; suppressed: number }>;
+  getMarketingAudienceReadinessSummary(): Promise<{
+    activeCustomerCount: number;
+    suppressedActiveCustomerCount: number;
+    optedOutActiveCustomerCount: number;
+    activeSuppressionRuleCount: number;
+  }>;
+  getActiveCrmCustomersForMarketingReconciliation(): Promise<Array<{
+    crmCustomerId: number;
+    bigCommerceCustomerId: number;
+    company: string | null;
+    email: string;
+  }>>;
   getMarketingAutomations(opts?: { status?: string; search?: string }): Promise<any[]>;
   getMarketingAutomation(id: number): Promise<any | undefined>;
   createMarketingAutomation(data: { name: string; description?: string; trigger_type: string; trigger_config?: Record<string, unknown>; frequency_days?: number; created_by: number; steps: Array<{ action_type: string; action_config?: Record<string, unknown> }> }): Promise<any>;
@@ -319,11 +367,12 @@ export interface IStorage {
   updateMarketingAutomationExecution(id: number, data: Record<string, unknown>): Promise<void>;
   getMarketingAudiences(opts?: { search?: string; type?: string }): Promise<any[]>;
   getMarketingAudience(id: number): Promise<any | undefined>;
-  createMarketingAudience(data: { name: string; description?: string; audience_type: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; contact_ids?: number[]; created_by: number }): Promise<any>;
-  updateMarketingAudience(id: number, data: { name?: string; description?: string; audience_type?: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; contact_ids?: number[] }, userId: number): Promise<any | undefined>;
+  createMarketingAudience(data: { name: string; description?: string; audience_type: string; dynamic_filters?: Record<string, unknown>; constant_contact_list_id?: string | null; constant_contact_sync_issues?: unknown[]; customer_ids?: number[]; contact_ids?: number[]; created_by: number }): Promise<any>;
+  updateMarketingAudience(id: number, data: { name?: string; description?: string; audience_type?: string; dynamic_filters?: Record<string, unknown>; constant_contact_list_id?: string | null; constant_contact_last_synced_at?: Date | null; constant_contact_sync_issues?: unknown[]; customer_ids?: number[]; contact_ids?: number[] }, userId: number): Promise<any | undefined>;
   deleteMarketingAudience(id: number, userId: number): Promise<void>;
   getMarketingAudienceCustomers(opts?: { search?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number; limit: number; offset: number }>;
   getMarketingContacts(opts?: { search?: string; type?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number; limit: number; offset: number }>;
+  getMarketingContactsByIds(ids: number[]): Promise<any[]>;
   importMarketingContacts(records: Array<{ email: string; first_name?: string; last_name?: string; company?: string; phone?: string; contact_type: string }>, userId: number): Promise<{ imported: number; duplicates: number }>;
   deactivateMarketingContact(id: number): Promise<void>;
   getMarketingAudienceMembers(audienceId: number, opts?: { search?: string; source?: string; status?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }>;
@@ -478,9 +527,53 @@ export class DatabaseStorage implements IStorage {
     await db.update(users).set({ allow_bigcommerce_search }).where(eq(users.id, id));
   }
 
-  async updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User> {
+  async updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; avatar_data: string | null; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User> {
     const result = await db.update(users).set(data).where(eq(users.id, id)).returning();
     return result[0];
+  }
+
+  async updateAccountPassword(id: number, passwordHash: string): Promise<void> {
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({ password: passwordHash }).where(eq(users.id, id));
+      await tx.execute(sql`DELETE FROM password_reset_tokens WHERE user_id = ${id}`);
+    });
+  }
+
+  async clearPasswordResetTokens(userId: number): Promise<void> {
+    await db.execute(sql`DELETE FROM password_reset_tokens WHERE user_id = ${userId}`);
+  }
+
+  async createPasswordResetToken(userId: number, tokenHash: string, expiresAt: Date): Promise<void> {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`DELETE FROM password_reset_tokens WHERE user_id = ${userId}`);
+      await tx.execute(sql`
+        INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+        VALUES (${userId}, ${tokenHash}, ${expiresAt})
+      `);
+    });
+  }
+
+  async consumePasswordResetToken(tokenHash: string, passwordHash: string): Promise<number | null> {
+    return db.transaction(async (tx) => {
+      const result = await tx.execute(sql`
+        SELECT user_id
+        FROM password_reset_tokens
+        WHERE token_hash = ${tokenHash}
+          AND used_at IS NULL
+          AND expires_at > now()
+        FOR UPDATE
+      `);
+      const userId = Number((result.rows[0] as { user_id?: number } | undefined)?.user_id);
+      if (!Number.isInteger(userId) || userId <= 0) return null;
+
+      await tx.update(users).set({ password: passwordHash }).where(eq(users.id, userId));
+      await tx.execute(sql`
+        UPDATE password_reset_tokens
+        SET used_at = now()
+        WHERE token_hash = ${tokenHash}
+      `);
+      return userId;
+    });
   }
 
   async setAttendanceHomeLocation(id: number, latitude: string, longitude: string): Promise<User> {
@@ -567,17 +660,78 @@ export class DatabaseStorage implements IStorage {
         order: orders,
         created_by_name: users.name,
         created_by_username: users.username,
+        bulk_order_import_id: bulkOrderImports.id,
       })
       .from(orders)
       .leftJoin(users, eq(orders.created_by_user_id, users.id))
+      .leftJoin(bulkOrderImports, eq(bulkOrderImports.order_id, orders.id))
       .where(whereClause)
       .orderBy(desc(orders.date));
 
-    return rows.map(({ order, created_by_name, created_by_username }) => ({
+    return rows.map(({ order, created_by_name, created_by_username, bulk_order_import_id }) => ({
       ...order,
       created_by_name: created_by_name ?? undefined,
       created_by_username: created_by_username ?? undefined,
+      bulk_order_import_id: bulk_order_import_id ?? undefined,
     }));
+  }
+
+  async createBulkOrderImport(
+    order: InsertOrder | null,
+    record: Omit<InsertBulkOrderImport, "order_id">,
+  ): Promise<{ order: Order | null; importRecord: BulkOrderImport }> {
+    return db.transaction(async (tx) => {
+      let createdOrder: Order | null = null;
+      if (order) {
+        const [insertedOrder] = await tx.insert(orders).values(order).returning();
+        createdOrder = insertedOrder;
+      }
+      const [importRecord] = await tx.insert(bulkOrderImports).values({
+        ...record,
+        order_id: createdOrder?.id ?? null,
+      }).returning();
+      return { order: createdOrder, importRecord };
+    });
+  }
+
+  async getBulkOrderImports(userId?: number): Promise<any[]> {
+    const query = db.select({
+      id: bulkOrderImports.id,
+      order_id: bulkOrderImports.order_id,
+      source_file_name: bulkOrderImports.source_file_name,
+      customer_name: bulkOrderImports.customer_name,
+      customer_email: bulkOrderImports.customer_email,
+      missing_file_name: bulkOrderImports.missing_file_name,
+      source_row_count: bulkOrderImports.source_row_count,
+      drafted_item_count: bulkOrderImports.drafted_item_count,
+      missing_item_count: bulkOrderImports.missing_item_count,
+      missing_quantity: bulkOrderImports.missing_quantity,
+      created_by_user_id: bulkOrderImports.created_by_user_id,
+      created_by_name: users.name,
+      created_at: bulkOrderImports.created_at,
+      order_status: orders.status,
+      order_total: orders.total,
+    })
+      .from(bulkOrderImports)
+      .leftJoin(orders, eq(bulkOrderImports.order_id, orders.id))
+      .leftJoin(users, eq(bulkOrderImports.created_by_user_id, users.id));
+
+    return userId == null
+      ? query.orderBy(desc(bulkOrderImports.created_at))
+      : query.where(eq(bulkOrderImports.created_by_user_id, userId)).orderBy(desc(bulkOrderImports.created_at));
+  }
+
+  async getBulkOrderImport(id: number): Promise<BulkOrderImport | undefined> {
+    const [record] = await db.select().from(bulkOrderImports).where(eq(bulkOrderImports.id, id));
+    return record;
+  }
+
+  async getBulkOrderImportByHash(userId: number, fileHash: string): Promise<BulkOrderImport | undefined> {
+    const [record] = await db.select().from(bulkOrderImports).where(and(
+      eq(bulkOrderImports.created_by_user_id, userId),
+      eq(bulkOrderImports.source_file_hash, fileHash),
+    ));
+    return record;
   }
 
   async updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void> {
@@ -621,11 +775,16 @@ export class DatabaseStorage implements IStorage {
   async getConsolidatedOrders(params: {
     page: number; limit: number; search?: string;
     createdBy?: number | null; syncStatus?: string; bcStatus?: string;
-    dateFrom?: Date | null; dateTo?: Date | null;
+    dateFrom?: Date | null; dateTo?: Date | null; brandId?: number | null;
     salesChannel?: "salesapp" | "allorders";
   }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }> {
-    const { page, limit, search, createdBy, syncStatus, bcStatus, dateFrom, dateTo, salesChannel = "salesapp" } = params;
+    const { page, limit, search, createdBy, syncStatus, bcStatus, dateFrom, dateTo, brandId, salesChannel = "salesapp" } = params;
     const offset = (page - 1) * limit;
+    const brandOrderIds = brandId == null ? null : db
+      .selectDistinct({ orderId: bcOrderLineItems.bigcommerce_order_id })
+      .from(bcOrderLineItems)
+      .innerJoin(products, eq(products.bigcommerce_id, bcOrderLineItems.bigcommerce_product_id))
+      .where(eq(products.brand_id, brandId));
 
     // ── All Orders mode: pull from customerOrdersMirror (BC-synced data) ──────
     if (salesChannel === "allorders") {
@@ -643,6 +802,7 @@ export class DatabaseStorage implements IStorage {
       if (bcStatus)   conds.push(eq(customerOrdersMirror.status, bcStatus));
       if (dateFrom)   conds.push(sql`${customerOrdersMirror.order_date} >= ${dateFrom}`);
       if (dateTo)     conds.push(sql`${customerOrdersMirror.order_date} <= ${dateTo}`);
+      if (brandOrderIds) conds.push(inArray(customerOrdersMirror.bigcommerce_order_id, brandOrderIds));
       const where = conds.length > 0 ? and(...conds) : undefined;
 
       const [rows, [countRow], [kpiRow]] = await Promise.all([
@@ -720,6 +880,7 @@ export class DatabaseStorage implements IStorage {
     if (syncStatus)        conds.push(eq(orders.status, syncStatus));
     if (dateFrom)          conds.push(sql`${orders.date} >= ${dateFrom}`);
     if (dateTo)            conds.push(sql`${orders.date} <= ${dateTo}`);
+    if (brandOrderIds)     conds.push(inArray(orders.bigcommerce_order_id, brandOrderIds));
 
     const bcStatusCond = bcStatus ? eq(customerOrdersMirror.status, bcStatus) : undefined;
     const where = conds.length > 0 ? and(...conds) : undefined;
@@ -793,6 +954,41 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  async getDropshipBrandOrderStats(
+    brandIds: number[],
+    dateRanges: { todayStart: Date; tomorrowStart: Date; yesterdayStart: Date; monthStart: Date },
+  ): Promise<Record<number, { today: number; yesterday: number; thisMonth: number; total: number }>> {
+    if (brandIds.length === 0) return {};
+    const rows = await db.select({
+      brandId: products.brand_id,
+      today: sql<number>`COUNT(DISTINCT ${customerOrdersMirror.bigcommerce_order_id}) FILTER (
+        WHERE ${customerOrdersMirror.order_date} >= ${dateRanges.todayStart}
+          AND ${customerOrdersMirror.order_date} < ${dateRanges.tomorrowStart}
+      )`,
+      yesterday: sql<number>`COUNT(DISTINCT ${customerOrdersMirror.bigcommerce_order_id}) FILTER (
+        WHERE ${customerOrdersMirror.order_date} >= ${dateRanges.yesterdayStart}
+          AND ${customerOrdersMirror.order_date} < ${dateRanges.todayStart}
+      )`,
+      thisMonth: sql<number>`COUNT(DISTINCT ${customerOrdersMirror.bigcommerce_order_id}) FILTER (
+        WHERE ${customerOrdersMirror.order_date} >= ${dateRanges.monthStart}
+          AND ${customerOrdersMirror.order_date} < ${dateRanges.tomorrowStart}
+      )`,
+      total: sql<number>`COUNT(DISTINCT ${customerOrdersMirror.bigcommerce_order_id})`,
+    })
+      .from(bcOrderLineItems)
+      .innerJoin(products, eq(products.bigcommerce_id, bcOrderLineItems.bigcommerce_product_id))
+      .innerJoin(customerOrdersMirror, eq(customerOrdersMirror.bigcommerce_order_id, bcOrderLineItems.bigcommerce_order_id))
+      .where(inArray(products.brand_id, brandIds))
+      .groupBy(products.brand_id);
+
+    return Object.fromEntries(rows.map((row) => [Number(row.brandId), {
+      today: Number(row.today ?? 0),
+      yesterday: Number(row.yesterday ?? 0),
+      thisMonth: Number(row.thisMonth ?? 0),
+      total: Number(row.total ?? 0),
+    }]));
+  }
+
   async getOrderDetail(id: number): Promise<any | null> {
     const [row] = await db.select({
       id: orders.id,
@@ -836,6 +1032,42 @@ export class DatabaseStorage implements IStorage {
   async setSetting(key: string, value: any): Promise<void> {
     await db.insert(settings).values({ key, value })
       .onConflictDoUpdate({ target: settings.key, set: { value } });
+  }
+
+  async storeConstantContactOAuthState(
+    stateHash: string,
+    value: { expiresAt: number; redirectUri: string },
+  ): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(stateHash)) throw new Error("Invalid Constant Contact OAuth state hash.");
+    await db.insert(settings)
+      .values({ key: `constant_contact_oauth_state:${stateHash}`, value })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value },
+      });
+  }
+
+  async consumeConstantContactOAuthState(
+    stateHash: string,
+  ): Promise<{ expiresAt: number; redirectUri: string } | null> {
+    if (!/^[a-f0-9]{64}$/.test(stateHash)) return null;
+    const [record] = await db.delete(settings)
+      .where(eq(settings.key, `constant_contact_oauth_state:${stateHash}`))
+      .returning({ value: settings.value });
+    const value = record?.value as { expiresAt?: unknown; redirectUri?: unknown } | undefined;
+    if (!value || typeof value !== "object") return null;
+    return {
+      expiresAt: Number(value.expiresAt),
+      redirectUri: typeof value.redirectUri === "string" ? value.redirectUri : "",
+    };
+  }
+
+  async purgeExpiredConstantContactOAuthStates(now: number): Promise<void> {
+    const prefix = "constant_contact_oauth_state:";
+    await db.delete(settings).where(and(
+      sql`left(${settings.key}, ${prefix.length}) = ${prefix}`,
+      sql`(${settings.value}->>'expiresAt')::bigint <= ${now}`,
+    ));
   }
 
   // ── Dropshipping ─────────────────────────────────────────────────────────
@@ -1476,6 +1708,18 @@ export class DatabaseStorage implements IStorage {
         ilike(customersMirror.email, s),
         ilike(customersMirror.phone, s),
         sql`coalesce(${customersMirror.shipping_address}->>'city', ${customersMirror.billing_address}->>'city') ILIKE ${s}`,
+        sql`coalesce(${customersMirror.shipping_address}->>'state', ${customersMirror.billing_address}->>'state') ILIKE ${s}`,
+        sql`coalesce(${customersMirror.shipping_address}->>'zip', ${customersMirror.billing_address}->>'zip', ${customersMirror.shipping_address}->>'postal_code', ${customersMirror.billing_address}->>'postal_code') ILIKE ${s}`,
+        sql`concat_ws(' ',
+          ${customersMirror.shipping_address}->>'address1',
+          ${customersMirror.shipping_address}->>'address2',
+          ${customersMirror.shipping_address}->>'street_1',
+          ${customersMirror.shipping_address}->>'street_2',
+          ${customersMirror.billing_address}->>'address1',
+          ${customersMirror.billing_address}->>'address2',
+          ${customersMirror.billing_address}->>'street_1',
+          ${customersMirror.billing_address}->>'street_2'
+        ) ILIKE ${s}`,
       ));
     }
     if (group) conditions.push(eq(customersMirror.customer_group_name, group));
@@ -2670,6 +2914,25 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  async getAttendanceDailyNote(userId: number, workDate: string): Promise<string> {
+    const [row] = await db.select({ note: attendanceDailyNotes.note })
+      .from(attendanceDailyNotes)
+      .where(and(eq(attendanceDailyNotes.user_id, userId), eq(attendanceDailyNotes.work_date, workDate)))
+      .limit(1);
+    return row?.note ?? "";
+  }
+
+  async saveAttendanceDailyNote(userId: number, workDate: string, note: string): Promise<AttendanceDailyNote> {
+    const rows = await db.insert(attendanceDailyNotes)
+      .values({ user_id: userId, work_date: workDate, note })
+      .onConflictDoUpdate({
+        target: [attendanceDailyNotes.user_id, attendanceDailyNotes.work_date],
+        set: { note, updated_at: new Date() },
+      })
+      .returning();
+    return rows[0];
+  }
+
   async getAttendanceById(id: number): Promise<AttendanceSession | undefined> {
     const rows = await db.select().from(attendanceSessions).where(eq(attendanceSessions.id, id)).limit(1);
     return rows[0];
@@ -2677,23 +2940,34 @@ export class DatabaseStorage implements IStorage {
 
   async getActiveAttendanceForUser(userId: number): Promise<AttendanceSession | undefined> {
     const rows = await db.select().from(attendanceSessions)
-      .where(and(eq(attendanceSessions.user_id, userId), eq(attendanceSessions.status, "active")))
+      .where(and(eq(attendanceSessions.user_id, userId), inArray(attendanceSessions.status, ["active", "on_break"])))
       .orderBy(desc(attendanceSessions.time_in))
       .limit(1);
     return rows[0];
   }
 
   async getAttendanceSessionsForDate(userId: number, workDate: string): Promise<AttendanceSession[]> {
-    return db.select().from(attendanceSessions)
+    const rows = await db.select().from(attendanceSessions)
       .where(and(eq(attendanceSessions.user_id, userId), eq(attendanceSessions.work_date, workDate)))
       .orderBy(asc(attendanceSessions.session_number), asc(attendanceSessions.time_in), asc(attendanceSessions.created_at));
+    const breaks = await this.getAttendanceBreakIntervals(rows.map(row => row.id));
+    return rows.map(row => ({ ...row, breaks: breaks[row.id] ?? [] }));
   }
 
-  async getAttendanceHistoryForUser(userId: number, limit = 30): Promise<AttendanceSession[]> {
-    return db.select().from(attendanceSessions)
+  async getAttendanceHistoryForUser(userId: number, limit = 30): Promise<Array<AttendanceSession & { daily_note?: string; breaks?: AttendanceBreakInterval[] }>> {
+    const rows = await db.select({
+      attendance: attendanceSessions,
+      daily_note: attendanceDailyNotes.note,
+    }).from(attendanceSessions)
+      .leftJoin(attendanceDailyNotes, and(
+        eq(attendanceDailyNotes.user_id, attendanceSessions.user_id),
+        eq(attendanceDailyNotes.work_date, attendanceSessions.work_date),
+      ))
       .where(eq(attendanceSessions.user_id, userId))
       .orderBy(desc(attendanceSessions.time_in), desc(attendanceSessions.created_at))
       .limit(Math.min(Math.max(limit, 1), 100));
+    const breaks = await this.getAttendanceBreakIntervals(rows.map(row => row.attendance.id));
+    return rows.map(row => ({ ...row.attendance, daily_note: row.daily_note ?? "", breaks: breaks[row.attendance.id] ?? [] }));
   }
 
   async createAttendance(data: InsertAttendanceSession): Promise<AttendanceSession> {
@@ -2737,7 +3011,11 @@ export class DatabaseStorage implements IStorage {
     if (opts.from) conditions.push(gte(attendanceSessions.work_date, opts.from));
     if (opts.to) conditions.push(lte(attendanceSessions.work_date, opts.to));
     if (opts.userId) conditions.push(eq(attendanceSessions.user_id, opts.userId));
-    if (opts.status && opts.status !== "all") conditions.push(eq(attendanceSessions.status, opts.status));
+    if (opts.status && opts.status !== "all") {
+      conditions.push(opts.status === "active"
+        ? inArray(attendanceSessions.status, ["active", "on_break"])
+        : eq(attendanceSessions.status, opts.status));
+    }
     if (opts.startMethod && opts.startMethod !== "all") conditions.push(eq(attendanceSessions.start_method, opts.startMethod));
     if (opts.reviewStatus && opts.reviewStatus !== "all") {
       if (opts.reviewStatus === "missing_time_out") {
@@ -2752,19 +3030,91 @@ export class DatabaseStorage implements IStorage {
         attendance: attendanceSessions,
         employee_name: users.name,
         employee_username: users.username,
+        daily_note: attendanceDailyNotes.note,
       })
         .from(attendanceSessions)
         .leftJoin(users, eq(users.id, attendanceSessions.user_id))
+        .leftJoin(attendanceDailyNotes, and(
+          eq(attendanceDailyNotes.user_id, attendanceSessions.user_id),
+          eq(attendanceDailyNotes.work_date, attendanceSessions.work_date),
+        ))
         .where(where)
         .orderBy(desc(attendanceSessions.work_date), desc(attendanceSessions.time_in))
          .limit(Math.min(Math.max(opts.limit ?? 100, 1), 5000))
         .offset(Math.max(opts.offset ?? 0, 0)),
       db.select({ count: sql<number>`count(*)` }).from(attendanceSessions).where(where),
     ]);
+    const attendanceRows = rows.map(row => ({
+        ...row.attendance,
+        employee_name: row.employee_name,
+        employee_username: row.employee_username,
+        daily_note: row.daily_note ?? "",
+      }));
+    const breaks = await this.getAttendanceBreakIntervals(attendanceRows.map(row => row.id));
     return {
-      rows: rows.map(row => ({ ...row.attendance, employee_name: row.employee_name, employee_username: row.employee_username })),
+      rows: attendanceRows.map(row => ({ ...row, breaks: breaks[row.id] ?? [] })),
       total: Number(countRows[0]?.count ?? 0),
     };
+  }
+
+  async getAttendanceBreakIntervals(attendanceIds: number[]): Promise<Record<number, AttendanceBreakInterval[]>> {
+    const result: Record<number, AttendanceBreakInterval[]> = {};
+    if (!attendanceIds.length) return result;
+    const [auditRows, checkpointRows] = await Promise.all([
+      db.select({
+        attendance_id: attendanceAuditLog.attendance_id,
+        action: attendanceAuditLog.action,
+        created_at: attendanceAuditLog.created_at,
+      }).from(attendanceAuditLog)
+        .where(and(
+          inArray(attendanceAuditLog.attendance_id, attendanceIds),
+          inArray(attendanceAuditLog.action, ["break_started", "break_ended"]),
+        ))
+        .orderBy(asc(attendanceAuditLog.created_at)),
+      db.select({
+        attendance_id: attendanceLocationCheckpoints.attendance_id,
+        checkpoint_type: attendanceLocationCheckpoints.checkpoint_type,
+        captured_at: attendanceLocationCheckpoints.captured_at,
+      }).from(attendanceLocationCheckpoints)
+        .where(and(
+          inArray(attendanceLocationCheckpoints.attendance_id, attendanceIds),
+          inArray(attendanceLocationCheckpoints.checkpoint_type, ["break_start", "break_end"]),
+        ))
+        .orderBy(asc(attendanceLocationCheckpoints.captured_at)),
+    ]);
+    const events = new Map<number, Array<{ type: "start" | "end"; at: Date }>>();
+    const addEvent = (attendanceId: number, type: "start" | "end", value: Date | null) => {
+      if (!value) return;
+      const list = events.get(attendanceId) ?? [];
+      if (!list.some(event => event.type === type && Math.abs(event.at.getTime() - value.getTime()) <= 1000)) {
+        list.push({ type, at: value });
+        events.set(attendanceId, list);
+      }
+    };
+    for (const row of auditRows) addEvent(row.attendance_id, row.action === "break_started" ? "start" : "end", row.created_at);
+    for (const row of checkpointRows) addEvent(row.attendance_id, row.checkpoint_type === "break_start" ? "start" : "end", row.captured_at);
+    for (const [attendanceId, list] of events) {
+      list.sort((a, b) => a.at.getTime() - b.at.getTime());
+      let open: Date | null = null;
+      const intervals: AttendanceBreakInterval[] = [];
+      for (const event of list) {
+        if (event.type === "start") {
+          if (!open) open = event.at;
+          continue;
+        }
+        if (open && event.at.getTime() >= open.getTime()) {
+          intervals.push({
+            break_started_at: open,
+            break_ended_at: event.at,
+            duration_seconds: Math.floor((event.at.getTime() - open.getTime()) / 1000),
+          });
+          open = null;
+        }
+      }
+      if (open) intervals.push({ break_started_at: open, break_ended_at: null, duration_seconds: null });
+      result[attendanceId] = intervals;
+    }
+    return result;
   }
 
   async getAttendanceAuditHistory(attendanceId: number): Promise<AttendanceAuditLog[]> {
@@ -2851,6 +3201,138 @@ export class DatabaseStorage implements IStorage {
     await db.update(customerOrdersMirror)
       .set({ ...data, updated_at: new Date() })
       .where(eq(customerOrdersMirror.bigcommerce_order_id, bcOrderId));
+  }
+
+  // ─── Zoho CRM Account Mapping ───────────────────────────────────────────────
+
+  async getZohoAccountMappings(opts: {
+    search?: string;
+    status?: string;
+    relationshipType?: string;
+    limit?: number;
+    offset?: number;
+    visibilityScope?: string;
+    visibilityUserId?: number;
+  }): Promise<{ rows: any[]; total: number }> {
+    const { search, status, relationshipType, limit = 50, offset = 0, visibilityScope, visibilityUserId } = opts;
+    const conditions: any[] = [];
+    if (status && status !== "all") conditions.push(eq(zohoAccountMappings.status, status));
+    if (relationshipType && relationshipType !== "all") {
+      conditions.push(eq(zohoAccountMappings.relationship_type, relationshipType));
+    }
+    const query = String(search ?? "").trim();
+    if (query) {
+      const pattern = `%${query}%`;
+      conditions.push(or(
+        ilike(customersMirror.company, pattern),
+        ilike(customersMirror.first_name, pattern),
+        ilike(customersMirror.last_name, pattern),
+        ilike(customersMirror.email, pattern),
+        ilike(zohoAccountMappings.zoho_account_name, pattern),
+        ilike(zohoAccountMappings.zoho_account_id, pattern),
+        sql`${customersMirror.bigcommerce_customer_id}::text ILIKE ${pattern}`,
+      ));
+    }
+    conditions.push(...this.buildCrmRepConditions(undefined, visibilityScope, visibilityUserId));
+    const where = conditions.length ? and(...conditions) : undefined;
+    const countRows = await db.select({
+      count: sql<number>`count(distinct ${zohoAccountMappings.id})::int`,
+    })
+      .from(zohoAccountMappings)
+      .innerJoin(customersMirror, eq(customersMirror.id, zohoAccountMappings.customer_id))
+      .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+      .where(where);
+    const rows = await db.select({
+      mapping: zohoAccountMappings,
+      customer: customersMirror,
+      mapped_by_name: users.name,
+    })
+      .from(zohoAccountMappings)
+      .innerJoin(customersMirror, eq(customersMirror.id, zohoAccountMappings.customer_id))
+      .leftJoin(customerSalesRep, eq(customerSalesRep.customer_id, customersMirror.id))
+      .leftJoin(users, eq(users.id, zohoAccountMappings.mapped_by_user_id))
+      .where(where)
+      .orderBy(desc(zohoAccountMappings.updated_at))
+      .limit(Math.min(Math.max(limit, 1), 200))
+      .offset(Math.max(offset, 0));
+    return {
+      rows: rows.map(row => ({
+        ...row.mapping,
+        customer: row.customer,
+        mapped_by_name: row.mapped_by_name ?? null,
+      })),
+      total: countRows[0]?.count ?? 0,
+    };
+  }
+
+  async getZohoAccountMapping(id: number): Promise<ZohoAccountMapping | undefined> {
+    const rows = await db.select().from(zohoAccountMappings).where(eq(zohoAccountMappings.id, id));
+    return rows[0];
+  }
+
+  async getZohoAccountMappingsForCustomer(customerId: number): Promise<ZohoAccountMapping[]> {
+    return db.select()
+      .from(zohoAccountMappings)
+      .where(eq(zohoAccountMappings.customer_id, customerId))
+      .orderBy(desc(zohoAccountMappings.relationship_type), desc(zohoAccountMappings.updated_at));
+  }
+
+  async getAllZohoAccountMappings(): Promise<ZohoAccountMapping[]> {
+    return db.select().from(zohoAccountMappings).orderBy(desc(zohoAccountMappings.updated_at));
+  }
+
+  async saveZohoAccountMapping(data: InsertZohoAccountMapping): Promise<ZohoAccountMapping> {
+    return db.transaction(async tx => {
+      if (!data.zoho_account_id) {
+        const existing = await tx.select()
+          .from(zohoAccountMappings)
+          .where(and(
+            eq(zohoAccountMappings.customer_id, data.customer_id),
+            eq(zohoAccountMappings.status, "unmatched"),
+          ))
+          .limit(1);
+        const existingRow = existing[0] as ZohoAccountMapping | undefined;
+        if (existingRow) {
+          const rows = await tx.update(zohoAccountMappings)
+            .set({ ...data, updated_at: new Date() })
+            .where(eq(zohoAccountMappings.id, existingRow.id))
+            .returning();
+          return rows[0];
+        }
+      }
+      if (data.relationship_type === "primary") {
+        await tx.update(zohoAccountMappings)
+          .set({ relationship_type: "additional", updated_at: new Date() })
+          .where(and(
+            eq(zohoAccountMappings.customer_id, data.customer_id),
+            eq(zohoAccountMappings.relationship_type, "primary"),
+          ));
+      }
+      const rows = await tx.insert(zohoAccountMappings)
+        .values({ ...data, updated_at: new Date() })
+        .onConflictDoUpdate({
+          target: [zohoAccountMappings.customer_id, zohoAccountMappings.zoho_account_id],
+          set: {
+            zoho_account_name: data.zoho_account_name,
+            zoho_account_email: data.zoho_account_email ?? null,
+            zoho_account_phone: data.zoho_account_phone ?? null,
+            relationship_type: data.relationship_type,
+            status: data.status,
+            match_method: data.match_method,
+            manually_confirmed: data.manually_confirmed,
+            last_error: data.last_error ?? null,
+            last_checked_at: data.last_checked_at ?? null,
+            mapped_by_user_id: data.mapped_by_user_id ?? null,
+            updated_at: new Date(),
+          },
+        })
+        .returning();
+      return rows[0];
+    });
+  }
+
+  async deleteZohoAccountMapping(id: number): Promise<void> {
+    await db.delete(zohoAccountMappings).where(eq(zohoAccountMappings.id, id));
   }
 
   // ─── CRM Audit Log ────────────────────────────────────────────────────────────
@@ -3135,6 +3617,7 @@ export class DatabaseStorage implements IStorage {
         .from(marketingAudienceMembers).where(eq(marketingAudienceMembers.audience_id, audienceId));
       return rows[0]?.count ?? 0;
     }
+    if (audience[0].audience_type === "constant_contact") return 0;
     return this.getMarketingDynamicCustomerCount((audience[0].dynamic_filters ?? {}) as Record<string, unknown>);
   }
 
@@ -3250,7 +3733,7 @@ export class DatabaseStorage implements IStorage {
     return { ...campaign, audience_count: audienceCount, recipients, activity: activity.map(row => ({ ...row.a, user_name: row.user_name })) };
   }
 
-  async createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; sender_email?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any> {
+  async createMarketingCampaign(data: { name: string; internal_description?: string; campaign_type?: string; subject_line?: string; preview_text?: string; message_content?: string; sender_email?: string; delivery_provider?: string; audience_type: string; audience_id?: number | null; audience_config?: Record<string, unknown>; template_id?: number | null; product_snapshots?: unknown[]; product_display_options?: unknown; scheduled_at?: Date | null; timezone?: string; created_by: number; customer_ids?: number[] }): Promise<any> {
     const customerIds = [...new Set((data.customer_ids ?? []).filter(Number.isInteger))];
     const recipientCount = !data.audience_type
       ? 0
@@ -3272,6 +3755,7 @@ export class DatabaseStorage implements IStorage {
         preview_text: data.preview_text ?? "",
         message_content: data.message_content ?? "",
         sender_email: data.sender_email ?? "",
+        delivery_provider: data.delivery_provider ?? "zoho",
         audience_type: data.audience_type,
         audience_id: data.audience_id ?? null,
         audience_config: data.audience_config ?? {},
@@ -3295,7 +3779,7 @@ export class DatabaseStorage implements IStorage {
   async updateMarketingCampaign(id: number, data: Record<string, unknown> & { customer_ids?: number[] }, userId: number): Promise<any | undefined> {
     const [current] = await db.select().from(marketingCampaigns).where(eq(marketingCampaigns.id, id)).limit(1);
     if (!current) return undefined;
-     const allowed = ["name", "internal_description", "campaign_type", "subject_line", "preview_text", "message_content", "sender_email", "audience_type", "audience_id", "audience_config", "template_id", "product_snapshots", "product_display_options", "scheduled_at", "timezone"] as const;
+     const allowed = ["name", "internal_description", "campaign_type", "subject_line", "preview_text", "message_content", "sender_email", "constant_contact_campaign_id", "constant_contact_activity_id", "audience_type", "audience_id", "audience_config", "template_id", "product_snapshots", "product_display_options", "scheduled_at", "timezone"] as const;
     const update: Record<string, unknown> = {};
     for (const key of allowed) if (key in data) update[key] = data[key];
     if ("scheduled_at" in update) {
@@ -3630,11 +4114,12 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async createMarketingAudience(data: { name: string; description?: string; audience_type: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; contact_ids?: number[]; created_by: number }): Promise<any> {
+  async createMarketingAudience(data: { name: string; description?: string; audience_type: string; dynamic_filters?: Record<string, unknown>; constant_contact_list_id?: string | null; constant_contact_sync_issues?: unknown[]; customer_ids?: number[]; contact_ids?: number[]; created_by: number }): Promise<any> {
     const audience = await db.transaction(async tx => {
       const [created] = await tx.insert(marketingAudiences).values({
         name: data.name.trim(), description: data.description ?? "", audience_type: data.audience_type,
-        dynamic_filters: data.dynamic_filters ?? {}, created_by: data.created_by,
+        dynamic_filters: data.dynamic_filters ?? {}, constant_contact_list_id: data.constant_contact_list_id ?? null,
+        constant_contact_sync_issues: data.constant_contact_sync_issues ?? [], created_by: data.created_by,
       }).returning();
       const customerIds = Array.from(new Set((data.customer_ids ?? []).filter(Number.isInteger)));
       const contactIds = Array.from(new Set((data.contact_ids ?? []).filter(Number.isInteger)));
@@ -3649,9 +4134,9 @@ export class DatabaseStorage implements IStorage {
     return this.getMarketingAudience(audience.id);
   }
 
-  async updateMarketingAudience(id: number, data: { name?: string; description?: string; audience_type?: string; dynamic_filters?: Record<string, unknown>; customer_ids?: number[]; contact_ids?: number[] }, userId: number): Promise<any | undefined> {
+  async updateMarketingAudience(id: number, data: { name?: string; description?: string; audience_type?: string; dynamic_filters?: Record<string, unknown>; constant_contact_list_id?: string | null; constant_contact_last_synced_at?: Date | null; constant_contact_sync_issues?: unknown[]; customer_ids?: number[]; contact_ids?: number[] }, userId: number): Promise<any | undefined> {
     const update: Record<string, unknown> = { updated_at: new Date() };
-    for (const key of ["name", "description", "audience_type", "dynamic_filters"] as const) if (data[key] !== undefined) update[key] = data[key];
+    for (const key of ["name", "description", "audience_type", "dynamic_filters", "constant_contact_list_id", "constant_contact_last_synced_at", "constant_contact_sync_issues"] as const) if (data[key] !== undefined) update[key] = data[key];
     const [updated] = await db.update(marketingAudiences).set(update as any).where(eq(marketingAudiences.id, id)).returning();
     if (!updated) return undefined;
     if (data.customer_ids || data.contact_ids) {
@@ -3706,6 +4191,15 @@ export class DatabaseStorage implements IStorage {
     return { rows, total: countRows[0]?.count ?? 0, limit, offset };
   }
 
+  async getMarketingContactsByIds(ids: number[]): Promise<any[]> {
+    const uniqueIds = Array.from(new Set(ids.filter(id => Number.isInteger(id) && id > 0)));
+    if (!uniqueIds.length) return [];
+    return db.select().from(marketingContacts).where(and(
+      inArray(marketingContacts.id, uniqueIds),
+      eq(marketingContacts.is_active, true),
+    ));
+  }
+
   async importMarketingContacts(records: Array<{ email: string; first_name?: string; last_name?: string; company?: string; phone?: string; contact_type: string }>, userId: number): Promise<{ imported: number; duplicates: number }> {
     let imported = 0;
     for (const record of records) {
@@ -3733,9 +4227,16 @@ export class DatabaseStorage implements IStorage {
     const sourceExpr = sql<string>`case when ${marketingAudienceMembers.marketing_contact_id} is not null then 'imported' else 'crm' end`;
     const statusExpr = sql<string>`case
       when ${marketingAudienceMembers.marketing_contact_id} is not null and ${marketingContacts.is_active} = false then 'inactive'
-      when ${marketingAudienceMembers.customer_id} is not null and (
-        coalesce(${marketingCustomerPreferences.email_subscribed}, true) = false
-        or exists (select 1 from marketing_suppressions ms where ms.customer_id = ${marketingAudienceMembers.customer_id} and ms.revoked_at is null)
+      when (
+        (${marketingAudienceMembers.customer_id} is not null and coalesce(${marketingCustomerPreferences.email_subscribed}, true) = false)
+        or exists (
+          select 1 from marketing_suppressions ms
+          where ms.revoked_at is null
+            and (
+              ms.customer_id = ${marketingAudienceMembers.customer_id}
+              or lower(trim(ms.email)) = lower(trim(coalesce(${customersMirror.email}, ${marketingContacts.email})))
+            )
+        )
       ) then 'suppressed'
       else 'eligible' end`;
     const conditions: any[] = [eq(marketingAudienceMembers.audience_id, audienceId)];
@@ -3893,10 +4394,39 @@ export class DatabaseStorage implements IStorage {
         inArray(customersMirror.id, customerIds),
         or(
           eq(marketingCustomerPreferences.email_subscribed, false),
-          sql`EXISTS (SELECT 1 FROM marketing_suppressions ms WHERE ms.customer_id = ${customersMirror.id} AND ms.revoked_at IS NULL)`,
+          sql`EXISTS (
+            SELECT 1 FROM marketing_suppressions ms
+            WHERE ms.revoked_at IS NULL
+              AND (
+                ms.customer_id = ${customersMirror.id}
+                OR lower(trim(ms.email)) = lower(trim(${customersMirror.email}))
+              )
+          )`,
         ),
       ));
     return new Set(rows.map(row => row.id));
+  }
+
+  private async getMarketingSuppressionSourcesByEmail(emails: string[]): Promise<Map<string, Set<string>>> {
+    const normalizedEmails = Array.from(new Set(emails
+      .map(email => String(email ?? "").trim().toLowerCase())
+      .filter(Boolean)));
+    if (!normalizedEmails.length) return new Map();
+
+    const rows = await db.select({
+      email: sql<string>`lower(trim(${marketingSuppressions.email}))`,
+      source: marketingSuppressions.source,
+    }).from(marketingSuppressions).where(and(
+      isNull(marketingSuppressions.revoked_at),
+      sql`lower(trim(${marketingSuppressions.email})) = ANY(${sql.param(normalizedEmails)}::text[])`,
+    ));
+    const sources = new Map<string, Set<string>>();
+    for (const row of rows) {
+      const set = sources.get(row.email) ?? new Set<string>();
+      set.add(row.source);
+      sources.set(row.email, set);
+    }
+    return sources;
   }
 
   async getMarketingAudiencePreview(filters: Record<string, unknown>, limit = 25): Promise<{ customers: any[]; total: number; suppressed: number }> {
@@ -3906,6 +4436,75 @@ export class DatabaseStorage implements IStorage {
       customers: candidates.slice(0, Math.max(0, limit)).map(c => ({ ...c, marketing_suppressed: suppressedIds.has(c.id) })),
       total: candidates.length,
       suppressed: suppressedIds.size,
+    };
+  }
+
+  async getActiveCrmCustomersForMarketingReconciliation(): Promise<Array<{
+    crmCustomerId: number;
+    bigCommerceCustomerId: number;
+    company: string | null;
+    email: string;
+  }>> {
+    return db.select({
+      crmCustomerId: customersMirror.id,
+      bigCommerceCustomerId: customersMirror.bigcommerce_customer_id,
+      company: customersMirror.company,
+      email: customersMirror.email,
+    }).from(customersMirror).where(and(
+      eq(customersMirror.account_type, "customer"),
+      eq(customersMirror.is_active, true),
+    )).orderBy(asc(customersMirror.email), asc(customersMirror.id));
+  }
+
+  async getMarketingAudienceReadinessSummary(): Promise<{
+    activeCustomerCount: number;
+    suppressedActiveCustomerCount: number;
+    optedOutActiveCustomerCount: number;
+    activeSuppressionRuleCount: number;
+  }> {
+    const activeCustomerCondition = and(
+      eq(customersMirror.account_type, "customer"),
+      eq(customersMirror.is_active, true),
+    );
+    const [activeCustomers, suppressedCustomers, optedOutCustomers, suppressionRules] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(customersMirror)
+        .where(activeCustomerCondition),
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(customersMirror)
+        .leftJoin(marketingCustomerPreferences, eq(marketingCustomerPreferences.customer_id, customersMirror.id))
+        .where(and(
+          eq(customersMirror.account_type, "customer"),
+          eq(customersMirror.is_active, true),
+          or(
+            eq(marketingCustomerPreferences.email_subscribed, false),
+            sql`EXISTS (
+              SELECT 1 FROM marketing_suppressions ms
+              WHERE ms.revoked_at IS NULL
+                AND (
+                  ms.customer_id = ${customersMirror.id}
+                  OR lower(trim(ms.email)) = lower(trim(${customersMirror.email}))
+                )
+            )`,
+          ),
+        )),
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(customersMirror)
+        .innerJoin(marketingCustomerPreferences, eq(marketingCustomerPreferences.customer_id, customersMirror.id))
+        .where(and(
+          eq(customersMirror.account_type, "customer"),
+          eq(customersMirror.is_active, true),
+          eq(marketingCustomerPreferences.email_subscribed, false),
+        )),
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(marketingSuppressions)
+        .where(isNull(marketingSuppressions.revoked_at)),
+    ]);
+    return {
+      activeCustomerCount: activeCustomers[0]?.count ?? 0,
+      suppressedActiveCustomerCount: suppressedCustomers[0]?.count ?? 0,
+      optedOutActiveCustomerCount: optedOutCustomers[0]?.count ?? 0,
+      activeSuppressionRuleCount: suppressionRules[0]?.count ?? 0,
     };
   }
 
@@ -3947,14 +4546,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async claimMarketingCampaign(id: number): Promise<any | undefined> {
-    const [campaign] = await db.update(marketingCampaigns).set({
-      status: "sending",
-      started_at: new Date(),
-      send_attempts: sql`${marketingCampaigns.send_attempts} + 1`,
-      updated_at: new Date(),
-      last_error: null,
-    }).where(and(eq(marketingCampaigns.id, id), or(eq(marketingCampaigns.status, "queued"), eq(marketingCampaigns.status, "scheduled")))).returning();
-    return campaign;
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(746291, 167504)`);
+      const [campaign] = await tx.update(marketingCampaigns).set({
+        status: "sending",
+        started_at: new Date(),
+        send_attempts: sql`${marketingCampaigns.send_attempts} + 1`,
+        updated_at: new Date(),
+        last_error: null,
+      }).where(and(eq(marketingCampaigns.id, id), or(eq(marketingCampaigns.status, "queued"), eq(marketingCampaigns.status, "scheduled")))).returning();
+      return campaign;
+    });
   }
 
   async getMarketingQueueCampaigns(): Promise<any[]> {
@@ -3971,6 +4573,9 @@ export class DatabaseStorage implements IStorage {
     const customerIds = Array.from(new Set(candidates.map(c => Number(c.id)).filter(Number.isInteger)));
     const contactIds = Array.from(new Set(candidates.map(c => Number(c.marketing_contact_id)).filter(Number.isInteger)));
     const suppressedIds = await this.getMarketingCustomerSuppressionIds(customerIds);
+    const emailSuppressionSources = await this.getMarketingSuppressionSourcesByEmail(
+      candidates.map((candidate: any) => String(candidate.email ?? "")),
+    );
     const existing = await db.select({ customer_id: marketingCampaignRecipients.customer_id, marketing_contact_id: marketingCampaignRecipients.marketing_contact_id, status: marketingCampaignRecipients.status })
       .from(marketingCampaignRecipients).where(eq(marketingCampaignRecipients.campaign_id, campaignId));
     const existingByKey = new Map(existing.map(row => [row.customer_id ? `customer:${row.customer_id}` : `contact:${row.marketing_contact_id}`, row.status]));
@@ -3978,8 +4583,18 @@ export class DatabaseStorage implements IStorage {
       const isImported = Number.isInteger(Number(customer.marketing_contact_id));
       const entityId = isImported ? Number(customer.marketing_contact_id) : Number(customer.id);
       const existingStatus = existingByKey.get(isImported ? `contact:${entityId}` : `customer:${entityId}`);
-      const status = !isImported && suppressedIds.has(customer.id)
-        ? (await this.getMarketingCustomerPreference(customer.id))?.email_subscribed === false ? "unsubscribed" : "suppressed"
+      const normalizedEmail = String(customer.email ?? "").trim().toLowerCase();
+      const emailSources = emailSuppressionSources.get(normalizedEmail) ?? new Set<string>();
+      const customerIsSuppressed = !isImported && suppressedIds.has(entityId);
+      const preference = customerIsSuppressed && !isImported
+        ? await this.getMarketingCustomerPreference(entityId)
+        : null;
+      const isSuppressed = customerIsSuppressed || emailSources.size > 0;
+      const isUnsubscribed = preference?.email_subscribed === false
+        || emailSources.has("constant_contact")
+        || emailSources.has("unsubscribe");
+      const status = isSuppressed
+        ? isUnsubscribed ? "unsubscribed" : "suppressed"
         : (existingStatus === "sent" ? "sent" : "eligible");
       const values = {
         campaign_id: campaignId,
@@ -4074,6 +4689,27 @@ export class DatabaseStorage implements IStorage {
     return campaign ? this.getMarketingCampaign(id) : undefined;
   }
 
+  async completeConstantContactMarketingCampaign(id: number, recipientCount: number): Promise<any | undefined> {
+    const safeCount = Number.isSafeInteger(recipientCount) && recipientCount >= 0 ? recipientCount : 0;
+    const [campaign] = await db.update(marketingCampaigns).set({
+      status: "sent",
+      recipient_count: safeCount,
+      sent_count: safeCount,
+      failed_count: 0,
+      completed_at: new Date(),
+      sent_at: new Date(),
+      updated_at: new Date(),
+    }).where(eq(marketingCampaigns.id, id)).returning();
+    if (campaign) {
+      await this.recordMarketingEvent({
+        campaign_id: id,
+        event_type: "sent",
+        detail: { provider: "constant_contact", recipient_count: safeCount, delivery_status: "submitted_to_provider" },
+      });
+    }
+    return campaign ? this.getMarketingCampaign(id) : undefined;
+  }
+
   async getMarketingRecipients(campaignId: number, opts: { status?: string; limit?: number; offset?: number } = {}): Promise<{ rows: any[]; total: number }> {
     const conditions: any[] = [eq(marketingCampaignRecipients.campaign_id, campaignId)];
     if (opts.status && opts.status !== "all") conditions.push(eq(marketingCampaignRecipients.status, opts.status));
@@ -4139,10 +4775,109 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getMarketingSuppressions(customerId?: number): Promise<any[]> {
+    let customerCondition: any = sql`true`;
+    if (customerId) {
+      const customer = await this.getCrmCustomerById(customerId);
+      const emailCondition = String(customer?.email ?? "").trim()
+        ? sql`lower(trim(${marketingSuppressions.email})) = lower(trim(${String(customer?.email ?? "")}))`
+        : sql`false`;
+      customerCondition = or(eq(marketingSuppressions.customer_id, customerId), emailCondition);
+    }
     return db.select().from(marketingSuppressions).where(and(
-      customerId ? eq(marketingSuppressions.customer_id, customerId) : sql`true`,
+      customerCondition,
       isNull(marketingSuppressions.revoked_at),
     )).orderBy(desc(marketingSuppressions.created_at));
+  }
+
+  async getMarketingSuppressedEmails(): Promise<string[]> {
+    const rows = await db.select({
+      email: sql<string>`lower(trim(coalesce(nullif(${marketingSuppressions.email}, ''), ${customersMirror.email})))`,
+    }).from(marketingSuppressions)
+      .leftJoin(customersMirror, eq(customersMirror.id, marketingSuppressions.customer_id))
+      .where(isNull(marketingSuppressions.revoked_at));
+    const optedOut = await db.select({
+      email: sql<string>`lower(trim(${customersMirror.email}))`,
+    }).from(marketingCustomerPreferences)
+      .innerJoin(customersMirror, eq(customersMirror.id, marketingCustomerPreferences.customer_id))
+      .where(eq(marketingCustomerPreferences.email_subscribed, false));
+    return Array.from(new Set([...rows, ...optedOut]
+      .map(row => String(row.email ?? "").trim().toLowerCase())
+      .filter(Boolean)));
+  }
+
+  async importConstantContactOptOutSuppressions(
+    emails: string[],
+    userId: number,
+  ): Promise<{ importedCount: number; alreadySuppressedCount: number; matchedCrmCustomerCount: number }> {
+    const normalizedEmails = Array.from(new Set(emails
+      .map(email => String(email ?? "").trim().toLowerCase())
+      .filter(email => email.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))));
+    if (!normalizedEmails.length) {
+      return { importedCount: 0, alreadySuppressedCount: 0, matchedCrmCustomerCount: 0 };
+    }
+
+    return db.transaction(async (tx) => {
+      // Serialize opt-out imports with campaign starts so a new campaign cannot
+      // prepare eligible recipients while this batch is being applied.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(746291, 167504)`);
+      const [sendingCampaign] = await tx.select({ id: marketingCampaigns.id })
+        .from(marketingCampaigns)
+        .where(eq(marketingCampaigns.status, "sending"))
+        .limit(1);
+      if (sendingCampaign) {
+        throw new Error("Wait until all marketing campaigns finish before importing Constant Contact opt-outs.");
+      }
+
+      const activeRows = await tx.select({
+        email: sql<string>`lower(trim(${marketingSuppressions.email}))`,
+      }).from(marketingSuppressions).where(and(
+        isNull(marketingSuppressions.revoked_at),
+        sql`lower(trim(${marketingSuppressions.email})) = ANY(${sql.param(normalizedEmails)}::text[])`,
+      ));
+      const activeEmails = new Set(activeRows.map(row => row.email));
+      const missingEmails = normalizedEmails.filter(email => !activeEmails.has(email));
+      let importedCount = 0;
+      for (let offset = 0; offset < missingEmails.length; offset += 500) {
+        const batch = missingEmails.slice(offset, offset + 500);
+        const inserted = await tx.insert(marketingSuppressions).values(batch.map(email => ({
+          customer_id: null,
+          email,
+          reason: "Opted out in Constant Contact",
+          source: "constant_contact",
+          created_by: userId,
+        }))).onConflictDoNothing().returning({ id: marketingSuppressions.id });
+        importedCount += inserted.length;
+      }
+
+      const matchedCustomers = await tx.select({ id: customersMirror.id })
+        .from(customersMirror)
+        .where(sql`lower(trim(${customersMirror.email})) = ANY(${sql.param(normalizedEmails)}::text[])`);
+      const customerIds = Array.from(new Set(matchedCustomers.map(row => row.id)));
+      const now = new Date();
+      for (let offset = 0; offset < customerIds.length; offset += 500) {
+        const batch = customerIds.slice(offset, offset + 500);
+        await tx.insert(marketingCustomerPreferences).values(batch.map(customer_id => ({
+          customer_id,
+          email_subscribed: false,
+          unsubscribed_at: now,
+          updated_by: userId,
+        }))).onConflictDoUpdate({
+          target: marketingCustomerPreferences.customer_id,
+          set: {
+            email_subscribed: false,
+            unsubscribed_at: sql`coalesce(${marketingCustomerPreferences.unsubscribed_at}, ${now})`,
+            updated_by: userId,
+            updated_at: now,
+          },
+        });
+      }
+
+      return {
+        importedCount,
+        alreadySuppressedCount: normalizedEmails.length - importedCount,
+        matchedCrmCustomerCount: customerIds.length,
+      };
+    });
   }
 
   async createMarketingSuppression(data: { customerId: number; email?: string; reason: string; source?: string; createdBy?: number }): Promise<any> {

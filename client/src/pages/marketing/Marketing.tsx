@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useRoute } from "wouter";
 import {
   Activity, ArrowLeft, BarChart3, CalendarClock, Check, ChevronRight, Clock3,
+  ClipboardCheck, Download, ShieldAlert,
   FileText, Filter, Mail, Megaphone, MoreHorizontal, Plus, RefreshCw, Search,
   Eye, Monitor, Send, Settings as SettingsIcon, Smartphone, Tablet, Target,
   Trash2, Users, X, Loader2, Package, Pencil, ShoppingBag,
@@ -24,6 +25,11 @@ import {
    getMarketingTemplates, getMarketingCustomerGroups, searchMarketingProducts,
    getMarketingProductList, getMarketingProductLists, getMarketingDeliveryLogs,
    getMarketingSenderSettings, saveMarketingSenderSettings, getMarketingProviderStatus,
+   getMarketingAudienceReadiness, exportMarketingAudienceReconciliation,
+   importMarketingConstantContactOptOuts, type MarketingAudienceReconciliationSummary,
+   getMarketingConstantContactLists, importMarketingConstantContactList,
+   getMarketingConstantContactAudienceMembers, updateMarketingConstantContactAudienceMembers,
+   exportMarketingConstantContactMissing,
 } from "@/lib/api";
 import {
   DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS,
@@ -498,11 +504,15 @@ function CampaignEditor({ id }: { id?: number }) {
   const [productSearch, setProductSearch] = useState("");
   const [pickerProducts, setPickerProducts] = useState<MarketingProductSnapshot[]>([]);
   const { data: existing } = useQuery<any>({ queryKey: ["marketing-campaign", id], queryFn: () => getMarketingCampaign(id!), enabled: editing });
+  const usesConstantContact = !editing || existing?.delivery_provider === "constant_contact";
   const { data: senderSettings = { emails: [], defaultEmail: "" } } = useQuery<{ emails: string[]; defaultEmail: string }>({
     queryKey: ["marketing-sender-settings"],
     queryFn: getMarketingSenderSettings,
   });
   const { data: audiences = [] } = useQuery<any[]>({ queryKey: ["marketing-audiences"], queryFn: getMarketingAudiences });
+  const campaignAudiences = usesConstantContact
+    ? audiences.filter((audience: any) => Boolean(audience.constant_contact_list_id))
+    : audiences;
   const { data: templates = [] } = useQuery<any[]>({ queryKey: ["marketing-templates"], queryFn: getMarketingTemplates });
   const { data: customerPage } = useQuery<any>({ queryKey: ["marketing-audience-customers", "campaign-editor"], queryFn: () => getMarketingAudienceCustomers({ limit: 100 }) });
   const { data: customerGroups = [], isLoading: customerGroupsLoading, error: customerGroupsError } = useQuery<Array<{ id: number; name: string }>>({
@@ -650,7 +660,39 @@ function CampaignEditor({ id }: { id?: number }) {
          </div> : <p className="mt-4 rounded-lg border border-dashed p-4 text-center text-sm text-slate-400">No products selected yet.</p>}
        </section>
     </div><div className="space-y-5">
-      <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><Users className="h-4 w-4 text-blue-500" /> Audience</h2><div className="space-y-3"><select className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.audience_type} onChange={e => { const nextType = e.target.value; setForm((old: any) => ({ ...old, audience_type: nextType, audience_config: nextType === "customer_group" ? {} : old.audience_config, audience_id: nextType === "saved_audience" ? old.audience_id : null })); }}><option value="">Choose an audience…</option><option value="all_eligible">All eligible customers (explicit opt-in)</option><option value="customer_group">BigCommerce customer group</option><option value="selected_customers">Selected customers</option><option value="saved_audience">Saved audience</option></select>{form.audience_type === "customer_group" && <div className="space-y-2"><select className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.audience_config?.customerGroupId || (selectedGroupName && !customerGroups.some(group => group.name === selectedGroupName) ? selectedGroupName : "")} disabled={customerGroupsLoading || Boolean(customerGroupsError)} onChange={e => { const group = customerGroups.find(candidate => String(candidate.id) === e.target.value); set("audience_config", group ? { customerGroupId: group.id, customerGroupName: group.name } : {}); }}><option value="">{customerGroupsLoading ? "Loading BigCommerce groups…" : "Choose a customer group…"}</option>{selectedGroupName && !form.audience_config?.customerGroupId && !customerGroups.some(group => group.name === selectedGroupName) && <option value={selectedGroupName}>{selectedGroupName} (saved value)</option>}{customerGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select>{customerGroupsError ? <p className="text-xs text-red-600">Unable to load BigCommerce customer groups. Check the catalog connection.</p> : !customerGroupsLoading && !customerGroups.length && <p className="text-xs text-slate-500">No BigCommerce customer groups were found.</p>}<p className="text-xs text-slate-400">Groups are loaded from BigCommerce and matched to the CRM mirror when the campaign sends.</p></div>}{form.audience_type === "saved_audience" && <select className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.audience_id || ""} onChange={e => set("audience_id", Number(e.target.value) || null)}><option value="">Choose a saved audience…</option>{audiences.map((a: any) => <option key={a.id} value={a.id}>{a.name} ({a.member_count})</option>)}</select>}{form.audience_type === "selected_customers" && <div className="max-h-60 space-y-1 overflow-auto rounded-md border p-2">{customers.map((c: any) => <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded p-2 text-sm hover:bg-slate-50"><input type="checkbox" checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(old => e.target.checked ? [...old, c.id] : old.filter(x => x !== c.id))} /><span className="min-w-0 truncate">{c.company || `${c.first_name} ${c.last_name}`}</span><span className="ml-auto text-xs text-slate-400">{c.email}</span></label>)}{!customers.length && <p className="p-3 text-xs text-slate-400">No eligible CRM customers found.</p>}</div>}{!form.audience_type ? <p className="text-xs font-medium text-amber-700">Choose an audience before marking this campaign ready, scheduling it, or sending it.</p> : form.audience_type === "all_eligible" ? <p className="text-xs font-medium text-amber-700">This sends to every eligible customer. Select this only when that is intentional.</p> : <p className="text-xs text-slate-400">Customers come from the CRM mirror and must be active customer accounts.</p>}</div></section>
+       <section className="rounded-xl border bg-white p-5 shadow-sm">
+         <h2 className="mb-2 flex items-center gap-2 font-semibold text-slate-900"><Users className="h-4 w-4 text-blue-500" /> Audience</h2>
+         {usesConstantContact && <p className="mb-4 text-xs text-slate-500">This campaign uses Constant Contact. Choose a saved audience linked to a Constant Contact list.</p>}
+         <div className="space-y-3">
+           <select className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.audience_type} onChange={e => {
+             const nextType = e.target.value;
+             if (usesConstantContact && nextType && nextType !== "saved_audience") {
+               toast({ title: "Choose a linked saved audience", description: "New campaigns are delivered by Constant Contact and require a linked list." });
+               return;
+             }
+             setForm((old: any) => ({ ...old, audience_type: nextType, audience_config: nextType === "customer_group" ? {} : old.audience_config, audience_id: nextType === "saved_audience" ? old.audience_id : null }));
+           }}>
+             <option value="">Choose an audience…</option>
+             {!usesConstantContact && <><option value="all_eligible">All eligible customers (explicit opt-in)</option><option value="customer_group">BigCommerce customer group</option><option value="selected_customers">Selected customers</option></>}
+             <option value="saved_audience">Saved audience</option>
+           </select>
+           {form.audience_type === "customer_group" && <div className="space-y-2">
+             <select className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.audience_config?.customerGroupId || (selectedGroupName && !customerGroups.some(group => group.name === selectedGroupName) ? selectedGroupName : "")} disabled={customerGroupsLoading || Boolean(customerGroupsError)} onChange={e => { const group = customerGroups.find(candidate => String(candidate.id) === e.target.value); set("audience_config", group ? { customerGroupId: group.id, customerGroupName: group.name } : {}); }}>
+               <option value="">{customerGroupsLoading ? "Loading BigCommerce groups…" : "Choose a customer group…"}</option>
+               {selectedGroupName && !form.audience_config?.customerGroupId && !customerGroups.some(group => group.name === selectedGroupName) && <option value={selectedGroupName}>{selectedGroupName} (saved value)</option>}
+               {customerGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+             </select>
+             {customerGroupsError ? <p className="text-xs text-red-600">Unable to load BigCommerce customer groups. Check the catalog connection.</p> : !customerGroupsLoading && !customerGroups.length && <p className="text-xs text-slate-500">No BigCommerce customer groups were found.</p>}
+             <p className="text-xs text-slate-400">Groups are loaded from BigCommerce and matched to the CRM mirror when the campaign sends.</p>
+           </div>}
+           {form.audience_type === "saved_audience" && <select className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.audience_id || ""} onChange={e => set("audience_id", Number(e.target.value) || null)}>
+             <option value="">Choose a saved audience…</option>
+             {campaignAudiences.map((a: any) => <option key={a.id} value={a.id}>{a.name}{a.constant_contact_list_id ? " · Constant Contact" : ` (${a.member_count})`}</option>)}
+           </select>}
+           {form.audience_type === "selected_customers" && <div className="max-h-60 space-y-1 overflow-auto rounded-md border p-2">{customers.map((c: any) => <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded p-2 text-sm hover:bg-slate-50"><input type="checkbox" checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(old => e.target.checked ? [...old, c.id] : old.filter(x => x !== c.id))} /><span className="min-w-0 truncate">{c.company || `${c.first_name} ${c.last_name}`}</span><span className="ml-auto text-xs text-slate-400">{c.email}</span></label>)}{!customers.length && <p className="p-3 text-xs text-slate-400">No eligible CRM customers found.</p>}</div>}
+           {!form.audience_type ? <p className="text-xs font-medium text-amber-700">Choose an audience before marking this campaign ready, scheduling it, or sending it.</p> : form.audience_type === "all_eligible" ? <p className="text-xs font-medium text-amber-700">This sends to every eligible customer. Select this only when that is intentional.</p> : <p className="text-xs text-slate-400">Customers come from the CRM mirror and must be active customer accounts.</p>}
+         </div>
+       </section>
       <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><CalendarClock className="h-4 w-4 text-blue-500" /> Schedule</h2><label className="block text-sm font-medium text-slate-700">Optional scheduled date<input type="datetime-local" className="mt-1.5 h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.scheduled_at || ""} onChange={e => set("scheduled_at", e.target.value)} /></label></section>
         <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={() => saveMutation.mutate("draft")} disabled={saveMutation.isPending || scheduleMutation.isPending || !hasPermission("marketing", editing ? "edit" : "create")}>Save draft</Button>{hasPermission("marketing", "send") && <>{form.scheduled_at && <Button variant="outline" onClick={() => scheduleMutation.mutate()} disabled={saveMutation.isPending || scheduleMutation.isPending || !audienceIsComplete}><CalendarClock className="mr-1.5 h-4 w-4" /> Schedule</Button>}<Button onClick={() => saveMutation.mutate("ready")} disabled={saveMutation.isPending || !audienceIsComplete || !hasPermission("marketing", editing ? "edit" : "create")}>{saveMutation.isPending ? "Saving…" : "Save & review"}</Button></>}</div>
      </div></div>
@@ -703,6 +745,274 @@ export function MarketingCampaignRoute() {
   return <CampaignEditor />;
 }
 
+function formatAuditCount(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "Not reported";
+  const count = Number(value);
+  return Number.isSafeInteger(count) && count >= 0
+    ? new Intl.NumberFormat().format(count)
+    : "Not reported";
+}
+
+function normalizeAudienceName(value: unknown): string {
+  return String(value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+export function MarketingAudienceReadiness() {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const { hasPermission } = usePermissions();
+  const qc = useQueryClient();
+  const [isExportingReconciliation, setIsExportingReconciliation] = useState(false);
+  const [reconciliationSummary, setReconciliationSummary] = useState<MarketingAudienceReconciliationSummary | null>(null);
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery<any>({
+    queryKey: ["marketing-audience-readiness"],
+    queryFn: getMarketingAudienceReadiness,
+    retry: false,
+  });
+  const importOptOuts = useMutation({
+    mutationFn: importMarketingConstantContactOptOuts,
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ["marketing-audience-readiness"] });
+      toast({
+        title: "Constant Contact opt-outs imported",
+        description: `${result.importedCount.toLocaleString()} new suppressions added; ${result.alreadySuppressedCount.toLocaleString()} were already protected.`,
+      });
+    },
+    onError: (mutationError: Error) => toast({
+      title: "Opt-out import failed",
+      description: mutationError.message,
+      variant: "destructive",
+    }),
+  });
+  const canImportOptOuts = hasPermission("marketing", "manage_suppressions");
+
+  if (isLoading) {
+    return <PageShell title="Audience readiness" subtitle="Read-only comparison of Constant Contact and local Marketing audiences">
+      <div className="py-16 text-center text-sm text-slate-400">Loading audience readiness data…</div>
+    </PageShell>;
+  }
+
+  const provider = data?.provider ?? {};
+  const local = data?.local ?? {};
+  const audiences: any[] = Array.isArray(local.audiences) ? local.audiences : [];
+  const lists: any[] = Array.isArray(provider.lists) ? provider.lists : [];
+  const segments: any[] = Array.isArray(provider.segments) ? provider.segments : [];
+  const consent = provider.consentCounts ?? {};
+  const confirmOptOutImport = () => {
+    const confirmed = window.confirm(
+      "Read Constant Contact opt-outs and add them to the app's active marketing suppressions? This never clears a suppression or changes Constant Contact, audiences, or campaigns.",
+    );
+    if (confirmed) importOptOuts.mutate();
+  };
+  const exportContactReconciliation = async () => {
+    setIsExportingReconciliation(true);
+    try {
+      const result = await exportMarketingAudienceReconciliation();
+      setReconciliationSummary(result.summary);
+      const url = URL.createObjectURL(result.blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = result.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast({
+        title: "Contact discrepancy exported",
+        description: `${result.summary.exportedRows.toLocaleString()} discrepancy rows; ${result.summary.ccContactRecords.toLocaleString()} Constant Contact records and ${result.summary.activeCrmCustomers.toLocaleString()} active CRM customers compared.`,
+      });
+    } catch (exportError) {
+      toast({
+        title: "Contact export failed",
+        description: exportError instanceof Error ? exportError.message : "Could not export the contact reconciliation.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExportingReconciliation(false);
+    }
+  };
+
+  return <PageShell
+    title="Audience readiness"
+    subtitle="Read-only comparison of Constant Contact and local Marketing audiences"
+    action={<div className="flex flex-wrap justify-end gap-2">
+      <Button variant="outline" onClick={() => setLocation("/marketing")}><ArrowLeft className="mr-2 h-4 w-4" /> Marketing</Button>
+      <Button variant="outline" onClick={() => refetch()} disabled={isFetching}><RefreshCw className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} /> Refresh audit</Button>
+    </div>}
+  >
+    {isError && <section role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+      <p className="font-semibold">The audit could not be refreshed.</p>
+      <p className="mt-1">{error instanceof Error ? error.message : "Constant Contact or local Marketing data is unavailable."}</p>
+    </section>}
+
+    {canImportOptOuts && <section className="flex flex-col gap-4 rounded-xl border border-violet-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start gap-3">
+        <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-violet-700" />
+        <div>
+          <h2 className="font-semibold text-slate-900">Import Constant Contact opt-outs</h2>
+        </div>
+      </div>
+      <Button onClick={confirmOptOutImport} disabled={importOptOuts.isPending}>
+        {importOptOuts.isPending
+          ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          : <ShieldAlert className="mr-2 h-4 w-4" />}
+        {importOptOuts.isPending ? "Importing opt-outs…" : "Import opt-outs"}
+      </Button>
+    </section>}
+
+    {!isError && <div className="flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50/70 p-4 text-sm text-blue-950">
+      <ClipboardCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-700" />
+      <div>
+        <p className="font-semibold">Read-only audit</p>
+        <p className="mt-1 text-blue-900/80">Refreshing this audit reads list and segment metadata and account consent totals. The separate export below downloads discrepancy rows on demand; neither action syncs audiences, changes subscriptions, or sends campaigns.</p>
+        <p className="mt-1 text-xs text-blue-800/70">Last checked {data?.checkedAt ? new Date(data.checkedAt).toLocaleString() : "—"}</p>
+      </div>
+    </div>}
+
+    {!isError && <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <StatCard label="CC contacts" value={formatAuditCount(consent.total)} caption={`${formatAuditCount(consent.explicit)} explicit · ${formatAuditCount(consent.implicit)} implied consent`} icon={Users} />
+      <StatCard label="CC unsubscribed" value={formatAuditCount(consent.unsubscribed)} caption="Account-level consent total" icon={ShieldAlert} tone="violet" />
+      <StatCard label="Active CRM customers" value={formatAuditCount(local.activeCustomerCount)} caption="Local base-audience population" icon={Users} tone="green" />
+      <StatCard label="Suppressed CRM customers" value={formatAuditCount(local.suppressedActiveCustomerCount)} caption={`${formatAuditCount(local.optedOutActiveCustomerCount)} have an opt-out preference`} icon={ShieldAlert} tone="violet" />
+      <StatCard label="Active suppression rules" value={formatAuditCount(local.activeSuppressionRuleCount)} caption="Local rules; not individual records" icon={ClipboardCheck} />
+    </div>}
+
+    {!isError && <section className="rounded-xl border border-indigo-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <Download className="mt-0.5 h-5 w-5 shrink-0 text-indigo-700" />
+          <div>
+            <h2 className="font-semibold text-slate-900">Email-level discrepancy export</h2>
+          </div>
+        </div>
+        <Button onClick={exportContactReconciliation} disabled={isExportingReconciliation} className="shrink-0">
+          {isExportingReconciliation
+            ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            : <Download className="mr-2 h-4 w-4" />}
+          {isExportingReconciliation ? "Comparing contacts…" : "Export discrepancy CSV"}
+        </Button>
+      </div>
+      {reconciliationSummary && <div className="mt-5 space-y-3 border-t pt-4" aria-live="polite">
+        <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-5">
+          <div><span className="block text-xs text-slate-500">CC records scanned</span><strong>{formatAuditCount(reconciliationSummary.ccContactRecords)}</strong></div>
+          <div><span className="block text-xs text-slate-500">Active CRM customers</span><strong>{formatAuditCount(reconciliationSummary.activeCrmCustomers)}</strong></div>
+          <div>
+            <span className="block text-xs text-slate-500">Raw count gap (CRM − CC)</span>
+            <strong>{(() => {
+              const gap = reconciliationSummary.activeCrmCustomers - (reconciliationSummary.ccReportedTotal ?? reconciliationSummary.ccContactRecords);
+              return gap === 0 ? "0" : `${gap > 0 ? "+" : "−"}${formatAuditCount(Math.abs(gap))}`;
+            })()}</strong>
+          </div>
+          <div><span className="block text-xs text-slate-500">Emails found on both sides</span><strong>{formatAuditCount(reconciliationSummary.matchedEmailGroups)}</strong></div>
+          <div><span className="block text-xs text-slate-500">Discrepancy rows exported</span><strong>{formatAuditCount(reconciliationSummary.exportedRows)}</strong></div>
+        </div>
+        <p className="text-xs text-slate-600">
+          {formatAuditCount(reconciliationSummary.ccOnlyEmailGroups)} CC-only email groups · {formatAuditCount(reconciliationSummary.crmOnlyEmailGroups)} CRM-only email groups · {formatAuditCount(reconciliationSummary.emailGroupsWithDifferentRecordCounts)} email groups with unequal record counts · {formatAuditCount(reconciliationSummary.ccRecordsWithoutValidEmail + reconciliationSummary.crmCustomersWithoutValidEmail)} records without a valid email.
+        </p>
+        {reconciliationSummary.ccCollectionTotal !== null && reconciliationSummary.ccCollectionTotal !== reconciliationSummary.ccContactRecords && <p role="status" className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          The Constant Contact contact list reported {formatAuditCount(reconciliationSummary.ccCollectionTotal)} records, but {formatAuditCount(reconciliationSummary.ccContactRecords)} were fetched. The list may have changed during export; review before acting on the CSV.
+        </p>}
+        {reconciliationSummary.ccReportedTotal !== null && reconciliationSummary.ccReportedTotal !== (reconciliationSummary.ccCollectionTotal ?? reconciliationSummary.ccContactRecords) && <p role="status" className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Constant Contact’s account-count endpoint reported {formatAuditCount(reconciliationSummary.ccReportedTotal)} contacts, while the default contact list reported {formatAuditCount(reconciliationSummary.ccCollectionTotal ?? reconciliationSummary.ccContactRecords)} non-deleted records. The endpoints may reflect different populations or a change during export; this CSV uses the contact-list population.
+        </p>}
+      </div>}
+    </section>}
+
+    {!isError && <section className="overflow-hidden rounded-xl border bg-white shadow-sm">
+      <div className="border-b px-5 py-4">
+        <h2 className="font-semibold text-slate-900">Local saved audiences</h2>
+        <p className="mt-1 text-xs text-slate-500">Names are matched after trimming and ignoring case. A name match does not confirm that the same people are members.</p>
+      </div>
+      {!audiences.length ? <p className="p-6 text-center text-sm text-slate-400">No saved local audiences were found.</p> : <div className="overflow-x-auto">
+        <table className="min-w-full divide-y text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr>
+            <th className="px-4 py-3 font-medium">Local audience</th>
+            <th className="px-4 py-3 font-medium">Type</th>
+            <th className="px-4 py-3 text-right font-medium">Local members</th>
+            <th className="px-4 py-3 font-medium">Constant Contact name match</th>
+            <th className="px-4 py-3 text-right font-medium">CC active list members</th>
+          </tr></thead>
+          <tbody className="divide-y">
+            {audiences.map((audience: any) => {
+              const key = normalizeAudienceName(audience.name);
+              const matchedLists = lists.filter((list: any) => normalizeAudienceName(list.name) === key);
+              const matchedSegments = segments.filter((segment: any) => normalizeAudienceName(segment.name) === key);
+              const matchLabels = [
+                ...matchedLists.map((list: any) => `List: ${list.name}`),
+                ...matchedSegments.map((segment: any) => `Segment: ${segment.name}`),
+              ];
+              const knownCounts = matchedLists
+                .map((list: any) => list.activeMemberCount)
+                .filter((count: any) => Number.isSafeInteger(count) && count >= 0);
+              const providerCount = knownCounts.length === 1 ? knownCounts[0] : null;
+              return <tr key={audience.id} className="hover:bg-slate-50/70">
+                <td className="max-w-[260px] px-4 py-3 font-medium text-slate-800"><span className="block truncate">{audience.name}</span></td>
+                <td className="px-4 py-3 capitalize text-slate-500">{String(audience.type || "—").replaceAll("_", " ")}</td>
+                <td className="px-4 py-3 text-right tabular-nums text-slate-700">{formatAuditCount(audience.memberCount)}</td>
+                <td className="max-w-[330px] px-4 py-3 text-slate-600">
+                  {matchLabels.length ? <span className="block truncate" title={matchLabels.join(", ")}>{matchLabels.join(", ")}</span> : <span className="text-slate-400">No exact name match</span>}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                  {knownCounts.length === 1 ? formatAuditCount(providerCount) : matchedLists.length > 1 ? "Multiple lists" : matchedSegments.length ? "Not exposed for segments" : "—"}
+                </td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>}
+    </section>}
+
+    {!isError && <div className="grid gap-5 xl:grid-cols-2">
+      <section className="overflow-hidden rounded-xl border bg-white shadow-sm">
+        <div className="border-b px-5 py-4">
+          <h2 className="font-semibold text-slate-900">Constant Contact lists</h2>
+          <p className="mt-1 text-xs text-slate-500">{formatAuditCount(provider.listCount)} active email lists · membership shows active, mailable contacts</p>
+        </div>
+        {!lists.length ? <p className="p-6 text-center text-sm text-slate-400">No active email lists were found.</p> : <div className="max-h-[420px] overflow-auto">
+          <div className="divide-y">{lists.map((list: any) => {
+            const matches = audiences.filter((audience: any) => normalizeAudienceName(audience.name) === normalizeAudienceName(list.name));
+            return <div key={list.id} className="flex items-center gap-3 px-5 py-3">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-slate-800">{list.name}</span>
+                <span className="block truncate text-xs text-slate-400">{matches.length ? `Name match: ${matches.map((item: any) => item.name).join(", ")}` : "No exact local audience name match"}</span>
+              </span>
+              <span className="shrink-0 text-sm tabular-nums text-slate-700">{formatAuditCount(list.activeMemberCount)} active</span>
+            </div>;
+          })}</div>
+        </div>}
+      </section>
+
+      <section className="overflow-hidden rounded-xl border bg-white shadow-sm">
+        <div className="border-b px-5 py-4">
+          <h2 className="font-semibold text-slate-900">Constant Contact segments</h2>
+          <p className="mt-1 text-xs text-slate-500">{formatAuditCount(provider.segmentCount)} segments · member totals are not included by the metadata endpoint</p>
+        </div>
+        {!segments.length ? <p className="p-6 text-center text-sm text-slate-400">No segments were found.</p> : <div className="max-h-[420px] overflow-auto">
+          <div className="divide-y">{segments.map((segment: any) => {
+            const matches = audiences.filter((audience: any) => normalizeAudienceName(audience.name) === normalizeAudienceName(segment.name));
+            return <div key={segment.id} className="flex items-center gap-3 px-5 py-3">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-slate-800">{segment.name}</span>
+                <span className="block truncate text-xs text-slate-400">{matches.length ? `Name match: ${matches.map((item: any) => item.name).join(", ")}` : "No exact local audience name match"}</span>
+              </span>
+              <span className="shrink-0 text-right text-xs text-slate-500">Member count<br />not exposed</span>
+            </div>;
+          })}</div>
+        </div>}
+      </section>
+    </div>}
+
+    {!isError && <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+      <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+      <div>
+        <p className="font-semibold">Why the totals can differ</p>
+        <p className="mt-1 text-amber-900/80">The dashboard compares total Constant Contact records with active CRM customers, which are different populations. Constant Contact can include unsubscribed or pending contacts, while CRM counts only active customer accounts. The export compares normalized email addresses, flags duplicate-count differences and missing emails, and helps identify exact unmatched groups. A BigCommerce sync does not guarantee the two systems have the same active records or email values.</p>
+        <p className="mt-1 text-amber-900/80">The app is the source of truth for contacts. This separate, manual action only adds Constant Contact opt-outs to local suppressions; it never removes a suppression or changes Constant Contact. Zoho remains the campaign sender.</p>
+      </div>
+    </div>}
+  </PageShell>;
+}
+
 export function MarketingAudiences() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -724,15 +1034,19 @@ export function MarketingAudiences() {
   const [memberStatus, setMemberStatus] = useState("all");
   const pageSize = 25;
   const { data: audiences = [], isLoading } = useQuery<any[]>({ queryKey: ["marketing-audiences"], queryFn: getMarketingAudiences });
+  const { data: ccLists = [], error: ccListsError } = useQuery<any[]>({
+    queryKey: ["marketing-constant-contact-lists"],
+    queryFn: getMarketingConstantContactLists,
+  });
   const { data: customerPage } = useQuery<any>({
-    queryKey: ["marketing-audience-customers", lookupSearch, lookupPage],
+    queryKey: ["marketing-audience-customers", lookupSearch, lookupPage, "saved-audience"],
     queryFn: () => getMarketingAudienceCustomers({ search: lookupSearch, limit: pageSize, offset: lookupPage * pageSize }),
-    enabled: form.audience_type === "manual" && sourceTab === "crm",
+    enabled: form.audience_type === "manual" && sourceTab === "crm" || form.audience_type === "constant_contact",
   });
   const { data: contactPage } = useQuery<any>({
     queryKey: ["marketing-contacts", lookupSearch, contactType, lookupPage],
     queryFn: () => getMarketingContacts({ search: lookupSearch, type: contactType, limit: pageSize, offset: lookupPage * pageSize }),
-    enabled: form.audience_type === "manual" && sourceTab === "imported",
+    enabled: (form.audience_type === "manual" || form.audience_type === "constant_contact") && sourceTab === "imported",
   });
   const { data: customerGroups = [], isLoading: customerGroupsLoading, error: customerGroupsError } = useQuery<Array<{ id: number; name: string }>>({
     queryKey: ["marketing-customer-groups"],
@@ -746,9 +1060,34 @@ export function MarketingAudiences() {
     enabled: form.audience_type === "dynamic",
   });
   const { data: memberData } = useQuery<any>({
-    queryKey: ["marketing-audience-members", viewingMembers?.id, memberSearch, memberStatus, memberPage],
-    queryFn: () => getMarketingAudienceMembers(viewingMembers.id, { search: memberSearch, status: memberStatus, limit: pageSize, offset: memberPage * pageSize }),
+    queryKey: ["marketing-audience-members", viewingMembers?.id, viewingMembers?.constant_contact_list_id, memberSearch, memberStatus, memberPage],
+    queryFn: () => viewingMembers.constant_contact_list_id
+      ? getMarketingConstantContactAudienceMembers(viewingMembers.id)
+      : getMarketingAudienceMembers(viewingMembers.id, { search: memberSearch, status: memberStatus, limit: pageSize, offset: memberPage * pageSize }),
     enabled: Boolean(viewingMembers),
+  });
+  const importCcList = useMutation({
+    mutationFn: (listId: string) => importMarketingConstantContactList(listId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["marketing-audiences"] });
+      qc.invalidateQueries({ queryKey: ["marketing-constant-contact-lists"] });
+      toast({ title: "Constant Contact list added to Saved Audiences" });
+    },
+    onError: (e: any) => toast({ title: "Unable to add list", description: e.message, variant: "destructive" }),
+  });
+  const updateCcMembers = useMutation({
+    mutationFn: (data: { audienceId: number; add_customer_ids?: number[]; remove_contact_ids?: string[] }) =>
+      updateMarketingConstantContactAudienceMembers(data.audienceId, data),
+    onSuccess: (result: any, variables) => {
+      qc.invalidateQueries({ queryKey: ["marketing-audience-members", variables.audienceId] });
+      qc.invalidateQueries({ queryKey: ["marketing-audiences"] });
+      toast({
+        title: "Constant Contact list updated",
+        description: `${result.addedCount} added, ${result.removedCount} removed, ${result.missing?.length ?? 0} not found in Constant Contact.`,
+      });
+      setSelectedIds([]);
+    },
+    onError: (e: any) => toast({ title: "Unable to update list", description: e.message, variant: "destructive" }),
   });
   const save = useMutation({
     mutationFn: () => selected?.id
@@ -791,11 +1130,31 @@ export function MarketingAudiences() {
   const setFilter = (key: string, value: any) => setForm((old: any) => ({ ...old, dynamic_filters: { ...old.dynamic_filters, [key]: value === "" || value === undefined || (Array.isArray(value) && value.length === 0) ? undefined : value } }));
   return <PageShell title="Audiences" subtitle="Build reusable CRM and imported-contact groups" action={hasPermission("marketing", "manage_audiences") ? <Button onClick={startNew}><Plus className="mr-2 h-4 w-4" /> New audience</Button> : undefined}>
      <div className={`grid gap-5 transition-[grid-template-columns] duration-300 ${audienceEditorFocused ? "lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.5fr)]" : "lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]"}`}>
-      <section onFocusCapture={() => setAudienceEditorFocused(false)} className="overflow-hidden rounded-xl border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="font-semibold text-slate-900">Saved audiences</h2><p className="text-xs text-slate-500">{audiences.length} audience{audiences.length === 1 ? "" : "s"}</p></div>{isLoading ? <div className="py-16 text-center text-sm text-slate-400">Loading audiences…</div> : audiences.length ? <div className="divide-y">{audiences.map((a: any) => <div key={a.id} className="flex flex-wrap items-center gap-3 px-5 py-4"><span className="rounded-lg bg-violet-50 p-2 text-violet-600"><Users className="h-4 w-4" /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-800">{a.name}</p><p className="text-xs text-slate-400">{a.audience_type === "dynamic" ? "Dynamic" : "Manual"} · {a.member_count} members</p></div><Button variant="outline" size="sm" onClick={() => { setViewingMembers(a); setMemberPage(0); setMemberSearch(""); }}>View members</Button><Button variant="ghost" size="sm" onClick={() => edit(a)}>Edit</Button>{hasPermission("marketing", "delete") && <Button variant="ghost" size="sm" className="text-red-600" onClick={() => { if (window.confirm("Delete this audience?")) remove.mutate(a.id); }}><Trash2 className="h-4 w-4" /></Button>}</div>)}</div> : <EmptyState icon={Users} text="No saved audiences yet" action="Create an audience" onClick={startNew} />}</section>
-       <section onFocusCapture={() => setAudienceEditorFocused(true)} className="rounded-xl border bg-white p-5 shadow-sm"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-semibold text-slate-900">{selected ? "Edit audience" : "New audience"}</h2><p className="text-xs text-slate-500">Suppression is evaluated again when a campaign sends.</p></div>{selected && <Button variant="ghost" size="sm" onClick={startNew}><X className="h-4 w-4" /></Button>}</div><div className="space-y-4"><label className="block text-sm font-medium text-slate-700">Name<Input className="mt-1.5" value={form.name} onChange={e => setForm((x: any) => ({ ...x, name: e.target.value }))} placeholder="VIP customers" /></label><label className="block text-sm font-medium text-slate-700">Description<textarea className="mt-1.5 min-h-16 w-full rounded-md border border-slate-200 p-3 text-sm" value={form.description} onChange={e => setForm((x: any) => ({ ...x, description: e.target.value }))} /></label><select className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.audience_type} onChange={e => { setForm((x: any) => ({ ...x, audience_type: e.target.value })); setLookupPage(0); }}><option value="manual">Manual selection</option><option value="dynamic">Dynamic filters</option></select>
+       <div className="space-y-5"><section onFocusCapture={() => setAudienceEditorFocused(false)} className="overflow-hidden rounded-xl border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="font-semibold text-slate-900">Saved audiences</h2><p className="text-xs text-slate-500">{audiences.length} audience{audiences.length === 1 ? "" : "s"}</p></div>{isLoading ? <div className="py-16 text-center text-sm text-slate-400">Loading audiences…</div> : audiences.length ? <div className="divide-y">{audiences.map((a: any) => <div key={a.id} className="flex flex-wrap items-center gap-3 px-5 py-4"><span className="rounded-lg bg-violet-50 p-2 text-violet-600"><Users className="h-4 w-4" /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-800">{a.name}</p><p className="text-xs text-slate-400">{a.constant_contact_list_id ? "Constant Contact list · live membership" : `${a.audience_type === "dynamic" ? "Dynamic" : "Manual"} · ${a.member_count} members`}</p></div><Button variant="outline" size="sm" onClick={() => { setViewingMembers(a); setMemberPage(0); setMemberSearch(""); }}>View members</Button><Button variant="ghost" size="sm" onClick={() => edit(a)}>Edit</Button>{hasPermission("marketing", "delete") && <Button variant="ghost" size="sm" className="text-red-600" onClick={() => { if (window.confirm("Remove this saved audience? The Constant Contact list itself will remain unchanged.")) remove.mutate(a.id); }}><Trash2 className="h-4 w-4" /></Button>}</div>)}</div> : <EmptyState icon={Users} text="No saved audiences yet" action="Create an audience" onClick={startNew} />}</section>
+       <section className="rounded-xl border bg-white p-5 shadow-sm"><div className="mb-3"><h2 className="font-semibold text-slate-900">Constant Contact lists</h2><p className="text-xs text-slate-500">Link existing lists to Saved Audiences. Edits to names and membership will sync to Constant Contact.</p></div>{ccListsError ? <p className="rounded-md bg-amber-50 p-3 text-xs text-amber-800">Constant Contact lists could not be loaded. Check the connection and try again.</p> : <div className="max-h-64 divide-y overflow-auto">{ccLists.map((list: any) => <div key={list.id} className="flex items-center gap-3 py-2.5"><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-800">{list.name}</p><p className="text-xs text-slate-400">{list.activeMemberCount ?? "—"} active members</p></div>{list.savedAudienceId ? <span className="text-xs text-emerald-700">Saved audience linked</span> : <Button size="sm" variant="outline" disabled={importCcList.isPending || !hasPermission("marketing", "manage_audiences")} onClick={() => importCcList.mutate(list.id)}>Add to Saved Audiences</Button>}</div>)}{!ccLists.length && <p className="py-4 text-center text-xs text-slate-400">No Constant Contact lists found.</p>}</div>}</section></div>
+        <section onFocusCapture={() => setAudienceEditorFocused(true)} className="rounded-xl border bg-white p-5 shadow-sm"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-semibold text-slate-900">{selected ? "Edit audience" : "New audience"}</h2><p className="text-xs text-slate-500">New local audiences sync eligible contacts to a Constant Contact list.</p></div>{selected && <Button variant="ghost" size="sm" onClick={startNew}><X className="h-4 w-4" /></Button>}</div><div className="space-y-4"><label className="block text-sm font-medium text-slate-700">Name<Input className="mt-1.5" value={form.name} onChange={e => setForm((x: any) => ({ ...x, name: e.target.value }))} placeholder="VIP customers" /></label><label className="block text-sm font-medium text-slate-700">Description<textarea className="mt-1.5 min-h-16 w-full rounded-md border border-slate-200 p-3 text-sm" value={form.description} onChange={e => setForm((x: any) => ({ ...x, description: e.target.value }))} /></label>{form.audience_type === "constant_contact" && <div className="rounded-lg border border-blue-100 bg-blue-50 p-3"><p className="text-xs text-blue-900">This saved audience is linked to Constant Contact. Select CRM customers or local leads and prospects below; only existing, sendable Constant Contact contacts are added. Missing and suppressed contacts are logged, never created or resubscribed.</p><Button className="mt-3" size="sm" disabled={!(sourceTab === "crm" ? selectedIds.length : selectedContactIds.length) || updateCcMembers.isPending || !hasPermission("marketing", "manage_audiences")} onClick={() => updateCcMembers.mutate({ audienceId: Number(selected?.id), ...(sourceTab === "crm" ? { add_customer_ids: selectedIds } : { add_contact_ids: selectedContactIds }) })}>Add selected {sourceTab === "crm" ? "CRM customers" : "local contacts"}</Button><Button className="ml-2 mt-3" size="sm" variant="outline" disabled={!selected?.id} onClick={() => exportMarketingConstantContactMissing(selected.id).catch((e: any) => toast({ title: "Export failed", description: e.message, variant: "destructive" }))}><Download className="mr-1 h-3.5 w-3.5" /> Export missing contacts</Button></div>}<select disabled={Boolean(selected?.constant_contact_list_id)} className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm disabled:bg-slate-100" value={form.audience_type} onChange={e => { setForm((x: any) => ({ ...x, audience_type: e.target.value })); setLookupPage(0); }}><option value="manual">Manual selection</option><option value="dynamic">Dynamic filters</option>{selected?.constant_contact_list_id && <option value="constant_contact">Constant Contact list</option>}</select>
          {form.audience_type === "dynamic" ? <div className="space-y-3"><div className="grid gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-2"><label className="text-xs font-medium text-slate-600">Customer group<select className="mt-1 h-9 w-full rounded-md border bg-white px-2 text-sm" value={form.dynamic_filters?.customerGroup || ""} disabled={customerGroupsLoading || Boolean(customerGroupsError)} onChange={e => setFilter("customerGroup", e.target.value)}><option value="">{customerGroupsLoading ? "Loading BigCommerce groups…" : "Any customer group"}</option>{form.dynamic_filters?.customerGroup && !customerGroups.some(group => group.name === form.dynamic_filters.customerGroup) && <option value={form.dynamic_filters.customerGroup}>{form.dynamic_filters.customerGroup} (saved value)</option>}{customerGroups.map(group => <option key={group.id} value={group.name}>{group.name}</option>)}</select>{customerGroupsError ? <span className="mt-1 block text-[10px] font-normal text-red-600">Unable to load BigCommerce groups.</span> : !customerGroupsLoading && !customerGroups.length && <span className="mt-1 block text-[10px] font-normal text-slate-400">No BigCommerce groups found.</span>}</label><label className="text-xs font-medium text-slate-600">Customer type<select className="mt-1 h-9 w-full rounded-md border bg-white px-2 text-sm" value={form.dynamic_filters?.customerType || ""} onChange={e => setFilter("customerType", e.target.value)}><option value="">Any type</option><option value="Store">Store</option><option value="Distributor">Distributor</option></select></label><label className="text-xs font-medium text-slate-600">Account health<select className="mt-1 h-9 w-full rounded-md border bg-white px-2 text-sm" value={form.dynamic_filters?.accountHealth || ""} onChange={e => setFilter("accountHealth", e.target.value)}><option value="">Any health</option><option value="Healthy">Healthy</option><option value="Watch">Watch</option><option value="At Risk">At Risk</option><option value="Lost">Lost</option></select></label><label className="text-xs font-medium text-slate-600">Account status<select className="mt-1 h-9 w-full rounded-md border bg-white px-2 text-sm" value={form.dynamic_filters?.isActive === false ? "inactive" : form.dynamic_filters?.isActive === true ? "active" : ""} onChange={e => setFilter("isActive", e.target.value === "active" ? true : e.target.value === "inactive" ? false : undefined)}><option value="">Any status</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label><label className="text-xs font-medium text-slate-600">State<select className="mt-1 h-9 w-full rounded-md border bg-white px-2 text-sm" value={form.dynamic_filters?.state || ""} onChange={e => setFilter("state", e.target.value)}><option value="">Any U.S. state</option>{MARKETING_US_STATE_OPTIONS.map(([abbreviation, name]) => <option key={abbreviation} value={abbreviation}>{name} ({abbreviation})</option>)}</select></label><label className="text-xs font-medium text-slate-600">Minimum revenue<Input type="number" min="0" className="mt-1 h-9 bg-white text-sm" value={form.dynamic_filters?.minRevenue ?? ""} onChange={e => setFilter("minRevenue", e.target.value ? Number(e.target.value) : undefined)} /></label><label className="text-xs font-medium text-slate-600">Minimum orders<Input type="number" min="0" className="mt-1 h-9 bg-white text-sm" value={form.dynamic_filters?.minOrders ?? ""} onChange={e => setFilter("minOrders", e.target.value ? Number(e.target.value) : undefined)} /></label><label className="text-xs font-medium text-slate-600">Last order before<Input type="date" className="mt-1 h-9 w-full bg-white text-sm" value={form.dynamic_filters?.lastOrderBefore || ""} onChange={e => setFilter("lastOrderBefore", e.target.value)} /></label></div><DynamicFilterExtensions filters={form.dynamic_filters || {}} setFilter={setFilter} /><div className="rounded-lg border border-blue-100 bg-blue-50/60 p-3"><div className="flex items-center justify-between"><p className="text-sm font-semibold text-blue-900">Live preview</p><span className="text-lg font-bold text-blue-700">{previewLoading ? "…" : preview?.total ?? 0}</span></div><p className="mt-1 text-xs text-blue-800/80">{preview?.suppressed ?? 0} suppressed · {Math.max(0, (preview?.total ?? 0) - (preview?.suppressed ?? 0))} eligible</p>{preview?.customers?.slice(0, 5).map((c: any) => <div key={c.id} className="mt-2 flex justify-between text-xs text-blue-900"><span className="truncate">{c.company || [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email}</span><span className={c.marketing_suppressed ? "text-red-600" : "text-emerald-700"}>{c.marketing_suppressed ? "Suppressed" : "Eligible"}</span></div>)}</div></div> : <div className="space-y-3"><div className="flex gap-1 rounded-lg bg-slate-100 p-1"><Button type="button" size="sm" variant={sourceTab === "crm" ? "default" : "ghost"} className="flex-1" onClick={() => { setSourceTab("crm"); setLookupPage(0); }}>CRM customers</Button><Button type="button" size="sm" variant={sourceTab === "imported" ? "default" : "ghost"} className="flex-1" onClick={() => { setSourceTab("imported"); setLookupPage(0); }}>Leads & prospects</Button></div><div className="flex flex-col gap-2 sm:flex-row"><div className="relative flex-1"><Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><Input className="pl-8" placeholder="Search contacts…" value={lookupSearch} onChange={e => { setLookupSearch(e.target.value); setLookupPage(0); }} /></div>{sourceTab === "imported" && <select className="h-10 rounded-md border bg-white px-2 text-sm" value={contactType} onChange={e => { setContactType(e.target.value); setLookupPage(0); }}><option value="all">All types</option><option value="lead">Leads</option><option value="prospect">Prospects</option></select>}</div>{sourceTab === "imported" && <div className="rounded-lg border border-dashed p-3"><div className="flex items-center justify-between gap-2"><p className="text-xs text-slate-500">CSV requires email; optional first_name, last_name, company, phone.</p><select className="h-8 rounded-md border bg-white px-2 text-xs" value={importType} onChange={e => setImportType(e.target.value as "lead" | "prospect")}><option value="lead">Lead</option><option value="prospect">Prospect</option></select></div><label className="mt-2 inline-flex cursor-pointer items-center rounded-md border bg-white px-3 py-2 text-xs font-medium text-slate-700">{importing ? "Importing…" : "Choose CSV file"}<input type="file" accept=".csv,text/csv" className="hidden" onChange={importCsv} disabled={importing || !hasPermission("marketing", "manage_audiences")} /></label></div>}<div className="flex items-center justify-between text-xs text-slate-500"><label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={allOnPage} onChange={toggleAll} /> Select all on page</label><span>{selectedIds.length + selectedContactIds.length} selected across all pages</span></div><div className="max-h-64 space-y-1 overflow-auto rounded-md border p-2">{visibleRows.map((c: any) => { const checked = sourceTab === "crm" ? selectedIds.includes(c.id) : selectedContactIds.includes(c.id); return <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded p-2 text-xs hover:bg-slate-50"><input type="checkbox" checked={checked} onChange={e => sourceTab === "crm" ? setSelectedIds(old => e.target.checked ? [...new Set([...old, c.id])] : old.filter(x => x !== c.id)) : setSelectedContactIds(old => e.target.checked ? [...new Set([...old, c.id])] : old.filter(x => x !== c.id))} /><span className="min-w-0 flex-1 truncate">{c.company || [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email}</span><span className="max-w-[130px] truncate text-slate-400">{c.email}</span>{sourceTab === "imported" && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase text-slate-500">{c.contact_type}</span>}</label>; })}{!visibleRows.length && <p className="p-3 text-center text-xs text-slate-400">No contacts match this search.</p>}</div><div className="flex items-center justify-between text-xs text-slate-500"><span>{total} available</span><div className="flex items-center gap-2"><Button type="button" size="sm" variant="outline" disabled={lookupPage === 0} onClick={() => setLookupPage(p => p - 1)}>Previous</Button><span>{totalPages ? lookupPage + 1 : 0} / {totalPages || 0}</span><Button type="button" size="sm" variant="outline" disabled={!totalPages || lookupPage + 1 >= totalPages} onClick={() => setLookupPage(p => p + 1)}>Next</Button></div></div><p className="text-xs text-slate-400">Imported contacts stay outside the CRM mirror and can be reused in marketing audiences.</p></div>}<Button className="w-full" onClick={() => save.mutate()} disabled={save.isPending || !form.name.trim() || !hasPermission("marketing", "manage_audiences")}>{save.isPending ? "Saving…" : "Save audience"}</Button></div></section>
      </div>
-    {viewingMembers && <section className="rounded-xl border bg-white shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4"><div><h2 className="font-semibold text-slate-900">Members: {viewingMembers.name}</h2><p className="text-xs text-slate-500">{memberData?.total ?? viewingMembers.member_count ?? 0} members · live eligibility</p></div><Button variant="ghost" size="sm" onClick={() => setViewingMembers(null)}><X className="mr-1 h-4 w-4" /> Close</Button></div><div className="p-4"><div className="mb-3 flex flex-col gap-2 sm:flex-row"><Input className="max-w-md" placeholder="Search members…" value={memberSearch} onChange={e => { setMemberSearch(e.target.value); setMemberPage(0); }} /><select className="h-10 rounded-md border bg-white px-3 text-sm" value={memberStatus} onChange={e => { setMemberStatus(e.target.value); setMemberPage(0); }}><option value="all">All eligibility</option><option value="eligible">Eligible</option><option value="suppressed">Suppressed</option><option value="inactive">Inactive</option></select></div><div className="overflow-x-auto"><div className="min-w-[620px] divide-y rounded-md border">{(memberData?.rows ?? []).map((m: any) => <div key={m.member_id} className="grid grid-cols-[1.3fr_1fr_130px_110px] gap-3 px-3 py-3 text-xs"><span className="truncate font-medium text-slate-800">{m.company || [m.first_name, m.last_name].filter(Boolean).join(" ") || "Unnamed contact"}</span><span className="truncate text-slate-500">{m.email}</span><span className="capitalize text-slate-500">{m.source}{m.contact_type ? ` · ${m.contact_type}` : ""}</span><span className={m.status === "eligible" ? "text-emerald-700" : "text-red-600"}>{m.status}</span></div>)}{!memberData?.rows?.length && <p className="p-6 text-center text-sm text-slate-400">No members match this search.</p>}</div></div><div className="mt-3 flex items-center justify-end gap-2 text-xs text-slate-500"><Button size="sm" variant="outline" disabled={memberPage === 0} onClick={() => setMemberPage(p => p - 1)}>Previous</Button><span>{memberData?.total ? memberPage + 1 : 0} / {memberData?.total ? Math.ceil(memberData.total / pageSize) : 0}</span><Button size="sm" variant="outline" disabled={!memberData?.total || memberPage + 1 >= Math.ceil(memberData.total / pageSize)} onClick={() => setMemberPage(p => p + 1)}>Next</Button></div></div></section>}
+    {viewingMembers && <section className="rounded-xl border bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
+        <div><h2 className="font-semibold text-slate-900">Members: {viewingMembers.name}</h2><p className="text-xs text-slate-500">{memberData?.total ?? viewingMembers.member_count ?? 0} members · {viewingMembers.constant_contact_list_id ? "Constant Contact list" : "live eligibility"}</p></div>
+        <Button variant="ghost" size="sm" onClick={() => setViewingMembers(null)}><X className="mr-1 h-4 w-4" /> Close</Button>
+      </div>
+      <div className="p-4">
+        {!viewingMembers.constant_contact_list_id && <div className="mb-3 flex flex-col gap-2 sm:flex-row"><Input className="max-w-md" placeholder="Search members…" value={memberSearch} onChange={e => { setMemberSearch(e.target.value); setMemberPage(0); }} /><select className="h-10 rounded-md border bg-white px-3 text-sm" value={memberStatus} onChange={e => { setMemberStatus(e.target.value); setMemberPage(0); }}><option value="all">All eligibility</option><option value="eligible">Eligible</option><option value="suppressed">Suppressed</option><option value="inactive">Inactive</option></select></div>}
+        <div className="overflow-x-auto"><div className="min-w-[620px] divide-y rounded-md border">
+          {(memberData?.rows ?? []).map((m: any) => <div key={m.member_id ?? m.contact_id} className="grid grid-cols-[1.3fr_1fr_130px_110px_auto] items-center gap-3 px-3 py-3 text-xs">
+            <span className="truncate font-medium text-slate-800">{m.company || [m.first_name, m.last_name].filter(Boolean).join(" ") || m.email || "Unnamed contact"}</span>
+            <span className="truncate text-slate-500">{m.email}</span>
+            <span className="capitalize text-slate-500">{m.source ?? "Constant Contact"}{m.contact_type ? ` · ${m.contact_type}` : ""}</span>
+            <span className={m.status === "eligible" || m.permission_to_send === "yes" ? "text-emerald-700" : "text-amber-700"}>{m.status ?? m.permission_to_send}</span>
+            {viewingMembers.constant_contact_list_id && <Button size="sm" variant="ghost" className="text-red-600" disabled={!hasPermission("marketing", "manage_audiences") || updateCcMembers.isPending} onClick={() => updateCcMembers.mutate({ audienceId: Number(viewingMembers.id), remove_contact_ids: [m.contact_id] })}>Remove</Button>}
+          </div>)}
+          {!memberData?.rows?.length && <p className="p-6 text-center text-sm text-slate-400">No members match this search.</p>}
+        </div></div>
+        {!viewingMembers.constant_contact_list_id && <div className="mt-3 flex items-center justify-end gap-2 text-xs text-slate-500"><Button size="sm" variant="outline" disabled={memberPage === 0} onClick={() => setMemberPage(p => p - 1)}>Previous</Button><span>{memberData?.total ? memberPage + 1 : 0} / {memberData?.total ? Math.ceil(memberData.total / pageSize) : 0}</span><Button size="sm" variant="outline" disabled={!memberData?.total || memberPage + 1 >= Math.ceil(memberData.total / pageSize)} onClick={() => setMemberPage(p => p + 1)}>Next</Button></div>}
+      </div>
+    </section>}
   </PageShell>;
 }
 
@@ -813,7 +1172,7 @@ function MarketingAudiencesLegacy() {
   const startNew = () => { setSelected(null); setForm({ name: "", description: "", audience_type: "manual", dynamic_filters: {} }); setSelectedIds([]); };
   const edit = async (a: any) => { const detail = await getMarketingAudience(a.id); setSelected(detail); setForm({ name: detail.name, description: detail.description, audience_type: detail.audience_type, dynamic_filters: detail.dynamic_filters || {} }); setSelectedIds((detail.members || []).map((m: any) => m.id)); };
   return <PageShell title="Audiences" subtitle="Reusable customer groups built on your existing CRM data" action={hasPermission("marketing", "create") ? <Button onClick={startNew}><Plus className="mr-2 h-4 w-4" /> New audience</Button> : undefined}>
-    <div className="grid gap-5 lg:grid-cols-[1fr_360px]"><section className="overflow-hidden rounded-xl border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="font-semibold text-slate-900">Saved audiences</h2><p className="text-xs text-slate-500">{audiences.length} audience{audiences.length === 1 ? "" : "s"}</p></div>{isLoading ? <div className="py-16 text-center text-sm text-slate-400">Loading audiences…</div> : audiences.length ? <div className="divide-y">{audiences.map((a: any) => <div key={a.id} className="flex items-center gap-3 px-5 py-4"><span className="rounded-lg bg-violet-50 p-2 text-violet-600"><Users className="h-4 w-4" /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-800">{a.name}</p><p className="text-xs text-slate-400">{a.audience_type === "dynamic" ? "Dynamic" : "Manual"} · {a.member_count} customers</p></div><Button variant="ghost" size="sm" onClick={() => edit(a)}>Edit</Button>{hasPermission("marketing", "delete") && <Button variant="ghost" size="sm" className="text-red-600" onClick={() => { if (window.confirm("Delete this audience?")) remove.mutate(a.id); }}><Trash2 className="h-4 w-4" /></Button>}</div>)}</div> : <EmptyState icon={Users} text="No saved audiences yet" action="Create an audience" onClick={startNew} />}</section>
+    <div className="grid gap-5 lg:grid-cols-[1fr_360px]"><section className="overflow-hidden rounded-xl border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="font-semibold text-slate-900">Saved audiences</h2><p className="text-xs text-slate-500">{audiences.length} audience{audiences.length === 1 ? "" : "s"}</p></div>{isLoading ? <div className="py-16 text-center text-sm text-slate-400">Loading audiences…</div> : audiences.length ? <div className="divide-y">{audiences.map((a: any) => <div key={a.id} className="flex items-center gap-3 px-5 py-4"><span className="rounded-lg bg-violet-50 p-2 text-violet-600"><Users className="h-4 w-4" /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-800">{a.name}</p><p className="text-xs text-slate-400">{a.constant_contact_list_id ? "Constant Contact list · live membership" : `${a.audience_type === "dynamic" ? "Dynamic" : "Manual"} · ${a.member_count} customers`}</p></div><Button variant="ghost" size="sm" onClick={() => edit(a)}>Edit</Button>{hasPermission("marketing", "delete") && <Button variant="ghost" size="sm" className="text-red-600" onClick={() => { if (window.confirm("Delete this audience?")) remove.mutate(a.id); }}><Trash2 className="h-4 w-4" /></Button>}</div>)}</div> : <EmptyState icon={Users} text="No saved audiences yet" action="Create an audience" onClick={startNew} />}</section>
        <section className="rounded-xl border bg-white p-5 shadow-sm"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-semibold text-slate-900">{selected ? "Edit audience" : "New audience"}</h2><p className="text-xs text-slate-500">Save a segment for future campaigns.</p></div>{selected && <Button variant="ghost" size="sm" onClick={startNew}><X className="h-4 w-4" /></Button>}</div><div className="space-y-4"><label className="block text-sm font-medium text-slate-700">Name<Input className="mt-1.5" value={form.name} onChange={e => setForm((x: any) => ({ ...x, name: e.target.value }))} placeholder="VIP customers" /></label><label className="block text-sm font-medium text-slate-700">Description<textarea className="mt-1.5 min-h-16 w-full rounded-md border border-slate-200 p-3 text-sm" value={form.description} onChange={e => setForm((x: any) => ({ ...x, description: e.target.value }))} /></label><select className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={form.audience_type} onChange={e => setForm((x: any) => ({ ...x, audience_type: e.target.value }))}><option value="manual">Manual selection</option><option value="dynamic">Dynamic filters</option></select>{form.audience_type === "dynamic" ? <div className="grid gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-2"><label className="text-xs font-medium text-slate-600">Customer group<Input className="mt-1 h-9 bg-white text-sm" value={form.dynamic_filters?.customerGroup || ""} onChange={e => setForm((x: any) => ({ ...x, dynamic_filters: { ...x.dynamic_filters, customerGroup: e.target.value } }))} placeholder="Optional group name" /></label><label className="text-xs font-medium text-slate-600">Customer type<select className="mt-1 h-9 w-full rounded-md border bg-white px-2 text-sm" value={form.dynamic_filters?.customerType || ""} onChange={e => setForm((x: any) => ({ ...x, dynamic_filters: { ...x.dynamic_filters, customerType: e.target.value } }))}><option value="">Any type</option><option value="Store">Store</option><option value="Distributor">Distributor</option></select></label><label className="text-xs font-medium text-slate-600">Account health<select className="mt-1 h-9 w-full rounded-md border bg-white px-2 text-sm" value={form.dynamic_filters?.accountHealth || ""} onChange={e => setForm((x: any) => ({ ...x, dynamic_filters: { ...x.dynamic_filters, accountHealth: e.target.value } }))}><option value="">Any health</option><option value="Healthy">Healthy</option><option value="Watch">Watch</option><option value="At Risk">At Risk</option><option value="Lost">Lost</option></select></label><label className="text-xs font-medium text-slate-600">Account status<select className="mt-1 h-9 w-full rounded-md border bg-white px-2 text-sm" value={form.dynamic_filters?.isActive === false ? "inactive" : form.dynamic_filters?.isActive === true ? "active" : ""} onChange={e => setForm((x: any) => ({ ...x, dynamic_filters: { ...x.dynamic_filters, ...(e.target.value ? { isActive: e.target.value === "active" } : { isActive: undefined }) } }))}><option value="">Any status</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label><label className="text-xs font-medium text-slate-600">State<Input className="mt-1 h-9 bg-white text-sm" value={form.dynamic_filters?.state || ""} onChange={e => setForm((x: any) => ({ ...x, dynamic_filters: { ...x.dynamic_filters, state: e.target.value } }))} placeholder="PA, MD…" /></label><label className="text-xs font-medium text-slate-600">Minimum lifetime revenue<Input type="number" min="0" className="mt-1 h-9 bg-white text-sm" value={form.dynamic_filters?.minRevenue || ""} onChange={e => setForm((x: any) => ({ ...x, dynamic_filters: { ...x.dynamic_filters, minRevenue: e.target.value ? Number(e.target.value) : undefined } }))} /></label><label className="text-xs font-medium text-slate-600">Minimum orders<Input type="number" min="0" className="mt-1 h-9 bg-white text-sm" value={form.dynamic_filters?.minOrders || ""} onChange={e => setForm((x: any) => ({ ...x, dynamic_filters: { ...x.dynamic_filters, minOrders: e.target.value ? Number(e.target.value) : undefined } }))} /></label><label className="text-xs font-medium text-slate-600">Last order before<Input type="date" className="mt-1 h-9 w-full bg-white text-sm" value={form.dynamic_filters?.lastOrderBefore || ""} onChange={e => setForm((x: any) => ({ ...x, dynamic_filters: { ...x.dynamic_filters, lastOrderBefore: e.target.value } }))} /></label><p className="col-span-full text-xs text-slate-400">Dynamic filters recalculate from CRM data and exclude marketing-suppressed customers when used in a campaign.</p></div> : <div className="max-h-56 space-y-1 overflow-auto rounded-md border p-2">{customers.map((c: any) => <label key={c.id} className="flex items-center gap-2 rounded p-2 text-xs hover:bg-slate-50"><input type="checkbox" checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(old => e.target.checked ? [...old, c.id] : old.filter(x => x !== c.id))} /><span className="min-w-0 flex-1 truncate">{c.company || `${c.first_name} ${c.last_name}`}</span></label>)}</div>}<Button className="w-full" onClick={() => save.mutate()} disabled={save.isPending || !form.name.trim() || !hasPermission("marketing", selected ? "edit" : "create")}>{save.isPending ? "Saving…" : "Save audience"}</Button></div></section>
     </div>
   </PageShell>;

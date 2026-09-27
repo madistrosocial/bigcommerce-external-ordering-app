@@ -70,3 +70,17 @@ mtime_ms = 1789381307847
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/5ce28780-4d7a-4952-9c3b-afd0db71dd4f/0d1af6c3-c1da-42a1-8207-5b246c649930"
 storage_version_token = "1789381310320189"
 content_type = "text/plain"
+
+[[outputs]]
+id = "UTDoGmDInKhlGt4Lp8W6Q"
+uri = "file://generated/Jovanne-Sotto-Order-Form-1-each.xlsx"
+type = "table"
+title = "Order Form — Qty 1 for Every SKU"
+description = "Completed XLSX with quantity 1 entered for all 170 SKU rows. The workbook was reopened and verified."
+logical_id = "b06fbc6d-c13a-472e-9299-e584e2455f04"
+content_hash = "sha256:32ecc3dc78670772960267b075f0df88744e9ad5afb34233b1616103737d087f"
+size = 13309
+mtime_ms = 1790484761784
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/b06fbc6d-c13a-472e-9299-e584e2455f04/f1341d56-209b-4154-99e8-b72ba101ebb9"
+storage_version_token = "1790484775437612"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

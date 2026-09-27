@@ -7,4 +7,4 @@ Attendance-admin views may expose saved home coordinates and captured time-in/ti
 
 **Why:** Managers need an actionable map view for attendance review, while employee screens should minimize technical location disclosure.
 
-**How to apply:** Gate the location list with attendance dashboard permission and coordinate clearing with attendance management permission. Use Google Maps search URLs built from validated numeric latitude/longitude values.
+**How to apply:** Gate the location list with the dedicated `attendance:view_home_locations` permission and coordinate clearing with attendance management permission. Use Google Maps search URLs built from validated numeric latitude/longitude values.

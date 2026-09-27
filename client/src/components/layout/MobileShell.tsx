@@ -29,6 +29,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import * as api from "@/lib/api";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 interface MobileShellProps {
   children: React.ReactNode;
@@ -38,6 +39,8 @@ interface MobileShellProps {
 
 export function MobileShell({ children, title = "Sales | Midatlantic Distribution", showBack = false }: MobileShellProps) {
   const { currentUser, isOfflineMode, setOfflineMode, toggleOfflineMode, logout, cart } = useStore();
+  const userInitials = (currentUser?.name || currentUser?.username || "U")
+    .split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -265,14 +268,21 @@ export function MobileShell({ children, title = "Sales | Midatlantic Distributio
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="hidden md:flex items-center gap-2" data-testid="button-user-menu">
-                <User className="h-5 w-5" />
+                <Avatar className="h-10 w-10">
+                  <AvatarImage src={currentUser.avatar_data || undefined} alt="" />
+                  <AvatarFallback className="bg-blue-100 text-sm font-semibold text-blue-700">{userInitials}</AvatarFallback>
+                </Avatar>
                 <span className="text-sm font-medium max-w-[120px] truncate">{currentUser.name}</span>
                 <ChevronDown className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56 bg-white dark:bg-slate-950 shadow-lg border z-50">
-              <DropdownMenuLabel>
-                <div className="flex flex-col">
+              <DropdownMenuLabel className="py-3 text-center">
+                <div className="flex flex-col items-center gap-2">
+                  <Avatar className="h-20 w-20 border-2 border-slate-100 shadow-sm">
+                    <AvatarImage src={currentUser.avatar_data || undefined} alt={`${currentUser.name} profile photo`} />
+                    <AvatarFallback className="bg-blue-100 text-xl font-semibold text-blue-700">{userInitials}</AvatarFallback>
+                  </Avatar>
                   <span>{currentUser.name}</span>
                   <span className="text-xs font-normal text-slate-500">{currentUser.role}</span>
                 </div>
@@ -298,6 +308,11 @@ export function MobileShell({ children, title = "Sales | Midatlantic Distributio
               <DropdownMenuItem onClick={toggleOfflineMode} data-testid="menu-toggle-offline">
                 {isOfflineMode ? <WifiOff className="mr-2 h-4 w-4" /> : <Wifi className="mr-2 h-4 w-4" />}
                 Offline Mode: {isOfflineMode ? "ON" : "OFF"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setLocation('/settings')} data-testid="menu-account-settings">
+                <User className="mr-2 h-4 w-4" />
+                User settings
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} className="text-red-600" data-testid="menu-logout">
