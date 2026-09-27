@@ -2,7 +2,7 @@ services:
   - type: web
     name: midatlantic-sales
     runtime: node
-    buildCommand: npm ci && npm run build
+    buildCommand: node script/prepare-render-install.mjs && npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /
     envVars:
