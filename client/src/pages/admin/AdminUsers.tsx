@@ -16,6 +16,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Users, ShieldCheck, ChevronRight, ArrowLeft, User, Lock, Shield, Eye, EyeOff, Save, Search, UsersRound, Home, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import CreateUserDialog from "@/components/admin/CreateUserDialog";
+import { MARKETING_ACTION_PERMS } from "@shared/marketing-permissions";
+export { MARKETING_ACTION_PERMS };
 
 function googleMapsUrl(latitude: unknown, longitude: unknown) {
   const lat = Number(latitude);
@@ -55,7 +57,6 @@ export const MODULES = [
   { key: "inventory_remove",   label: "Inventory › Remove Inventory" },
   { key: "inventory_audit",    label: "Inventory › Audit Queue" },
   { key: "inventory_logs",     label: "Inventory › Logs" },
-  { key: "marketing",          label: "Marketing" },
   { key: "pricing",            label: "Price Tiers" },
   { key: "reports",            label: "Reports" },
   { key: "reporting_price_override_audit", label: "Reporting › Price Override Audit" },
@@ -94,18 +95,6 @@ export const ORDERS_ACTION_PERMS = [
 
 export const INVENTORY_AUDIT_ACTION_PERMS = [
   { module: "inventory_audit", action: "audit", label: "Complete Audits",  description: "Can enter physical counts, submit audit results, and adjust SKUVault inventory. Requires Audit Queue access above." },
-];
-
-export const MARKETING_ACTION_PERMS = [
-  { module: "marketing", action: "create", label: "Create Campaigns", description: "Can create and duplicate campaigns." },
-  { module: "marketing", action: "edit", label: "Edit Campaigns", description: "Can edit campaign content and audience settings." },
-  { module: "marketing", action: "delete", label: "Delete Campaigns", description: "Can delete campaigns that have not been sent." },
-  { module: "marketing", action: "send", label: "Schedule and Send Campaigns", description: "Can move campaigns through the scheduling and sending workflow." },
-  { module: "marketing", action: "view_analytics", label: "View Marketing Analytics", description: "Can view campaign performance metrics." },
-  { module: "marketing", action: "manage_audiences", label: "Manage Marketing Audiences", description: "Can create, edit, import, and delete campaign audiences." },
-  { module: "marketing", action: "manage_templates", label: "Manage Marketing Templates", description: "Can create, edit, archive, and reuse marketing templates." },
-  { module: "marketing", action: "manage_automations", label: "Manage Marketing Automations", description: "Can create and manage marketing automations." },
-  { module: "marketing", action: "manage_suppressions", label: "Manage Marketing Suppressions", description: "Can manage customer marketing preferences and suppressions." },
 ];
 
 export const ATTENDANCE_ACTION_PERMS = [

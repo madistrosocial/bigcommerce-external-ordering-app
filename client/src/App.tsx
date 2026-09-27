@@ -108,17 +108,44 @@ function PermissionRoute({
   component: Component,
   module,
   action = "view",
+  additionalPermissions = [],
 }: {
   component: React.ComponentType;
   module: string;
   action?: string;
+  additionalPermissions?: Array<{ module: string; action?: string }>;
 }) {
   const { currentUser } = useStore();
   const { hasPermission, isLoading } = usePermissions();
   if (!currentUser || !currentUser.is_enabled) return <Redirect to="/" />;
   if (isLoading) return null;
-  if (!hasPermission(module, action)) return <Redirect to="/dashboard" />;
+  const canAccess = [{ module, action }, ...additionalPermissions]
+    .every(permission => hasPermission(permission.module, permission.action));
+  if (!canAccess) return <Redirect to="/dashboard" />;
   return <Component />;
+}
+
+function MarketingLandingRoute() {
+  const { currentUser } = useStore();
+  const { hasPermission, isLoading } = usePermissions();
+  if (!currentUser || !currentUser.is_enabled) return <Redirect to="/" />;
+  if (isLoading) return null;
+  if (hasPermission("marketing")) return <MarketingDashboard />;
+
+  const pages: Array<{ action: string; path: string }> = [
+    { action: "view_campaigns", path: "/marketing/campaigns" },
+    { action: "view_order_form", path: "/marketing/order-form" },
+    { action: "view_product_lists", path: "/marketing/product-lists" },
+    { action: "view_audiences", path: "/marketing/audiences" },
+    { action: "view_audience_readiness", path: "/marketing/audience-readiness" },
+    { action: "view_templates", path: "/marketing/templates" },
+    { action: "view_automations", path: "/marketing/automations" },
+    { action: "view_log", path: "/marketing/log" },
+    { action: "view_analytics", path: "/marketing/analytics" },
+    { action: "view_settings", path: "/marketing/settings" },
+  ];
+  const firstAccessiblePage = pages.find(page => hasPermission("marketing", page.action));
+  return <Redirect to={firstAccessiblePage?.path ?? "/dashboard"} />;
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -216,46 +243,46 @@ function Router() {
 
       {/* ── Marketing routes ── */}
       <Route path="/marketing">
-        {() => <PermissionRoute component={MarketingDashboard} module="marketing" />}
+        {() => <MarketingLandingRoute />}
       </Route>
       <Route path="/marketing/settings">
-        {() => <PermissionRoute component={MarketingSettings} module="marketing" action="send" />}
+        {() => <PermissionRoute component={MarketingSettings} module="marketing" action="view_settings" />}
       </Route>
       <Route path="/marketing/campaigns">
-        {() => <PermissionRoute component={MarketingCampaigns} module="marketing" />}
+        {() => <PermissionRoute component={MarketingCampaigns} module="marketing" action="view_campaigns" />}
       </Route>
       <Route path="/marketing/campaigns/new">
-        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" action="create" />}
+        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" action="view_campaigns" additionalPermissions={[{ module: "marketing", action: "create" }]} />}
       </Route>
       <Route path="/marketing/campaigns/:id/edit">
-        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" action="edit" />}
+        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" action="view_campaigns" additionalPermissions={[{ module: "marketing", action: "edit" }]} />}
       </Route>
       <Route path="/marketing/campaigns/:id">
-        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" />}
+        {() => <PermissionRoute component={MarketingCampaignRoute} module="marketing" action="view_campaigns" />}
       </Route>
       <Route path="/marketing/order-form">
-        {() => <PermissionRoute component={MarketingOrderForm} module="marketing" />}
+        {() => <PermissionRoute component={MarketingOrderForm} module="marketing" action="view_order_form" />}
       </Route>
       <Route path="/marketing/product-lists">
-        {() => <PermissionRoute component={MarketingProductLists} module="marketing" />}
+        {() => <PermissionRoute component={MarketingProductLists} module="marketing" action="view_product_lists" />}
       </Route>
       <Route path="/marketing/log/:id">
-        {() => <PermissionRoute component={MarketingLogRoute} module="marketing" />}
+        {() => <PermissionRoute component={MarketingLogRoute} module="marketing" action="view_log" />}
       </Route>
       <Route path="/marketing/log">
-        {() => <PermissionRoute component={MarketingLog} module="marketing" />}
+        {() => <PermissionRoute component={MarketingLog} module="marketing" action="view_log" />}
       </Route>
       <Route path="/marketing/audiences">
-        {() => <PermissionRoute component={MarketingAudiences} module="marketing" action="manage_audiences" />}
+        {() => <PermissionRoute component={MarketingAudiences} module="marketing" action="view_audiences" />}
       </Route>
       <Route path="/marketing/audience-readiness">
-        {() => <PermissionRoute component={MarketingAudienceReadiness} module="marketing" />}
+        {() => <PermissionRoute component={MarketingAudienceReadiness} module="marketing" action="view_audience_readiness" />}
       </Route>
       <Route path="/marketing/templates">
-        {() => <PermissionRoute component={MarketingTemplates} module="marketing" action="manage_templates" />}
+        {() => <PermissionRoute component={MarketingTemplates} module="marketing" action="view_templates" />}
       </Route>
       <Route path="/marketing/automations">
-        {() => <PermissionRoute component={MarketingAutomations} module="marketing" action="manage_automations" />}
+        {() => <PermissionRoute component={MarketingAutomations} module="marketing" action="view_automations" />}
       </Route>
       <Route path="/marketing/analytics">
         {() => <PermissionRoute component={MarketingAnalytics} module="marketing" action="view_analytics" />}

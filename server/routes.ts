@@ -69,6 +69,7 @@ import {
 } from "./constant-contact";
 import { DEFAULT_VENDOR_DISPLAY_NAME, KOLE_VENDOR, KoleImportsAdapter, toDropshipProductInsert, type KoleCredentials } from "./vendors/kole-imports";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
+import { MARKETING_ACTION_PERMS, MARKETING_LEGACY_PAGE_GRANTS } from "@shared/marketing-permissions";
 import { dateOnlyInTimeZone, parseDateTimeLocal } from "@shared/timezone";
 import {
   ATTENDANCE_PERMISSION_DEFINITIONS,
@@ -784,6 +785,22 @@ export async function registerRoutes(
       const perms = await storage.getUserPermissionStrings(user.id);
       const hasModuleAccess = module !== "attendance" || action === "view" || perms.includes("attendance:view");
       if (!perms.includes(`${module}:${action}`) || !hasModuleAccess) return res.status(403).json({ error: "Forbidden" });
+      (req as any).authUser = user;
+      next();
+    };
+
+  const requireMarketingPageAccess = (pageActions: string | string[], action?: string) =>
+    async (req: Request, res: Response, next: NextFunction) => {
+      const user = await getAuthenticatedUser(req);
+      if (!user) return res.status(401).json({ error: "Authentication required" });
+      if (user.role === "admin") { (req as any).authUser = user; return next(); }
+
+      const permissions = await storage.getUserPermissionStrings(user.id);
+      const pages = Array.isArray(pageActions) ? pageActions : [pageActions];
+      const canViewPage = pages.some(pageAction => permissions.includes(`marketing:${pageAction}`));
+      const canPerformAction = !action || permissions.includes(`marketing:${action}`);
+      if (!canViewPage || !canPerformAction) return res.status(403).json({ error: "Forbidden" });
+
       (req as any).authUser = user;
       next();
     };
@@ -8443,27 +8460,58 @@ export async function registerRoutes(
 
   // ── Marketing permission auto-seed ────────────────────────────────────────────
   await (async () => {
-    const MARKETING_PERMS: Array<{ module: string; action: string; description: string }> = [
-      { module: "marketing", action: "view", description: "Marketing: view dashboard, campaigns, and audiences" },
-      { module: "marketing", action: "create", description: "Marketing: create and duplicate campaigns" },
-      { module: "marketing", action: "edit", description: "Marketing: edit campaign content and audience settings" },
-      { module: "marketing", action: "delete", description: "Marketing: delete unsent campaigns" },
-      { module: "marketing", action: "send", description: "Marketing: schedule, pause, and send campaigns" },
-      { module: "marketing", action: "view_analytics", description: "Marketing: view campaign analytics" },
-      { module: "marketing", action: "manage_audiences", description: "Marketing: create, edit, import, and delete audiences" },
-      { module: "marketing", action: "manage_templates", description: "Marketing: create, edit, archive, and reuse templates" },
-      { module: "marketing", action: "manage_automations", description: "Marketing: create and manage automations" },
-      { module: "marketing", action: "manage_suppressions", description: "Marketing: manage customer preferences and suppressions" },
-    ];
-    try {
-      const existing = await storage.getAllPermissions();
-      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
-      for (const p of MARKETING_PERMS) {
-        if (!existingSet.has(`${p.module}:${p.action}`)) {
-          await storage.createPermission({ module: p.module, action: p.action, description: p.description });
-        }
+    const migrationKey = "marketing_page_permissions_migrated_v1";
+    const existing = await storage.getAllPermissions();
+    const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+    for (const permission of MARKETING_ACTION_PERMS) {
+      const key = `${permission.module}:${permission.action}`;
+      if (!existingSet.has(key)) {
+        await storage.createPermission({
+          module: permission.module,
+          action: permission.action,
+          description: permission.description,
+        });
       }
-    } catch (_) { /* non-fatal */ }
+    }
+
+    const migrationState = await storage.getSetting(migrationKey);
+    if (migrationState?.value) return;
+
+    // Preserve current access once. Admins can then grant/revoke individual
+    // Marketing pages without the migration restoring removed assignments.
+    for (const grant of MARKETING_LEGACY_PAGE_GRANTS) {
+      for (const sourceAction of grant.sourceActions) {
+        await db.execute(sql`
+          INSERT INTO role_permissions (role_id, permission_id)
+          SELECT DISTINCT assigned.role_id, target.id
+          FROM role_permissions AS assigned
+          JOIN permissions AS source ON source.id = assigned.permission_id
+          JOIN permissions AS target
+            ON target.module = 'marketing' AND target.action = ${grant.pageAction}
+          WHERE source.module = 'marketing' AND source.action = ${sourceAction}
+            AND NOT EXISTS (
+              SELECT 1 FROM role_permissions AS existing_assignment
+              WHERE existing_assignment.role_id = assigned.role_id
+                AND existing_assignment.permission_id = target.id
+            )
+        `);
+        await db.execute(sql`
+          INSERT INTO user_permissions (user_id, permission_id)
+          SELECT DISTINCT assigned.user_id, target.id
+          FROM user_permissions AS assigned
+          JOIN permissions AS source ON source.id = assigned.permission_id
+          JOIN permissions AS target
+            ON target.module = 'marketing' AND target.action = ${grant.pageAction}
+          WHERE source.module = 'marketing' AND source.action = ${sourceAction}
+            AND NOT EXISTS (
+              SELECT 1 FROM user_permissions AS existing_assignment
+              WHERE existing_assignment.user_id = assigned.user_id
+                AND existing_assignment.permission_id = target.id
+            )
+        `);
+      }
+    }
+    await storage.setSetting(migrationKey, true);
   })();
 
   // ── Attendance permission auto-seed ───────────────────────────────────────────
@@ -11504,18 +11552,18 @@ export async function registerRoutes(
     return null;
   }
 
-  app.get("/api/marketing/dashboard", requirePermission("marketing"), async (_req, res) => {
+  app.get("/api/marketing/dashboard", requireMarketingPageAccess("view"), async (_req, res) => {
     try { res.json(await storage.getMarketingDashboard()); }
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/sender-settings", requirePermission("marketing"), async (_req, res) => {
+  app.get("/api/marketing/sender-settings", requireMarketingPageAccess(["view", "view_settings", "view_campaigns", "view_order_form"]), async (_req, res) => {
     try {
       res.json(await getMarketingSenderSettings());
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/provider-status", requirePermission("marketing"), async (_req, res) => {
+  app.get("/api/marketing/provider-status", requireMarketingPageAccess(["view", "view_settings"]), async (_req, res) => {
     res.json(await getZohoCampaignsCredentialStatus());
   });
 
@@ -11877,7 +11925,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/marketing/sender-settings", requirePermission("marketing", "send"), async (req, res) => {
+  app.put("/api/marketing/sender-settings", requireMarketingPageAccess("view_settings", "send"), async (req, res) => {
     try {
       const requestedEmails: string[] = Array.isArray(req.body?.emails)
         ? req.body.emails.map((email: unknown): string => String(email ?? "").trim())
@@ -11898,7 +11946,7 @@ export async function registerRoutes(
 
   // Marketing product picker. Credentials stay server-side and only the
   // snapshot fields needed by the campaign editor are returned.
-  app.get("/api/marketing/products/search", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/products/search", requireMarketingPageAccess(["view_campaigns", "view_order_form", "view_product_lists"]), async (req, res) => {
     try {
       const query = String(req.query.query ?? "").trim();
       if (query.length < 2) return res.json([]);
@@ -11956,7 +12004,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/marketing/product-lists", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/product-lists", requireMarketingPageAccess(["view_product_lists", "view_campaigns", "view_order_form"]), async (req, res) => {
     try {
       res.json(await storage.getMarketingProductLists({ search: String(req.query.search ?? "") }));
     } catch (e: any) {
@@ -11964,7 +12012,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/marketing/product-lists/:id", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/product-lists/:id", requireMarketingPageAccess(["view_product_lists", "view_campaigns", "view_order_form"]), async (req, res) => {
     try {
       const list = await storage.getMarketingProductList(Number(req.params.id));
       if (!list) return res.status(404).json({ error: "Product list not found" });
@@ -11974,7 +12022,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/marketing/product-lists", requirePermission("marketing"), async (req, res) => {
+  app.post("/api/marketing/product-lists", requireMarketingPageAccess("view_product_lists", "manage_product_lists"), async (req, res) => {
     try {
       const name = String(req.body?.name ?? "").trim();
       if (!name) return res.status(400).json({ error: "A product list name is required" });
@@ -11990,7 +12038,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/marketing/product-lists/:id", requirePermission("marketing"), async (req, res) => {
+  app.patch("/api/marketing/product-lists/:id", requireMarketingPageAccess("view_product_lists", "manage_product_lists"), async (req, res) => {
     try {
       const name = req.body?.name === undefined ? undefined : String(req.body.name ?? "").trim();
       if (name !== undefined && !name) return res.status(400).json({ error: "A product list name is required" });
@@ -12005,7 +12053,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/marketing/product-lists/:id", requirePermission("marketing"), async (req, res) => {
+  app.delete("/api/marketing/product-lists/:id", requireMarketingPageAccess("view_product_lists", "manage_product_lists"), async (req, res) => {
     try {
       await storage.deleteMarketingProductList(Number(req.params.id), Number((req as any).authUser.id));
       res.status(204).send();
@@ -12014,7 +12062,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/marketing/product-lists/:id/items", requirePermission("marketing"), async (req, res) => {
+  app.post("/api/marketing/product-lists/:id/items", requireMarketingPageAccess("view_product_lists", "manage_product_lists"), async (req, res) => {
     try {
       const products = Array.isArray(req.body?.products) ? req.body.products : [];
       if (!products.length) return res.status(400).json({ error: "Select at least one product" });
@@ -12038,7 +12086,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/marketing/product-lists/:id/items/:itemId", requirePermission("marketing"), async (req, res) => {
+  app.delete("/api/marketing/product-lists/:id/items/:itemId", requireMarketingPageAccess("view_product_lists", "manage_product_lists"), async (req, res) => {
     try {
       await storage.removeMarketingProductListItem(Number(req.params.id), Number(req.params.itemId));
       res.status(204).send();
@@ -12049,7 +12097,7 @@ export async function registerRoutes(
 
   // Order Form customer lookup uses the CRM mirror and applies the caller's
   // existing CRM visibility scope without changing Marketing Audiences.
-  app.get("/api/marketing/order-forms/customers", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/order-forms/customers", requireMarketingPageAccess("view_order_form"), async (req, res) => {
     try {
       const user = (req as any).authUser;
       const perms = await storage.getUserPermissionStrings(Number(user.id));
@@ -12078,7 +12126,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/marketing/order-forms/history", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/order-forms/history", requireMarketingPageAccess("view_order_form"), async (req, res) => {
     try {
       const user = (req as any).authUser;
       const perms = await storage.getUserPermissionStrings(Number(user.id));
@@ -12127,7 +12175,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/marketing/logs", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/logs", requireMarketingPageAccess(["view_log", "view_campaigns", "view_order_form"]), async (req, res) => {
     try {
       const rawType = String(req.query.type ?? "all");
       const delivery_type = rawType === "campaign" || rawType === "order_form" ? rawType : undefined;
@@ -12144,7 +12192,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/marketing/logs/:id", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/logs/:id", requireMarketingPageAccess("view_log"), async (req, res) => {
     try {
       const log = await storage.getMarketingDeliveryLog(Number(req.params.id));
       if (!log) return res.status(404).json({ error: "Marketing log not found" });
@@ -12154,7 +12202,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/marketing/order-forms/send", requirePermission("marketing", "send"), async (req, res) => {
+  app.post("/api/marketing/order-forms/send", requireMarketingPageAccess("view_order_form", "send"), async (req, res) => {
     try {
       const defaultEmailTitle = "Your Order Form from MidAtlantic Distribution";
       const defaultEmailBody = "Hi {first_name},\n\nPlease find your order form attached. Review the available products and let us know if you have any questions.\n\nThank you,\nMidAtlantic Distribution";
@@ -12392,7 +12440,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/marketing/customer-groups", requirePermission("marketing"), async (_req, res) => {
+  app.get("/api/marketing/customer-groups", requireMarketingPageAccess(["view_campaigns", "view_order_form", "view_audiences", "view_audience_readiness"]), async (_req, res) => {
     try {
       const setting = await storage.getSetting("bigcommerce_config");
       const config = setting?.value
@@ -12507,7 +12555,7 @@ export async function registerRoutes(
     return { audience: updated, addedCount: toAdd.length, removedCount: toRemove.length, missingCount: issues.length };
   }
 
-  app.get("/api/marketing/constant-contact/lists", requirePermission("marketing"), async (_req, res) => {
+  app.get("/api/marketing/constant-contact/lists", requireMarketingPageAccess(["view_audiences", "view_audience_readiness"]), async (_req, res) => {
     try {
       const [provider, audiences] = await Promise.all([
         getConstantContactAudienceSnapshot(),
@@ -12524,7 +12572,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/marketing/audiences/import-constant-contact", requirePermission("marketing", "manage_audiences"), async (req, res) => {
+  app.post("/api/marketing/audiences/import-constant-contact", requireMarketingPageAccess("view_audiences", "manage_audiences"), async (req, res) => {
     try {
       const listId = String(req.body?.list_id ?? "").trim();
       if (!listId) return res.status(400).json({ error: "Choose a Constant Contact list." });
@@ -12546,7 +12594,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/marketing/audiences/:id/constant-contact-members", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/audiences/:id/constant-contact-members", requireMarketingPageAccess("view_audiences"), async (req, res) => {
     try {
       const audience = await storage.getMarketingAudience(Number(req.params.id));
       if (!audience?.constant_contact_list_id) return res.status(409).json({ error: "This saved audience is not linked to a Constant Contact list." });
@@ -12565,7 +12613,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/marketing/audiences/:id/constant-contact-members", requirePermission("marketing", "manage_audiences"), async (req, res) => {
+  app.post("/api/marketing/audiences/:id/constant-contact-members", requireMarketingPageAccess("view_audiences", "manage_audiences"), async (req, res) => {
     try {
       const audience = await storage.getMarketingAudience(Number(req.params.id));
       const listId = String(audience?.constant_contact_list_id ?? "").trim();
@@ -12666,7 +12714,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/marketing/audiences/:id/constant-contact-missing.csv", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/audiences/:id/constant-contact-missing.csv", requireMarketingPageAccess("view_audiences"), async (req, res) => {
     try {
       const audience = await storage.getMarketingAudience(Number(req.params.id));
       if (!audience) return res.status(404).json({ error: "Audience not found." });
@@ -12688,7 +12736,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/marketing/audience-readiness", requirePermission("marketing"), async (_req, res) => {
+  app.get("/api/marketing/audience-readiness", requireMarketingPageAccess("view_audience_readiness"), async (_req, res) => {
     try {
       const [provider, localSummary, audienceRows] = await Promise.all([
         getConstantContactAudienceSnapshot(),
@@ -12719,7 +12767,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/marketing/audience-readiness/reconciliation.csv", requirePermission("marketing"), async (_req, res) => {
+  app.get("/api/marketing/audience-readiness/reconciliation.csv", requireMarketingPageAccess("view_audience_readiness"), async (_req, res) => {
     try {
       const [provider, crmCustomers] = await Promise.all([
         getConstantContactReconciliationSnapshot(),
@@ -12871,7 +12919,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/marketing/constant-contact/import-opt-outs", requirePermission("marketing", "manage_suppressions"), async (req, res) => {
+  app.post("/api/marketing/constant-contact/import-opt-outs", requireMarketingPageAccess("view_audience_readiness", "manage_suppressions"), async (req, res) => {
     try {
       const sendingCampaigns = await storage.getMarketingCampaigns({ status: "sending", limit: 1 });
       if (sendingCampaigns.total > 0) {
@@ -12903,7 +12951,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/marketing/campaigns", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/campaigns", requireMarketingPageAccess("view_campaigns"), async (req, res) => {
     try {
       const result = await storage.getMarketingCampaigns({
         search: String(req.query.search ?? ""),
@@ -12915,7 +12963,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/campaigns/:id", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/campaigns/:id", requireMarketingPageAccess("view_campaigns"), async (req, res) => {
     try {
       const campaign = await storage.getMarketingCampaign(Number(req.params.id));
       if (!campaign) return res.status(404).json({ error: "Campaign not found" });
@@ -12923,7 +12971,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/campaigns", requirePermission("marketing", "create"), async (req, res) => {
+  app.post("/api/marketing/campaigns", requireMarketingPageAccess("view_campaigns", "create"), async (req, res) => {
     try {
       const body = req.body ?? {};
       if (!String(body.name ?? "").trim()) return res.status(400).json({ error: "Campaign name is required" });
@@ -12974,7 +13022,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.patch("/api/marketing/campaigns/:id", requirePermission("marketing", "edit"), async (req, res) => {
+  app.patch("/api/marketing/campaigns/:id", requireMarketingPageAccess("view_campaigns", "edit"), async (req, res) => {
     try {
       const body = req.body ?? {};
       const current = await storage.getMarketingCampaign(Number(req.params.id));
@@ -13014,7 +13062,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.delete("/api/marketing/campaigns/:id", requirePermission("marketing", "delete"), async (req, res) => {
+  app.delete("/api/marketing/campaigns/:id", requireMarketingPageAccess("view_campaigns", "delete"), async (req, res) => {
     try {
       const campaign = await storage.getMarketingCampaign(Number(req.params.id));
       if (!campaign) return res.status(404).json({ error: "Campaign not found" });
@@ -13024,7 +13072,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/campaigns/:id/status", requirePermission("marketing", "send"), async (req, res) => {
+  app.post("/api/marketing/campaigns/:id/status", requireMarketingPageAccess("view_campaigns", "send"), async (req, res) => {
     try {
       const id = Number(req.params.id);
       const current = await storage.getMarketingCampaign(id);
@@ -13046,7 +13094,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/campaigns/:id/test-send", requirePermission("marketing", "send"), async (req, res) => {
+  app.post("/api/marketing/campaigns/:id/test-send", requireMarketingPageAccess("view_campaigns", "send"), async (req, res) => {
     try {
       const email = String(req.body?.email ?? "").trim();
       if (!email) return res.status(400).json({ error: "A test email address is required" });
@@ -13055,7 +13103,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/campaigns/:id/send", requirePermission("marketing", "send"), async (req, res) => {
+  app.post("/api/marketing/campaigns/:id/send", requireMarketingPageAccess("view_campaigns", "send"), async (req, res) => {
     try {
       if (req.body?.confirm !== true) return res.status(400).json({ error: "Explicit confirmation is required before sending" });
       const id = Number(req.params.id);
@@ -13079,7 +13127,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/campaigns/:id/schedule", requirePermission("marketing", "send"), async (req, res) => {
+  app.post("/api/marketing/campaigns/:id/schedule", requireMarketingPageAccess("view_campaigns", "send"), async (req, res) => {
     try {
       const id = Number(req.params.id);
       const when = new Date(String(req.body?.scheduled_at ?? ""));
@@ -13104,7 +13152,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/campaigns/:id/pause", requirePermission("marketing", "send"), async (req, res) => {
+  app.post("/api/marketing/campaigns/:id/pause", requireMarketingPageAccess("view_campaigns", "send"), async (req, res) => {
     try {
       const id = Number(req.params.id);
       const campaign = await storage.getMarketingCampaign(id);
@@ -13113,7 +13161,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/campaigns/:id/duplicate", requirePermission("marketing", "create"), async (req, res) => {
+  app.post("/api/marketing/campaigns/:id/duplicate", requireMarketingPageAccess("view_campaigns", "create"), async (req, res) => {
     try {
       const original = await storage.getMarketingCampaign(Number(req.params.id));
       if (!original) return res.status(404).json({ error: "Campaign not found" });
@@ -13132,22 +13180,22 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/campaigns/:id/recipients", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/campaigns/:id/recipients", requireMarketingPageAccess("view_campaigns"), async (req, res) => {
     try { res.json(await storage.getMarketingRecipients(Number(req.params.id), { status: String(req.query.status ?? "all"), limit: Math.min(Number(req.query.limit ?? 100), 200), offset: Math.max(Number(req.query.offset ?? 0), 0) })); }
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/analytics", requirePermission("marketing", "view_analytics"), async (req, res) => {
+  app.get("/api/marketing/analytics", requireMarketingPageAccess("view_analytics"), async (req, res) => {
     try { res.json(await storage.getMarketingAnalytics({ campaignId: req.query.campaignId ? Number(req.query.campaignId) : undefined, dateFrom: String(req.query.dateFrom ?? ""), dateTo: String(req.query.dateTo ?? "") })); }
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/audiences", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/audiences", requireMarketingPageAccess(["view_audiences", "view_campaigns", "view_order_form", "view_audience_readiness"]), async (req, res) => {
     try { res.json(await storage.getMarketingAudiences({ search: String(req.query.search ?? ""), type: String(req.query.type ?? "all") })); }
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/audiences/:id", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/audiences/:id", requireMarketingPageAccess(["view_audiences", "view_campaigns", "view_order_form", "view_audience_readiness"]), async (req, res) => {
     try {
       const audience = await storage.getMarketingAudience(Number(req.params.id));
       if (!audience) return res.status(404).json({ error: "Audience not found" });
@@ -13155,7 +13203,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/audiences", requirePermission("marketing", "manage_audiences"), async (req, res) => {
+  app.post("/api/marketing/audiences", requireMarketingPageAccess("view_audiences", "manage_audiences"), async (req, res) => {
     try {
       const body = req.body ?? {};
       const name = String(body.name ?? "").trim();
@@ -13176,7 +13224,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.patch("/api/marketing/audiences/:id", requirePermission("marketing", "manage_audiences"), async (req, res) => {
+  app.patch("/api/marketing/audiences/:id", requireMarketingPageAccess("view_audiences", "manage_audiences"), async (req, res) => {
     try {
       const id = Number(req.params.id);
       const current = await storage.getMarketingAudience(id);
@@ -13200,7 +13248,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.delete("/api/marketing/audiences/:id", requirePermission("marketing", "manage_audiences"), async (req, res) => {
+  app.delete("/api/marketing/audiences/:id", requireMarketingPageAccess("view_audiences", "manage_audiences"), async (req, res) => {
     try {
       const campaignUse = await storage.getMarketingCampaigns({ limit: 1000 });
       if (campaignUse.campaigns.some(c => c.audience_id === Number(req.params.id))) {
@@ -13211,17 +13259,17 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/audience-customers", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/audience-customers", requireMarketingPageAccess(["view_audiences", "view_campaigns", "view_order_form", "view_audience_readiness"]), async (req, res) => {
     try { res.json(await storage.getMarketingAudienceCustomers({ search: String(req.query.search ?? ""), limit: Math.min(Number(req.query.limit ?? 25), 100), offset: Math.max(Number(req.query.offset ?? 0), 0) })); }
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/contacts", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/contacts", requireMarketingPageAccess(["view_audiences", "view_campaigns", "view_order_form", "view_audience_readiness"]), async (req, res) => {
     try { res.json(await storage.getMarketingContacts({ search: String(req.query.search ?? ""), type: String(req.query.type ?? "all"), limit: Math.min(Number(req.query.limit ?? 25), 100), offset: Math.max(Number(req.query.offset ?? 0), 0) })); }
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/contacts/import", requirePermission("marketing", "manage_audiences"), async (req, res) => {
+  app.post("/api/marketing/contacts/import", requireMarketingPageAccess("view_audiences", "manage_audiences"), async (req, res) => {
     try {
       const type = String(req.body?.contact_type ?? "lead").toLowerCase();
       if (!["lead", "prospect"].includes(type)) return res.status(400).json({ error: "Contact type must be lead or prospect" });
@@ -13248,7 +13296,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/audiences/:id/members", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/audiences/:id/members", requireMarketingPageAccess(["view_audiences", "view_campaigns", "view_order_form", "view_audience_readiness"]), async (req, res) => {
     try {
       const audience = await storage.getMarketingAudience(Number(req.params.id));
       if (!audience) return res.status(404).json({ error: "Audience not found." });
@@ -13292,17 +13340,17 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/audience-preview", requirePermission("marketing"), async (req, res) => {
+  app.post("/api/marketing/audience-preview", requireMarketingPageAccess(["view_campaigns", "view_order_form"]), async (req, res) => {
     try { res.json(await storage.getMarketingAudiencePreview(req.body?.filters ?? {}, Math.min(Number(req.body?.limit ?? 25), 100))); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/templates", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/templates", requireMarketingPageAccess(["view_templates", "view_campaigns", "view_order_form"]), async (req, res) => {
     try { res.json(await storage.getMarketingTemplates({ search: String(req.query.search ?? ""), category: String(req.query.category ?? "all"), includeArchived: req.query.includeArchived === "true" })); }
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/templates", requirePermission("marketing", "manage_templates"), async (req, res) => {
+  app.post("/api/marketing/templates", requireMarketingPageAccess("view_templates", "manage_templates"), async (req, res) => {
     try {
       const key = `marketing_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
        const template = await storage.upsertEmailTemplate(key, { name: String(req.body?.name ?? "").trim(), subject_template: String(req.body?.subject_template ?? ""), body: sanitizeMarketingEditorHtml(String(req.body?.body ?? "")), template_type: "marketing", category: String(req.body?.category ?? "general"), updated_by: getMarketingUserId(req) });
@@ -13310,7 +13358,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.patch("/api/marketing/templates/:id", requirePermission("marketing", "manage_templates"), async (req, res) => {
+  app.patch("/api/marketing/templates/:id", requireMarketingPageAccess("view_templates", "manage_templates"), async (req, res) => {
     try {
       const current = await storage.getMarketingTemplateById(Number(req.params.id));
       if (!current) return res.status(404).json({ error: "Template not found" });
@@ -13319,17 +13367,17 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/templates/:id/archive", requirePermission("marketing", "manage_templates"), async (req, res) => {
+  app.post("/api/marketing/templates/:id/archive", requireMarketingPageAccess("view_templates", "manage_templates"), async (req, res) => {
     try { res.json(await storage.archiveMarketingTemplate(Number(req.params.id), getMarketingUserId(req), req.body?.archived !== false)); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/automations", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/automations", requireMarketingPageAccess("view_automations"), async (req, res) => {
     try { res.json(await storage.getMarketingAutomations({ status: String(req.query.status ?? "all"), search: String(req.query.search ?? "") })); }
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get("/api/marketing/automations/:id", requirePermission("marketing"), async (req, res) => {
+  app.get("/api/marketing/automations/:id", requireMarketingPageAccess("view_automations"), async (req, res) => {
     try {
       const automation = await storage.getMarketingAutomation(Number(req.params.id));
       if (!automation) return res.status(404).json({ error: "Automation not found" });
@@ -13337,7 +13385,7 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/automations", requirePermission("marketing", "manage_automations"), async (req, res) => {
+  app.post("/api/marketing/automations", requireMarketingPageAccess("view_automations", "manage_automations"), async (req, res) => {
     try {
       const allowedTriggers = new Set(["customer_created", "customer_signup_completed", "audience_membership"]);
       if (!allowedTriggers.has(String(req.body?.trigger_type))) return res.status(400).json({ error: "Unsupported automation trigger" });
@@ -13347,12 +13395,12 @@ export async function registerRoutes(
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.patch("/api/marketing/automations/:id", requirePermission("marketing", "manage_automations"), async (req, res) => {
+  app.patch("/api/marketing/automations/:id", requireMarketingPageAccess("view_automations", "manage_automations"), async (req, res) => {
     try { res.json(await storage.updateMarketingAutomation(Number(req.params.id), req.body ?? {}, getMarketingUserId(req))); }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
-  app.post("/api/marketing/automations/:id/status", requirePermission("marketing", "manage_automations"), async (req, res) => {
+  app.post("/api/marketing/automations/:id/status", requireMarketingPageAccess("view_automations", "manage_automations"), async (req, res) => {
     try {
       const status = String(req.body?.status ?? "");
       if (!["draft", "active", "paused", "archived"].includes(status)) return res.status(400).json({ error: "Invalid automation status" });

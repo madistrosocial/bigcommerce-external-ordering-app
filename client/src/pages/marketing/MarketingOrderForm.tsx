@@ -345,7 +345,7 @@ export default function MarketingOrderForm() {
              <Button className="mt-4 h-auto min-h-10 w-full whitespace-normal px-3 py-2" disabled={!audienceReady || !products.length || !canSend} onClick={() => setReviewOpen(true)}><Check className="mr-2 h-4 w-4 shrink-0" /> Review & Send</Button>
           </section>
 
-           <MarketingDeliveryLogPreview rows={deliveryLogs?.rows ?? []} total={deliveryLogs?.total ?? 0} loading={deliveryLogsLoading} title="Order Form sent history" onViewAll={() => setLocation("/marketing/log?type=order_form")} />
+           <MarketingDeliveryLogPreview rows={deliveryLogs?.rows ?? []} total={deliveryLogs?.total ?? 0} loading={deliveryLogsLoading} title="Order Form sent history" onViewAll={hasPermission("marketing", "view_log") ? () => setLocation("/marketing/log?type=order_form") : undefined} />
         </div>
       </div>
 

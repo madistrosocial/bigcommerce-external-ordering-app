@@ -208,15 +208,16 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
 
   const marketingChildren: NavLeaf[] = [
     ...(hasPermission("marketing") ? [{ label: "Overview", path: "/marketing" }] : []),
-    ...(hasPermission("marketing") ? [{ label: "Campaigns", path: "/marketing/campaigns" }] : []),
-    ...(hasPermission("marketing") ? [{ label: "Order Form", path: "/marketing/order-form" }] : []),
-    ...(hasPermission("marketing") ? [{ label: "Product Lists", path: "/marketing/product-lists" }] : []),
-    ...(hasPermission("marketing", "manage_audiences") ? [{ label: "Audiences", path: "/marketing/audiences" }] : []),
-    ...(hasPermission("marketing") ? [{ label: "Audience Readiness", path: "/marketing/audience-readiness" }] : []),
-    ...(hasPermission("marketing", "manage_templates") ? [{ label: "Templates", path: "/marketing/templates" }] : []),
-    ...(hasPermission("marketing", "manage_automations") ? [{ label: "Automations", path: "/marketing/automations" }] : []),
-    ...(hasPermission("marketing") ? [{ label: "Log", path: "/marketing/log" }] : []),
+    ...(hasPermission("marketing", "view_campaigns") ? [{ label: "Campaigns", path: "/marketing/campaigns" }] : []),
+    ...(hasPermission("marketing", "view_order_form") ? [{ label: "Order Form", path: "/marketing/order-form" }] : []),
+    ...(hasPermission("marketing", "view_product_lists") ? [{ label: "Product Lists", path: "/marketing/product-lists" }] : []),
+    ...(hasPermission("marketing", "view_audiences") ? [{ label: "Audiences", path: "/marketing/audiences" }] : []),
+    ...(hasPermission("marketing", "view_audience_readiness") ? [{ label: "Audience Readiness", path: "/marketing/audience-readiness" }] : []),
+    ...(hasPermission("marketing", "view_templates") ? [{ label: "Templates", path: "/marketing/templates" }] : []),
+    ...(hasPermission("marketing", "view_automations") ? [{ label: "Automations", path: "/marketing/automations" }] : []),
+    ...(hasPermission("marketing", "view_log") ? [{ label: "Log", path: "/marketing/log" }] : []),
     ...(hasPermission("marketing", "view_analytics") ? [{ label: "Analytics", path: "/marketing/analytics" }] : []),
+    ...(hasPermission("marketing", "view_settings") ? [{ label: "Settings", path: "/marketing/settings" }] : []),
   ];
 
   // Tools children — permission-gated

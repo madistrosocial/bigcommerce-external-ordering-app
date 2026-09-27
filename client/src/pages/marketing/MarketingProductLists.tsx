@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   addMarketingProductListItems,
   createMarketingProductList,
@@ -38,6 +39,8 @@ type ProductListProduct = {
 export default function MarketingProductLists() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { hasPermission } = usePermissions();
+  const canManageLists = hasPermission("marketing", "manage_product_lists");
   const queryClient = useQueryClient();
   const [selectedListId, setSelectedListId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
@@ -118,7 +121,7 @@ export default function MarketingProductLists() {
         <section className="min-w-0 rounded-xl border bg-white p-4 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 font-semibold text-slate-900"><Package className="h-4 w-4 text-blue-500" /> Collections</h2>
-            <Button size="sm" onClick={() => setCreateOpen(true)}><Plus className="mr-1.5 h-4 w-4" /> New</Button>
+             {canManageLists && <Button size="sm" onClick={() => setCreateOpen(true)}><Plus className="mr-1.5 h-4 w-4" /> New</Button>}
           </div>
           <div className="relative mb-3">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -138,6 +141,7 @@ export default function MarketingProductLists() {
             <ProductListEditor
               key={selectedList.id}
               list={selectedList}
+              canManage={canManageLists}
               productSearch={productSearch}
               setProductSearch={setProductSearch}
               productResults={productResults}
@@ -154,7 +158,7 @@ export default function MarketingProductLists() {
         </section>
       </div>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={canManageLists && createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>New product list</DialogTitle><DialogDescription>Create a reusable collection that can be loaded into a Campaign or Order Form.</DialogDescription></DialogHeader>
           <div className="space-y-4">
@@ -169,9 +173,10 @@ export default function MarketingProductLists() {
 }
 
 function ProductListEditor({
-  list, productSearch, setProductSearch, productResults, productsLoading, onAdd, onRemove, adding, removing, onSave, saving, onDelete, deleting,
+  list, canManage, productSearch, setProductSearch, productResults, productsLoading, onAdd, onRemove, adding, removing, onSave, saving, onDelete, deleting,
 }: {
   list: any;
+  canManage: boolean;
   productSearch: string;
   setProductSearch: (value: string) => void;
   productResults: ProductListProduct[];
@@ -191,14 +196,15 @@ function ProductListEditor({
   return <div className="space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0"><h2 className="truncate text-lg font-semibold text-slate-900">{list.name}</h2><p className="mt-1 text-sm text-slate-500">{list.items?.length ?? 0} product{list.items?.length === 1 ? "" : "s"}</p></div>
-      <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={onDelete} disabled={deleting}><Trash2 className="mr-1.5 h-4 w-4" /> Delete list</Button>
+       {canManage && <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={onDelete} disabled={deleting}><Trash2 className="mr-1.5 h-4 w-4" /> Delete list</Button>}
     </div>
+     {!canManage && <p className="text-sm text-slate-500">{list.description || "You have view-only access to this product list."}</p>}
     <div className="grid gap-3 sm:grid-cols-2">
-      <label className="text-sm font-medium text-slate-700">Name<Input className="mt-1.5" value={name} onChange={event => setName(event.target.value)} /></label>
-      <label className="text-sm font-medium text-slate-700">Description<textarea className="mt-1.5 h-10 w-full rounded-md border border-slate-200 p-2 text-sm outline-none focus:border-blue-400" value={description} onChange={event => setDescription(event.target.value)} /></label>
+       <label className="text-sm font-medium text-slate-700">Name<Input className="mt-1.5" value={name} onChange={event => setName(event.target.value)} disabled={!canManage} /></label>
+       <label className="text-sm font-medium text-slate-700">Description<textarea className="mt-1.5 h-10 w-full rounded-md border border-slate-200 p-2 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50" value={description} onChange={event => setDescription(event.target.value)} disabled={!canManage} /></label>
     </div>
-    <div className="flex justify-end"><Button size="sm" variant="outline" onClick={() => onSave({ name, description })} disabled={!name.trim() || saving}><Check className="mr-1.5 h-4 w-4" /> {saving ? "Saving…" : "Save details"}</Button></div>
-    <div className="border-t pt-5">
+     {canManage && <div className="flex justify-end"><Button size="sm" variant="outline" onClick={() => onSave({ name, description })} disabled={!name.trim() || saving}><Check className="mr-1.5 h-4 w-4" /> {saving ? "Saving…" : "Save details"}</Button></div>}
+     {canManage && <div className="border-t pt-5">
       <h3 className="font-semibold text-slate-900">Add products</h3>
       <p className="mt-1 text-xs text-slate-500">Search BigCommerce by product title or SKU, then add products to this reusable list.</p>
       <div className="relative mt-3"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><Input className="pl-9" placeholder="Search product title or SKU…" value={productSearch} onChange={event => setProductSearch(event.target.value)} /></div>
@@ -210,7 +216,7 @@ function ProductListEditor({
             {existingIds.has(Number(product.id)) ? <Check className="h-4 w-4 shrink-0 text-emerald-600" /> : <Plus className="h-4 w-4 shrink-0 text-blue-600" />}
           </button>) : <p className="p-5 text-center text-sm text-slate-400">No products found.</p>}
       </div>}
-    </div>
+     </div>}
     <div>
       <h3 className="mb-2 font-semibold text-slate-900">Products in this list</h3>
       {list.items?.length ? <div className="divide-y rounded-lg border">{list.items.map((item: any) => {
@@ -218,7 +224,7 @@ function ProductListEditor({
         return <div key={item.id} className="flex min-w-0 items-center gap-3 p-3">
           {product.image ? <img src={product.image} alt="" className="h-11 w-11 shrink-0 rounded object-cover" /> : <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded bg-slate-100 text-slate-400"><Package className="h-5 w-5" /></span>}
           <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-800">{product.name || `Product ${item.product_id}`}</p><p className="truncate text-xs text-slate-500">{product.sku || "No SKU"}{product.price ? ` · $${Number(product.price).toFixed(2)}` : ""}</p></div>
-          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-400 hover:text-red-600" onClick={() => onRemove(item.id)} disabled={removing} aria-label={`Remove ${product.name || "product"}`}><X className="h-4 w-4" /></Button>
+           {canManage && <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-400 hover:text-red-600" onClick={() => onRemove(item.id)} disabled={removing} aria-label={`Remove ${product.name || "product"}`}><X className="h-4 w-4" /></Button>}
         </div>;
       })}</div> : <p className="rounded-lg border border-dashed p-8 text-center text-sm text-slate-400">No products in this list yet.</p>}
     </div>
