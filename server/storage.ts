@@ -971,7 +971,8 @@ export class DatabaseStorage implements IStorage {
       .filter(([, productIds]) => productIds.length > 0)
       .map(([brandId, productIds]) => sql`
         SELECT ${Number(brandId)}::int AS brand_id,
-               unnest(${productIds}::int[]) AS product_id
+               product_id::int AS product_id
+        FROM jsonb_array_elements_text(${JSON.stringify(productIds)}::jsonb) AS product_ids(product_id)
       `);
     if (brandProductQueries.length === 0) return {};
 
