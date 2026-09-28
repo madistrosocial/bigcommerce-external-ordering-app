@@ -73,13 +73,13 @@ export default function BulkOrderUploadCard({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle>Upload Order Form</CardTitle>
+              <CardTitle className="text-sm">Upload Order Form</CardTitle>
               <div className="flex gap-1.5" aria-label="Supported formats">
                 <span className="rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">CSV</span>
                 <span className="rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">XLSX</span>
               </div>
             </div>
-            <CardDescription className="mt-1">
+            <CardDescription className="mt-1 text-xs">
               Add a completed Order Form to start a POS draft.
             </CardDescription>
           </div>
@@ -118,20 +118,20 @@ export default function BulkOrderUploadCard({
                 ? <Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden="true" />
                 : <Upload className="h-5 w-5 text-primary" aria-hidden="true" />}
             </div>
-            <p className="font-medium">
+            <p className="text-sm font-medium">
               {isDragging ? "Drop your Order Form here" : "Drag and drop your file here"}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">or choose a file from your device</p>
+            <p className="mt-1 text-xs text-muted-foreground">or choose a file from your device</p>
             <Button
               type="button"
               variant="outline"
-              className="mt-4 min-h-10"
+              className="mt-4 min-h-10 text-xs"
               disabled={disabled}
               onClick={() => inputRef.current?.click()}
             >
               Choose file
             </Button>
-            <p className="mt-3 text-xs text-muted-foreground">CSV or XLSX · Maximum file size 4 MB</p>
+            <p className="mt-3 text-[11px] text-muted-foreground">CSV or XLSX · Maximum file size 4 MB</p>
           </div>
         </div>
 
@@ -141,8 +141,8 @@ export default function BulkOrderUploadCard({
               <FileSpreadsheet className="h-5 w-5" aria-hidden="true" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium" title={fileName}>{fileName}</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="truncate text-xs font-medium" title={fileName}>{fileName}</p>
+              <p className="text-[11px] text-muted-foreground">
                 {previewing ? "Reading workbook details…" : fileSizeBytes === null ? "Ready to process" : formatFileSize(fileSizeBytes)}
               </p>
             </div>
@@ -162,7 +162,7 @@ export default function BulkOrderUploadCard({
         )}
 
         {preview && (
-          <div className="rounded-lg border bg-muted/30 p-3.5 text-sm" aria-live="polite">
+          <div className="rounded-lg border bg-muted/30 p-3.5 text-xs" aria-live="polite">
             <div className="font-medium">
               Order Form customer: {preview.customer_name || "Name not found"}
             </div>

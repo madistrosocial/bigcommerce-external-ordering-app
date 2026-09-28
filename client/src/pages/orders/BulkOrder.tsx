@@ -420,12 +420,12 @@ export default function BulkOrder() {
     <div className="mx-auto w-full max-w-6xl space-y-5 px-3 py-4 pb-28 sm:space-y-6 sm:px-6 sm:py-6 md:pb-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Bulk Order</h1>
-          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+          <h1 className="text-lg font-semibold tracking-tight">Bulk Order</h1>
+          <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
             Turn a completed Order Form into a POS draft.
           </p>
         </div>
-        <Button className="w-full sm:w-auto" variant="outline" onClick={() => setLocation("/orders/drafts")}>
+        <Button className="w-full text-xs sm:w-auto" variant="outline" onClick={() => setLocation("/orders/drafts")}>
           Open Draft Orders
         </Button>
       </header>
@@ -440,7 +440,7 @@ export default function BulkOrder() {
               <li
                 key={label}
                 aria-current={active ? "step" : undefined}
-                className={`flex min-w-0 items-center gap-2 text-xs sm:gap-3 sm:text-sm ${
+                className={`flex min-w-0 items-center gap-2 text-xs sm:gap-3 ${
                   active ? "font-semibold text-primary" : completed ? "font-medium text-foreground" : "text-muted-foreground"
                 }`}
               >
@@ -478,8 +478,8 @@ export default function BulkOrder() {
                 <Users className="h-5 w-5" aria-hidden="true" />
               </div>
               <div className="min-w-0">
-                <CardTitle>Select customer</CardTitle>
-                <CardDescription className="mt-1">
+                <CardTitle className="text-sm">Select customer</CardTitle>
+                <CardDescription className="mt-1 text-xs">
                   Find the customer and confirm the shipping address for this draft.
                 </CardDescription>
               </div>
@@ -491,7 +491,7 @@ export default function BulkOrder() {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               <Input
                 id="bulk-order-customer"
-                className="min-h-11 pl-9"
+                className="min-h-11 pl-9 text-sm"
                 value={customerSearch}
                 placeholder="Search name, company, phone, or email"
                 onChange={event => {
@@ -501,7 +501,7 @@ export default function BulkOrder() {
               />
             </div>
             {selectedCustomer ? (
-              <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3.5 text-sm">
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3.5 text-xs">
                 <div className="min-w-0">
                   <div className="truncate font-medium text-emerald-950">{displayCustomerName(selectedCustomer)}</div>
                   {selectedCustomer.company && (
@@ -517,17 +517,17 @@ export default function BulkOrder() {
             ) : (
               <div className="min-h-24 max-h-56 space-y-1 overflow-y-auto rounded-lg border p-1">
                 {customerQuery.isFetching ? (
-                  <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" /> Searching customers…
                   </div>
                 ) : lookupTerm.length < 2 ? (
-                  <p className="px-3 py-3 text-sm text-muted-foreground">Choose an Order Form or search for a customer.</p>
+                  <p className="px-3 py-3 text-xs text-muted-foreground">Choose an Order Form or search for a customer.</p>
                 ) : customerQuery.isError ? (
-                  <p className="px-3 py-3 text-sm text-destructive">
+                  <p className="px-3 py-3 text-xs text-destructive">
                     {customerQuery.error instanceof Error ? customerQuery.error.message : "BigCommerce customer search failed."}
                   </p>
                 ) : customerMatches.length === 0 ? (
-                  <p className="px-3 py-3 text-sm text-muted-foreground">No BigCommerce customers match this search.</p>
+                  <p className="px-3 py-3 text-xs text-muted-foreground">No BigCommerce customers match this search.</p>
                 ) : (
                   customerMatches.map(customer => (
                     <button
@@ -540,7 +540,7 @@ export default function BulkOrder() {
                       }}
                     >
                       <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium">
+                        <span className="block truncate text-xs font-medium">
                           {displayCustomerName(customer)}
                           {customer.company && customer.company !== displayCustomerName(customer)
                             ? ` · ${customer.company}`
@@ -567,21 +567,21 @@ export default function BulkOrder() {
             )}
             {selectedCustomer && (
               <div className="space-y-2 border-t pt-4">
-                <label className="text-sm font-medium" htmlFor="bulk-order-address">Shipping address</label>
+                <label className="text-xs font-medium" htmlFor="bulk-order-address">Shipping address</label>
                 {addressesLoading ? (
-                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <p className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" /> Loading BigCommerce addresses…
                   </p>
                 ) : addressesError ? (
-                  <p className="text-sm text-destructive">
+                  <p className="text-xs text-destructive">
                     Could not load addresses. Clear and reselect the customer to try again.
                   </p>
                 ) : customerAddresses.length === 0 ? (
-                  <p className="text-sm text-destructive">
+                  <p className="text-xs text-destructive">
                     This customer has no saved BigCommerce shipping addresses. Add an address or select another customer.
                   </p>
                 ) : customerAddresses.length === 1 ? (
-                  <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                  <div className="rounded-lg border bg-muted/30 p-3 text-xs">
                     {formatCustomerAddress(customerAddresses[0])}
                   </div>
                 ) : (
@@ -608,7 +608,7 @@ export default function BulkOrder() {
         </Card>
       </div>
 
-      <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
+      <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
         <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <p>
           Drafts are created based on available inventory only. Missing item lists are available for download below.
@@ -616,7 +616,7 @@ export default function BulkOrder() {
       </div>
 
       <div className="hidden justify-end md:flex">
-        <Button className="min-h-11 min-w-56" onClick={() => importMutation.mutate()} disabled={!canCreateDraft}>
+        <Button className="min-h-11 min-w-56 text-xs" onClick={() => importMutation.mutate()} disabled={!canCreateDraft}>
           {importMutation.isPending ? (
             <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing…</>
           ) : (
@@ -631,15 +631,15 @@ export default function BulkOrder() {
             <div className="flex items-start gap-3">
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
               <div>
-                <p className="font-medium">{result.customer_name} — import complete</p>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm font-medium">{result.customer_name} — import complete</p>
+                <p className="text-xs text-muted-foreground">
                   {result.order_id
                     ? `Draft #${result.order_id} · ${result.drafted_item_count} lines · $${Number(result.order_total).toFixed(2)}`
                     : "No units were available, so an empty POS draft was not created."}
                   {" · "}{result.missing_quantity} missing units across {result.missing_item_count} lines
                 </p>
                 {result.customer_mismatch_warning && (
-                  <p role="status" className="mt-1 text-sm text-amber-700">
+                  <p role="status" className="mt-1 text-xs text-amber-700">
                     {result.customer_mismatch_warning}
                   </p>
                 )}
@@ -648,6 +648,7 @@ export default function BulkOrder() {
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
+                className="text-xs"
                 onClick={() => void downloadMissingItems(result)}
                 disabled={downloadingId === result.id}
               >
@@ -655,7 +656,7 @@ export default function BulkOrder() {
                 Download Missing Items CSV
               </Button>
               {result.order_id && (
-                <Button variant="outline" onClick={() => setLocation("/orders/drafts")}>
+                <Button variant="outline" className="text-xs" onClick={() => setLocation("/orders/drafts")}>
                   Open Draft Orders
                 </Button>
               )}
@@ -667,13 +668,14 @@ export default function BulkOrder() {
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
           <div>
-            <CardTitle>Processed imports</CardTitle>
-            <CardDescription>Drafts and Missing Items files remain available here after refresh.</CardDescription>
+            <CardTitle className="text-sm">Processed imports</CardTitle>
+            <CardDescription className="text-xs">Drafts and Missing Items files remain available here after refresh.</CardDescription>
           </div>
           {canViewAll && (
             <Button
               size="sm"
               variant={showAllImports ? "default" : "outline"}
+              className="text-xs"
               onClick={() => setShowAllImports(value => !value)}
             >
               {showAllImports ? "Showing all imports" : "Show all imports"}
@@ -686,7 +688,7 @@ export default function BulkOrder() {
               <Loader2 className="h-4 w-4 animate-spin" /> Loading imports…
             </div>
           ) : importsQuery.isError ? (
-            <p className="py-6 text-sm text-destructive">
+            <p className="py-6 text-xs text-destructive">
               {importsQuery.error instanceof Error ? importsQuery.error.message : "Could not load import history."}
             </p>
           ) : (importsQuery.data ?? []).length === 0 ? (
@@ -698,7 +700,7 @@ export default function BulkOrder() {
                   <div key={record.id} className="space-y-3 rounded-xl border p-3.5">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">{record.customer_name}</p>
+                        <p className="truncate text-xs font-medium">{record.customer_name}</p>
                         <p className="truncate text-xs text-muted-foreground">{record.source_file_name}</p>
                       </div>
                       <time className="shrink-0 text-right text-xs text-muted-foreground">
@@ -710,7 +712,7 @@ export default function BulkOrder() {
                         Created by {record.created_by_name || "—"}
                       </p>
                     )}
-                    <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/40 p-3 text-sm">
+                    <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/40 p-3 text-xs">
                       <div className="min-w-0">
                         <p className="text-xs text-muted-foreground">Draft</p>
                         {record.order_id ? (
@@ -731,8 +733,8 @@ export default function BulkOrder() {
                       </div>
                     </div>
                     <Button
-                      className="w-full"
                       variant="outline"
+                      className="w-full text-xs"
                       onClick={() => void downloadMissingItems(record)}
                       disabled={downloadingId === record.id}
                     >
@@ -748,7 +750,7 @@ export default function BulkOrder() {
               <div className="hidden overflow-x-auto lg:block">
                 <table className="w-full min-w-[820px] text-left text-sm">
                   <thead>
-                    <tr className="border-b text-xs text-muted-foreground">
+                    <tr className="border-b text-[11px] text-muted-foreground">
                       <th className="px-3 py-2 font-medium">Processed</th>
                       <th className="px-3 py-2 font-medium">Customer / source file</th>
                       {showAllImports && <th className="px-3 py-2 font-medium">Created by</th>}
@@ -759,7 +761,7 @@ export default function BulkOrder() {
                   </thead>
                   <tbody>
                     {(importsQuery.data ?? []).map(record => (
-                      <tr key={record.id} className="border-b last:border-0">
+                      <tr key={record.id} className="border-b text-xs last:border-0">
                         <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{formatDate(record.created_at)}</td>
                         <td className="max-w-[340px] px-3 py-3">
                           <div className="truncate font-medium">{record.customer_name}</div>
@@ -786,6 +788,7 @@ export default function BulkOrder() {
                           <Button
                             size="sm"
                             variant="outline"
+                            className="text-xs"
                             onClick={() => void downloadMissingItems(record)}
                             disabled={downloadingId === record.id}
                           >
