@@ -809,7 +809,7 @@ export default function BulkOrder() {
       </Card>
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
-        <Button className="min-h-12 w-full" onClick={() => importMutation.mutate()} disabled={!canCreateDraft}>
+        <Button className="min-h-12 w-full text-xs" onClick={() => importMutation.mutate()} disabled={!canCreateDraft}>
           {importMutation.isPending ? (
             <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing…</>
           ) : (
