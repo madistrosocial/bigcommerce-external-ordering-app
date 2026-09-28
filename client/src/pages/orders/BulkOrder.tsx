@@ -611,8 +611,7 @@ export default function BulkOrder() {
       <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
         <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <p>
-          Only available quantities go into the POS draft. Any shortfall is saved in the Missing Items CSV.
-          This import does not submit an order to BigCommerce.
+          Drafts are created based on available inventory only. Missing item lists are available for download below.
         </p>
       </div>
 
