@@ -350,7 +350,7 @@ export default function MarketingOrderForm() {
       </div>
 
       <Dialog open={productListOpen} onOpenChange={setProductListOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="marketing-font-scale max-w-3xl">
           <DialogHeader><DialogTitle>Product List</DialogTitle><DialogDescription>Search and select products. Current availability is refreshed again when you send.</DialogDescription></DialogHeader>
           <div className="relative"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><Input autoFocus className="pl-9" placeholder="Search product name or SKU…" value={productSearch} onChange={event => setProductSearch(event.target.value)} /></div>
           <div className="max-h-[50vh] space-y-1 overflow-y-auto rounded-lg border p-2">
@@ -364,7 +364,7 @@ export default function MarketingOrderForm() {
       </Dialog>
 
       <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
-        <DialogContent className="max-h-[calc(var(--app-height,100dvh)-1rem)] max-w-2xl overflow-y-auto overscroll-contain pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+        <DialogContent className="marketing-font-scale max-h-[calc(var(--app-height,100dvh)-1rem)] max-w-2xl overflow-y-auto overscroll-contain pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
           <DialogHeader><DialogTitle>Order Form Summary</DialogTitle><DialogDescription>One {format.toUpperCase()} file will be generated and sent separately to each recipient.</DialogDescription></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3"><SummaryStat label="Recipients" value={recipientCount} /><SummaryStat label="Products" value={products.length} /><SummaryStat label="Files" value={recipientCount} /></div>

@@ -1,0 +1,35 @@
+.marketing-font-scale {
+  font-size: 12px;
+}
+
+.marketing-font-scale :is(h2, h3):not(.prose *) {
+  font-size: 14px;
+}
+
+.marketing-font-scale h1:not(.prose *) {
+  font-size: 18px;
+}
+
+.marketing-font-scale :is(.text-sm, .text-base):not(.prose *) {
+  font-size: 12px !important;
+}
+
+.marketing-font-scale .text-xs.text-slate-400:not(.prose *) {
+  font-size: 11px !important;
+}
+
+.marketing-font-scale .text-lg:not(.prose *) {
+  font-size: 14px !important;
+}
+
+.marketing-font-scale :is(.text-xl, .text-2xl):not(.prose *) {
+  font-size: 18px !important;
+}
+
+.marketing-font-scale :is(input, select, textarea):not(.prose *) {
+  font-size: 14px !important;
+}
+
+.marketing-font-scale button:not(.prose *) {
+  font-size: 12px !important;
+}

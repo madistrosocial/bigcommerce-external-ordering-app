@@ -159,7 +159,7 @@ export default function MarketingProductLists() {
       </div>
 
       <Dialog open={canManageLists && createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="marketing-font-scale max-w-md">
           <DialogHeader><DialogTitle>New product list</DialogTitle><DialogDescription>Create a reusable collection that can be loaded into a Campaign or Order Form.</DialogDescription></DialogHeader>
           <div className="space-y-4">
             <label className="block text-sm font-medium text-slate-700">List name<Input className="mt-1.5" value={name} onChange={event => setName(event.target.value)} placeholder="Non-Nicotine Vape 2026" /></label>

@@ -49,3 +49,4 @@
 - [Constant Contact authorization and campaigns](constant-contact-campaign-api.md) — OAuth boundaries, aggregate-readiness limits, and on-demand contact reconciliation population rules.
 - [Cross-platform npm optional lock entries](npm-optional-lockfile.md) — `npm ci` may require platform-specific optional records omitted by the host install.
 - [Bulk Order customer override](bulk-order-customer-override.md) — the selected POS customer is authoritative; form identity mismatches warn but do not block the draft.
+- [Marketing typography scale](marketing-font-scale.md) — use 18/14/12/11px for page, section, content, and metadata; retain 14px form controls.

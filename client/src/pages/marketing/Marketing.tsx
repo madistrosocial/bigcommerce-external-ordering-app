@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import RichTextEditor from "@/components/editor/RichTextEditor";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
+import "./marketing-typography.css";
 import {
   createMarketingAudience, createMarketingCampaign, deleteMarketingAudience,
   deleteMarketingCampaign, getMarketingAudience, getMarketingAudienceCustomers,
@@ -110,7 +111,7 @@ const PRODUCT_DISPLAY_FIELDS: Array<[keyof MarketingProductDisplayOptions, strin
 
 export function PageShell({ children, title, subtitle, action }: { children: React.ReactNode; title: string; subtitle?: string; action?: React.ReactNode }) {
   return (
-    <div className="marketing-page min-h-full w-full min-w-0 max-w-full overflow-x-hidden bg-slate-50">
+    <div className="marketing-page marketing-font-scale min-h-full w-full min-w-0 max-w-full overflow-x-hidden bg-slate-50">
       <div className="border-b bg-white px-4 py-5 sm:px-6">
         <div className="mx-auto flex min-w-0 max-w-7xl flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0"><p className="mb-1 text-xs font-semibold uppercase tracking-wider text-blue-600">Marketing</p><h1 className="break-words text-2xl font-bold tracking-tight text-slate-900">{title}</h1>{subtitle && <p className="mt-1 break-words text-sm text-slate-500">{subtitle}</p>}</div>
@@ -225,7 +226,7 @@ function MarketingEmailPreview({
   </style></head><body><div class="email-shell"><div class="email-meta"><div><strong>From:</strong> ${escapeMarketingPreviewHtml(sender || "Not configured")}</div><div><strong>To:</strong> Alex Morgan &lt;alex@example.com&gt;</div><div><strong>Subject:</strong> ${escapeMarketingPreviewHtml(subject || "Your campaign subject")}</div>${previewText ? `<div><strong>Preview:</strong> ${escapeMarketingPreviewHtml(previewText)}</div>` : ""}</div><div class="email-content">${renderMarketingPreviewTemplate(content || "<p>Your campaign message will appear here.</p>")}</div></div></body></html>`;
 
   return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="flex h-[min(90vh,760px)] w-[calc(100vw-2rem)] max-w-5xl flex-col overflow-hidden p-0">
+    <DialogContent className="marketing-font-scale flex h-[min(90vh,760px)] w-[calc(100vw-2rem)] max-w-5xl flex-col overflow-hidden p-0">
       <DialogHeader className="border-b px-5 py-4 pr-12">
         <DialogTitle className="flex items-center gap-2"><Eye className="h-4 w-4 text-blue-600" /> Email preview</DialogTitle>
         <DialogDescription>See how this campaign renders at common desktop, tablet, and mobile email widths. Unsaved editor changes are included.</DialogDescription>
