@@ -5856,7 +5856,15 @@ export async function registerRoutes(
         yesterdayStart: toStart(yesterdayDate),
         monthStart: toStart(monthStartDate),
       };
-      const statsByBrandId = await storage.getDropshipBrandOrderStats(pins.map((brand) => brand.id), dateRanges);
+      const productIdsByBrandId: Record<number, number[]> = {};
+      for (let i = 0; i < pins.length; i += 4) {
+        const batch = await Promise.all(pins.slice(i, i + 4).map(async (brand) => [
+          brand.id,
+          [...await fetchBcProductIdsByBrand(brand.id)],
+        ] as [number, number[]]));
+        for (const [brandId, productIds] of batch) productIdsByBrandId[brandId] = productIds;
+      }
+      const statsByBrandId = await storage.getDropshipBrandOrderStats(productIdsByBrandId, dateRanges);
       const pinnedBrands = pins.map((brand) => ({
         ...brand,
         ...(statsByBrandId[brand.id] ?? { today: 0, yesterday: 0, thisMonth: 0, total: 0 }),
@@ -11189,7 +11197,7 @@ export async function registerRoutes(
   // ─── BC API helpers: fetch product IDs by brand/category (cached 1h) ────────
 
   async function fetchBcProductIdsByBrand(brandId: number): Promise<Set<number>> {
-    const cacheKey = `report_brand_pids_${brandId}`;
+    const cacheKey = `report_brand_pids_v2_${brandId}`;
     const cached = await storage.getSetting(cacheKey);
     if (cached?.value) {
       const { ids: cachedIds, ts } = cached.value as any;
@@ -11203,7 +11211,7 @@ export async function registerRoutes(
         `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?brand_id=${brandId}&include_fields=id&limit=250&page=${pg}`,
         { headers },
       );
-      if (!r.ok) break;
+      if (!r.ok) throw new Error(`BigCommerce product lookup for brand ${brandId} failed (${r.status}).`);
       const json = await r.json();
       const items: any[] = json.data ?? [];
       items.forEach((p: any) => ids.push(p.id));

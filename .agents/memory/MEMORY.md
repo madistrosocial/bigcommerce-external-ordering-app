@@ -30,7 +30,7 @@
 - [Activity-log IP geolocation](activity-log-ip-geolocation.md) — use FreeIPAPI’s no-key HTTPS endpoint with caching and conservative rate limiting for approximate location.
 - [Draft invoice safety](draft-invoice-safety.md) — draft PDFs must stay visibly non-final and never expose staff notes or SMTP credentials.
 - [Dropshipping phase boundaries](dropshipping-phase-boundaries.md) — vendor catalog ingestion stays separate from BigCommerce/SkuVault side effects until an explicit import/order phase.
-- [Dropship brand dashboard counts](dropship-brand-dashboard-counts.md) — brand metrics count distinct synced BigCommerce orders by current local product-brand mapping, not vendor fulfillment state.
+- [Dropship brand dashboard counts](dropship-brand-dashboard-counts.md) — resolve BigCommerce brand products directly; count distinct synced line-item orders, not just locally pinned products.
 - [Dropshipping display labels](dropshipping-display-labels.md) — vendor provider identity stays server-side; user-facing labels are persisted placeholders editable from the connector.
 - [ShipStation dropship automation](shipstation-dropship-automation.md) — product tags can flow to order tags, but shipment splitting needs separate product or routing configuration.
 - [GitHub push authentication](github-push-auth.md) — Git HTTPS push may reject the installed GitHub integration; use its authenticated Git data API for branch-only updates.

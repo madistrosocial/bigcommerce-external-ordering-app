@@ -74,7 +74,7 @@ export interface IStorage {
   updateOrderNote(id: number, note: string): Promise<void>;
   updateOrderCustomerNote(id: number, customerNote: string): Promise<void>;
   getConsolidatedOrders(params: { page: number; limit: number; search?: string; createdBy?: number | null; syncStatus?: string; bcStatus?: string; dateFrom?: Date | null; dateTo?: Date | null; brandId?: number | null; salesChannel?: "salesapp" | "allorders"; }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }>;
-  getDropshipBrandOrderStats(brandIds: number[], dateRanges: { todayStart: Date; tomorrowStart: Date; yesterdayStart: Date; monthStart: Date; }): Promise<Record<number, { today: number; yesterday: number; thisMonth: number; total: number }>>;
+  getDropshipBrandOrderStats(productIdsByBrandId: Record<number, number[]>, dateRanges: { todayStart: Date; tomorrowStart: Date; yesterdayStart: Date; monthStart: Date; }): Promise<Record<number, { today: number; yesterday: number; thisMonth: number; total: number }>>;
   getOrderDetail(id: number): Promise<any | null>;
   updateOrderSyncError(id: number, error: string): Promise<void>;
   updateOrderForSubmission(id: number, updates: { bigcommerce_customer_id: number; billing_address: any; status: string }): Promise<void>;
@@ -964,33 +964,42 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDropshipBrandOrderStats(
-    brandIds: number[],
+    productIdsByBrandId: Record<number, number[]>,
     dateRanges: { todayStart: Date; tomorrowStart: Date; yesterdayStart: Date; monthStart: Date },
   ): Promise<Record<number, { today: number; yesterday: number; thisMonth: number; total: number }>> {
-    if (brandIds.length === 0) return {};
-    const rows = await db.select({
-      brandId: products.brand_id,
-      today: sql<number>`COUNT(DISTINCT ${customerOrdersMirror.bigcommerce_order_id}) FILTER (
-        WHERE ${customerOrdersMirror.order_date} >= ${dateRanges.todayStart}
-          AND ${customerOrdersMirror.order_date} < ${dateRanges.tomorrowStart}
-      )`,
-      yesterday: sql<number>`COUNT(DISTINCT ${customerOrdersMirror.bigcommerce_order_id}) FILTER (
-        WHERE ${customerOrdersMirror.order_date} >= ${dateRanges.yesterdayStart}
-          AND ${customerOrdersMirror.order_date} < ${dateRanges.todayStart}
-      )`,
-      thisMonth: sql<number>`COUNT(DISTINCT ${customerOrdersMirror.bigcommerce_order_id}) FILTER (
-        WHERE ${customerOrdersMirror.order_date} >= ${dateRanges.monthStart}
-          AND ${customerOrdersMirror.order_date} < ${dateRanges.tomorrowStart}
-      )`,
-      total: sql<number>`COUNT(DISTINCT ${customerOrdersMirror.bigcommerce_order_id})`,
-    })
-      .from(bcOrderLineItems)
-      .innerJoin(products, eq(products.bigcommerce_id, bcOrderLineItems.bigcommerce_product_id))
-      .innerJoin(customerOrdersMirror, eq(customerOrdersMirror.bigcommerce_order_id, bcOrderLineItems.bigcommerce_order_id))
-      .where(inArray(products.brand_id, brandIds))
-      .groupBy(products.brand_id);
+    const brandProductQueries = Object.entries(productIdsByBrandId)
+      .filter(([, productIds]) => productIds.length > 0)
+      .map(([brandId, productIds]) => sql`
+        SELECT ${Number(brandId)}::int AS brand_id,
+               unnest(${productIds}::int[]) AS product_id
+      `);
+    if (brandProductQueries.length === 0) return {};
 
-    return Object.fromEntries(rows.map((row) => [Number(row.brandId), {
+    const brandProducts = sql.join(brandProductQueries, sql` UNION ALL `);
+    const result = await db.execute(sql`
+      WITH brand_products AS (${brandProducts})
+      SELECT
+        bp.brand_id AS "brandId",
+        COUNT(DISTINCT li.bigcommerce_order_id) FILTER (
+          WHERE li.order_date >= ${dateRanges.todayStart}
+            AND li.order_date < ${dateRanges.tomorrowStart}
+        ) AS today,
+        COUNT(DISTINCT li.bigcommerce_order_id) FILTER (
+          WHERE li.order_date >= ${dateRanges.yesterdayStart}
+            AND li.order_date < ${dateRanges.todayStart}
+        ) AS yesterday,
+        COUNT(DISTINCT li.bigcommerce_order_id) FILTER (
+          WHERE li.order_date >= ${dateRanges.monthStart}
+            AND li.order_date < ${dateRanges.tomorrowStart}
+        ) AS "thisMonth",
+        COUNT(DISTINCT li.bigcommerce_order_id) AS total
+      FROM brand_products bp
+      INNER JOIN bc_order_line_items li
+        ON li.bigcommerce_product_id = bp.product_id
+      GROUP BY bp.brand_id
+    `);
+
+    return Object.fromEntries((result.rows as any[]).map((row) => [Number(row.brandId), {
       today: Number(row.today ?? 0),
       yesterday: Number(row.yesterday ?? 0),
       thisMonth: Number(row.thisMonth ?? 0),
