@@ -2,17 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
-  AlertCircle,
   CheckCircle2,
   Download,
-  FileSpreadsheet,
+  Info,
   Loader2,
   Search,
   Upload,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import BulkOrderUploadCard from "./BulkOrderUploadCard";
 import { getAuthHeaders } from "@/lib/api";
 import * as api from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -108,11 +109,11 @@ export default function BulkOrder() {
   const canViewAll = hasPermission("orders", "view_all_drafts");
   const [showAllImports, setShowAllImports] = useState(false);
   const [fileName, setFileName] = useState("");
+  const [fileSizeBytes, setFileSizeBytes] = useState<number | null>(null);
   const [csvContents, setCsvContents] = useState("");
   const [xlsxBase64, setXlsxBase64] = useState("");
   const [orderFormPreview, setOrderFormPreview] = useState<OrderFormPreview | null>(null);
   const [previewingFile, setPreviewingFile] = useState(false);
-  const [fileInputKey, setFileInputKey] = useState(0);
   const [customerSearch, setCustomerSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<api.BigCommerceCustomer | null>(null);
   const [customerAddresses, setCustomerAddresses] = useState<api.BigCommerceAddress[]>([]);
@@ -248,6 +249,7 @@ export default function BulkOrder() {
     onSuccess: async imported => {
       setResult(imported);
       setFileName("");
+      setFileSizeBytes(null);
       setCsvContents("");
       setXlsxBase64("");
       setOrderFormPreview(null);
@@ -255,7 +257,6 @@ export default function BulkOrder() {
       setCustomerSearch("");
       setCustomerAddresses([]);
       setSelectedAddress(null);
-      setFileInputKey(key => key + 1);
       await queryClient.invalidateQueries({ queryKey: ["bulk-order-imports"] });
       const summary = imported.order_id
         ? `Draft #${imported.order_id} created; ${imported.missing_quantity} units are missing.`
@@ -289,6 +290,7 @@ export default function BulkOrder() {
     }
 
     setFileName(file.name);
+    setFileSizeBytes(file.size);
     setCsvContents("");
     setXlsxBase64("");
     setOrderFormPreview(null);
@@ -340,6 +342,7 @@ export default function BulkOrder() {
       }
     } catch (error) {
       setFileName("");
+      setFileSizeBytes(null);
       setCsvContents("");
       setXlsxBase64("");
       setOrderFormPreview(null);
@@ -351,6 +354,20 @@ export default function BulkOrder() {
     } finally {
       setPreviewingFile(false);
     }
+  };
+
+  const removeSelectedFile = () => {
+    setFileName("");
+    setFileSizeBytes(null);
+    setCsvContents("");
+    setXlsxBase64("");
+    setOrderFormPreview(null);
+    setSelectedCustomer(null);
+    setCustomerSearch("");
+    setCustomerAddresses([]);
+    setSelectedAddress(null);
+    setAddressesError("");
+    setResult(null);
   };
 
   const downloadMissingItems = async (record: Pick<BulkOrderImportRecord, "id" | "missing_file_name">) => {
@@ -384,220 +401,230 @@ export default function BulkOrder() {
   };
 
   const customerMatches = customerQuery.data ?? [];
+  const hasFileContent = Boolean(csvContents || xlsxBase64);
+  const canCreateDraft = Boolean(
+    fileName
+    && hasFileContent
+    && selectedCustomer
+    && selectedAddress
+    && !addressesLoading
+    && !addressesError
+    && !previewingFile
+    && !(Boolean(xlsxBase64) && !orderFormPreview?.completed_item_count)
+    && !importMutation.isPending,
+  );
+  const currentStep = !fileName ? 1 : selectedCustomer && selectedAddress ? 3 : 2;
+  const steps = ["Upload Order Form", "Select POS Customer", "Create Draft"];
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="mx-auto w-full max-w-6xl space-y-5 px-3 py-4 pb-28 sm:space-y-6 sm:px-6 sm:py-6 md:pb-6">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Bulk Order</h1>
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Bulk Order</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Processed order form will be saved as Draft Order.
+            Turn a completed Order Form into a POS draft.
           </p>
         </div>
-        <Button variant="outline" onClick={() => setLocation("/orders/drafts")}>
+        <Button className="w-full sm:w-auto" variant="outline" onClick={() => setLocation("/orders/drafts")}>
           Open Draft Orders
         </Button>
-      </div>
+      </header>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileSpreadsheet className="h-5 w-5" />
-            Import a completed order form
-          </CardTitle>
-          <CardDescription>
-            Supports CSV and XLSX file types.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="grid gap-5 lg:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor="bulk-order-csv">Order Form file</label>
-              <Input
-                key={fileInputKey}
-                id="bulk-order-csv"
-                type="file"
-                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={event => void handleFile(event.target.files?.[0])}
-              />
-              {fileName && (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <FileSpreadsheet className="h-4 w-4" />
-                  {fileName}
-                </p>
-              )}
-              {previewingFile && (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Reading workbook details…
-                </p>
-              )}
-              {orderFormPreview && (
-                <div className="rounded-md border bg-muted/30 p-3 text-sm">
-                  <div className="font-medium">
-                    Order Form customer: {orderFormPreview.customer_name || "Name not found"}
-                  </div>
-                  <div className="text-muted-foreground">
-                    {orderFormPreview.customer_email || "Email not found"}
-                  </div>
-                  {!orderFormPreview.completed_item_count && (
-                    <div className="mt-2 text-amber-700">
-                      No quantities are filled in yet. Complete at least one Qty cell before creating a draft.
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+      <nav aria-label="Bulk Order progress">
+        <ol className="grid grid-cols-3 gap-2 rounded-xl border bg-card p-3 sm:p-4">
+          {steps.map((label, index) => {
+            const stepNumber = index + 1;
+            const completed = stepNumber < currentStep;
+            const active = stepNumber === currentStep;
+            return (
+              <li
+                key={label}
+                aria-current={active ? "step" : undefined}
+                className={`flex min-w-0 items-center gap-2 text-xs sm:gap-3 sm:text-sm ${
+                  active ? "font-semibold text-primary" : completed ? "font-medium text-foreground" : "text-muted-foreground"
+                }`}
+              >
+                <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs ${
+                  active
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : completed
+                      ? "border-emerald-600 bg-emerald-600 text-white"
+                      : "border-muted-foreground/30 bg-background"
+                }`}>
+                  {completed ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : stepNumber}
+                </span>
+                <span className="min-w-0 leading-tight">{label}</span>
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor="bulk-order-customer">Select POS customer</label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="bulk-order-customer"
-                  className="pl-9"
-                  value={customerSearch}
-                  placeholder="Search name, company, phone, or email"
-                  onChange={event => {
-                    setCustomerSearch(event.target.value);
-                    setSelectedCustomer(null);
-                  }}
-                />
+      <div className="grid items-stretch gap-5 lg:grid-cols-2">
+        <BulkOrderUploadCard
+          fileName={fileName}
+          fileSizeBytes={fileSizeBytes}
+          preview={orderFormPreview}
+          previewing={previewingFile}
+          disabled={previewingFile || importMutation.isPending}
+          onFileSelected={handleFile}
+          onRemoveFile={removeSelectedFile}
+        />
+
+        <Card className="min-w-0">
+          <CardHeader className="pb-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Users className="h-5 w-5" aria-hidden="true" />
               </div>
-              {selectedCustomer ? (
-                <div className="flex items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm">
-                  <div className="min-w-0">
-                    <div className="truncate font-medium text-emerald-950">{displayCustomerName(selectedCustomer)}</div>
-                    {selectedCustomer.company && (
-                      <div className="truncate text-emerald-800">{selectedCustomer.company}</div>
-                    )}
-                    <div className="truncate text-emerald-800">
-                      {selectedCustomer.email || "No email on BigCommerce record"}
-                      {selectedCustomer.phone ? ` · ${selectedCustomer.phone}` : ""}
-                    </div>
-                  </div>
-                  <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
-                </div>
-              ) : (
-                <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-1">
-                  {customerQuery.isFetching ? (
-                    <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" /> Searching POS customers…
-                    </div>
-                  ) : lookupTerm.length < 2 ? (
-                    <p className="px-3 py-2 text-sm text-muted-foreground">Choose an Order Form or search for a POS customer.</p>
-                  ) : customerQuery.isError ? (
-                    <p className="px-3 py-2 text-sm text-destructive">
-                      {customerQuery.error instanceof Error ? customerQuery.error.message : "BigCommerce customer search failed."}
-                    </p>
-                  ) : customerMatches.length === 0 ? (
-                    <p className="px-3 py-2 text-sm text-muted-foreground">No BigCommerce customers match this search.</p>
-                  ) : (
-                    customerMatches.map(customer => (
-                      <button
-                        key={customer.id}
-                        type="button"
-                        className="flex w-full items-start justify-between gap-3 rounded px-3 py-2 text-left hover:bg-muted"
-                        onClick={() => {
-                          setSelectedCustomer(customer);
-                          setCustomerSearch(displayCustomerName(customer));
-                        }}
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-medium">
-                            {displayCustomerName(customer)}
-                            {customer.company && customer.company !== displayCustomerName(customer)
-                              ? ` · ${customer.company}`
-                              : ""}
-                          </span>
-                          <span className="block truncate text-xs text-muted-foreground">
-                            {customer.email || "No email"}
-                            {customer.phone ? ` · ${customer.phone}` : ""}
-                          </span>
-                        </span>
-                        <span className="shrink-0 pt-0.5 text-xs text-muted-foreground">Select</span>
-                      </button>
-                    ))
+              <div className="min-w-0">
+                <CardTitle>Select POS customer</CardTitle>
+                <CardDescription className="mt-1">
+                  Find the customer and confirm the shipping address for this draft.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="relative">
+              <label className="sr-only" htmlFor="bulk-order-customer">Search POS customers</label>
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <Input
+                id="bulk-order-customer"
+                className="min-h-11 pl-9"
+                value={customerSearch}
+                placeholder="Search name, company, phone, or email"
+                onChange={event => {
+                  setCustomerSearch(event.target.value);
+                  setSelectedCustomer(null);
+                }}
+              />
+            </div>
+            {selectedCustomer ? (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3.5 text-sm">
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-emerald-950">{displayCustomerName(selectedCustomer)}</div>
+                  {selectedCustomer.company && (
+                    <div className="truncate text-emerald-800">{selectedCustomer.company}</div>
                   )}
+                  <div className="truncate text-emerald-800">
+                    {selectedCustomer.email || "No email on BigCommerce record"}
+                    {selectedCustomer.phone ? ` · ${selectedCustomer.phone}` : ""}
+                  </div>
                 </div>
-              )}
-              {customerMismatchWarning && (
-                <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  {customerMismatchWarning}
-                </p>
-              )}
-              {exactCustomerMatch && !selectedCustomer && (
-                <p className="text-xs text-muted-foreground">Select the matching POS customer.</p>
-              )}
-              {selectedCustomer && (
-                <div className="space-y-2 border-t pt-3">
-                  <label className="text-sm font-medium" htmlFor="bulk-order-address">Shipping address</label>
-                  {addressesLoading ? (
-                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" /> Loading BigCommerce addresses…
-                    </p>
-                  ) : addressesError ? (
-                    <p className="text-sm text-destructive">
-                      Could not load addresses. Clear and reselect the customer to try again.
-                    </p>
-                  ) : customerAddresses.length === 0 ? (
-                    <p className="text-sm text-destructive">
-                      This customer has no saved BigCommerce shipping addresses. Add an address or select another customer.
-                    </p>
-                  ) : customerAddresses.length === 1 ? (
-                    <div className="rounded-md border bg-muted/30 p-3 text-sm">
-                      {formatCustomerAddress(customerAddresses[0])}
-                    </div>
-                  ) : (
-                    <select
-                      id="bulk-order-address"
-                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                      value={String(selectedAddress?.id ?? "")}
-                      onChange={event => {
-                        const address = customerAddresses.find(item => String(item.id) === event.target.value) ?? null;
-                        setSelectedAddress(address);
+                <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" aria-label="Customer selected" />
+              </div>
+            ) : (
+              <div className="min-h-24 max-h-56 space-y-1 overflow-y-auto rounded-lg border p-1">
+                {customerQuery.isFetching ? (
+                  <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Searching POS customers…
+                  </div>
+                ) : lookupTerm.length < 2 ? (
+                  <p className="px-3 py-3 text-sm text-muted-foreground">Choose an Order Form or search for a POS customer.</p>
+                ) : customerQuery.isError ? (
+                  <p className="px-3 py-3 text-sm text-destructive">
+                    {customerQuery.error instanceof Error ? customerQuery.error.message : "BigCommerce customer search failed."}
+                  </p>
+                ) : customerMatches.length === 0 ? (
+                  <p className="px-3 py-3 text-sm text-muted-foreground">No BigCommerce customers match this search.</p>
+                ) : (
+                  customerMatches.map(customer => (
+                    <button
+                      key={customer.id}
+                      type="button"
+                      className="flex min-h-12 w-full items-start justify-between gap-3 rounded-md px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => {
+                        setSelectedCustomer(customer);
+                        setCustomerSearch(displayCustomerName(customer));
                       }}
                     >
-                      <option value="" disabled>Select a shipping address</option>
-                      {customerAddresses.map(address => (
-                        <option key={address.id} value={String(address.id)}>
-                          {formatCustomerAddress(address)}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium">
+                          {displayCustomerName(customer)}
+                          {customer.company && customer.company !== displayCustomerName(customer)
+                            ? ` · ${customer.company}`
+                            : ""}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {customer.email || "No email"}
+                          {customer.phone ? ` · ${customer.phone}` : ""}
+                        </span>
+                      </span>
+                      <span className="shrink-0 pt-0.5 text-xs text-muted-foreground">Select</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+            {customerMismatchWarning && (
+              <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {customerMismatchWarning}
+              </p>
+            )}
+            {exactCustomerMatch && !selectedCustomer && (
+              <p className="text-xs text-muted-foreground">Select the matching POS customer.</p>
+            )}
+            {selectedCustomer && (
+              <div className="space-y-2 border-t pt-4">
+                <label className="text-sm font-medium" htmlFor="bulk-order-address">Shipping address</label>
+                {addressesLoading ? (
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading BigCommerce addresses…
+                  </p>
+                ) : addressesError ? (
+                  <p className="text-sm text-destructive">
+                    Could not load addresses. Clear and reselect the customer to try again.
+                  </p>
+                ) : customerAddresses.length === 0 ? (
+                  <p className="text-sm text-destructive">
+                    This customer has no saved BigCommerce shipping addresses. Add an address or select another customer.
+                  </p>
+                ) : customerAddresses.length === 1 ? (
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                    {formatCustomerAddress(customerAddresses[0])}
+                  </div>
+                ) : (
+                  <select
+                    id="bulk-order-address"
+                    className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={String(selectedAddress?.id ?? "")}
+                    onChange={event => {
+                      const address = customerAddresses.find(item => String(item.id) === event.target.value) ?? null;
+                      setSelectedAddress(address);
+                    }}
+                  >
+                    <option value="" disabled>Select a shipping address</option>
+                    {customerAddresses.map(address => (
+                      <option key={address.id} value={String(address.id)}>
+                        {formatCustomerAddress(address)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-            <div className="flex max-w-2xl items-start gap-2 text-xs text-muted-foreground">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              Drafts contain only available quantities. Any shortfall is saved in the Missing Items CSV. No BigCommerce order is submitted during import.
-            </div>
-            <Button
-              onClick={() => importMutation.mutate()}
-              disabled={
-                !fileName
-                || (!csvContents && !xlsxBase64)
-                || !selectedCustomer
-                || !selectedAddress
-                || addressesLoading
-                || Boolean(addressesError)
-                || previewingFile
-                || (Boolean(xlsxBase64) && !orderFormPreview?.completed_item_count)
-                || importMutation.isPending
-              }
-            >
-              {importMutation.isPending ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing…</>
-              ) : (
-                <><Upload className="mr-2 h-4 w-4" /> Create POS Draft</>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
+        <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <p>
+          Only available quantities go into the POS draft. Any shortfall is saved in the Missing Items CSV.
+          This import does not submit an order to BigCommerce.
+        </p>
+      </div>
+
+      <div className="hidden justify-end md:flex">
+        <Button className="min-h-11 min-w-56" onClick={() => importMutation.mutate()} disabled={!canCreateDraft}>
+          {importMutation.isPending ? (
+            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing…</>
+          ) : (
+            <><Upload className="mr-2 h-4 w-4" /> Create POS Draft</>
+          )}
+        </Button>
+      </div>
 
       {result && (
         <Card className="border-emerald-200">
@@ -666,64 +693,128 @@ export default function BulkOrder() {
           ) : (importsQuery.data ?? []).length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">No Bulk Order files have been processed yet.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-left text-sm">
-                <thead>
-                  <tr className="border-b text-xs text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Processed</th>
-                    <th className="px-3 py-2 font-medium">Customer / source file</th>
-                    {showAllImports && <th className="px-3 py-2 font-medium">Created by</th>}
-                    <th className="px-3 py-2 font-medium">Draft</th>
-                    <th className="px-3 py-2 text-right font-medium">Missing</th>
-                    <th className="px-3 py-2 text-right font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(importsQuery.data ?? []).map(record => (
-                    <tr key={record.id} className="border-b last:border-0">
-                      <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{formatDate(record.created_at)}</td>
-                      <td className="max-w-[340px] px-3 py-3">
-                        <div className="truncate font-medium">{record.customer_name}</div>
-                        <div className="truncate text-xs text-muted-foreground">{record.source_file_name}</div>
-                      </td>
-                      {showAllImports && <td className="px-3 py-3 text-muted-foreground">{record.created_by_name || "—"}</td>}
-                      <td className="px-3 py-3">
+            <>
+              <div className="space-y-3 lg:hidden">
+                {(importsQuery.data ?? []).map(record => (
+                  <div key={record.id} className="space-y-3 rounded-xl border p-3.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{record.customer_name}</p>
+                        <p className="truncate text-xs text-muted-foreground">{record.source_file_name}</p>
+                      </div>
+                      <time className="shrink-0 text-right text-xs text-muted-foreground">
+                        {formatDate(record.created_at)}
+                      </time>
+                    </div>
+                    {showAllImports && (
+                      <p className="text-xs text-muted-foreground">
+                        Created by {record.created_by_name || "—"}
+                      </p>
+                    )}
+                    <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/40 p-3 text-sm">
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">Draft</p>
                         {record.order_id ? (
-                          <div>
-                            <div className="font-medium">Draft #{record.order_id}</div>
-                            <div className="text-xs text-muted-foreground">
+                          <>
+                            <p className="font-medium">#{record.order_id}</p>
+                            <p className="truncate text-xs text-muted-foreground">
                               {record.order_status || "draft"} · ${Number(record.order_total || 0).toFixed(2)}
-                            </div>
-                          </div>
+                            </p>
+                          </>
                         ) : (
-                          <span className="text-xs text-muted-foreground">No in-stock lines</span>
+                          <p className="text-xs text-muted-foreground">No in-stock lines</p>
                         )}
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <div className="font-medium">{record.missing_quantity} units</div>
-                        <div className="text-xs text-muted-foreground">{record.missing_item_count} lines</div>
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void downloadMissingItems(record)}
-                          disabled={downloadingId === record.id}
-                        >
-                          {downloadingId === record.id
-                            ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            : <Download className="mr-2 h-4 w-4" />}
-                          Download CSV
-                        </Button>
-                      </td>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Missing</p>
+                        <p className="font-medium">{record.missing_quantity} units</p>
+                        <p className="text-xs text-muted-foreground">{record.missing_item_count} lines</p>
+                      </div>
+                    </div>
+                    <Button
+                      className="w-full"
+                      variant="outline"
+                      onClick={() => void downloadMissingItems(record)}
+                      disabled={downloadingId === record.id}
+                    >
+                      {downloadingId === record.id
+                        ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        : <Download className="mr-2 h-4 w-4" />}
+                      Download Missing Items CSV
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden overflow-x-auto lg:block">
+                <table className="w-full min-w-[820px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b text-xs text-muted-foreground">
+                      <th className="px-3 py-2 font-medium">Processed</th>
+                      <th className="px-3 py-2 font-medium">Customer / source file</th>
+                      {showAllImports && <th className="px-3 py-2 font-medium">Created by</th>}
+                      <th className="px-3 py-2 font-medium">Draft</th>
+                      <th className="px-3 py-2 text-right font-medium">Missing</th>
+                      <th className="px-3 py-2 text-right font-medium">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {(importsQuery.data ?? []).map(record => (
+                      <tr key={record.id} className="border-b last:border-0">
+                        <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{formatDate(record.created_at)}</td>
+                        <td className="max-w-[340px] px-3 py-3">
+                          <div className="truncate font-medium">{record.customer_name}</div>
+                          <div className="truncate text-xs text-muted-foreground">{record.source_file_name}</div>
+                        </td>
+                        {showAllImports && <td className="px-3 py-3 text-muted-foreground">{record.created_by_name || "—"}</td>}
+                        <td className="px-3 py-3">
+                          {record.order_id ? (
+                            <div>
+                              <div className="font-medium">Draft #{record.order_id}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {record.order_status || "draft"} · ${Number(record.order_total || 0).toFixed(2)}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">No in-stock lines</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <div className="font-medium">{record.missing_quantity} units</div>
+                          <div className="text-xs text-muted-foreground">{record.missing_item_count} lines</div>
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void downloadMissingItems(record)}
+                            disabled={downloadingId === record.id}
+                          >
+                            {downloadingId === record.id
+                              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              : <Download className="mr-2 h-4 w-4" />}
+                            Download CSV
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
+
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
+        <Button className="min-h-12 w-full" onClick={() => importMutation.mutate()} disabled={!canCreateDraft}>
+          {importMutation.isPending ? (
+            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing…</>
+          ) : (
+            <><Upload className="mr-2 h-4 w-4" /> Create POS Draft</>
+          )}
+        </Button>
+      </div>
     </div>
   );
 }
