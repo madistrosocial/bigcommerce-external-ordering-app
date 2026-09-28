@@ -256,7 +256,11 @@ export interface IStorage {
   createCrmAuditLog(data: InsertCrmAuditLog): Promise<void>;
   getCrmAuditEntries(opts: { customerIds?: number[]; actions?: string[]; limit?: number }): Promise<any[]>;
   // System activity log
-  createUserActivityLog(data: InsertUserActivityLog): Promise<void>;
+  createUserActivityLog(data: InsertUserActivityLog): Promise<number>;
+  setUserActivityLogLocation(
+    id: number,
+    location: Pick<InsertUserActivityLog, "location_city" | "location_region" | "location_country">,
+  ): Promise<void>;
   getUserActivityLogs(opts: { limit: number; offset: number; search?: string; eventType?: string }): Promise<{ rows: UserActivityLog[]; total: number }>;
   // CRM Table resets
   truncateCrmCustomers(): Promise<void>;
@@ -3369,8 +3373,16 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async createUserActivityLog(data: InsertUserActivityLog): Promise<void> {
-    await db.insert(userActivityLogs).values(data);
+  async createUserActivityLog(data: InsertUserActivityLog): Promise<number> {
+    const [row] = await db.insert(userActivityLogs).values(data).returning({ id: userActivityLogs.id });
+    return row.id;
+  }
+
+  async setUserActivityLogLocation(
+    id: number,
+    location: Pick<InsertUserActivityLog, "location_city" | "location_region" | "location_country">,
+  ): Promise<void> {
+    await db.update(userActivityLogs).set(location).where(eq(userActivityLogs.id, id));
   }
 
   async getUserActivityLogs(opts: {
@@ -3388,6 +3400,10 @@ export class DatabaseStorage implements IStorage {
         ilike(userActivityLogs.username, pattern),
         ilike(userActivityLogs.action, pattern),
         ilike(userActivityLogs.page_path, pattern),
+        ilike(userActivityLogs.ip_address, pattern),
+        ilike(userActivityLogs.location_city, pattern),
+        ilike(userActivityLogs.location_region, pattern),
+        ilike(userActivityLogs.location_country, pattern),
       );
       if (searchCondition) conditions.push(searchCondition);
     }

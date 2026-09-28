@@ -74,6 +74,9 @@ export default function SystemActivityLogPage() {
               <p className="mt-1 text-sm text-slate-500">
                 Sign-ins, sign-outs, pages visited, and authenticated write actions.
               </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Locations are approximate and may be unavailable. Public IPs are looked up by FreeIPAPI.
+              </p>
             </div>
           </div>
           <Button
@@ -94,7 +97,7 @@ export default function SystemActivityLogPage() {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
                 className="pl-9"
-                placeholder="Search users, pages, or activity"
+                placeholder="Search user, activity, IP, or location"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 data-testid="input-syslog-search"
@@ -160,11 +163,12 @@ export default function SystemActivityLogPage() {
             </div>
           ) : (
             <div className={`overflow-x-auto ${isFetching ? "opacity-70" : ""}`}>
-              <table className="w-full min-w-[850px] text-left" data-testid="table-syslog">
+              <table className="w-full min-w-[1050px] text-left" data-testid="table-syslog">
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Date and time</th>
                     <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">User</th>
+                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">IP and location</th>
                     <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Type</th>
                     <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Activity</th>
                     <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Result</th>
@@ -177,6 +181,15 @@ export default function SystemActivityLogPage() {
                         {fmt.dateTime(row.created_at)}
                       </td>
                       <td className="px-4 py-3 text-sm font-medium text-slate-800">{row.username}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        <div className="font-mono text-xs">{row.ip_address || "Not recorded"}</div>
+                        {row.ip_address && (
+                          <div className="mt-0.5 text-xs text-slate-500">
+                            {[row.location_city, row.location_region, row.location_country].filter(Boolean).join(", ")
+                              || "Approximate location unavailable"}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
                           {EVENT_LABELS[row.event_type]}

@@ -9,6 +9,10 @@ CREATE TABLE IF NOT EXISTS user_activity_logs (
   page_path text,
   http_method text,
   status_code integer,
+  ip_address text,
+  location_city text,
+  location_region text,
+  location_country text,
   created_at timestamp NOT NULL DEFAULT now()
 );
 

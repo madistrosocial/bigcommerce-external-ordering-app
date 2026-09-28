@@ -112,6 +112,10 @@ export interface UserActivityLogEntry {
   page_path: string | null;
   http_method: string | null;
   status_code: number | null;
+  ip_address: string | null;
+  location_city: string | null;
+  location_region: string | null;
+  location_country: string | null;
   created_at: string;
 }
 

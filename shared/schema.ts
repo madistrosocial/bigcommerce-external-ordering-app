@@ -420,6 +420,10 @@ export const userActivityLogs = pgTable("user_activity_logs", {
   page_path: text("page_path"),
   http_method: text("http_method"),
   status_code: integer("status_code"),
+  ip_address: text("ip_address"),
+  location_city: text("location_city"),
+  location_region: text("location_region"),
+  location_country: text("location_country"),
   created_at: timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({
   createdAtIdx: index("user_activity_logs_created_at_idx").on(t.created_at, t.id),

@@ -6,6 +6,10 @@ import { createServer } from "http";
 const app = express();
 const httpServer = createServer(app);
 
+// The app is deployed behind one trusted reverse proxy. Trust only that hop so
+// Express resolves req.ip without accepting arbitrary client-supplied X-Forwarded-For values.
+app.set("trust proxy", 1);
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;

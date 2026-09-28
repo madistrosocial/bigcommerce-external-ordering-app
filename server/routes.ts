@@ -82,6 +82,7 @@ import {
   parseAccuracy,
   parseCoordinate,
 } from "./attendance";
+import { lookupActivityLogLocation, normalizeClientIp } from "./activity-log-location";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
 const DEFAULT_INVOICE_TEMPLATE = `<!DOCTYPE html>
@@ -744,6 +745,24 @@ export async function registerRoutes(
     return segments[0] ? `/${segments[0]}` : "/";
   };
 
+  const recordActivityLog = async (
+    req: Request,
+    data: Parameters<typeof storage.createUserActivityLog>[0],
+  ): Promise<void> => {
+    const ipAddress = normalizeClientIp(req.ip);
+    const id = await storage.createUserActivityLog({
+      ...data,
+      ip_address: ipAddress,
+    });
+    if (!ipAddress) return;
+
+    void lookupActivityLogLocation(ipAddress)
+      .then((location) => location && storage.setUserActivityLogLocation(id, location))
+      .catch(() => {
+        // Geolocation is best-effort and must never affect the request or log entry.
+      });
+  };
+
   const attachAuthenticatedActivityLog = (req: Request, res: Response, user: any) => {
     const requestState = req as Request & { activityLogAttached?: boolean };
     const method = req.method.toUpperCase();
@@ -759,7 +778,7 @@ export async function registerRoutes(
     requestState.activityLogAttached = true;
     const path = safeTopLevelApiPath(req.path);
     res.once("finish", () => {
-      void storage.createUserActivityLog({
+      void recordActivityLog(req, {
         user_id: user.id,
         username: String(user.username || user.name || "Unknown user"),
         event_type: "api_action",
@@ -1764,7 +1783,7 @@ export async function registerRoutes(
       // Don't send password to frontend
       const { password: _, ...safeUser } = user;
       try {
-        await storage.createUserActivityLog({
+        await recordActivityLog(req, {
           user_id: user.id,
           username: user.username,
           event_type: "login",
@@ -1784,7 +1803,7 @@ export async function registerRoutes(
   app.post("/api/auth/logout", requireAuth, async (req, res) => {
     const user = (req as any).authUser;
     try {
-      await storage.createUserActivityLog({
+      await recordActivityLog(req, {
         user_id: user.id,
         username: String(user.username || user.name || "Unknown user"),
         event_type: "logout",
@@ -1812,7 +1831,7 @@ export async function registerRoutes(
 
     const user = (req as any).authUser;
     try {
-      await storage.createUserActivityLog({
+      await recordActivityLog(req, {
         user_id: user.id,
         username: String(user.username || user.name || "Unknown user"),
         event_type: "page_view",

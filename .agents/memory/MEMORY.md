@@ -27,6 +27,7 @@
 - [Stale session recovery](stale-session-recovery.md) — invalid saved auth must fail safely and expose a cache-clearing force-logout path.
 - [Attendance review and audit](attendance-review-audit.md) — completion state stays separate from manager approval; corrections preserve reasoned old/new history.
 - [Attendance location maps](attendance-location-maps.md) — admin views use validated Google Maps links; employee APIs keep raw coordinates hidden.
+- [Activity-log IP geolocation](activity-log-ip-geolocation.md) — use FreeIPAPI’s no-key HTTPS endpoint with caching and conservative rate limiting for approximate location.
 - [Draft invoice safety](draft-invoice-safety.md) — draft PDFs must stay visibly non-final and never expose staff notes or SMTP credentials.
 - [Dropshipping phase boundaries](dropshipping-phase-boundaries.md) — vendor catalog ingestion stays separate from BigCommerce/SkuVault side effects until an explicit import/order phase.
 - [Dropship brand dashboard counts](dropship-brand-dashboard-counts.md) — brand metrics count distinct synced BigCommerce orders by current local product-brand mapping, not vendor fulfillment state.
