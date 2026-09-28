@@ -181,7 +181,7 @@ export default function BulkOrder() {
     );
 
     return mismatch
-      ? "Selected POS customer doesn't match the form. The draft will use this customer."
+      ? "Selected customer doesn't match the form. The draft will use this customer."
       : null;
   }, [fileName, orderFormPreview, selectedCustomer]);
 
@@ -222,7 +222,7 @@ export default function BulkOrder() {
     mutationFn: async () => {
       const hasContent = Boolean(csvContents || xlsxBase64);
       if (!fileName || !hasContent || !selectedCustomer || !selectedAddress) {
-        throw new Error("Choose an Order Form, POS customer, and shipping address.");
+        throw new Error("Choose an Order Form, customer, and shipping address.");
       }
       if (xlsxBase64 && !orderFormPreview?.completed_item_count) {
         throw new Error("Enter at least one quantity in the XLSX workbook before creating a draft.");
@@ -414,7 +414,7 @@ export default function BulkOrder() {
     && !importMutation.isPending,
   );
   const currentStep = !fileName ? 1 : selectedCustomer && selectedAddress ? 3 : 2;
-  const steps = ["Upload Order Form", "Select POS Customer", "Create Draft"];
+  const steps = ["Upload Order Form", "Select customer", "Create Draft"];
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-5 px-3 py-4 pb-28 sm:space-y-6 sm:px-6 sm:py-6 md:pb-6">
@@ -478,7 +478,7 @@ export default function BulkOrder() {
                 <Users className="h-5 w-5" aria-hidden="true" />
               </div>
               <div className="min-w-0">
-                <CardTitle>Select POS customer</CardTitle>
+                <CardTitle>Select customer</CardTitle>
                 <CardDescription className="mt-1">
                   Find the customer and confirm the shipping address for this draft.
                 </CardDescription>
@@ -487,7 +487,7 @@ export default function BulkOrder() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="relative">
-              <label className="sr-only" htmlFor="bulk-order-customer">Search POS customers</label>
+              <label className="sr-only" htmlFor="bulk-order-customer">Search customers</label>
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               <Input
                 id="bulk-order-customer"
@@ -518,10 +518,10 @@ export default function BulkOrder() {
               <div className="min-h-24 max-h-56 space-y-1 overflow-y-auto rounded-lg border p-1">
                 {customerQuery.isFetching ? (
                   <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Searching POS customers…
+                    <Loader2 className="h-4 w-4 animate-spin" /> Searching customers…
                   </div>
                 ) : lookupTerm.length < 2 ? (
-                  <p className="px-3 py-3 text-sm text-muted-foreground">Choose an Order Form or search for a POS customer.</p>
+                  <p className="px-3 py-3 text-sm text-muted-foreground">Choose an Order Form or search for a customer.</p>
                 ) : customerQuery.isError ? (
                   <p className="px-3 py-3 text-sm text-destructive">
                     {customerQuery.error instanceof Error ? customerQuery.error.message : "BigCommerce customer search failed."}
@@ -563,7 +563,7 @@ export default function BulkOrder() {
               </p>
             )}
             {exactCustomerMatch && !selectedCustomer && (
-              <p className="text-xs text-muted-foreground">Select the matching POS customer.</p>
+              <p className="text-xs text-muted-foreground">Select the matching customer.</p>
             )}
             {selectedCustomer && (
               <div className="space-y-2 border-t pt-4">
