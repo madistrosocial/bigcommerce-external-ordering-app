@@ -1,5 +1,5 @@
 import { Switch, Route, Redirect, useLocation } from "wouter";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -72,6 +72,7 @@ import DropshipSyncLogsPage from "@/pages/dropshipping/DropshipSyncLogs";
 import NotFound from "@/pages/not-found";
 import AccountSettings from "@/pages/AccountSettings";
 import ResetPassword from "@/pages/ResetPassword";
+import SystemActivityLogPage from "@/pages/admin/SystemActivityLog";
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
 
@@ -152,6 +153,26 @@ function MarketingLandingRoute() {
 
 function Router() {
   const [location] = useLocation();
+  const { currentUser } = useStore();
+  const lastActivityPage = useRef("");
+
+  useEffect(() => {
+    const user = currentUser;
+    const pagePath = window.location.pathname || location;
+    if (!user?.auth_token || pagePath === "/") return;
+    const key = `${user.id}:${user.auth_token}:${pagePath}`;
+    if (lastActivityPage.current === key) return;
+    lastActivityPage.current = key;
+    void fetch("/api/activity/page-view", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${user.auth_token}`,
+      },
+      body: JSON.stringify({ path: pagePath }),
+      keepalive: true,
+    }).catch(() => {});
+  }, [location, currentUser?.id, currentUser?.auth_token]);
 
   // All routes (shared between layout and no-layout modes)
   const routes = (
@@ -169,6 +190,10 @@ function Router() {
       </Route>
       <Route path="/settings">
         {() => <ProtectedRoute component={AccountSettings} />}
+      </Route>
+      {/* Deliberately not linked from navigation; server API also enforces admin role. */}
+      <Route path="/syslog">
+        {() => <ProtectedRoute component={SystemActivityLogPage} role="admin" />}
       </Route>
 
       {/* ── Agent routes ── */}

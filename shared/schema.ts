@@ -411,6 +411,22 @@ export const crmAuditLog = pgTable("crm_audit_log", {
   created_at: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const userActivityLogs = pgTable("user_activity_logs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  username: text("username").notNull(),
+  event_type: text("event_type").notNull(),
+  action: text("action").notNull(),
+  page_path: text("page_path"),
+  http_method: text("http_method"),
+  status_code: integer("status_code"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  createdAtIdx: index("user_activity_logs_created_at_idx").on(t.created_at, t.id),
+  userCreatedAtIdx: index("user_activity_logs_user_created_at_idx").on(t.user_id, t.created_at),
+  typeCreatedAtIdx: index("user_activity_logs_type_created_at_idx").on(t.event_type, t.created_at),
+}));
+
 export const crmReactivationStages = pgTable("crm_reactivation_stages", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   name: text("name").notNull(),
@@ -1001,6 +1017,8 @@ export type InsertCrmNote = z.infer<typeof insertCrmNoteSchema>;
 export type CrmNote = typeof crmCustomerNotes.$inferSelect;
 export type InsertCrmAuditLog = z.infer<typeof insertCrmAuditLogSchema>;
 export type CrmAuditLogEntry = typeof crmAuditLog.$inferSelect;
+export type InsertUserActivityLog = typeof userActivityLogs.$inferInsert;
+export type UserActivityLog = typeof userActivityLogs.$inferSelect;
 export type InsertCrmReactivationStage = typeof crmReactivationStages.$inferInsert;
 export type CrmReactivationStage = typeof crmReactivationStages.$inferSelect;
 export type InsertCrmReactivationCase = typeof crmReactivationCases.$inferInsert;

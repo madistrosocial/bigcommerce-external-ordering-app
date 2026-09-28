@@ -7,6 +7,8 @@ import { alias } from "drizzle-orm/pg-core";
 import { normalizeMarketingProductDisplayOptions, DEFAULT_MARKETING_PRODUCT_DISPLAY_OPTIONS } from "@shared/marketing-products";
 import { attendanceAuditLog } from "@shared/schema";
 import type { AttendanceAuditLog, InsertAttendanceAuditLog } from "@shared/schema";
+import { userActivityLogs } from "@shared/schema";
+import type { InsertUserActivityLog, UserActivityLog } from "@shared/schema";
 
 export type AttendanceBreakInterval = {
   break_started_at: Date;
@@ -253,6 +255,9 @@ export interface IStorage {
   // CRM Audit Log
   createCrmAuditLog(data: InsertCrmAuditLog): Promise<void>;
   getCrmAuditEntries(opts: { customerIds?: number[]; actions?: string[]; limit?: number }): Promise<any[]>;
+  // System activity log
+  createUserActivityLog(data: InsertUserActivityLog): Promise<void>;
+  getUserActivityLogs(opts: { limit: number; offset: number; search?: string; eventType?: string }): Promise<{ rows: UserActivityLog[]; total: number }>;
   // CRM Table resets
   truncateCrmCustomers(): Promise<void>;
   truncateCrmOrders(): Promise<void>;
@@ -3362,6 +3367,43 @@ export class DatabaseStorage implements IStorage {
       customer_last_name: c?.last_name ?? "",
       customer_email: c?.email ?? "",
     }));
+  }
+
+  async createUserActivityLog(data: InsertUserActivityLog): Promise<void> {
+    await db.insert(userActivityLogs).values(data);
+  }
+
+  async getUserActivityLogs(opts: {
+    limit: number;
+    offset: number;
+    search?: string;
+    eventType?: string;
+  }): Promise<{ rows: UserActivityLog[]; total: number }> {
+    const conditions: any[] = [];
+    if (opts.eventType) conditions.push(eq(userActivityLogs.event_type, opts.eventType));
+    const search = opts.search?.trim();
+    if (search) {
+      const pattern = `%${search}%`;
+      const searchCondition = or(
+        ilike(userActivityLogs.username, pattern),
+        ilike(userActivityLogs.action, pattern),
+        ilike(userActivityLogs.page_path, pattern),
+      );
+      if (searchCondition) conditions.push(searchCondition);
+    }
+    const where = conditions.length ? and(...conditions) : undefined;
+    const [rows, countRows] = await Promise.all([
+      db.select()
+        .from(userActivityLogs)
+        .where(where)
+        .orderBy(desc(userActivityLogs.created_at), desc(userActivityLogs.id))
+        .limit(opts.limit)
+        .offset(opts.offset),
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(userActivityLogs)
+        .where(where),
+    ]);
+    return { rows, total: Number(countRows[0]?.count ?? 0) };
   }
 
   async truncateCrmCustomers(): Promise<void> {

@@ -100,6 +100,14 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   logout: () => {
+    const user = get().currentUser;
+    if (user?.auth_token) {
+      void fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.auth_token}` },
+        keepalive: true,
+      }).catch(() => {});
+    }
     void clearLocalPosCustomerCache();
     localStorage.removeItem('vansales_user');
     localStorage.removeItem('vansales_cart');

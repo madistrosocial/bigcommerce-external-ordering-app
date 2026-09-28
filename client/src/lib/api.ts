@@ -101,6 +101,27 @@ export interface User {
   auth_token?: string;
 }
 
+export type UserActivityEventType = "login" | "logout" | "page_view" | "api_action";
+
+export interface UserActivityLogEntry {
+  id: number;
+  user_id: number | null;
+  username: string;
+  event_type: UserActivityEventType;
+  action: string;
+  page_path: string | null;
+  http_method: string | null;
+  status_code: number | null;
+  created_at: string;
+}
+
+export interface UserActivityLogPage {
+  rows: UserActivityLogEntry[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export interface OrderItem {
   product_id: number;
   bigcommerce_product_id?: number;
@@ -739,6 +760,28 @@ export async function getAccountProfile(): Promise<User> {
   if (!res.ok) {
     const error = await res.json().catch(() => ({}));
     throw new Error(error.error || "Failed to load account settings");
+  }
+  return res.json();
+}
+
+export async function getSyslogActivity(opts: {
+  page?: number;
+  limit?: number;
+  search?: string;
+  eventType?: UserActivityEventType;
+}): Promise<UserActivityLogPage> {
+  const params = new URLSearchParams();
+  if (opts.page !== undefined) params.set("page", String(opts.page));
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.search) params.set("search", opts.search);
+  if (opts.eventType) params.set("eventType", opts.eventType);
+  const res = await fetch(`${API_BASE}/syslog?${params.toString()}`, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error || "Failed to load system activity");
   }
   return res.json();
 }

@@ -736,6 +736,43 @@ export async function registerRoutes(
     return user?.is_enabled ? user : null;
   };
 
+  const safeTopLevelApiPath = (pathname: string): string => {
+    const segments = pathname.split("?")[0].split("/").filter(Boolean);
+    if (segments[0] === "api") {
+      return segments[1] ? `/api/${segments[1]}` : "/api";
+    }
+    return segments[0] ? `/${segments[0]}` : "/";
+  };
+
+  const attachAuthenticatedActivityLog = (req: Request, res: Response, user: any) => {
+    const requestState = req as Request & { activityLogAttached?: boolean };
+    const method = req.method.toUpperCase();
+    if (
+      requestState.activityLogAttached
+      || !["POST", "PUT", "PATCH", "DELETE"].includes(method)
+      || req.path === "/api/auth/logout"
+      || req.path === "/api/activity/page-view"
+      || req.path.startsWith("/api/syslog")
+    ) {
+      return;
+    }
+    requestState.activityLogAttached = true;
+    const path = safeTopLevelApiPath(req.path);
+    res.once("finish", () => {
+      void storage.createUserActivityLog({
+        user_id: user.id,
+        username: String(user.username || user.name || "Unknown user"),
+        event_type: "api_action",
+        action: `${method} ${path}`,
+        page_path: path,
+        http_method: method,
+        status_code: res.statusCode,
+      }).catch(() => {
+        console.error("Unable to save user activity entry.");
+      });
+    });
+  };
+
   /**
    * Verifies the signed session token and attaches the enabled DB user to req.
    */
@@ -750,6 +787,7 @@ export async function registerRoutes(
     }
 
     (req as any).authUser = user;
+    attachAuthenticatedActivityLog(req, res, user);
     next();
   };
 
@@ -770,6 +808,7 @@ export async function registerRoutes(
     }
 
     (req as any).authUser = user;
+    attachAuthenticatedActivityLog(req, res, user);
     next();
   };
 
@@ -781,11 +820,16 @@ export async function registerRoutes(
     async (req: Request, res: Response, next: NextFunction) => {
       const user = await getAuthenticatedUser(req);
       if (!user) return res.status(401).json({ error: "Authentication required" });
-      if (user.role === "admin") { (req as any).authUser = user; return next(); }
+      if (user.role === "admin") {
+        (req as any).authUser = user;
+        attachAuthenticatedActivityLog(req, res, user);
+        return next();
+      }
       const perms = await storage.getUserPermissionStrings(user.id);
       const hasModuleAccess = module !== "attendance" || action === "view" || perms.includes("attendance:view");
       if (!perms.includes(`${module}:${action}`) || !hasModuleAccess) return res.status(403).json({ error: "Forbidden" });
       (req as any).authUser = user;
+      attachAuthenticatedActivityLog(req, res, user);
       next();
     };
 
@@ -793,7 +837,11 @@ export async function registerRoutes(
     async (req: Request, res: Response, next: NextFunction) => {
       const user = await getAuthenticatedUser(req);
       if (!user) return res.status(401).json({ error: "Authentication required" });
-      if (user.role === "admin") { (req as any).authUser = user; return next(); }
+      if (user.role === "admin") {
+        (req as any).authUser = user;
+        attachAuthenticatedActivityLog(req, res, user);
+        return next();
+      }
 
       const permissions = await storage.getUserPermissionStrings(user.id);
       const pages = Array.isArray(pageActions) ? pageActions : [pageActions];
@@ -802,6 +850,7 @@ export async function registerRoutes(
       if (!canViewPage || !canPerformAction) return res.status(403).json({ error: "Forbidden" });
 
       (req as any).authUser = user;
+      attachAuthenticatedActivityLog(req, res, user);
       next();
     };
 
@@ -1714,9 +1763,90 @@ export async function registerRoutes(
 
       // Don't send password to frontend
       const { password: _, ...safeUser } = user;
+      try {
+        await storage.createUserActivityLog({
+          user_id: user.id,
+          username: user.username,
+          event_type: "login",
+          action: "Successful login",
+          http_method: "POST",
+          status_code: 200,
+        });
+      } catch {
+        console.error("Unable to save user activity entry.");
+      }
       res.json({ ...safeUser, auth_token: issueSessionToken(user.id) });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/auth/logout", requireAuth, async (req, res) => {
+    const user = (req as any).authUser;
+    try {
+      await storage.createUserActivityLog({
+        user_id: user.id,
+        username: String(user.username || user.name || "Unknown user"),
+        event_type: "logout",
+        action: "Successful logout",
+        http_method: "POST",
+        status_code: 204,
+      });
+    } catch {
+      console.error("Unable to save user activity entry.");
+    }
+    res.status(204).end();
+  });
+
+  app.post("/api/activity/page-view", requireAuth, async (req, res) => {
+    const rawPath = typeof req.body?.path === "string" ? req.body.path : "";
+    const pagePath = rawPath.split(/[?#]/, 1)[0].trim();
+    if (
+      !pagePath.startsWith("/")
+      || pagePath.startsWith("//")
+      || pagePath.length > 300
+      || /[\u0000-\u001f]/.test(pagePath)
+    ) {
+      return res.status(400).json({ error: "Invalid page path" });
+    }
+
+    const user = (req as any).authUser;
+    try {
+      await storage.createUserActivityLog({
+        user_id: user.id,
+        username: String(user.username || user.name || "Unknown user"),
+        event_type: "page_view",
+        action: `Viewed ${pagePath}`,
+        page_path: pagePath,
+      });
+    } catch {
+      console.error("Unable to save user activity entry.");
+    }
+    res.status(204).end();
+  });
+
+  app.get("/api/syslog", requireAdmin, async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      const rawPage = Number(req.query.page);
+      const rawLimit = Number(req.query.limit);
+      const page = Number.isInteger(rawPage) && rawPage >= 0 ? Math.min(rawPage, 100000) : 0;
+      const limit = Number.isInteger(rawLimit) ? Math.max(1, Math.min(rawLimit, 100)) : 50;
+      const eventType = String(req.query.eventType ?? "").trim();
+      const allowedEventTypes = new Set(["login", "logout", "page_view", "api_action"]);
+      if (eventType && !allowedEventTypes.has(eventType)) {
+        return res.status(400).json({ error: "Invalid activity type" });
+      }
+      const search = String(req.query.search ?? "").trim().slice(0, 100);
+      const result = await storage.getUserActivityLogs({
+        limit,
+        offset: page * limit,
+        search: search || undefined,
+        eventType: eventType || undefined,
+      });
+      res.json({ ...result, page, limit });
+    } catch {
+      res.status(500).json({ error: "Failed to load system activity" });
     }
   });
 
