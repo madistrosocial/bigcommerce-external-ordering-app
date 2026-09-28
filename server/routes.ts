@@ -5103,6 +5103,9 @@ export async function registerRoutes(
       const effectiveSalesChannel = hasOrdersView
         ? (salesChannel === "allorders" ? "allorders" : "salesapp")
         : "salesapp";
+      const brandProductIds = parsedBrandId != null && effectiveSalesChannel === "allorders"
+        ? [...await fetchBcProductIdsByBrand(parsedBrandId)]
+        : undefined;
 
       const result = await storage.getConsolidatedOrders({
         page: Math.max(1, parseInt(page)),
@@ -5114,6 +5117,7 @@ export async function registerRoutes(
         dateFrom: parsedDateFrom,
         dateTo: parsedDateTo,
         brandId: parsedBrandId,
+        brandProductIds,
         salesChannel: effectiveSalesChannel,
       });
       res.json(result);

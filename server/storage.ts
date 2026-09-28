@@ -73,7 +73,7 @@ export interface IStorage {
   updateOrderStatus(id: number, status: string, bcOrderId?: number): Promise<void>;
   updateOrderNote(id: number, note: string): Promise<void>;
   updateOrderCustomerNote(id: number, customerNote: string): Promise<void>;
-  getConsolidatedOrders(params: { page: number; limit: number; search?: string; createdBy?: number | null; syncStatus?: string; bcStatus?: string; dateFrom?: Date | null; dateTo?: Date | null; brandId?: number | null; salesChannel?: "salesapp" | "allorders"; }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }>;
+  getConsolidatedOrders(params: { page: number; limit: number; search?: string; createdBy?: number | null; syncStatus?: string; bcStatus?: string; dateFrom?: Date | null; dateTo?: Date | null; brandId?: number | null; brandProductIds?: number[]; salesChannel?: "salesapp" | "allorders"; }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }>;
   getDropshipBrandOrderStats(productIdsByBrandId: Record<number, number[]>, dateRanges: { todayStart: Date; tomorrowStart: Date; yesterdayStart: Date; monthStart: Date; }): Promise<Record<number, { today: number; yesterday: number; thisMonth: number; total: number }>>;
   getOrderDetail(id: number): Promise<any | null>;
   updateOrderSyncError(id: number, error: string): Promise<void>;
@@ -785,15 +785,25 @@ export class DatabaseStorage implements IStorage {
     page: number; limit: number; search?: string;
     createdBy?: number | null; syncStatus?: string; bcStatus?: string;
     dateFrom?: Date | null; dateTo?: Date | null; brandId?: number | null;
+    brandProductIds?: number[];
     salesChannel?: "salesapp" | "allorders";
   }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }> {
-    const { page, limit, search, createdBy, syncStatus, bcStatus, dateFrom, dateTo, brandId, salesChannel = "salesapp" } = params;
+    const { page, limit, search, createdBy, syncStatus, bcStatus, dateFrom, dateTo, brandId, brandProductIds, salesChannel = "salesapp" } = params;
     const offset = (page - 1) * limit;
     const brandOrderIds = brandId == null ? null : db
       .selectDistinct({ orderId: bcOrderLineItems.bigcommerce_order_id })
       .from(bcOrderLineItems)
-      .innerJoin(products, eq(products.bigcommerce_id, bcOrderLineItems.bigcommerce_product_id))
-      .where(eq(products.brand_id, brandId));
+      .where(brandProductIds !== undefined
+        ? sql`${bcOrderLineItems.bigcommerce_product_id} IN (
+            SELECT product_id::int
+            FROM jsonb_array_elements_text(${JSON.stringify(brandProductIds)}::jsonb) AS product_ids(product_id)
+          )`
+        : sql`EXISTS (
+            SELECT 1
+            FROM products p
+            WHERE p.bigcommerce_id = ${bcOrderLineItems.bigcommerce_product_id}
+              AND p.brand_id = ${brandId}
+          )`);
 
     // ── All Orders mode: pull from customerOrdersMirror (BC-synced data) ──────
     if (salesChannel === "allorders") {

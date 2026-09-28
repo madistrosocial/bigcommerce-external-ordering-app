@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useTimeService } from "@/hooks/useTimeService";
 import { CalendarDays, ChevronRight, Loader2, PackageOpen, Pin, Plus, RefreshCw, Search, ShoppingBag, X } from "lucide-react";
 
@@ -34,6 +35,8 @@ export default function DropshipDashboardPage() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { hasPermission } = usePermissions();
+  const canViewOrders = hasPermission("orders", "view");
   const fmt = useTimeService();
   const [manageOpen, setManageOpen] = useState(false);
   const [brandSearch, setBrandSearch] = useState("");
@@ -88,6 +91,14 @@ export default function DropshipDashboardPage() {
   };
 
   const openSalesHistory = (brand: api.DropshipDashboardBrand, metric: MetricKey) => {
+    if (!canViewOrders) {
+      toast({
+        title: "Orders access required",
+        description: "Your account can view brand totals but does not have permission to open BigCommerce order details. Ask an administrator for Orders → View access.",
+        variant: "destructive",
+      });
+      return;
+    }
     const dates = dashboardQuery.data?.dates;
     const params = new URLSearchParams({
       salesChannel: "allorders",
@@ -185,6 +196,8 @@ export default function DropshipDashboardPage() {
                         key={key}
                         type="button"
                         onClick={() => openSalesHistory(brand, key)}
+                        aria-disabled={!canViewOrders}
+                        title={!canViewOrders ? "Orders → View permission is required to open matching orders" : undefined}
                         className="group rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-left transition hover:border-blue-300 hover:bg-blue-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                         aria-label={`Open ${metricLabels[key].title.toLowerCase()} orders for ${brand.name}`}
                       >
