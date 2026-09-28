@@ -27,16 +27,16 @@ description: Migration constraints for replacing the current per-recipient campa
 
 **How to apply:** Keep the ordinary readiness refresh aggregate-only. Run contact-level reconciliation only as a separate, explicit user action; compare names as labels rather than identity mappings.
 
-**Contact reconciliation rule:** `GET /contacts` defaults to non-deleted contacts across consent states; `include_count=true` returns `contacts_count` for that same filter, while `status=all` includes deleted contacts. Compare populations carefully, and limit writes to list membership for contacts that already exist and are sendable.
+**Contact reconciliation rule:** `GET /contacts` defaults to non-deleted contacts across consent states; `include_count=true` returns `contacts_count` for that same filter, while `status=all` includes deleted contacts. Compare populations carefully, and limit reconciliation writes to list membership for contacts that already exist and are sendable.
 
 **Why:** Account counts and the default collection can differ due to population or timing. List membership is not consent: creating contacts or changing consent during reconciliation risks unwanted outreach.
 
 **How to apply:** Fetch contact records only for an explicit audience operation, normalize email by trimming and lowercasing, and compare against local records. Add only matching existing, sendable provider contact IDs to lists; record/export missing, unsubscribed, invalid, or locally suppressed contacts. Never create contacts or alter provider consent.
 
-**Contact and opt-out ownership rule:** The app is the source of truth for overall contacts and its marketing suppressions remain in force. If a future integration imports Constant Contact opt-outs, add them to the app's suppressions; never clear a suppression or resubscribe someone just because they appear in an app audience.
+**Contact creation rule:** Constant Contact supports contact creation, but its direct-create and sign-up-form API guides say to use those methods only when the person has explicitly agreed to email. A future app-driven create flow must require recorded consent evidence; ordinary CRM/customer presence or imported CSV membership is not enough. Bulk imports setting `permission_to_send=implicit` do not establish consent.
 
-**Why:** Audience membership is not evidence of renewed consent. Treating it as such could override an explicit opt-out and allow an unwanted campaign.
+**Why:** Audience membership is not evidence of consent, and the create-or-update opt-in endpoint can affect existing permission state. Unsubscribes and the app's local suppressions must never be silently overridden.
 
-**How to apply:** For any future opt-out import or sender cutover, preserve local suppressions and make provider opt-outs an additional suppression signal. The current audit remains read-only; do not perform an import or other contact/subscription changes without explicit implementation authorization.
+**How to apply:** Keep audience reconciliation limited to matching existing, sendable provider contacts; report absent contacts instead of creating them. Any future create flow needs an explicit consent-capture/source record, must preserve both local and provider opt-outs, and must not resubscribe contacts without their own action. Do not create or alter contacts without explicit implementation authorization.
 
 Reference: https://developer.constantcontact.com/api_guide/email_campaign_create.html and https://developer.constantcontact.com/api_guide/email_campaign_create_schedule.html
