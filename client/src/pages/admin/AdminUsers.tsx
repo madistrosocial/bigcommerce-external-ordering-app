@@ -49,6 +49,7 @@ export const MODULES = [
   { key: "cart",               label: "Cart" },
   { key: "dropshipping",       label: "Dropshipping" },
   { key: "orders_drafts",      label: "Orders › Drafts" },
+  { key: "orders_bulk",        label: "Orders › Bulk Order" },
   { key: "orders_all",         label: "Orders › Sales History" },
   { key: "customers_create",   label: "CRM › Create BC Customer" },
   { key: "customers_submit_docs", label: "Customers › Submit Docs" },

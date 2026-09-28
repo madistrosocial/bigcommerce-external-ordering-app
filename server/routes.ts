@@ -2062,7 +2062,7 @@ export async function registerRoutes(
     return permissions.includes("orders:view_all_drafts");
   };
 
-  app.get("/api/orders/bulk-imports", requirePermission("orders_drafts"), async (req, res) => {
+  app.get("/api/orders/bulk-imports", requirePermission("orders_bulk"), async (req, res) => {
     try {
       const authUser = (req as any).authUser;
       const requestedAll = req.query.scope === "all";
@@ -2079,7 +2079,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/orders/bulk-imports/:id/missing-items", requirePermission("orders_drafts"), async (req, res) => {
+  app.get("/api/orders/bulk-imports/:id/missing-items", requirePermission("orders_bulk"), async (req, res) => {
     try {
       const authUser = (req as any).authUser;
       const record = await storage.getBulkOrderImport(Number(req.params.id));
@@ -2102,7 +2102,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/orders/bulk-imports/preview", requirePermission("orders_drafts"), async (req, res) => {
+  app.post("/api/orders/bulk-imports/preview", requirePermission("orders_bulk"), async (req, res) => {
     const fileName = String(req.body?.fileName ?? "").split(/[\\/]/).pop()?.trim() ?? "";
     if (!fileName.toLowerCase().endsWith(".xlsx")) {
       return res.status(400).json({ error: "Choose an XLSX Order Form workbook." });
@@ -2121,7 +2121,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/orders/bulk-imports", requirePermission("orders_drafts"), async (req, res) => {
+  app.post("/api/orders/bulk-imports", requirePermission("orders_bulk"), async (req, res) => {
     const authUser = (req as any).authUser;
     const fileName = String(req.body?.fileName ?? "").split(/[\\/]/).pop()?.trim() ?? "";
     const csv = typeof req.body?.csv === "string" ? req.body.csv : "";
@@ -8441,6 +8441,55 @@ export async function registerRoutes(
     } catch (_) { /* non-fatal */ }
   })();
 
+  // ── Bulk Order permission seed and legacy access migration ────────────────────
+  await (async () => {
+    const migrationKey = "orders_bulk_permission_migrated_v1";
+    const permission = {
+      module: "orders_bulk",
+      action: "view",
+      description: "Orders: access Bulk Order imports",
+    };
+    const existing = await storage.getAllPermissions();
+    if (!existing.some((p: any) => p.module === permission.module && p.action === permission.action)) {
+      await storage.createPermission(permission);
+    }
+
+    const migrationState = await storage.getSetting(migrationKey);
+    if (migrationState?.value) return;
+
+    // Existing Drafts access also exposed Bulk Order. Copy it once so staff and
+    // groups keep that access while allowing admins to separate it afterward.
+    await db.execute(sql`
+      INSERT INTO role_permissions (role_id, permission_id)
+      SELECT DISTINCT assigned.role_id, target.id
+      FROM role_permissions AS assigned
+      JOIN permissions AS source ON source.id = assigned.permission_id
+      JOIN permissions AS target
+        ON target.module = 'orders_bulk' AND target.action = 'view'
+      WHERE source.module = 'orders_drafts' AND source.action = 'view'
+        AND NOT EXISTS (
+          SELECT 1 FROM role_permissions AS existing_assignment
+          WHERE existing_assignment.role_id = assigned.role_id
+            AND existing_assignment.permission_id = target.id
+        )
+    `);
+    await db.execute(sql`
+      INSERT INTO user_permissions (user_id, permission_id)
+      SELECT DISTINCT assigned.user_id, target.id
+      FROM user_permissions AS assigned
+      JOIN permissions AS source ON source.id = assigned.permission_id
+      JOIN permissions AS target
+        ON target.module = 'orders_bulk' AND target.action = 'view'
+      WHERE source.module = 'orders_drafts' AND source.action = 'view'
+        AND NOT EXISTS (
+          SELECT 1 FROM user_permissions AS existing_assignment
+          WHERE existing_assignment.user_id = assigned.user_id
+            AND existing_assignment.permission_id = target.id
+        )
+    `);
+    await storage.setSetting(migrationKey, true);
+  })();
+
   // ── Product 360 permission auto-seed ─────────────────────────────────────────
   await (async () => {
     const PRODUCT_360_PERMS: Array<{ module: string; action: string; description: string }> = [
@@ -8539,7 +8588,7 @@ export async function registerRoutes(
     return { scope: "ASSIGNED_ONLY", userId };
   }
 
-  app.get("/api/orders/bulk-imports/customers/search", requirePermission("orders_drafts"), async (req, res) => {
+  app.get("/api/orders/bulk-imports/customers/search", requirePermission("orders_bulk"), async (req, res) => {
     try {
       const query = String(req.query.query ?? "").trim();
       if (query.length < 2) return res.json([]);

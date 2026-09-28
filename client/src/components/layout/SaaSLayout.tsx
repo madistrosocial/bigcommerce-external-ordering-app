@@ -194,7 +194,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   // Orders children (all permission-gated)
   const ordersChildren: NavLeaf[] = [
     ...(hasPermission("orders_drafts") ? [{ label: "Drafts", path: "/orders/drafts" }] : []),
-    ...(hasPermission("orders_drafts") ? [{ label: "Bulk Order", path: "/orders/bulk" }] : []),
+    ...(hasPermission("orders_bulk") ? [{ label: "Bulk Order", path: "/orders/bulk" }] : []),
     ...(hasPermission("orders_all") ? [{ label: "Sales History", path: "/orders/list" }] : []),
   ];
 

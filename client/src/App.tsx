@@ -197,7 +197,7 @@ function Router() {
         {() => <ProtectedRoute component={DraftOrders} role="agent" />}
       </Route>
       <Route path="/orders/bulk">
-        {() => <PermissionRoute component={BulkOrder} module="orders_drafts" />}
+        {() => <PermissionRoute component={BulkOrder} module="orders_bulk" />}
       </Route>
       <Route path="/orders/all">
         {() => <ProtectedRoute component={AllOrders} />}
@@ -416,7 +416,7 @@ function Router() {
         {() => <ProtectedRoute component={SalesReportPage} />}
       </Route>
       <Route path="/reports/exports">
-        {() => <ProtectedRoute component={ExportsPage} />}
+        {() => <PermissionRoute component={ExportsPage} module="reporting_exports" />}
       </Route>
       <Route path="/reports/price-override-audit">
         {() => <ProtectedRoute component={PriceOverrideAuditPage} />}
