@@ -42,6 +42,7 @@ import BCOrders from "@/pages/agent/BCOrders";
 import AdminGroups from "@/pages/admin/AdminGroups";
 import BCProductLink from "@/pages/tools/BCProductLink";
 import BCProductLinkLogs from "@/pages/tools/BCProductLinkLogs";
+import ImageEditor from "@/pages/tools/ImageEditor";
 import PromoSkuTracker from "@/pages/tools/PromoSkuTracker";
 import InvoicePrintPage from "@/pages/InvoicePrintPage";
 import ShipStationExportPage from "@/pages/admin/ShipStationExport";
@@ -392,6 +393,9 @@ function Router() {
       </Route>
       <Route path="/tools/bc-product-link-logs">
         {() => <ProtectedRoute component={BCProductLinkLogs} />}
+      </Route>
+      <Route path="/tools/image-editor">
+        {() => <PermissionRoute component={ImageEditor} module="tools_image_editor" />}
       </Route>
       <Route path="/tools/promo-sku-tracker">
         {() => <ProtectedRoute component={PromoSkuTracker} />}

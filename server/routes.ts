@@ -76,6 +76,11 @@ import {
   type KoleProductSyncField,
   type KoleProductSyncKind,
 } from "./koleProductSync";
+import {
+  decodeGeneratedImageDataUrl,
+  generateImageEditorOutput,
+  ImageEditorError,
+} from "./imageEditor";
 import { buildBigCommerceSkuIndex, normalizeKoleSku } from "./koleSkuMapping";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 import { MARKETING_ACTION_PERMS, MARKETING_LEGACY_PAGE_GRANTS } from "@shared/marketing-permissions";
@@ -7591,6 +7596,153 @@ export async function registerRoutes(
       res.json({ ...result, rows, page, limit, can_view_all: canViewAll, filters: { dateFrom, dateTo, signedUpBy: signedUpByUserId ?? null } });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ===== TOOLS: IMAGE EDITOR =====
+  const imageEditorGenerationUsage = new Map<number, { windowStartedAt: number; count: number }>();
+  const imageEditorGenerationSchema = z.object({
+    generalDirection: z.string().trim().min(3).max(1500),
+    specificCustomization: z.string().max(2000).optional().default(""),
+    referenceImageDataUrl: z.string().max(6_000_000).optional().default(""),
+    referenceImageUrl: z.string().trim().max(2048).optional().default(""),
+    logoDataUrl: z.string().max(2_900_000),
+  }).strict();
+
+  app.post("/api/tools/image-editor/generate", requirePermission("tools_image_editor"), async (req, res) => {
+    const parsed = imageEditorGenerationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Add a general direction and a transparent PNG logo. Keep each instruction within its character limit." });
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({ error: "OpenAI image generation is not configured." });
+    }
+
+    const userId = Number((req as any).authUser?.id ?? 0);
+    const now = Date.now();
+    const usage = imageEditorGenerationUsage.get(userId);
+    if (usage && now - usage.windowStartedAt < 60 * 60 * 1000 && usage.count >= 10) {
+      return res.status(429).json({ error: "You have reached the limit of 10 image generations per hour. Try again later." });
+    }
+    if (!usage || now - usage.windowStartedAt >= 60 * 60 * 1000) {
+      imageEditorGenerationUsage.set(userId, { windowStartedAt: now, count: 1 });
+    } else {
+      usage.count += 1;
+    }
+
+    try {
+      const image = await generateImageEditorOutput({
+        apiKey: process.env.OPENAI_API_KEY,
+        ...parsed.data,
+      });
+      return res.json({ imageDataUrl: `data:image/jpeg;base64,${image.toString("base64")}` });
+    } catch (error: any) {
+      const status = error instanceof ImageEditorError ? error.statusCode : 500;
+      const message = error instanceof Error ? error.message : "Image generation failed unexpectedly.";
+      if (status >= 500) console.error("[Image Editor] Generation request failed:", message);
+      return res.status(status).json({
+        error: status === 500 ? "Image generation failed unexpectedly. Please try again." : message,
+      });
+    }
+  });
+
+  app.get("/api/tools/image-editor/products", requirePermission("tools_image_editor"), async (req, res) => {
+    try {
+      const query = String(req.query.q ?? "").trim();
+      if (query.length < 2) return res.json([]);
+      if (query.length > 120) return res.status(400).json({ error: "Search text must be 120 characters or fewer." });
+      const { storeHash, headers } = await getBcCreds();
+      const url = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products?keyword=${encodeURIComponent(query)}&limit=12&include=primary_image,variants`;
+      const response = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) {
+        console.error("[Image Editor] BigCommerce product search failed:", response.status);
+        return res.status(502).json({ error: "BigCommerce product search failed." });
+      }
+      const payload = await response.json() as any;
+      const products = (Array.isArray(payload?.data) ? payload.data : []).map((product: any) => ({
+        id: Number(product.id),
+        name: String(product.name ?? ""),
+        sku: String(product.sku ?? ""),
+        image: String(product.primary_image?.url_standard ?? ""),
+        variantSkus: Array.isArray(product.variants)
+          ? product.variants.map((variant: any) => String(variant.sku ?? "")).filter(Boolean)
+          : [],
+      })).filter((product: any) => Number.isSafeInteger(product.id) && product.id > 0 && product.name);
+      return res.json(products);
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : "Product search failed.";
+      console.error("[Image Editor] BigCommerce product search failed:", message);
+      return res.status(502).json({ error: "BigCommerce product search failed. Check the store connection and try again." });
+    }
+  });
+
+  app.post("/api/tools/image-editor/upload", requirePermission("tools_image_editor"), async (req, res) => {
+    let imageBuffer: Buffer;
+    try {
+      const productId = Number(req.body?.productId);
+      if (!Number.isSafeInteger(productId) || productId <= 0) {
+        return res.status(400).json({ error: "Select a valid BigCommerce product." });
+      }
+      imageBuffer = decodeGeneratedImageDataUrl(req.body?.imageDataUrl);
+
+      const { storeHash, token, headers } = await getBcCreds();
+      const productUrl = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products/${productId}`;
+      const productResponse = await fetch(`${productUrl}?include=images`, {
+        headers,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (productResponse.status === 404) return res.status(404).json({ error: "That BigCommerce product no longer exists." });
+      if (!productResponse.ok) {
+        return res.status(502).json({ error: "Could not verify the selected BigCommerce product." });
+      }
+      const productPayload = await productResponse.json() as any;
+      const product = productPayload?.data;
+      if (!product?.id) return res.status(404).json({ error: "That BigCommerce product could not be found." });
+      const existingImages = Array.isArray(product.images) ? product.images : [];
+      if (existingImages.length >= 1000) {
+        return res.status(409).json({ error: "BigCommerce's 1,000-image limit has been reached for this product." });
+      }
+      const sortOrder = existingImages.reduce((maximum: number, image: any) => {
+        const value = Number(image?.sort_order);
+        return Number.isFinite(value) ? Math.max(maximum, value) : maximum;
+      }, -1) + 1;
+
+      const form = new FormData();
+      form.append(
+        "image_file",
+        new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" }),
+        `image-editor-${productId}.jpg`,
+      );
+      form.append("description", "Image Editor product image");
+      form.append("is_thumbnail", "false");
+      form.append("sort_order", String(sortOrder));
+
+      const uploadResponse = await fetch(`${productUrl}/images`, {
+        method: "POST",
+        headers: { "X-Auth-Token": token, Accept: "application/json" },
+        body: form,
+        signal: AbortSignal.timeout(60_000),
+      });
+      const uploadPayload = await uploadResponse.json().catch(() => null) as any;
+      if (!uploadResponse.ok || !uploadPayload?.data?.id) {
+        console.error("[Image Editor] BigCommerce image upload failed:", uploadResponse.status);
+        return res.status(502).json({ error: "BigCommerce could not add the image to this product." });
+      }
+      return res.json({
+        imageId: Number(uploadPayload.data.id),
+        imageUrl: String(uploadPayload.data.url_standard ?? uploadPayload.data.url_zoom ?? ""),
+        productName: String(product.name ?? ""),
+      });
+    } catch (error: any) {
+      if (error instanceof ImageEditorError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      const message = error instanceof Error ? error.message : "BigCommerce image upload failed.";
+      console.error("[Image Editor] BigCommerce upload failed:", message);
+      return res.status(502).json({ error: "BigCommerce image upload failed. Check the store connection and try again." });
     }
   });
 
