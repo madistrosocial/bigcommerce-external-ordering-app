@@ -69,6 +69,11 @@ export default function ImageEditor() {
   const { toast } = useToast();
   const referenceFileInputRef = useRef<HTMLInputElement>(null);
   const logoFileInputRef = useRef<HTMLInputElement>(null);
+  const settingsEditedRef = useRef({
+    generalDirection: false,
+    specificCustomization: false,
+    logo: false,
+  });
 
   const [generalDirection, setGeneralDirection] = useState("");
   const [specificCustomization, setSpecificCustomization] = useState("");
@@ -148,9 +153,10 @@ export default function ImageEditor() {
       });
       return;
     }
+    settingsEditedRef.current.logo = true;
     try {
       setLogoDataUrl(await fileAsDataUrl(file));
-      setLogoFile(file);
+      setLogoFileName(file.name);
       clearGeneratedImage();
     } catch (error) {
       toast({
@@ -158,6 +164,80 @@ export default function ImageEditor() {
         description: error instanceof Error ? error.message : "Choose the logo again.",
         variant: "destructive",
       });
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const restoreSettings = async () => {
+      try {
+        const settings = await loadImageEditorSettings();
+        if (cancelled) return;
+        if (settings) {
+          if (!settingsEditedRef.current.generalDirection) {
+            setGeneralDirection(settings.generalDirection);
+          }
+          if (!settingsEditedRef.current.specificCustomization) {
+            setSpecificCustomization(settings.specificCustomization);
+          }
+          if (!settingsEditedRef.current.logo) {
+            setLogoDataUrl(settings.logoDataUrl);
+            setLogoFileName(settings.logoFileName);
+          }
+          setSavedSettings(settings);
+        }
+      } catch {
+        if (!cancelled) setSettingsStorageError("Saved settings could not be loaded from this browser.");
+      } finally {
+        if (!cancelled) setSettingsReady(true);
+      }
+    };
+
+    void restoreSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const hasUnsavedSettings = settingsReady && (
+    savedSettings
+      ? generalDirection !== savedSettings.generalDirection
+        || specificCustomization !== savedSettings.specificCustomization
+        || logoDataUrl !== savedSettings.logoDataUrl
+        || logoFileName !== savedSettings.logoFileName
+      : Boolean(generalDirection || specificCustomization || logoDataUrl || logoFileName)
+  );
+
+  const saveSettings = async () => {
+    const settings: ImageEditorSettings = {
+      generalDirection,
+      specificCustomization,
+      logoDataUrl,
+      logoFileName,
+    };
+    setIsSavingSettings(true);
+    setSettingsStorageError("");
+    try {
+      await saveImageEditorSettings(settings);
+      setSavedSettings(settings);
+      settingsEditedRef.current = {
+        generalDirection: false,
+        specificCustomization: false,
+        logo: false,
+      };
+      toast({
+        title: "Editor setup saved",
+        description: "Your directions and logo are saved in this browser.",
+      });
+    } catch {
+      setSettingsStorageError("This browser could not save your setup. Check its storage settings and try again.");
+      toast({
+        title: "Could not save editor setup",
+        description: "Browser storage is unavailable. Your current fields are still on this page.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingSettings(false);
     }
   };
 
@@ -406,6 +486,7 @@ export default function ImageEditor() {
                   id="general-direction"
                   value={generalDirection}
                   onChange={(event) => {
+                    settingsEditedRef.current.generalDirection = true;
                     setGeneralDirection(event.target.value);
                     clearGeneratedImage();
                   }}
@@ -422,6 +503,7 @@ export default function ImageEditor() {
                   id="specific-customization"
                   value={specificCustomization}
                   onChange={(event) => {
+                    settingsEditedRef.current.specificCustomization = true;
                     setSpecificCustomization(event.target.value);
                     clearGeneratedImage();
                   }}
@@ -461,7 +543,7 @@ export default function ImageEditor() {
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-slate-700">{logoFile?.name || "Drop a transparent PNG logo"}</div>
+                  <div className="truncate text-sm font-medium text-slate-700">{logoFileName || "Drop a transparent PNG logo"}</div>
                   <div className="mt-1 text-xs text-slate-500">PNG with transparency · 2 MB maximum · placed at the lower-right</div>
                 </div>
                 <div className="flex gap-2">
@@ -475,8 +557,9 @@ export default function ImageEditor() {
                       size="icon"
                       aria-label="Remove logo"
                       onClick={() => {
+                        settingsEditedRef.current.logo = true;
                         setLogoDataUrl("");
-                        setLogoFile(null);
+                        setLogoFileName("");
                         clearGeneratedImage();
                       }}
                     >
@@ -499,6 +582,39 @@ export default function ImageEditor() {
               <p className="mt-3 text-xs text-slate-500">
                 Each generation uses your OpenAI account. Limit: 10 generations per user per hour.
               </p>
+              <div className="mt-4 space-y-2 border-t pt-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p
+                    className={`text-xs ${settingsStorageError ? "text-red-600" : "text-slate-500"}`}
+                    aria-live="polite"
+                    data-testid="image-editor-settings-status"
+                  >
+                    {!settingsReady
+                      ? "Loading saved setup…"
+                      : settingsStorageError
+                        ? settingsStorageError
+                        : hasUnsavedSettings
+                          ? "You have unsaved changes."
+                          : savedSettings
+                            ? "Your setup is saved in this browser."
+                            : "No setup saved yet."}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void saveSettings()}
+                    disabled={!settingsReady || isSavingSettings || !hasUnsavedSettings}
+                    data-testid="save-image-editor-settings"
+                  >
+                    {isSavingSettings && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {isSavingSettings ? "Saving setup…" : "Save setup"}
+                  </Button>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Saved in this browser only. Your directions and logo are not synced to other devices.
+                </p>
+              </div>
             </CardContent>
           </Card>
 

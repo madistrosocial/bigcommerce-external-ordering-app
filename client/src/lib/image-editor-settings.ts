@@ -35,7 +35,7 @@ function runStoreOperation<T>(
 ): Promise<T> {
   return openDatabase().then((database) => new Promise<T>((resolve, reject) => {
     let settled = false;
-    let result: T;
+    let result: T | undefined;
     const finishWithError = (error: Error) => {
       if (settled) return;
       settled = true;
@@ -62,7 +62,7 @@ function runStoreOperation<T>(
       if (settled) return;
       settled = true;
       database.close();
-      resolve(result);
+      resolve(result as T);
     };
     transaction.onerror = () => {
       finishWithError(transaction.error ?? new Error("Could not access saved settings."));
