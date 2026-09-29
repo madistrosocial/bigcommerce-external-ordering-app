@@ -17,6 +17,7 @@ import {
   loadImageEditorSettings,
   saveImageEditorSettings,
   type ImageEditorSettings,
+  type LogoTone,
 } from "@/lib/image-editor-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,14 +67,44 @@ async function responseJson(response: Response): Promise<any> {
   return body;
 }
 
+function loadDataUrlImage(source: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("The generated image or logo could not be opened."));
+    image.src = source;
+  });
+}
+
+async function compositeLogoOverlay(generatedImage: string, logoDataUrl: string): Promise<string> {
+  const [base, logo] = await Promise.all([
+    loadDataUrlImage(generatedImage),
+    loadDataUrlImage(logoDataUrl),
+  ]);
+  if (logo.naturalWidth !== LOGO_OVERLAY_SIZE || logo.naturalHeight !== LOGO_OVERLAY_SIZE) {
+    throw new Error("Logo overlays must be exactly 1200 × 1200 pixels.");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = LOGO_OVERLAY_SIZE;
+  canvas.height = LOGO_OVERLAY_SIZE;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare the BigCommerce image preview.");
+  context.drawImage(base, 0, 0, LOGO_OVERLAY_SIZE, LOGO_OVERLAY_SIZE);
+  context.drawImage(logo, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
 export default function ImageEditor() {
   const { toast } = useToast();
   const referenceFileInputRef = useRef<HTMLInputElement>(null);
-  const logoFileInputRef = useRef<HTMLInputElement>(null);
+  const darkLogoFileInputRef = useRef<HTMLInputElement>(null);
+  const lightLogoFileInputRef = useRef<HTMLInputElement>(null);
   const settingsEditedRef = useRef({
     generalDirection: false,
     specificCustomization: false,
-    logo: false,
+    darkLogo: false,
+    lightLogo: false,
+    logoTone: false,
   });
 
   const [generalDirection, setGeneralDirection] = useState("");
@@ -81,16 +112,22 @@ export default function ImageEditor() {
   const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
   const [referenceImageDataUrl, setReferenceImageDataUrl] = useState("");
   const [referenceImageUrl, setReferenceImageUrl] = useState("");
-  const [logoDataUrl, setLogoDataUrl] = useState("");
-  const [logoFileName, setLogoFileName] = useState("");
+  const [darkLogoDataUrl, setDarkLogoDataUrl] = useState("");
+  const [darkLogoFileName, setDarkLogoFileName] = useState("");
+  const [lightLogoDataUrl, setLightLogoDataUrl] = useState("");
+  const [lightLogoFileName, setLightLogoFileName] = useState("");
+  const [selectedLogoTone, setSelectedLogoTone] = useState<LogoTone>("dark");
   const [settingsReady, setSettingsReady] = useState(false);
   const [savedSettings, setSavedSettings] = useState<ImageEditorSettings | null>(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsStorageError, setSettingsStorageError] = useState("");
   const [isDraggingReference, setIsDraggingReference] = useState(false);
-  const [isDraggingLogo, setIsDraggingLogo] = useState(false);
+  const [isDraggingLogo, setIsDraggingLogo] = useState<LogoTone | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState("");
+  const [finalImage, setFinalImage] = useState("");
+  const [isPreparingFinalImage, setIsPreparingFinalImage] = useState(false);
+  const [finalImageError, setFinalImageError] = useState("");
   const [productQuery, setProductQuery] = useState("");
   const [products, setProducts] = useState<BigCommerceProduct[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<BigCommerceProduct | null>(null);
@@ -101,8 +138,14 @@ export default function ImageEditor() {
 
   const clearGeneratedImage = () => {
     setGeneratedImage("");
+    setFinalImage("");
+    setFinalImageError("");
+    setIsPreparingFinalImage(false);
     setUploadResult(null);
   };
+
+  const selectedLogoDataUrl = selectedLogoTone === "dark" ? darkLogoDataUrl : lightLogoDataUrl;
+  const selectedLogoFileName = selectedLogoTone === "dark" ? darkLogoFileName : lightLogoFileName;
 
   const setReferenceFile = async (file?: File) => {
     if (!file) return;
@@ -136,7 +179,7 @@ export default function ImageEditor() {
     }
   };
 
-  const setLogo = async (file?: File) => {
+  const setLogo = async (tone: LogoTone, file?: File) => {
     if (!file) return;
     if (file.type !== "image/png") {
       toast({
@@ -155,9 +198,29 @@ export default function ImageEditor() {
       return;
     }
     let hasCorrectOverlaySize = false;
+    let hasTransparentArtwork = false;
     try {
       const bitmap = await createImageBitmap(file);
       hasCorrectOverlaySize = bitmap.width === LOGO_OVERLAY_SIZE && bitmap.height === LOGO_OVERLAY_SIZE;
+      if (hasCorrectOverlaySize) {
+        const canvas = document.createElement("canvas");
+        canvas.width = LOGO_OVERLAY_SIZE;
+        canvas.height = LOGO_OVERLAY_SIZE;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) throw new Error("Could not inspect the logo transparency.");
+        context.drawImage(bitmap, 0, 0);
+        const pixels = context.getImageData(0, 0, LOGO_OVERLAY_SIZE, LOGO_OVERLAY_SIZE).data;
+        let hasVisiblePixel = false;
+        let hasTransparentPixel = false;
+        for (let index = 3; index < pixels.length; index += 4) {
+          if (pixels[index] > 0) hasVisiblePixel = true;
+          if (pixels[index] < 255) hasTransparentPixel = true;
+          if (hasVisiblePixel && hasTransparentPixel) {
+            hasTransparentArtwork = true;
+            break;
+          }
+        }
+      }
       bitmap.close();
     } catch {
       toast({
@@ -175,11 +238,39 @@ export default function ImageEditor() {
       });
       return;
     }
-    settingsEditedRef.current.logo = true;
+    if (!hasTransparentArtwork) {
+      toast({
+        title: "Logo must have transparency",
+        description: "Use a 1200 × 1200 PNG with a visible logo and a transparent background.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
-      setLogoDataUrl(await fileAsDataUrl(file));
-      setLogoFileName(file.name);
-      clearGeneratedImage();
+      const dataUrl = await fileAsDataUrl(file);
+      if (tone === "dark") {
+        settingsEditedRef.current.darkLogo = true;
+        setDarkLogoDataUrl(dataUrl);
+        setDarkLogoFileName(file.name);
+        if (!lightLogoDataUrl) {
+          settingsEditedRef.current.logoTone = true;
+          setSelectedLogoTone("dark");
+        }
+      } else {
+        settingsEditedRef.current.lightLogo = true;
+        setLightLogoDataUrl(dataUrl);
+        setLightLogoFileName(file.name);
+        if (!darkLogoDataUrl) {
+          settingsEditedRef.current.logoTone = true;
+          setSelectedLogoTone("light");
+        }
+      }
+      if (tone === selectedLogoTone) {
+        setFinalImage("");
+        setIsPreparingFinalImage(true);
+      }
+      setUploadResult(null);
+      setFinalImageError("");
     } catch (error) {
       toast({
         title: "Could not read logo",
@@ -202,9 +293,16 @@ export default function ImageEditor() {
           if (!settingsEditedRef.current.specificCustomization) {
             setSpecificCustomization(settings.specificCustomization);
           }
-          if (!settingsEditedRef.current.logo) {
-            setLogoDataUrl(settings.logoDataUrl);
-            setLogoFileName(settings.logoFileName);
+          if (!settingsEditedRef.current.darkLogo) {
+            setDarkLogoDataUrl(settings.darkLogoDataUrl);
+            setDarkLogoFileName(settings.darkLogoFileName);
+          }
+          if (!settingsEditedRef.current.lightLogo) {
+            setLightLogoDataUrl(settings.lightLogoDataUrl);
+            setLightLogoFileName(settings.lightLogoFileName);
+          }
+          if (!settingsEditedRef.current.logoTone) {
+            setSelectedLogoTone(settings.selectedLogoTone);
           }
           setSavedSettings(settings);
         }
@@ -221,21 +319,56 @@ export default function ImageEditor() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!generatedImage || !selectedLogoDataUrl) {
+      setFinalImage("");
+      setFinalImageError("");
+      setIsPreparingFinalImage(false);
+      return;
+    }
+
+    let cancelled = false;
+    setFinalImage("");
+    setFinalImageError("");
+    setIsPreparingFinalImage(true);
+    void compositeLogoOverlay(generatedImage, selectedLogoDataUrl)
+      .then((image) => {
+        if (!cancelled) setFinalImage(image);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setFinalImageError(error instanceof Error ? error.message : "Could not prepare the BigCommerce preview.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsPreparingFinalImage(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [generatedImage, selectedLogoDataUrl]);
+
   const hasUnsavedSettings = settingsReady && (
     savedSettings
       ? generalDirection !== savedSettings.generalDirection
         || specificCustomization !== savedSettings.specificCustomization
-        || logoDataUrl !== savedSettings.logoDataUrl
-        || logoFileName !== savedSettings.logoFileName
-      : Boolean(generalDirection || specificCustomization || logoDataUrl || logoFileName)
+        || darkLogoDataUrl !== savedSettings.darkLogoDataUrl
+        || darkLogoFileName !== savedSettings.darkLogoFileName
+        || lightLogoDataUrl !== savedSettings.lightLogoDataUrl
+        || lightLogoFileName !== savedSettings.lightLogoFileName
+        || selectedLogoTone !== savedSettings.selectedLogoTone
+      : Boolean(generalDirection || specificCustomization || darkLogoDataUrl || darkLogoFileName || lightLogoDataUrl || lightLogoFileName)
   );
 
   const saveSettings = async () => {
     const settings: ImageEditorSettings = {
       generalDirection,
       specificCustomization,
-      logoDataUrl,
-      logoFileName,
+      darkLogoDataUrl,
+      darkLogoFileName,
+      lightLogoDataUrl,
+      lightLogoFileName,
+      selectedLogoTone,
     };
     setIsSavingSettings(true);
     setSettingsStorageError("");
@@ -245,11 +378,13 @@ export default function ImageEditor() {
       settingsEditedRef.current = {
         generalDirection: false,
         specificCustomization: false,
-        logo: false,
+        darkLogo: false,
+        lightLogo: false,
+        logoTone: false,
       };
       toast({
         title: "Editor setup saved",
-        description: "Your directions and logo are saved in this browser.",
+        description: "Your directions and dark/light logo options are saved in this browser.",
       });
     } catch {
       setSettingsStorageError("This browser could not save your setup. Check its storage settings and try again.");
@@ -303,13 +438,8 @@ export default function ImageEditor() {
       toast({ title: "Add a general direction", description: "Describe the image you want to create." });
       return;
     }
-    if (!logoDataUrl) {
-      toast({ title: "Upload your logo", description: "A transparent PNG logo is required for the final image." });
-      return;
-    }
-
     setIsGenerating(true);
-    setUploadResult(null);
+    clearGeneratedImage();
     setProductQuery("");
     setProducts([]);
     setSelectedProduct(null);
@@ -322,7 +452,6 @@ export default function ImageEditor() {
           specificCustomization,
           referenceImageDataUrl,
           referenceImageUrl: referenceImageUrl.trim(),
-          logoDataUrl,
         }),
       });
       const payload = await responseJson(response);
@@ -330,7 +459,7 @@ export default function ImageEditor() {
         throw new Error("The image service returned an invalid result. Please try again.");
       }
       setGeneratedImage(payload.imageDataUrl);
-      toast({ title: "Image ready", description: "Your 1200 × 1200 logo overlay was added at its original size and position." });
+      toast({ title: "Image ready", description: "The generated image is shown without a logo. Choose a logo for the BigCommerce preview." });
     } catch (error) {
       toast({
         title: "Image generation failed",
@@ -343,13 +472,13 @@ export default function ImageEditor() {
   };
 
   const uploadToBigCommerce = async () => {
-    if (!generatedImage || !selectedProduct) return;
+    if (!finalImage || !selectedProduct) return;
     setIsUploading(true);
     try {
       const response = await fetch("/api/tools/image-editor/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ productId: selectedProduct.id, imageDataUrl: generatedImage }),
+        body: JSON.stringify({ productId: selectedProduct.id, imageDataUrl: finalImage }),
       });
       const payload = await responseJson(response);
       setUploadResult({
@@ -377,11 +506,64 @@ export default function ImageEditor() {
     void setReferenceFile(event.dataTransfer.files[0]);
   };
 
-  const handleLogoDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsDraggingLogo(false);
-    void setLogo(event.dataTransfer.files[0]);
+  const chooseLogoTone = (tone: LogoTone) => {
+    if (tone === selectedLogoTone) return;
+    if (tone === "dark" ? !darkLogoDataUrl : !lightLogoDataUrl) return;
+    settingsEditedRef.current.logoTone = true;
+    setSelectedLogoTone(tone);
+    setFinalImage("");
+    setFinalImageError("");
+    setIsPreparingFinalImage(true);
+    setUploadResult(null);
   };
+
+  const removeLogo = (tone: LogoTone) => {
+    settingsEditedRef.current[tone === "dark" ? "darkLogo" : "lightLogo"] = true;
+    if (tone === "dark") {
+      setDarkLogoDataUrl("");
+      setDarkLogoFileName("");
+    } else {
+      setLightLogoDataUrl("");
+      setLightLogoFileName("");
+    }
+    if (selectedLogoTone === tone) {
+      setFinalImage("");
+      setFinalImageError("");
+      const otherTone: LogoTone = tone === "dark" ? "light" : "dark";
+      const otherLogo = otherTone === "dark" ? darkLogoDataUrl : lightLogoDataUrl;
+      setIsPreparingFinalImage(Boolean(otherLogo));
+      if (otherLogo) {
+        settingsEditedRef.current.logoTone = true;
+        setSelectedLogoTone(otherTone);
+      }
+    }
+    setUploadResult(null);
+  };
+
+  const handleLogoDrop = (tone: LogoTone, event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDraggingLogo(null);
+    void setLogo(tone, event.dataTransfer.files[0]);
+  };
+
+  const logoUploadOptions = [
+    {
+      tone: "dark" as const,
+      label: "Dark logo",
+      description: "Use on light or bright backgrounds.",
+      dataUrl: darkLogoDataUrl,
+      fileName: darkLogoFileName,
+      inputRef: darkLogoFileInputRef,
+    },
+    {
+      tone: "light" as const,
+      label: "Light logo",
+      description: "Use on dark or busy backgrounds.",
+      dataUrl: lightLogoDataUrl,
+      fileName: lightLogoFileName,
+      inputRef: lightLogoFileInputRef,
+    },
+  ];
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 md:p-6">
@@ -541,68 +723,79 @@ export default function ImageEditor() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">3. Add your logo</CardTitle>
+              <CardTitle className="text-base">3. Add dark and light logo options</CardTitle>
               <CardDescription>
-                Upload the 1200 × 1200 transparent overlay with the logo already positioned. The editor preserves its size and placement.
+                Upload prepared 1200 × 1200 transparent PNG overlays. The generated image stays untouched; logos are only used in the BigCommerce preview.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div
-                className={`flex flex-col items-center gap-3 rounded-lg border-2 border-dashed p-5 text-center transition-colors sm:flex-row sm:text-left ${
-                  isDraggingLogo ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-slate-50/70"
-                }`}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setIsDraggingLogo(true);
-                }}
-                onDragLeave={() => setIsDraggingLogo(false)}
-                onDrop={handleLogoDrop}
-                data-testid="logo-dropzone"
-              >
-                {logoDataUrl ? (
-                  <img src={logoDataUrl} alt="Logo preview" className="h-16 w-28 rounded border bg-white object-contain p-2" />
-                ) : (
-                  <div className="flex h-16 w-28 items-center justify-center rounded border bg-white text-slate-400">
-                    <ImageIcon className="h-6 w-6" />
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-slate-700">{logoFileName || "Drop a transparent PNG logo"}</div>
-                  <div className="mt-1 text-xs text-slate-500">1200 × 1200 transparent PNG · 2 MB maximum · no logo resizing or repositioning</div>
-                </div>
-                <div className="flex gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => logoFileInputRef.current?.click()}>
-                    {logoDataUrl ? "Replace logo" : "Choose logo"}
-                  </Button>
-                  {logoDataUrl && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label="Remove logo"
-                      onClick={() => {
-                        settingsEditedRef.current.logo = true;
-                        setLogoDataUrl("");
-                        setLogoFileName("");
-                        clearGeneratedImage();
+            <CardContent className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {logoUploadOptions.map((option) => (
+                  <div
+                    key={option.tone}
+                    className={`rounded-lg border-2 border-dashed p-3 transition-colors ${
+                      isDraggingLogo === option.tone ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-slate-50/70"
+                    }`}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      setIsDraggingLogo(option.tone);
+                    }}
+                    onDragLeave={() => setIsDraggingLogo(null)}
+                    onDrop={(event) => handleLogoDrop(option.tone, event)}
+                    data-testid={`image-editor-${option.tone}-logo-dropzone`}
+                  >
+                    <div className="flex items-center gap-3">
+                      {option.dataUrl ? (
+                        <img src={option.dataUrl} alt={`${option.label} preview`} className="h-14 w-14 rounded border bg-white object-contain p-1" />
+                      ) : (
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded border bg-white text-slate-400">
+                          <ImageIcon className="h-5 w-5" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-800">{option.label}</div>
+                        <div className="text-xs text-slate-500">{option.description}</div>
+                        <div className="mt-1 truncate text-xs text-slate-500">
+                          {option.fileName || "Drop a prepared PNG here"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-slate-500">1200 × 1200 · 2 MB max</span>
+                      <div className="flex gap-1">
+                        <Button type="button" variant="outline" size="sm" onClick={() => option.inputRef.current?.click()}>
+                          {option.dataUrl ? "Replace" : "Choose"}
+                        </Button>
+                        {option.dataUrl && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Remove ${option.label.toLowerCase()}`}
+                            onClick={() => removeLogo(option.tone)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    <input
+                      ref={option.inputRef}
+                      type="file"
+                      accept="image/png"
+                      className="hidden"
+                      onChange={(event) => {
+                        void setLogo(option.tone, event.target.files?.[0]);
+                        event.currentTarget.value = "";
                       }}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-                <input
-                  ref={logoFileInputRef}
-                  type="file"
-                  accept="image/png"
-                  className="hidden"
-                  onChange={(event) => {
-                    void setLogo(event.target.files?.[0]);
-                    event.currentTarget.value = "";
-                  }}
-                  data-testid="image-editor-logo-input"
-                />
+                      data-testid={`image-editor-${option.tone}-logo-input`}
+                    />
+                  </div>
+                ))}
               </div>
+              <p className="text-xs text-slate-500">
+                Each logo is preserved at its original 1200 × 1200 size and placement. You can generate without either logo.
+              </p>
               <p className="mt-3 text-xs text-slate-500">
                 Each generation uses your OpenAI account. Limit: 10 generations per user per hour.
               </p>
@@ -636,7 +829,7 @@ export default function ImageEditor() {
                   </Button>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Saved in this browser only. Your directions and logo are not synced to other devices.
+                  Saved in this browser only. Your directions and both logo options are not synced to other devices.
                 </p>
               </div>
             </CardContent>
@@ -647,7 +840,7 @@ export default function ImageEditor() {
             size="lg"
             className="w-full"
             onClick={() => void generateImage()}
-            disabled={isGenerating || !logoDataUrl || generalDirection.trim().length < 3}
+            disabled={isGenerating || generalDirection.trim().length < 3}
             data-testid="generate-image-button"
           >
             {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
@@ -658,8 +851,8 @@ export default function ImageEditor() {
         <div className="space-y-6 lg:sticky lg:top-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Result</CardTitle>
-              <CardDescription>Your finished image includes the uploaded logo and is ready to download or add to a product.</CardDescription>
+              <CardTitle className="text-base">Generated image · no logo</CardTitle>
+              <CardDescription>This is the image returned by the generator, shown unchanged and without either logo.</CardDescription>
             </CardHeader>
             <CardContent>
               {isGenerating ? (
@@ -671,23 +864,17 @@ export default function ImageEditor() {
               ) : generatedImage ? (
                 <div className="space-y-4">
                   <div className="overflow-hidden rounded-lg border bg-slate-50">
-                    <img src={generatedImage} alt="Generated product image with logo overlay" className="aspect-square w-full object-contain" />
+                    <img src={generatedImage} alt="Generated product image without a logo" className="aspect-square w-full object-contain" />
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <a
-                      href={generatedImage}
-                      download="image-editor-product.jpg"
-                      className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
-                      data-testid="download-generated-image"
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      Download JPG
-                    </a>
-                    <Badge variant="outline" className="gap-1">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                      Logo applied
-                    </Badge>
-                  </div>
+                  <a
+                    href={generatedImage}
+                    download="image-editor-generated.jpg"
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm hover:bg-accent"
+                    data-testid="download-generated-image"
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download original
+                  </a>
                 </div>
               ) : (
                 <div className="flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed bg-slate-50 px-5 text-center">
@@ -695,7 +882,95 @@ export default function ImageEditor() {
                     <ImageIcon className="h-7 w-7" />
                   </div>
                   <div className="mt-3 text-sm font-medium text-slate-700">Your image will appear here</div>
-                  <p className="mt-1 max-w-xs text-xs text-slate-500">Add your direction and a transparent PNG logo, then generate an image.</p>
+                  <p className="mt-1 max-w-xs text-xs text-slate-500">Add your direction and generate an image. Logo options are applied only in the separate preview.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">BigCommerce preview</CardTitle>
+              <CardDescription>Choose the dark or light overlay. This composited version is the image sent to BigCommerce.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="BigCommerce logo choice">
+                <Button
+                  type="button"
+                  variant={selectedLogoTone === "dark" ? "default" : "outline"}
+                  role="radio"
+                  aria-checked={selectedLogoTone === "dark"}
+                  disabled={!darkLogoDataUrl}
+                  onClick={() => chooseLogoTone("dark")}
+                  data-testid="select-dark-logo"
+                >
+                  Dark logo
+                </Button>
+                <Button
+                  type="button"
+                  variant={selectedLogoTone === "light" ? "default" : "outline"}
+                  role="radio"
+                  aria-checked={selectedLogoTone === "light"}
+                  disabled={!lightLogoDataUrl}
+                  onClick={() => chooseLogoTone("light")}
+                  data-testid="select-light-logo"
+                >
+                  Light logo
+                </Button>
+              </div>
+              {selectedLogoFileName && (
+                <p className="truncate text-xs text-slate-500" title={selectedLogoFileName}>
+                  Selected overlay: {selectedLogoFileName}
+                </p>
+              )}
+
+              {isGenerating || isPreparingFinalImage ? (
+                <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-slate-50 text-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+                  <div className="text-sm font-medium text-slate-700">
+                    {isGenerating ? "Waiting for the generated image" : "Preparing the logo preview"}
+                  </div>
+                </div>
+              ) : finalImage ? (
+                <div className="space-y-4">
+                  <div className="overflow-hidden rounded-lg border bg-slate-50">
+                    <img
+                      src={finalImage}
+                      alt={`BigCommerce product preview with ${selectedLogoTone} logo`}
+                      className="aspect-square w-full object-contain"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <a
+                      href={finalImage}
+                      download={`image-editor-${selectedLogoTone}-logo.jpg`}
+                      className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
+                      data-testid="download-bigcommerce-preview"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download BigCommerce image
+                    </a>
+                    <Badge variant="outline" className="gap-1">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                      {selectedLogoTone === "dark" ? "Dark" : "Light"} logo applied
+                    </Badge>
+                  </div>
+                </div>
+              ) : finalImageError ? (
+                <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
+                  {finalImageError}
+                </p>
+              ) : (
+                <div className="flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed bg-slate-50 px-5 text-center">
+                  <div className="rounded-full bg-white p-3 text-slate-400 shadow-sm">
+                    <ImageIcon className="h-7 w-7" />
+                  </div>
+                  <div className="mt-3 text-sm font-medium text-slate-700">
+                    {selectedLogoDataUrl ? "Generate an image to preview this logo" : "Upload a dark or light logo"}
+                  </div>
+                  <p className="mt-1 max-w-xs text-xs text-slate-500">
+                    The generated image stays logo-free. This window shows the version prepared for BigCommerce.
+                  </p>
                 </div>
               )}
             </CardContent>
@@ -708,7 +983,9 @@ export default function ImageEditor() {
                   <Package className="h-4 w-4 text-indigo-600" />
                   Add to BigCommerce
                 </CardTitle>
-                <CardDescription>Search by product name or SKU. The new image is appended; existing product images are not replaced.</CardDescription>
+                <CardDescription>
+                  The selected dark/light logo preview is uploaded. Search by product name or SKU; existing images are not replaced.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {selectedProduct ? (
@@ -803,7 +1080,7 @@ export default function ImageEditor() {
                   type="button"
                   className="w-full"
                   onClick={() => void uploadToBigCommerce()}
-                  disabled={!selectedProduct || isUploading || Boolean(uploadResult)}
+                  disabled={!selectedProduct || !finalImage || isPreparingFinalImage || isUploading || Boolean(uploadResult)}
                   data-testid="upload-to-bigcommerce-button"
                 >
                   {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}

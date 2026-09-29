@@ -1,8 +1,13 @@
+export type LogoTone = "dark" | "light";
+
 export type ImageEditorSettings = {
   generalDirection: string;
   specificCustomization: string;
-  logoDataUrl: string;
-  logoFileName: string;
+  darkLogoDataUrl: string;
+  darkLogoFileName: string;
+  lightLogoDataUrl: string;
+  lightLogoFileName: string;
+  selectedLogoTone: LogoTone;
 };
 
 const DATABASE_NAME = "vansales-image-editor";
@@ -73,29 +78,47 @@ function runStoreOperation<T>(
   }));
 }
 
-function isImageEditorSettings(value: unknown): value is ImageEditorSettings {
-  if (!value || typeof value !== "object") return false;
-  const settings = value as Partial<ImageEditorSettings>;
+function normalizeImageEditorSettings(value: unknown): ImageEditorSettings | null {
+  if (!value || typeof value !== "object") return null;
+  const settings = value as Record<string, unknown>;
+  const darkLogoDataUrl = typeof settings.darkLogoDataUrl === "string"
+    ? settings.darkLogoDataUrl
+    : typeof settings.logoDataUrl === "string" ? settings.logoDataUrl : "";
+  const darkLogoFileName = typeof settings.darkLogoFileName === "string"
+    ? settings.darkLogoFileName
+    : typeof settings.logoFileName === "string" ? settings.logoFileName : "";
+  const lightLogoDataUrl = typeof settings.lightLogoDataUrl === "string" ? settings.lightLogoDataUrl : "";
+  const lightLogoFileName = typeof settings.lightLogoFileName === "string" ? settings.lightLogoFileName : "";
+  const selectedLogoTone: LogoTone = settings.selectedLogoTone === "light" ? "light" : "dark";
   if (
     typeof settings.generalDirection !== "string"
     || settings.generalDirection.length > 1500
     || typeof settings.specificCustomization !== "string"
     || settings.specificCustomization.length > 2000
-    || typeof settings.logoDataUrl !== "string"
-    || settings.logoDataUrl.length > MAX_LOGO_DATA_URL_LENGTH
-    || typeof settings.logoFileName !== "string"
-    || settings.logoFileName.length > 255
+    || darkLogoDataUrl.length > MAX_LOGO_DATA_URL_LENGTH
+    || darkLogoFileName.length > 255
+    || lightLogoDataUrl.length > MAX_LOGO_DATA_URL_LENGTH
+    || lightLogoFileName.length > 255
   ) {
-    return false;
+    return null;
   }
 
-  return settings.logoDataUrl === ""
-    || /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(settings.logoDataUrl);
+  const validDataUrl = (dataUrl: string) => dataUrl === "" || /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(dataUrl);
+  if (!validDataUrl(darkLogoDataUrl) || !validDataUrl(lightLogoDataUrl)) return null;
+  return {
+    generalDirection: settings.generalDirection,
+    specificCustomization: settings.specificCustomization,
+    darkLogoDataUrl,
+    darkLogoFileName,
+    lightLogoDataUrl,
+    lightLogoFileName,
+    selectedLogoTone,
+  };
 }
 
 export async function loadImageEditorSettings(): Promise<ImageEditorSettings | null> {
   const value = await runStoreOperation<unknown>("readonly", (store) => store.get(SETTINGS_KEY));
-  return isImageEditorSettings(value) ? value : null;
+  return normalizeImageEditorSettings(value);
 }
 
 export async function saveImageEditorSettings(settings: ImageEditorSettings): Promise<void> {

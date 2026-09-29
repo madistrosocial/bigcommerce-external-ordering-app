@@ -7606,13 +7606,12 @@ export async function registerRoutes(
     specificCustomization: z.string().max(2000).optional().default(""),
     referenceImageDataUrl: z.string().max(6_000_000).optional().default(""),
     referenceImageUrl: z.string().trim().max(2048).optional().default(""),
-    logoDataUrl: z.string().max(2_900_000),
   }).strict();
 
   app.post("/api/tools/image-editor/generate", requirePermission("tools_image_editor"), async (req, res) => {
     const parsed = imageEditorGenerationSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ error: "Add a general direction and a transparent PNG logo. Keep each instruction within its character limit." });
+      return res.status(400).json({ error: "Add a general direction and keep each instruction within its character limit." });
     }
     if (!process.env.OPENAI_API_KEY) {
       return res.status(503).json({ error: "OpenAI image generation is not configured." });
