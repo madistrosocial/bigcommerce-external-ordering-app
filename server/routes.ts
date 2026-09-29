@@ -68,6 +68,7 @@ import {
   verifyConstantContactUserPrivileges,
 } from "./constant-contact";
 import { DEFAULT_VENDOR_DISPLAY_NAME, KOLE_VENDOR, KoleImportsAdapter, toDropshipProductInsert, type KoleCredentials } from "./vendors/kole-imports";
+import { KOLE_CSV_FEED_URL, MAX_KOLE_FEED_BYTES, parseKoleFeedCsv } from "./vendors/kole-feed";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 import { MARKETING_ACTION_PERMS, MARKETING_LEGACY_PAGE_GRANTS } from "@shared/marketing-permissions";
 import { dateOnlyInTimeZone, parseDateTimeLocal } from "@shared/timezone";
@@ -1107,47 +1108,50 @@ export async function registerRoutes(
     const startedAt = Date.now();
     let log: any;
     try {
-      const credentials = await getKoleConfig();
-      if (!credentials) return res.status(400).json({ error: "Vendor credentials are not configured." });
       const vendor = await getKoleVendor();
       log = await storage.createDropshipSyncLog({ vendor_id: vendor.id });
-      const adapter = new KoleImportsAdapter(credentials);
-      const seenSkus: string[] = [];
-      let offset = 0;
-      let processed = 0;
-      let created = 0;
-      let updated = 0;
-      let errorCount = 0;
-      const errors: string[] = [];
-
-      while (true) {
-        const page = await adapter.getProducts({ limit: 25, offset });
-        errorCount += page.errors.length;
-        errors.push(...page.errors.slice(0, 10));
-        if (page.products.length > 0) {
-          const result = await storage.upsertDropshipProducts(page.products.map((product) => toDropshipProductInsert(vendor.id, product)));
-          created += result.created;
-          updated += result.updated;
-          processed += page.products.length;
-          seenSkus.push(...page.products.map((product) => product.sku));
-        }
-        if (!page.hasMore) break;
-        offset += 25;
+      const feedResponse = await fetch(KOLE_CSV_FEED_URL, {
+        headers: { Accept: "text/csv, application/octet-stream" },
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!feedResponse.ok) {
+        throw new Error(`Kole Imports feed request failed (${feedResponse.status}).`);
       }
+      const contentLength = Number(feedResponse.headers.get("content-length") || 0);
+      if (contentLength > MAX_KOLE_FEED_BYTES) {
+        throw new Error("Kole Imports feed is larger than the supported 50 MB limit.");
+      }
+      const csv = await feedResponse.text();
+      if (Buffer.byteLength(csv, "utf8") > MAX_KOLE_FEED_BYTES) {
+        throw new Error("Kole Imports feed is larger than the supported 50 MB limit.");
+      }
+
+      const products = parseKoleFeedCsv(csv);
+      const result = await storage.upsertDropshipProducts(
+        products.map((product) => toDropshipProductInsert(vendor.id, product)),
+      );
+      const seenSkus = products.map((product) => product.sku);
       await storage.markDropshipProductsUnavailable(vendor.id, seenSkus);
       const completedAt = Date.now();
       const finished = await storage.finishDropshipSyncLog(log.id, {
         status: "completed",
         completed_at: new Date(),
         duration_ms: completedAt - startedAt,
-        products_processed: processed,
-        products_created: created,
-        products_updated: updated,
-        error_count: errorCount,
-        error_summary: errors.length ? "Some vendor products could not be normalized." : null,
-        detail: { pages: Math.ceil((offset + 25) / 25), rateLimit: "25 products per request" },
+        products_processed: products.length,
+        products_created: result.created,
+        products_updated: result.updated,
+        error_count: 0,
+        error_summary: null,
+        detail: { source: "csv_feed", sourceUrl: KOLE_CSV_FEED_URL },
       });
-      res.json({ ok: true, log: finished, productsProcessed: processed, productsCreated: created, productsUpdated: updated, errorCount });
+      res.json({
+        ok: true,
+        log: finished,
+        productsProcessed: products.length,
+        productsCreated: result.created,
+        productsUpdated: result.updated,
+        errorCount: 0,
+      });
     } catch (error: any) {
       if (log?.id) {
         await storage.finishDropshipSyncLog(log.id, {
@@ -1159,6 +1163,173 @@ export async function registerRoutes(
         }).catch(() => {});
       }
       res.status(502).json({ error: "Vendor catalog sync failed. Check the connection and try again." });
+    }
+  });
+
+  app.post("/api/dropshipping/kole/products/create-drafts", requirePermission("dropshipping", "manage"), async (req, res) => {
+    const inputItems = req.body?.items;
+    if (!Array.isArray(inputItems) || inputItems.length < 1 || inputItems.length > 25) {
+      return res.status(400).json({ error: "Select between 1 and 25 vendor products to create drafts." });
+    }
+
+    const requestedItems: Array<{ id: number; price: number }> = [];
+    const seenIds = new Set<number>();
+    for (const item of inputItems) {
+      const id = Number(item?.id);
+      const price = Number(item?.price);
+      if (!Number.isInteger(id) || id <= 0 || !Number.isFinite(price) || price <= 0) {
+        return res.status(400).json({ error: "Every selected product needs a valid positive retail price." });
+      }
+      if (seenIds.has(id)) return res.status(400).json({ error: "A vendor product was selected more than once." });
+      seenIds.add(id);
+      requestedItems.push({ id, price });
+    }
+
+    const credentials = await getBcCreds().catch(() => null);
+    if (!credentials) return res.status(400).json({ error: "BigCommerce is not configured." });
+
+    try {
+      const vendor = await getKoleVendor();
+      const products = await Promise.all(requestedItems.map(({ id }) => storage.getDropshipProduct(id)));
+      if (products.some((product) => !product || product.vendor_id !== vendor.id)) {
+        return res.status(404).json({ error: "One or more selected vendor products could not be found." });
+      }
+
+      const results: Array<{
+        id: number;
+        sku: string;
+        status: "created" | "skipped" | "failed";
+        bigcommerceProductId?: number;
+        message?: string;
+      }> = [];
+      const headers = {
+        "X-Auth-Token": credentials.token,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      };
+
+      for (let index = 0; index < requestedItems.length; index++) {
+        const requested = requestedItems[index];
+        const product = products[index]!;
+        if (product.bigcommerce_product_id) {
+          results.push({
+            id: product.id,
+            sku: product.vendor_sku,
+            status: "skipped",
+            bigcommerceProductId: product.bigcommerce_product_id,
+            message: "Already mapped to a BigCommerce product.",
+          });
+          continue;
+        }
+
+        try {
+          const matchUrl = `https://api.bigcommerce.com/stores/${credentials.storeHash}/v3/catalog/products?sku=${encodeURIComponent(product.vendor_sku)}&include=variants&limit=250`;
+          const matchResponse = await fetch(matchUrl, { headers });
+          const matchPayload = await matchResponse.json().catch(() => ({}));
+          if (!matchResponse.ok) {
+            throw new Error(`BigCommerce SKU lookup failed (${matchResponse.status}).`);
+          }
+          const matches = Array.isArray(matchPayload.data) ? matchPayload.data : [];
+          const normalizedSku = product.vendor_sku.trim().toLowerCase();
+          const existingProduct = matches.find((match: any) =>
+            String(match?.sku ?? "").trim().toLowerCase() === normalizedSku,
+          );
+          const existingVariant = matches.find((match: any) =>
+            Array.isArray(match?.variants) && match.variants.some((variant: any) =>
+              String(variant?.sku ?? "").trim().toLowerCase() === normalizedSku,
+            ),
+          );
+          const existing = existingProduct || existingVariant;
+          if (existing) {
+            results.push({
+              id: product.id,
+              sku: product.vendor_sku,
+              status: "skipped",
+              bigcommerceProductId: Number(existing.id) || undefined,
+              message: "A BigCommerce product or variant already uses this SKU; it was not changed.",
+            });
+            continue;
+          }
+
+          const raw = product.raw_data && typeof product.raw_data === "object"
+            ? product.raw_data as Record<string, unknown>
+            : {};
+          const inventoryWasProvided = typeof raw.inventoryProvided === "boolean"
+            ? raw.inventoryProvided
+            : raw.inventory !== undefined && raw.inventory !== null && String(raw.inventory).trim() !== "";
+          const rawWeight = raw.item_weight ?? raw.weight;
+          const weight = rawWeight == null || String(rawWeight).trim() === "" ? 0 : Number(rawWeight);
+          const imageUrls = (Array.isArray(product.image_data) ? product.image_data : [])
+            .map((image: any) => typeof image === "string" ? image : image?.url || image?.src || image?.href || "")
+            .map((image: unknown) => String(image).trim())
+            .filter((image: string) => /^https:\/\//i.test(image));
+
+          const createResponse = await fetch(
+            `https://api.bigcommerce.com/stores/${credentials.storeHash}/v3/catalog/products`,
+            {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                name: product.title.slice(0, 250),
+                type: "physical",
+                weight: Number.isFinite(weight) && weight >= 0 ? weight : 0,
+                price: requested.price,
+                sku: product.vendor_sku,
+                description: product.description,
+                cost_price: product.cost == null ? undefined : Number(product.cost),
+                upc: product.upc || undefined,
+                inventory_tracking: inventoryWasProvided ? "product" : "none",
+                ...(inventoryWasProvided ? { inventory_level: product.inventory } : {}),
+                availability: "disabled",
+                is_visible: false,
+                images: imageUrls.map((image_url, imageIndex) => ({
+                  image_url,
+                  is_thumbnail: imageIndex === 0,
+                  sort_order: imageIndex,
+                })),
+              }),
+            },
+          );
+          const createPayload = await createResponse.json().catch(() => ({}));
+          if (!createResponse.ok) {
+            const details = JSON.stringify(createPayload.errors || createPayload).slice(0, 500);
+            throw new Error(`BigCommerce rejected this product (${createResponse.status})${details ? `: ${details}` : ""}`);
+          }
+
+          const bigcommerceProductId = Number(createPayload?.data?.id);
+          if (!Number.isInteger(bigcommerceProductId) || bigcommerceProductId <= 0) {
+            throw new Error("BigCommerce created the product but did not return its product ID.");
+          }
+          let mappingWarning: string | undefined;
+          try {
+            const mapped = await storage.mapDropshipProductToBigCommerce(product.id, bigcommerceProductId);
+            if (!mapped) mappingWarning = "The draft was created, but the vendor catalog mapping could not be saved.";
+          } catch {
+            mappingWarning = "The draft was created, but the vendor catalog mapping could not be saved.";
+          }
+          results.push({
+            id: product.id,
+            sku: product.vendor_sku,
+            status: "created",
+            bigcommerceProductId,
+            message: mappingWarning,
+          });
+        } catch (error: any) {
+          results.push({
+            id: product.id,
+            sku: product.vendor_sku,
+            status: "failed",
+            message: error?.message || "BigCommerce draft creation failed.",
+          });
+        }
+      }
+
+      const created = results.filter((result) => result.status === "created").length;
+      const skipped = results.filter((result) => result.status === "skipped").length;
+      const failed = results.filter((result) => result.status === "failed").length;
+      res.json({ ok: failed === 0, created, skipped, failed, results });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to create BigCommerce drafts." });
     }
   });
 

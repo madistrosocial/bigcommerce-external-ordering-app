@@ -87,17 +87,30 @@ export default function KoleImportsPage() {
         <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
           <Plug className="h-5 w-5 text-indigo-600" /> {displayName}
         </h1>
-        <p className="text-sm text-slate-500 mt-1">Connect this vendor catalog without publishing products or changing inventory.</p>
+        <p className="text-sm text-slate-500 mt-1">Catalog sync currently reads the Kole Imports CSV feed. It updates the Vendor Catalog only; selected products can be created as hidden BigCommerce drafts.</p>
       </div>
 
       <Card className="shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold">Connection Status</CardTitle>
-          <CardDescription>Test Connection performs a read-only request for one catalog product.</CardDescription>
+          <CardTitle className="text-sm font-semibold">Current Catalog Feed</CardTitle>
+          <CardDescription>This public CSV feed is used by Sync CSV Feed. Vendor API credentials are not required.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <a className="text-sm text-indigo-700 underline underline-offset-2 break-all" href="https://www.koleimports.com/dropship/feed/downloadfeed" target="_blank" rel="noreferrer">
+            https://www.koleimports.com/dropship/feed/downloadfeed
+          </a>
+          <Badge className="w-fit bg-green-100 text-green-700 border-0"><CheckCircle2 className="h-3.5 w-3.5 mr-1" />Feed active</Badge>
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold">Optional Vendor API Status</CardTitle>
+          <CardDescription>This status is separate from CSV feed syncing; an unavailable API will not block catalog imports.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-slate-600">{displayName} API</span>
+            <span className="text-sm text-slate-600">{displayName} API (not used by CSV sync)</span>
             {hasCredentials && lastTestOk === false ? (
               <Badge className="bg-red-100 text-red-700 border-0"><XCircle className="h-3.5 w-3.5 mr-1" />Connection Error</Badge>
             ) : hasCredentials && lastTestOk === true ? (
@@ -123,15 +136,15 @@ export default function KoleImportsPage() {
           )}
           <Button variant="outline" size="sm" onClick={handleTest} disabled={testing || !hasCredentials}>
             {testing ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1.5" />}
-            Test Connection
+            Test API
           </Button>
         </CardContent>
       </Card>
 
       <Card className="shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2"><KeyRound className="h-4 w-4 text-slate-500" /> API Credentials</CardTitle>
-          <CardDescription>Credentials are submitted over the authenticated app API and never included in frontend responses or logs. Leave a field blank to keep its current value.</CardDescription>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2"><KeyRound className="h-4 w-4 text-slate-500" /> Optional API Credentials</CardTitle>
+          <CardDescription>Only needed if Kole API access becomes available. CSV feed sync ignores these values. Credentials are stored server-side; leave fields blank to keep existing values.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid sm:grid-cols-2 gap-4">

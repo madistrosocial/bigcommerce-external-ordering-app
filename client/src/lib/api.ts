@@ -325,6 +325,25 @@ export function syncKoleCatalog() {
   }>("/dropshipping/kole/sync", { method: "POST" });
 }
 
+export function createKoleDrafts(items: Array<{ id: number; price: number }>) {
+  return dropshipRequest<{
+    ok: boolean;
+    created: number;
+    skipped: number;
+    failed: number;
+    results: Array<{
+      id: number;
+      sku: string;
+      status: "created" | "skipped" | "failed";
+      bigcommerceProductId?: number;
+      message?: string;
+    }>;
+  }>("/dropshipping/kole/products/create-drafts", {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  });
+}
+
 export function getKoleSyncLogs() {
   return dropshipRequest<DropshipSyncLog[]>("/dropshipping/kole/sync-logs");
 }

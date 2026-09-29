@@ -5,10 +5,11 @@ import * as api from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckCircle2, ChevronLeft, ChevronRight, Eye, Filter, Loader2, Package, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, Filter, Loader2, Package, Plus, RefreshCw, Search, X } from "lucide-react";
 
 const PAGE_SIZE = 25;
 
@@ -26,6 +27,33 @@ function imageUrl(data: unknown[]) {
     return String(record.url || record.src || record.href || "");
   }
   return "";
+}
+
+function inventoryLabel(product: api.DropshipProduct) {
+  const raw = product.raw_data || {};
+  if (typeof raw.inventoryProvided === "boolean") {
+    return raw.inventoryProvided ? product.inventory.toLocaleString() : "Not provided";
+  }
+  if (Object.prototype.hasOwnProperty.call(raw, "inventory") && String(raw.inventory ?? "").trim() === "") {
+    return "Not provided";
+  }
+  return product.inventory.toLocaleString();
+}
+
+function packLabel(product: api.DropshipProduct) {
+  const raw = product.raw_data || {};
+  const casePack = String(raw.case_pack ?? "").trim();
+  const innerPack = String(raw["Inner Pack"] ?? "").trim();
+  const minimumQty = String(raw.minimum_qty ?? "").trim();
+  const pieces = [
+    casePack ? `Case ${casePack}` : "",
+    innerPack ? `Inner ${innerPack}` : "",
+    minimumQty ? `Min ${minimumQty}` : "",
+  ].filter(Boolean);
+  if (pieces.length) return pieces.join(" · ");
+  return product.tier_data?.length
+    ? `${product.tier_data.length} tier${product.tier_data.length === 1 ? "" : "s"}`
+    : "—";
 }
 
 function statusLabel(status: string) {
@@ -51,7 +79,11 @@ export default function DropshipCatalogPage() {
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selectedProducts, setSelectedProducts] = useState<Map<number, api.DropshipProduct>>(new Map());
   const [detail, setDetail] = useState<api.DropshipProduct | null>(null);
+  const [draftProducts, setDraftProducts] = useState<api.DropshipProduct[]>([]);
+  const [draftPrices, setDraftPrices] = useState<Record<number, string>>({});
+  const [draftDialogOpen, setDraftDialogOpen] = useState(false);
   const displayName = connection?.displayName || "Vendor Catalog";
 
   const params = useMemo(() => ({ page, limit: PAGE_SIZE, search: appliedSearch, category, subcategory, inStock: stockOnly, closeout: closeoutOnly, imported: importedOnly, status }), [page, appliedSearch, category, subcategory, stockOnly, closeoutOnly, importedOnly, status]);
@@ -62,6 +94,8 @@ export default function DropshipCatalogPage() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
       queryClient.invalidateQueries({ queryKey: ["dropship-sync-logs"] });
+      setSelected(new Set());
+      setSelectedProducts(new Map());
       toast({ title: "Catalog sync completed", description: `${result.productsProcessed} products processed · ${result.productsCreated} new · ${result.productsUpdated} updated` });
     },
     onError: (mutationError: any) => toast({ title: "Catalog sync failed", description: mutationError.message, variant: "destructive" }),
@@ -76,6 +110,35 @@ export default function DropshipCatalogPage() {
     onError: (mutationError: any) => toast({ title: "Status update failed", description: mutationError.message, variant: "destructive" }),
   });
 
+  const createDrafts = useMutation({
+    mutationFn: api.createKoleDrafts,
+    onSuccess: (result) => {
+      const createdIds = new Set(result.results.filter((item) => item.status === "created").map((item) => item.id));
+      setSelected((current) => {
+        const next = new Set(current);
+        for (const id of createdIds) next.delete(id);
+        return next;
+      });
+      setSelectedProducts((current) => {
+        const next = new Map(current);
+        for (const id of createdIds) next.delete(id);
+        return next;
+      });
+      setDraftDialogOpen(false);
+      setDetail(null);
+      queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
+      queryClient.invalidateQueries({ queryKey: ["dropship-sync-logs"] });
+      const failure = result.results.find((item) => item.status === "failed");
+      const warning = result.results.find((item) => item.status === "created" && item.message);
+      toast({
+        title: result.failed ? "Draft import finished with errors" : "BigCommerce draft import finished",
+        description: `${result.created} created · ${result.skipped} existing SKU${result.skipped === 1 ? "" : "s"} skipped · ${result.failed} failed${failure?.message ? ` · ${failure.message}` : warning?.message ? ` · ${warning.message}` : ""}`,
+        ...(result.failed ? { variant: "destructive" as const } : {}),
+      });
+    },
+    onError: (mutationError: any) => toast({ title: "Draft creation failed", description: mutationError.message, variant: "destructive" }),
+  });
+
   useEffect(() => {
     const timer = window.setTimeout(() => { setPage(1); setAppliedSearch(search.trim()); }, 350);
     return () => window.clearTimeout(timer);
@@ -83,15 +146,51 @@ export default function DropshipCatalogPage() {
 
   const rows = data?.rows ?? [];
   const totalPages = Math.max(Math.ceil((data?.total ?? 0) / PAGE_SIZE), 1);
-  const toggleSelected = (id: number) => setSelected((current) => {
-    const next = new Set(current);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
   const queueSelected = () => {
     for (const id of selected) updateStatus.mutate({ id, nextStatus: "queued" });
     setSelected(new Set());
+    setSelectedProducts(new Map());
   };
+  const toggleProductSelected = (product: api.DropshipProduct) => {
+    if (!selected.has(product.id) && selected.size >= 25) {
+      toast({ title: "Select up to 25 products", description: "Create drafts in batches of 25 or fewer.", variant: "destructive" });
+      return;
+    }
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(product.id)) next.delete(product.id); else next.add(product.id);
+      return next;
+    });
+    setSelectedProducts((current) => {
+      const next = new Map(current);
+      if (next.has(product.id)) next.delete(product.id); else next.set(product.id, product);
+      return next;
+    });
+  };
+  const openDraftDialog = (products: api.DropshipProduct[]) => {
+    const eligible = products.filter((product) => !product.bigcommerce_product_id);
+    if (!eligible.length) {
+      toast({ title: "No products to create", description: "Selected products are already mapped to BigCommerce." });
+      return;
+    }
+    if (eligible.length > 25) {
+      toast({ title: "Select up to 25 products", description: "Create drafts in batches of 25 or fewer.", variant: "destructive" });
+      return;
+    }
+    setDraftProducts(eligible);
+    setDraftPrices(Object.fromEntries(eligible.map((product) => [product.id, ""])));
+    setDraftDialogOpen(true);
+  };
+  const submitDrafts = () => {
+    createDrafts.mutate(draftProducts.map((product) => ({
+      id: product.id,
+      price: Number(draftPrices[product.id]),
+    })));
+  };
+  const draftPricesValid = draftProducts.length > 0 && draftProducts.every((product) => {
+    const price = Number(draftPrices[product.id]);
+    return Number.isFinite(price) && price > 0;
+  });
   const clearFilters = () => {
     setSearch(""); setAppliedSearch(""); setCategory(""); setSubcategory(""); setStockOnly(false); setCloseoutOnly(false); setImportedOnly(false); setStatus(""); setPage(1);
   };
@@ -101,17 +200,18 @@ export default function DropshipCatalogPage() {
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" /> Product Catalog</h1>
-          <p className="text-sm text-slate-500 mt-1">{displayName} products stored in SalesCore. Selecting or queueing a product does not create a BigCommerce product.</p>
+          <p className="text-sm text-slate-500 mt-1">Sync the Kole Imports CSV into {displayName}, then select products to create hidden, disabled BigCommerce drafts.</p>
         </div>
         <div className="flex gap-2">
           {selected.size > 0 && <Button variant="outline" size="sm" onClick={queueSelected} disabled={updateStatus.isPending}><Plus className="h-4 w-4 mr-1.5" />Queue {selected.size}</Button>}
-          <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending}><RefreshCw className={`h-4 w-4 mr-1.5 ${sync.isPending ? "animate-spin" : ""}`} />Sync Catalog</Button>
+          {selected.size > 0 && <Button size="sm" onClick={() => openDraftDialog(Array.from(selectedProducts.values()))} disabled={createDrafts.isPending}><Plus className="h-4 w-4 mr-1.5" />Create {selected.size} Draft{selected.size === 1 ? "" : "s"}</Button>}
+          <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending}><RefreshCw className={`h-4 w-4 mr-1.5 ${sync.isPending ? "animate-spin" : ""}`} />Sync CSV Feed</Button>
         </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Catalog products</p><p className="text-xl font-bold text-slate-800">{data?.total ?? "—"}</p></CardContent></Card>
-        <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Page size</p><p className="text-xl font-bold text-slate-800">25</p><p className="text-[10px] text-slate-400">Vendor API limit</p></CardContent></Card>
+        <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Feed source</p><p className="text-xl font-bold text-slate-800">CSV</p><p className="text-[10px] text-slate-400">Kole Imports inventory feed</p></CardContent></Card>
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Current page</p><p className="text-xl font-bold text-slate-800">{page} / {totalPages}</p></CardContent></Card>
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Selected</p><p className="text-xl font-bold text-indigo-600">{selected.size}</p></CardContent></Card>
       </div>
@@ -147,7 +247,7 @@ export default function DropshipCatalogPage() {
       </Card>
 
       <Card className="shadow-sm overflow-hidden">
-        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {(error as Error).message}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters. Run Sync Catalog after connecting {displayName}.</div> : (
+        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {(error as Error).message}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters. Run Sync CSV Feed to load the current Kole Imports inventory.</div> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200"><tr className="text-left text-[11px] uppercase tracking-wide text-slate-500">
@@ -157,14 +257,14 @@ export default function DropshipCatalogPage() {
                 {rows.map((product) => {
                   const image = imageUrl(product.image_data);
                   return <tr key={product.id} className="hover:bg-slate-50/80 align-top">
-                    <td className="px-3 py-3"><input type="checkbox" checked={selected.has(product.id)} onChange={() => toggleSelected(product.id)} aria-label={`Select ${product.title}`} /></td>
+                    <td className="px-3 py-3"><input type="checkbox" checked={selected.has(product.id)} disabled={Boolean(product.bigcommerce_product_id)} onChange={() => toggleProductSelected(product)} aria-label={`Select ${product.title}`} /></td>
                     <td className="px-3 py-3 min-w-[240px]"><div className="flex gap-3">{image ? <img src={image} alt="" className="h-12 w-12 rounded border border-slate-200 object-contain bg-white" /> : <div className="h-12 w-12 rounded border border-slate-200 bg-slate-50 flex items-center justify-center"><Package className="h-5 w-5 text-slate-300" /></div>}<div className="min-w-0"><p className="font-medium text-slate-800 line-clamp-2">{product.title}</p><p className="text-xs text-slate-500 mt-1">{product.brand || "Unbranded"}{product.vendor_category ? ` · ${product.vendor_category}` : ""}</p>{product.is_closeout && <Badge className="mt-1 bg-orange-100 text-orange-700 border-0 text-[10px]">Closeout</Badge>}</div></div></td>
                     <td className="px-3 py-3 whitespace-nowrap"><p className="font-mono text-xs text-slate-700">{product.vendor_sku}</p><p className="text-xs text-slate-400 mt-1">{product.upc || "No UPC"}</p></td>
                     <td className="px-3 py-3 font-medium whitespace-nowrap">{formatCost(product.cost)}</td>
-                    <td className="px-3 py-3 text-xs text-slate-600 whitespace-nowrap">{product.tier_data?.length ? `${product.tier_data.length} tier${product.tier_data.length === 1 ? "" : "s"}` : "—"}</td>
-                    <td className="px-3 py-3 font-medium whitespace-nowrap">{product.inventory.toLocaleString()}</td>
+                    <td className="px-3 py-3 text-xs text-slate-600 whitespace-nowrap">{packLabel(product)}</td>
+                    <td className="px-3 py-3 font-medium whitespace-nowrap">{inventoryLabel(product)}</td>
                     <td className="px-3 py-3 whitespace-nowrap"><StatusBadge status={product.status} /></td>
-                    <td className="px-3 py-3"><div className="flex justify-end gap-1"><Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDetail(product)}><Eye className="h-3.5 w-3.5 mr-1" />View Details</Button><Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDetail(product)}>Review Mapping</Button>{product.status !== "queued" && <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => updateStatus.mutate({ id: product.id, nextStatus: "queued" })}><Plus className="h-3.5 w-3.5 mr-1" />Queue</Button>}</div></td>
+                    <td className="px-3 py-3"><div className="flex justify-end gap-1"><Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDetail(product)}><Eye className="h-3.5 w-3.5 mr-1" />View Details</Button>{product.status !== "queued" && !product.bigcommerce_product_id && <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => updateStatus.mutate({ id: product.id, nextStatus: "queued" })}><Plus className="h-3.5 w-3.5 mr-1" />Queue</Button>}</div></td>
                   </tr>;
                 })}
               </tbody>
@@ -182,10 +282,53 @@ export default function DropshipCatalogPage() {
           {detail && <><DialogHeader><DialogTitle className="flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" />{detail.title}</DialogTitle></DialogHeader><div className="space-y-5">
             <div className="flex flex-wrap gap-2"><StatusBadge status={detail.status} />{detail.is_closeout && <Badge className="bg-orange-100 text-orange-700 border-0">Closeout</Badge>}{detail.bigcommerce_product_id ? <Badge className="bg-blue-100 text-blue-700 border-0">Mapped to BC #{detail.bigcommerce_product_id}</Badge> : <Badge className="bg-slate-100 text-slate-600 border-0">Not mapped</Badge>}</div>
             {detail.image_data?.length > 0 && <div className="flex gap-2 overflow-x-auto">{detail.image_data.slice(0, 8).map((_, index) => { const src = imageUrl([detail.image_data[index]]); return src ? <img key={index} src={src} alt="" className="h-24 w-24 object-contain border rounded bg-white" /> : null; })}</div>}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm"><div><p className="text-xs text-slate-500">SKU</p><p className="font-mono">{detail.vendor_sku}</p></div><div><p className="text-xs text-slate-500">UPC</p><p>{detail.upc || "—"}</p></div><div><p className="text-xs text-slate-500">Brand</p><p>{detail.brand || "—"}</p></div><div><p className="text-xs text-slate-500">Cost</p><p>{formatCost(detail.cost)}</p></div><div><p className="text-xs text-slate-500">Inventory</p><p>{detail.inventory.toLocaleString()}</p></div><div><p className="text-xs text-slate-500">Category</p><p>{detail.vendor_category || "—"}</p></div><div><p className="text-xs text-slate-500">Subcategory</p><p>{detail.vendor_subcategory || "—"}</p></div><div><p className="text-xs text-slate-500">Weight</p><p>{String((detail.raw_data as any)?.weight || "—")}</p></div></div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm"><div><p className="text-xs text-slate-500">SKU</p><p className="font-mono">{detail.vendor_sku}</p></div><div><p className="text-xs text-slate-500">UPC</p><p>{detail.upc || "—"}</p></div><div><p className="text-xs text-slate-500">Brand</p><p>{detail.brand || "—"}</p></div><div><p className="text-xs text-slate-500">Cost</p><p>{formatCost(detail.cost)}</p></div><div><p className="text-xs text-slate-500">Inventory</p><p>{inventoryLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Pack / minimum</p><p>{packLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Category</p><p>{detail.vendor_category || "—"}</p></div><div><p className="text-xs text-slate-500">Subcategory</p><p>{detail.vendor_subcategory || "—"}</p></div><div><p className="text-xs text-slate-500">Weight</p><p>{String((detail.raw_data as any)?.item_weight || (detail.raw_data as any)?.weight || "—")}</p></div></div>
             {detail.description && <div><p className="text-xs font-medium text-slate-500 mb-1">Description</p><p className="text-sm text-slate-700 whitespace-pre-wrap">{detail.description}</p></div>}
-            <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => updateStatus.mutate({ id: detail.id, nextStatus: "queued" })} disabled={detail.status === "queued"}><Plus className="h-4 w-4 mr-1.5" />Add to Import Queue</Button><Button variant="ghost" onClick={() => setDetail(null)}>Close</Button></div>
+            <div className="flex flex-wrap gap-2">{!detail.bigcommerce_product_id && <Button onClick={() => openDraftDialog([detail])}><Plus className="h-4 w-4 mr-1.5" />Create BigCommerce Draft</Button>}<Button variant="outline" onClick={() => updateStatus.mutate({ id: detail.id, nextStatus: "queued" })} disabled={detail.status === "queued" || Boolean(detail.bigcommerce_product_id)}><Plus className="h-4 w-4 mr-1.5" />Add to Import Queue</Button><Button variant="ghost" onClick={() => setDetail(null)}>Close</Button></div>
           </div></>}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={draftDialogOpen} onOpenChange={setDraftDialogOpen}>
+        <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create hidden BigCommerce drafts</DialogTitle>
+            <DialogDescription>
+              Drafts will be hidden and disabled. Enter a retail price for each item; supplier cost stays in BigCommerce cost price. Existing SKU matches are skipped and never overwritten.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {draftProducts.map((product) => (
+              <div key={product.id} className="grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-3 rounded-md border border-slate-200 p-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-800 line-clamp-2">{product.title}</p>
+                  <p className="text-xs font-mono text-slate-500 mt-1">{product.vendor_sku}</p>
+                  <p className="text-xs text-slate-500 mt-1">Supplier cost: {formatCost(product.cost)} · Inventory: {inventoryLabel(product)}</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`draft-price-${product.id}`} className="text-xs">Retail price</Label>
+                  <Input
+                    id={`draft-price-${product.id}`}
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={draftPrices[product.id] ?? ""}
+                    onChange={(event) => setDraftPrices((current) => ({ ...current, [product.id]: event.target.value }))}
+                    placeholder="Enter price"
+                    disabled={createDrafts.isPending}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDraftDialogOpen(false)} disabled={createDrafts.isPending}>Cancel</Button>
+            <Button onClick={submitDrafts} disabled={createDrafts.isPending || !draftPricesValid}>
+              {createDrafts.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              Create {draftProducts.length} Draft{draftProducts.length === 1 ? "" : "s"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -98,6 +98,7 @@ export interface IStorage {
   upsertDropshipProducts(entries: InsertDropshipProduct[]): Promise<{ created: number; updated: number }>;
   markDropshipProductsUnavailable(vendorId: number, seenSkus: string[]): Promise<void>;
   updateDropshipProductStatus(id: number, status: string): Promise<DropshipProduct | undefined>;
+  mapDropshipProductToBigCommerce(id: number, bigcommerceProductId: number): Promise<DropshipProduct | undefined>;
   createDropshipSyncLog(data: { vendor_id: number }): Promise<DropshipSyncLog>;
   finishDropshipSyncLog(id: number, data: Partial<InsertDropshipSyncLog>): Promise<DropshipSyncLog | undefined>;
   getDropshipSyncLogs(vendorId: number, limit?: number): Promise<DropshipSyncLog[]>;
@@ -1169,34 +1170,55 @@ export class DatabaseStorage implements IStorage {
   async upsertDropshipProducts(entries: InsertDropshipProduct[]): Promise<{ created: number; updated: number }> {
     let created = 0;
     let updated = 0;
+    const entriesByVendor = new Map<number, Map<string, InsertDropshipProduct>>();
     for (const entry of entries) {
-      const existing = await db.select({ id: dropshipProducts.id })
-        .from(dropshipProducts)
-        .where(and(eq(dropshipProducts.vendor_id, entry.vendor_id), eq(dropshipProducts.vendor_sku, entry.vendor_sku)))
-        .limit(1);
-      await db.insert(dropshipProducts).values(entry).onConflictDoUpdate({
-        target: [dropshipProducts.vendor_id, dropshipProducts.vendor_sku],
-        set: {
-          vendor_product_id: entry.vendor_product_id,
-          title: entry.title,
-          description: entry.description,
-          brand: entry.brand,
-          upc: entry.upc,
-          inventory: entry.inventory,
-          cost: entry.cost,
-          tier_data: entry.tier_data,
-          image_data: entry.image_data,
-          vendor_category: entry.vendor_category,
-          vendor_subcategory: entry.vendor_subcategory,
-          is_closeout: entry.is_closeout,
-          vendor_modified_at: entry.vendor_modified_at,
-          raw_data: entry.raw_data,
-          updated_at: new Date(),
-          status: sql`CASE WHEN ${dropshipProducts.status} IN ('queued', 'mapped') THEN ${dropshipProducts.status} ELSE 'available' END`,
-        },
-      });
-      if (existing.length > 0) updated++;
-      else created++;
+      let bySku = entriesByVendor.get(entry.vendor_id);
+      if (!bySku) {
+        bySku = new Map();
+        entriesByVendor.set(entry.vendor_id, bySku);
+      }
+      bySku.set(entry.vendor_sku, entry);
+    }
+
+    for (const [vendorId, bySku] of entriesByVendor) {
+      const vendorEntries = Array.from(bySku.values());
+      for (let offset = 0; offset < vendorEntries.length; offset += 50) {
+        const batch = vendorEntries.slice(offset, offset + 50);
+        const existingRows = await db.select({ vendor_sku: dropshipProducts.vendor_sku })
+          .from(dropshipProducts)
+          .where(and(
+            eq(dropshipProducts.vendor_id, vendorId),
+            inArray(dropshipProducts.vendor_sku, batch.map((entry) => entry.vendor_sku)),
+          ));
+        const existingSkus = new Set(existingRows.map((row) => row.vendor_sku));
+
+        await db.insert(dropshipProducts).values(batch).onConflictDoUpdate({
+          target: [dropshipProducts.vendor_id, dropshipProducts.vendor_sku],
+          set: {
+            vendor_product_id: sql`excluded.vendor_product_id`,
+            title: sql`excluded.title`,
+            description: sql`excluded.description`,
+            brand: sql`excluded.brand`,
+            upc: sql`excluded.upc`,
+            inventory: sql`excluded.inventory`,
+            cost: sql`excluded.cost`,
+            tier_data: sql`excluded.tier_data`,
+            image_data: sql`excluded.image_data`,
+            vendor_category: sql`excluded.vendor_category`,
+            vendor_subcategory: sql`excluded.vendor_subcategory`,
+            is_closeout: sql`excluded.is_closeout`,
+            vendor_modified_at: sql`excluded.vendor_modified_at`,
+            raw_data: sql`excluded.raw_data`,
+            updated_at: new Date(),
+            status: sql`CASE WHEN ${dropshipProducts.status} IN ('queued', 'mapped') THEN ${dropshipProducts.status} ELSE 'available' END`,
+          },
+        });
+
+        for (const entry of batch) {
+          if (existingSkus.has(entry.vendor_sku)) updated++;
+          else created++;
+        }
+      }
     }
     return { created, updated };
   }
@@ -1212,6 +1234,14 @@ export class DatabaseStorage implements IStorage {
   async updateDropshipProductStatus(id: number, status: string): Promise<DropshipProduct | undefined> {
     const rows = await db.update(dropshipProducts)
       .set({ status, updated_at: new Date() })
+      .where(eq(dropshipProducts.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  async mapDropshipProductToBigCommerce(id: number, bigcommerceProductId: number): Promise<DropshipProduct | undefined> {
+    const rows = await db.update(dropshipProducts)
+      .set({ bigcommerce_product_id: bigcommerceProductId, status: "mapped", updated_at: new Date() })
       .where(eq(dropshipProducts.id, id))
       .returning();
     return rows[0];
