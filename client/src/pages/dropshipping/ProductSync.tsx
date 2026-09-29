@@ -658,12 +658,11 @@ export default function ProductSyncPage() {
                   size="sm"
                   onClick={selectAllMappedListings}
                   disabled={!canManage || syncPending || productsQuery.isFetching || !productsQuery.data?.total}
-                  aria-label={`Select all ${productsQuery.data?.total ?? 0} mapped listings${appliedSearch ? " matching the current search" : ""} across all pages`}
+                  aria-label={`Select all mapped listings${appliedSearch ? " matching the current search" : ""} across all pages`}
                   className="shrink-0"
                 >
                   {selectAllPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
                   {selectAllPending ? "Selecting…" : appliedSearch ? "Select all matches" : "Select all mapped"}
-                  <span className="font-mono text-[10px]">({productsQuery.data?.total ?? 0})</span>
                 </Button>
                 {selectedProductIds.size > 0 && (
                   <Button variant="ghost" size="sm" onClick={clearProductSelection} disabled={!canManage || syncPending}>
