@@ -198,11 +198,12 @@ export default function DropshipCatalogPage() {
     mutationFn: api.syncMappedKoleDetails,
     onSuccess: (result) => {
       setDetailsSyncResult(result);
+      setDetailsSyncConfirmOpen(false);
       queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
       toast({
-        title: result.productsFailed ? "Details sync finished with errors" : "Mapped product details synced",
-        description: `${result.productsUpdated} products updated · ${result.photosAdded} photos added · ${result.inventoryUpdated} inventory counts updated · ${result.productsFailed} failed`,
-        ...(result.productsFailed ? { variant: "destructive" as const } : {}),
+        title: result.productsFailed || result.duplicateMappingsSkipped ? "Details sync finished with warnings" : "Mapped product details synced",
+        description: `${result.productsUpdated} products updated · ${result.photosAdded} photos added · ${result.inventoryUpdated} inventory counts updated · ${result.productsFailed} failed · ${result.duplicateMappingsSkipped} duplicate mappings skipped`,
+        ...(result.productsFailed || result.duplicateMappingsSkipped ? { variant: "destructive" as const } : {}),
       });
     },
     onError: (mutationError: any) => toast({ title: "Details sync failed", description: mutationError.message, variant: "destructive" }),
@@ -310,7 +311,7 @@ export default function DropshipCatalogPage() {
   };
   const startCsvUpload = (file?: File) => {
     if (!file) return;
-    if (sync.isPending || uploadCsv.isPending) return;
+    if (sync.isPending || uploadCsv.isPending || syncMappedDetails.isPending) return;
     if (!file.size) {
       toast({ title: "CSV upload failed", description: "The selected file is empty.", variant: "destructive" });
       return;
@@ -341,12 +342,12 @@ export default function DropshipCatalogPage() {
             }}
           />
           {selected.size > 0 && <Button variant="outline" size="sm" onClick={queueSelected} disabled={updateStatus.isPending}><Plus className="h-4 w-4 mr-1.5" />Queue {selected.size}</Button>}
-          {selected.size > 0 && <Button size="sm" onClick={() => openDraftDialog(Array.from(selectedProducts.values()))} disabled={createDrafts.isPending}><Plus className="h-4 w-4 mr-1.5" />Create {selected.size} Draft{selected.size === 1 ? "" : "s"}</Button>}
-          <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()} disabled={sync.isPending || uploadCsv.isPending}>
+          {selected.size > 0 && <Button size="sm" onClick={() => openDraftDialog(Array.from(selectedProducts.values()))} disabled={createDrafts.isPending || syncMappedDetails.isPending}><Plus className="h-4 w-4 mr-1.5" />Create {selected.size} Draft{selected.size === 1 ? "" : "s"}</Button>}
+          <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()} disabled={sync.isPending || uploadCsv.isPending || syncMappedDetails.isPending}>
             {uploadCsv.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Upload className="h-4 w-4 mr-1.5" />}
             {uploadCsv.isPending ? "Uploading CSV…" : "Upload CSV"}
           </Button>
-          <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending || uploadCsv.isPending}><RefreshCw className={`h-4 w-4 mr-1.5 ${sync.isPending ? "animate-spin" : ""}`} />Sync CSV Feed</Button>
+          <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending || uploadCsv.isPending || syncMappedDetails.isPending}><RefreshCw className={`h-4 w-4 mr-1.5 ${sync.isPending ? "animate-spin" : ""}`} />Sync CSV Feed</Button>
         </div>
       </div>
 
@@ -394,6 +395,7 @@ export default function DropshipCatalogPage() {
                 || sync.isPending
                 || uploadCsv.isPending
                 || createDrafts.isPending
+                || syncMappedDetails.isPending
               }
             >
               {runSkuMapping.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Link2 className="h-4 w-4 mr-1.5" />}

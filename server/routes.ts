@@ -220,6 +220,8 @@ type CachedBcCustomer = {
 
 const BC_CUSTOMER_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const BC_CUSTOMER_DIRECTORY_PAGE_CONCURRENCY = 4;
+const KOLE_DETAILS_SYNC_CONCURRENCY = 3;
+let koleDetailsSyncInProgress = false;
 let bcCustomerSearchCache: {
   storeHash: string;
   loadedAt: number;
@@ -229,6 +231,72 @@ let bcCustomerSearchInFlight: {
   storeHash: string;
   promise: Promise<CachedBcCustomer[]>;
 } | null = null;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(items.length, Math.max(1, concurrency));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index], index);
+    }
+  }));
+  return results;
+}
+
+async function fetchBigCommerceWithRetry(url: string, init: RequestInit): Promise<globalThis.Response> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const response = await fetch(url, {
+      ...init,
+      signal: init.signal ?? AbortSignal.timeout(30_000),
+    });
+    if (response.status !== 429 || attempt === 2) return response;
+
+    const retryAfterSeconds = Number(response.headers.get("Retry-After"));
+    const resetAfterMs = Number(response.headers.get("X-Rate-Limit-Time-Reset-Ms"));
+    const waitMs = Math.min(30_000, Math.max(
+      250,
+      retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : resetAfterMs > 0 ? resetAfterMs + 100 : (attempt + 1) * 1000,
+    ));
+    await response.arrayBuffer().catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  throw new Error("BigCommerce request retry limit reached.");
+}
+
+function normalizeKoleSourceImageUrl(value: unknown): string {
+  try {
+    const url = new URL(String(value ?? "").trim());
+    if (url.protocol !== "https:") return "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function imageFileName(value: unknown): string {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  let path = text;
+  try {
+    path = new URL(text).pathname;
+  } catch {
+    path = text.split(/[?#]/, 1)[0];
+  }
+  const rawName = path.split("/").filter(Boolean).at(-1) ?? "";
+  try {
+    return decodeURIComponent(rawName).toLowerCase();
+  } catch {
+    return rawName.toLowerCase();
+  }
+}
 
 type BcCustomerDirectoryResult = {
   customers: CachedBcCustomer[];
@@ -1638,6 +1706,346 @@ export async function registerRoutes(
         message: error?.message || String(error),
       });
       res.status(502).json({ error: error?.message || "Failed to scan BigCommerce listings for SKU matches." });
+    }
+  });
+
+  app.post("/api/dropshipping/kole/products/sync-details", requirePermission("dropshipping", "manage"), async (_req, res) => {
+    if (koleDetailsSyncInProgress) {
+      return res.status(409).json({ error: "A mapped product details sync is already running." });
+    }
+    koleDetailsSyncInProgress = true;
+
+    type SyncCandidate = {
+      product: any;
+      bigcommerceProductId: number;
+    };
+    type SyncOutcome = {
+      sku: string;
+      bigcommerceProductId: number;
+      updated: boolean;
+      failed: boolean;
+      unchanged: boolean;
+      photosAdded: number;
+      costUpdated: boolean;
+      descriptionUpdated: boolean;
+      inventoryUpdated: boolean;
+      inventorySkipped: boolean;
+      inventoryUnavailable: boolean;
+      errors: string[];
+    };
+
+    try {
+      const vendor = await getKoleVendor();
+      const mappedRows: any[] = [];
+      let rowsRead = 0;
+      let page = 1;
+      while (true) {
+        const result = await storage.getDropshipProducts({
+          vendorId: vendor.id,
+          page,
+          limit: 100,
+          imported: true,
+        });
+        mappedRows.push(...result.rows);
+        rowsRead += result.rows.length;
+        if (result.rows.length === 0 || rowsRead >= result.total) break;
+        page++;
+      }
+
+      const productsByBigCommerceId = new Map<number, any[]>();
+      for (const product of mappedRows) {
+        const bigcommerceProductId = Number(product.bigcommerce_product_id);
+        if (!Number.isInteger(bigcommerceProductId) || bigcommerceProductId <= 0) continue;
+        const owners = productsByBigCommerceId.get(bigcommerceProductId) ?? [];
+        owners.push(product);
+        productsByBigCommerceId.set(bigcommerceProductId, owners);
+      }
+
+      const candidates: SyncCandidate[] = [];
+      const issueSamples: Array<{ sku: string; bigcommerceProductId: number; message: string }> = [];
+      let duplicateMappingsSkipped = 0;
+      for (const [bigcommerceProductId, owners] of productsByBigCommerceId) {
+        if (owners.length !== 1) {
+          duplicateMappingsSkipped++;
+          if (issueSamples.length < 50) {
+            issueSamples.push({
+              sku: owners.map((owner) => String(owner.vendor_sku ?? "")).join(", "),
+              bigcommerceProductId,
+              message: "Multiple Kole catalog rows point to this BigCommerce product; skipped to avoid conflicting updates.",
+            });
+          }
+          continue;
+        }
+        candidates.push({ product: owners[0], bigcommerceProductId });
+      }
+
+      if (candidates.length === 0) {
+        return res.json({
+          ok: duplicateMappingsSkipped === 0,
+          productsScanned: mappedRows.length,
+          productsUpdated: 0,
+          productsFailed: 0,
+          productsUnchanged: 0,
+          photosAdded: 0,
+          costPricesUpdated: 0,
+          descriptionsUpdated: 0,
+          inventoryUpdated: 0,
+          inventorySkipped: 0,
+          inventoryUnavailable: 0,
+          duplicateMappingsSkipped,
+          issueSamples,
+        });
+      }
+
+      const { storeHash, headers } = await getBcCreds();
+      const outcomes = await mapWithConcurrency(
+        candidates,
+        KOLE_DETAILS_SYNC_CONCURRENCY,
+        async ({ product, bigcommerceProductId }): Promise<SyncOutcome> => {
+          const outcome: SyncOutcome = {
+            sku: String(product.vendor_sku ?? ""),
+            bigcommerceProductId,
+            updated: false,
+            failed: false,
+            unchanged: false,
+            photosAdded: 0,
+            costUpdated: false,
+            descriptionUpdated: false,
+            inventoryUpdated: false,
+            inventorySkipped: false,
+            inventoryUnavailable: false,
+            errors: [],
+          };
+          const productUrl = `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${bigcommerceProductId}`;
+
+          let currentProduct: any;
+          try {
+            const currentResponse = await fetchBigCommerceWithRetry(`${productUrl}?include=images`, { headers });
+            const currentPayload = await currentResponse.json().catch(() => ({}));
+            if (!currentResponse.ok || !currentPayload?.data) {
+              throw new Error(`BigCommerce product lookup failed (${currentResponse.status}).`);
+            }
+            currentProduct = currentPayload.data;
+          } catch (error: any) {
+            outcome.errors.push(error?.message || "Could not read the mapped BigCommerce product.");
+            outcome.failed = true;
+            return outcome;
+          }
+
+          const raw = product.raw_data && typeof product.raw_data === "object" && !Array.isArray(product.raw_data)
+            ? product.raw_data as Record<string, unknown>
+            : {};
+          const update: Record<string, unknown> = {};
+          const extendedCost = getKoleExtendedCost(raw, product.cost);
+          if (extendedCost !== null) {
+            const costForBigCommerce = Math.round((extendedCost + Number.EPSILON) * 100) / 100;
+            if (Number(currentProduct.cost_price) !== costForBigCommerce) {
+              update.cost_price = costForBigCommerce;
+              outcome.costUpdated = true;
+            }
+          }
+
+          const description = String(product.description ?? "");
+          if (description.trim() && String(currentProduct.description ?? "") !== description) {
+            update.description = description;
+            outcome.descriptionUpdated = true;
+          }
+
+          const inventoryProvided = typeof raw.inventoryProvided === "boolean"
+            ? raw.inventoryProvided
+            : raw.inventory !== undefined && raw.inventory !== null && String(raw.inventory).trim() !== "";
+          const inventoryLevel = Number(product.inventory);
+          if (!inventoryProvided) {
+            outcome.inventoryUnavailable = true;
+          } else if (!Number.isInteger(inventoryLevel) || inventoryLevel < 0 || inventoryLevel > 2_147_483_647) {
+            outcome.errors.push("The Kole inventory count is outside BigCommerce's supported range.");
+          } else if (currentProduct.inventory_tracking === "product") {
+            if (Number(currentProduct.inventory_level) !== inventoryLevel) {
+              update.inventory_level = inventoryLevel;
+              outcome.inventoryUpdated = true;
+            }
+          } else {
+            outcome.inventorySkipped = true;
+          }
+
+          if (Object.keys(update).length > 0) {
+            try {
+              const updateResponse = await fetchBigCommerceWithRetry(productUrl, {
+                method: "PUT",
+                headers,
+                body: JSON.stringify(update),
+              });
+              if (!updateResponse.ok) {
+                await updateResponse.text().catch(() => "");
+                throw new Error(`BigCommerce detail update failed (${updateResponse.status}).`);
+              }
+              await updateResponse.arrayBuffer().catch(() => undefined);
+              outcome.updated = true;
+            } catch (error: any) {
+              outcome.errors.push(error?.message || "BigCommerce detail update failed.");
+              outcome.costUpdated = false;
+              outcome.descriptionUpdated = false;
+              outcome.inventoryUpdated = false;
+            }
+          }
+
+          const sourceImages = new Set<string>();
+          for (const image of (Array.isArray(product.image_data) ? product.image_data : []) as unknown[]) {
+            const value = typeof image === "string"
+              ? image
+              : (image as any)?.url || (image as any)?.src || (image as any)?.href || "";
+            const normalizedUrl = normalizeKoleSourceImageUrl(value);
+            if (normalizedUrl) sourceImages.add(normalizedUrl);
+          }
+          if (sourceImages.size > 0) {
+            const photoLedgerKey = `dropship_kole_photo_sync_${bigcommerceProductId}`;
+            let ledger = new Set<string>();
+            let photoLedgerReadable = true;
+            try {
+              const savedLedger = await storage.getSetting(photoLedgerKey);
+              let ledgerValue = savedLedger?.value;
+              if (typeof ledgerValue === "string") {
+                try {
+                  ledgerValue = JSON.parse(ledgerValue);
+                } catch {
+                  ledgerValue = [];
+                }
+              }
+              if (Array.isArray(ledgerValue)) {
+                ledger = new Set(ledgerValue.map(normalizeKoleSourceImageUrl).filter(Boolean));
+              }
+            } catch {
+              photoLedgerReadable = false;
+              outcome.errors.push("Could not load photo sync history; Kole photos were not changed.");
+            }
+
+            const bigcommerceImages = Array.isArray(currentProduct.images) ? currentProduct.images : [];
+            const existingUrls = new Set<string>();
+            const existingFileNames = new Set<string>();
+            let maxSortOrder = -1;
+            for (const image of bigcommerceImages) {
+              for (const candidateUrl of [image?.image_url, image?.url_standard, image?.url_zoom, image?.url_thumbnail, image?.url_tiny]) {
+                const normalizedUrl = normalizeKoleSourceImageUrl(candidateUrl);
+                if (normalizedUrl) existingUrls.add(normalizedUrl);
+              }
+              for (const candidateName of [image?.image_file, image?.image_url, image?.url_standard, image?.url_zoom]) {
+                const name = imageFileName(candidateName);
+                if (name) existingFileNames.add(name);
+              }
+              const sortOrder = Number(image?.sort_order);
+              if (Number.isFinite(sortOrder)) maxSortOrder = Math.max(maxSortOrder, sortOrder);
+            }
+
+            for (const imageUrl of photoLedgerReadable ? sourceImages : new Set<string>()) {
+              if (ledger.has(imageUrl)) continue;
+              const sourceFileName = imageFileName(imageUrl);
+              if (existingUrls.has(imageUrl) || (sourceFileName && existingFileNames.has(sourceFileName))) {
+                ledger.add(imageUrl);
+                try {
+                  await storage.setSetting(photoLedgerKey, Array.from(ledger));
+                } catch {
+                  outcome.errors.push("A matching Kole photo exists, but its sync history could not be saved.");
+                }
+                continue;
+              }
+              if (imageUrl.length > 255) {
+                outcome.errors.push("A Kole photo URL exceeds BigCommerce's 255-character limit.");
+                continue;
+              }
+
+              let imageCreated = false;
+              try {
+                const imageResponse = await fetchBigCommerceWithRetry(
+                  `${productUrl}/images`,
+                  {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({
+                      image_url: imageUrl,
+                      is_thumbnail: bigcommerceImages.length === 0 && outcome.photosAdded === 0,
+                      sort_order: maxSortOrder + outcome.photosAdded + 1,
+                    }),
+                  },
+                );
+                if (!imageResponse.ok) {
+                  await imageResponse.text().catch(() => "");
+                  throw new Error(`BigCommerce photo upload failed (${imageResponse.status}).`);
+                }
+                await imageResponse.arrayBuffer().catch(() => undefined);
+                outcome.photosAdded++;
+                outcome.updated = true;
+                imageCreated = true;
+              } catch (error: any) {
+                outcome.errors.push(error?.message || "BigCommerce photo upload failed.");
+              }
+              if (imageCreated) {
+                ledger.add(imageUrl);
+                try {
+                  await storage.setSetting(photoLedgerKey, Array.from(ledger));
+                } catch {
+                  outcome.errors.push("Photo was added, but its repeat-run duplicate protection could not be saved.");
+                }
+              }
+            }
+          }
+
+          outcome.failed = outcome.errors.length > 0;
+          outcome.unchanged = !outcome.updated && !outcome.failed;
+          return outcome;
+        },
+      );
+
+      let productsUpdated = 0;
+      let productsFailed = 0;
+      let productsUnchanged = 0;
+      let photosAdded = 0;
+      let costPricesUpdated = 0;
+      let descriptionsUpdated = 0;
+      let inventoryUpdated = 0;
+      let inventorySkipped = 0;
+      let inventoryUnavailable = 0;
+      for (const outcome of outcomes) {
+        if (outcome.updated) productsUpdated++;
+        if (outcome.failed) productsFailed++;
+        if (outcome.unchanged) productsUnchanged++;
+        photosAdded += outcome.photosAdded;
+        if (outcome.costUpdated) costPricesUpdated++;
+        if (outcome.descriptionUpdated) descriptionsUpdated++;
+        if (outcome.inventoryUpdated) inventoryUpdated++;
+        if (outcome.inventorySkipped) inventorySkipped++;
+        if (outcome.inventoryUnavailable) inventoryUnavailable++;
+        for (const message of outcome.errors) {
+          if (issueSamples.length >= 50) break;
+          issueSamples.push({
+            sku: outcome.sku,
+            bigcommerceProductId: outcome.bigcommerceProductId,
+            message,
+          });
+        }
+      }
+
+      res.json({
+        ok: productsFailed === 0 && duplicateMappingsSkipped === 0,
+        productsScanned: mappedRows.length,
+        productsUpdated,
+        productsFailed,
+        productsUnchanged,
+        photosAdded,
+        costPricesUpdated,
+        descriptionsUpdated,
+        inventoryUpdated,
+        inventorySkipped,
+        inventoryUnavailable,
+        duplicateMappingsSkipped,
+        issueSamples,
+      });
+    } catch (error: any) {
+      console.error("[Kole details sync] failed before product updates completed", {
+        message: error?.message || String(error),
+      });
+      res.status(502).json({ error: error?.message || "Failed to sync mapped Kole product details." });
+    } finally {
+      koleDetailsSyncInProgress = false;
     }
   });
 
