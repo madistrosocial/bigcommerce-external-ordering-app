@@ -259,7 +259,6 @@ async function generateOpenAiImage(apiKey: string, prompt: string, referenceImag
         prompt,
         ...(hasReference ? {
           images: [{ image_url: referenceImageDataUrl }],
-          input_fidelity: "high",
         } : {}),
         n: 1,
         size: "1024x1024",
