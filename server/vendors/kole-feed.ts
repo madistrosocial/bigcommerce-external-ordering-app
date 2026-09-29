@@ -91,9 +91,15 @@ export function parseKoleFeedCsv(csv: string): KoleProduct[] {
 
   const headers = rows[0].map((header, index) => (index === 0 ? header.replace(/^\uFEFF/, "") : header).trim());
   const headerSet = new Set(headers);
-  for (const required of ["id", "title", "description", "inventory", "item_piece_price", "image_large"]) {
+  for (const required of ["id", "title", "description", "inventory", "image_large"]) {
     if (!headerSet.has(required)) throw new Error(`Kole Imports feed is missing the "${required}" column.`);
   }
+  const costColumn = headerSet.has("ext_price")
+    ? "ext_price"
+    : headerSet.has("item_piece_price")
+      ? "item_piece_price"
+      : null;
+  if (!costColumn) throw new Error('Kole Imports feed is missing the "ext_price" or "item_piece_price" cost column.');
 
   const products: KoleProduct[] = [];
   for (let rowIndex = 1; rowIndex < rows.length; rowIndex++) {
@@ -110,7 +116,7 @@ export function parseKoleFeedCsv(csv: string): KoleProduct[] {
       .map((url) => String(url ?? "").trim())
       .filter((url) => /^https:\/\//i.test(url));
     const rawInventory = String(record.inventory ?? "").trim();
-    const cost = String(record.item_piece_price ?? "").trim();
+    const cost = String(record[costColumn] ?? "").trim();
     const itemWeight = String(record.item_weight ?? "").trim();
 
     products.push({

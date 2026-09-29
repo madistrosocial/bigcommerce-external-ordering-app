@@ -63,11 +63,18 @@ function minimumQuantity(product: api.DropshipProduct): number | null {
   return Number.isFinite(quantity) && quantity > 0 ? quantity : null;
 }
 
+function extendedSupplierCost(product: api.DropshipProduct) {
+  const raw = product.raw_data || {};
+  const hasExtendedPrice = Object.prototype.hasOwnProperty.call(raw, "ext_price");
+  const value = hasExtendedPrice ? raw.ext_price : product.cost;
+  const cost = Number(String(value ?? "").trim().replace(/[$,]/g, ""));
+  return Number.isFinite(cost) && cost > 0 ? cost : null;
+}
+
 function suggestedRetailPrice(product: api.DropshipProduct) {
-  const cost = Number(product.cost);
-  const quantity = minimumQuantity(product);
-  if (!Number.isFinite(cost) || cost <= 0 || quantity === null) return "";
-  const price = Math.round((cost * quantity * 1.2 + Number.EPSILON) * 100) / 100;
+  const cost = extendedSupplierCost(product);
+  if (cost === null) return "";
+  const price = Math.round((cost * 1.2 + Number.EPSILON) * 100) / 100;
   return price > 0 ? price.toFixed(2) : "";
 }
 
@@ -375,7 +382,7 @@ export default function DropshipCatalogPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200"><tr className="text-left text-[11px] uppercase tracking-wide text-slate-500">
-                <th className="px-3 py-3 w-10">Select</th><th className="px-3 py-3">Product</th><th className="px-3 py-3">SKU / UPC</th><th className="px-3 py-3">Cost</th><th className="px-3 py-3">Pack / tier</th><th className="px-3 py-3">Inventory</th><th className="px-3 py-3">Status</th><th className="px-3 py-3 text-right">Actions</th>
+                 <th className="px-3 py-3 w-10">Select</th><th className="px-3 py-3">Product</th><th className="px-3 py-3">SKU / UPC</th><th className="px-3 py-3">Extended cost</th><th className="px-3 py-3">Pack / tier</th><th className="px-3 py-3">Inventory</th><th className="px-3 py-3">Status</th><th className="px-3 py-3 text-right">Actions</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {rows.map((product) => {
@@ -384,7 +391,7 @@ export default function DropshipCatalogPage() {
                     <td className="px-3 py-3"><input type="checkbox" checked={selected.has(product.id)} disabled={Boolean(product.bigcommerce_product_id)} onChange={() => toggleProductSelected(product)} aria-label={`Select ${product.title}`} /></td>
                     <td className="px-3 py-3 min-w-[240px]"><div className="flex gap-3">{image ? <img src={image} alt="" className="h-12 w-12 rounded border border-slate-200 object-contain bg-white" /> : <div className="h-12 w-12 rounded border border-slate-200 bg-slate-50 flex items-center justify-center"><Package className="h-5 w-5 text-slate-300" /></div>}<div className="min-w-0"><p className="font-medium text-slate-800 line-clamp-2">{product.title}</p><p className="text-xs text-slate-500 mt-1">{product.brand || "Unbranded"}{product.vendor_category ? ` · ${product.vendor_category}` : ""}</p>{product.is_closeout && <Badge className="mt-1 bg-orange-100 text-orange-700 border-0 text-[10px]">Closeout</Badge>}</div></div></td>
                     <td className="px-3 py-3 whitespace-nowrap"><p className="font-mono text-xs text-slate-700">{product.vendor_sku}</p><p className="text-xs text-slate-400 mt-1">{product.upc || "No UPC"}</p></td>
-                    <td className="px-3 py-3 font-medium whitespace-nowrap">{formatCost(product.cost)}</td>
+                    <td className="px-3 py-3 font-medium whitespace-nowrap">{formatCost(extendedSupplierCost(product)?.toFixed(2) ?? null)}</td>
                     <td className="px-3 py-3 text-xs text-slate-600 whitespace-nowrap">{packLabel(product)}</td>
                     <td className="px-3 py-3 font-medium whitespace-nowrap">{inventoryLabel(product)}</td>
                     <td className="px-3 py-3 whitespace-nowrap"><StatusBadge status={product.status} /></td>
@@ -406,7 +413,7 @@ export default function DropshipCatalogPage() {
           {detail && <><DialogHeader><DialogTitle className="flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" />{detail.title}</DialogTitle><DialogDescription>Vendor product details for SKU {detail.vendor_sku}. Creating a BigCommerce draft requires an entered retail price.</DialogDescription></DialogHeader><div className="space-y-5">
             <div className="flex flex-wrap gap-2"><StatusBadge status={detail.status} />{detail.is_closeout && <Badge className="bg-orange-100 text-orange-700 border-0">Closeout</Badge>}{detail.bigcommerce_product_id ? <Badge className="bg-blue-100 text-blue-700 border-0">Mapped to BC #{detail.bigcommerce_product_id}</Badge> : <Badge className="bg-slate-100 text-slate-600 border-0">Not mapped</Badge>}</div>
             {detail.image_data?.length > 0 && <div className="flex gap-2 overflow-x-auto">{detail.image_data.slice(0, 8).map((_, index) => { const src = imageUrl([detail.image_data[index]]); return src ? <img key={index} src={src} alt="" className="h-24 w-24 object-contain border rounded bg-white" /> : null; })}</div>}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm"><div><p className="text-xs text-slate-500">SKU</p><p className="font-mono">{detail.vendor_sku}</p></div><div><p className="text-xs text-slate-500">UPC</p><p>{detail.upc || "—"}</p></div><div><p className="text-xs text-slate-500">Brand</p><p>{detail.brand || "—"}</p></div><div><p className="text-xs text-slate-500">Cost</p><p>{formatCost(detail.cost)}</p></div><div><p className="text-xs text-slate-500">Inventory</p><p>{inventoryLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Pack / minimum</p><p>{packLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Category</p><p>{detail.vendor_category || "—"}</p></div><div><p className="text-xs text-slate-500">Subcategory</p><p>{detail.vendor_subcategory || "—"}</p></div><div><p className="text-xs text-slate-500">Weight</p><p>{String((detail.raw_data as any)?.item_weight || (detail.raw_data as any)?.weight || "—")}</p></div></div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm"><div><p className="text-xs text-slate-500">SKU</p><p className="font-mono">{detail.vendor_sku}</p></div><div><p className="text-xs text-slate-500">UPC</p><p>{detail.upc || "—"}</p></div><div><p className="text-xs text-slate-500">Brand</p><p>{detail.brand || "—"}</p></div><div><p className="text-xs text-slate-500">Extended cost (MOQ included)</p><p>{formatCost(extendedSupplierCost(detail)?.toFixed(2) ?? null)}</p></div><div><p className="text-xs text-slate-500">Inventory</p><p>{inventoryLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Pack / minimum</p><p>{packLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Category</p><p>{detail.vendor_category || "—"}</p></div><div><p className="text-xs text-slate-500">Subcategory</p><p>{detail.vendor_subcategory || "—"}</p></div><div><p className="text-xs text-slate-500">Weight</p><p>{String((detail.raw_data as any)?.item_weight || (detail.raw_data as any)?.weight || "—")}</p></div></div>
             {detail.description && <div><p className="text-xs font-medium text-slate-500 mb-1">Description</p><p className="text-sm text-slate-700 whitespace-pre-wrap">{detail.description}</p></div>}
             <div className="flex flex-wrap gap-2">{!detail.bigcommerce_product_id && <Button onClick={() => openDraftDialog([detail])}><Plus className="h-4 w-4 mr-1.5" />Create BigCommerce Draft</Button>}<Button variant="outline" onClick={() => updateStatus.mutate({ id: detail.id, nextStatus: "queued" })} disabled={detail.status === "queued" || Boolean(detail.bigcommerce_product_id)}><Plus className="h-4 w-4 mr-1.5" />Add to Import Queue</Button><Button variant="ghost" onClick={() => setDetail(null)}>Close</Button></div>
           </div></>}
@@ -418,7 +425,7 @@ export default function DropshipCatalogPage() {
           <DialogHeader>
             <DialogTitle>Create hidden BigCommerce drafts</DialogTitle>
             <DialogDescription>
-              Drafts stay hidden and disabled. The suggested price is supplier cost × Kole minimum quantity × 1.20; you can edit it. Choose an existing BigCommerce category for each item. Existing SKU matches are skipped.
+              Drafts stay hidden and disabled. The suggested price is the supplier ext_price × 1.20; ext_price already includes the Kole minimum quantity. You can edit the price. Choose an existing BigCommerce category for each item. Existing SKU matches are skipped.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -461,9 +468,9 @@ export default function DropshipCatalogPage() {
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-slate-800 line-clamp-2">{product.title}</p>
                       <p className="text-xs font-mono text-slate-500 mt-1">{product.vendor_sku}</p>
-                      <p className="text-xs text-slate-500 mt-1">Supplier cost: {formatCost(product.cost)} · Kole minimum quantity: {quantity === null ? "Not provided" : quantity.toLocaleString()}</p>
+                      <p className="text-xs text-slate-500 mt-1">Extended supplier cost (MOQ included): {formatCost(extendedSupplierCost(product)?.toFixed(2) ?? null)} · Kole minimum quantity: {quantity === null ? "Not provided" : quantity.toLocaleString()}</p>
                       <p className="text-xs text-slate-500 mt-1">Inventory: {inventoryLabel(product)}</p>
-                      {!suggestedRetailPrice(product) && <p className="text-xs text-amber-700 mt-1">A positive cost and minimum quantity are needed for an automatic price; enter the price manually.</p>}
+                      {!suggestedRetailPrice(product) && <p className="text-xs text-amber-700 mt-1">A positive ext_price is needed for an automatic price; enter the price manually.</p>}
                     </div>
                     <div className="space-y-3">
                       <div className="space-y-1.5">
