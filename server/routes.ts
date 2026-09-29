@@ -1113,6 +1113,18 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/dropshipping/kole/mapping-brand", requirePermission("dropshipping", "view"), async (_req, res) => {
+    try {
+      const setting = await storage.getSetting("dropship_kole_mapping_brand_name");
+      const brandName = typeof setting?.value === "string" && setting.value.trim()
+        ? setting.value.trim()
+        : "KCDS";
+      res.json({ brandName });
+    } catch {
+      res.status(500).json({ error: "Failed to load the BigCommerce brand setting." });
+    }
+  });
+
   app.post("/api/dropshipping/kole/sync", requirePermission("dropshipping", "sync"), async (_req, res) => {
     const startedAt = Date.now();
     let log: any;
@@ -1478,6 +1490,154 @@ export async function registerRoutes(
       res.json({ ok: failed === 0, created, skipped, failed, results });
     } catch (error: any) {
       res.status(500).json({ error: error?.message || "Failed to create BigCommerce drafts." });
+    }
+  });
+
+  app.post("/api/dropshipping/kole/products/map-existing", requirePermission("dropshipping", "manage"), async (req, res) => {
+    const brandName = String(req.body?.brandName ?? "").trim().slice(0, 100);
+    if (!brandName) return res.status(400).json({ error: "Enter a BigCommerce brand name to scan." });
+
+    try {
+      const brands = await getCachedBcBrandOptions();
+      const matchingBrands = brands.filter((brand) => brand.name.trim().toLowerCase() === brandName.toLowerCase());
+      if (matchingBrands.length === 0) {
+        return res.status(404).json({ error: `No BigCommerce brand named "${brandName}" was found.` });
+      }
+      if (matchingBrands.length > 1) {
+        return res.status(409).json({ error: `More than one BigCommerce brand is named "${brandName}". Rename the brands so the mapping target is unambiguous.` });
+      }
+
+      const brandId = matchingBrands[0].id;
+      const { storeHash, headers } = await getBcCreds();
+      await storage.setSetting("dropship_kole_mapping_brand_name", brandName);
+
+      const pageSize = 250;
+      const bigCommerceProducts: Array<{ id: number; sku: string }> = [];
+      let scanned = 0;
+      for (let page = 1; ; page++) {
+        const url = `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?brand_id=${brandId}&include_fields=id,sku,brand_id&limit=${pageSize}&page=${page}`;
+        const response = await fetch(url, { headers });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(`BigCommerce product scan failed (${response.status}).`);
+        }
+        const pageProducts = Array.isArray(payload?.data) ? payload.data : [];
+        scanned += pageProducts.length;
+        for (const item of pageProducts) {
+          const id = Number(item?.id);
+          if (!Number.isInteger(id) || id <= 0) continue;
+          bigCommerceProducts.push({ id, sku: String(item?.sku ?? "").trim() });
+        }
+
+        const totalPages = Number(payload?.meta?.pagination?.total_pages);
+        if (
+          pageProducts.length < pageSize
+          || (Number.isInteger(totalPages) && totalPages > 0 && page >= totalPages)
+        ) break;
+      }
+
+      const productsByBigCommerceSku = new Map<string, Array<{ id: number; sku: string }>>();
+      let productsWithoutSku = 0;
+      for (const product of bigCommerceProducts) {
+        const normalizedSku = product.sku.toLowerCase();
+        if (!normalizedSku) {
+          productsWithoutSku++;
+          continue;
+        }
+        const matches = productsByBigCommerceSku.get(normalizedSku) ?? [];
+        matches.push(product);
+        productsByBigCommerceSku.set(normalizedSku, matches);
+      }
+
+      const vendor = await getKoleVendor();
+      const localProducts = await storage.getDropshipProductsBySkus(
+        vendor.id,
+        Array.from(productsByBigCommerceSku.keys()),
+      );
+      const localProductsBySku = new Map<string, typeof localProducts>();
+      for (const product of localProducts) {
+        const normalizedSku = product.vendor_sku.trim().toLowerCase();
+        const matches = localProductsBySku.get(normalizedSku) ?? [];
+        matches.push(product);
+        localProductsBySku.set(normalizedSku, matches);
+      }
+
+      const alreadyMappedProducts = await storage.getDropshipProductsByBigCommerceIds(
+        vendor.id,
+        bigCommerceProducts.map((product) => product.id),
+      );
+      const localProductsByBigCommerceId = new Map<number, typeof alreadyMappedProducts>();
+      for (const product of alreadyMappedProducts) {
+        const id = Number(product.bigcommerce_product_id);
+        const matches = localProductsByBigCommerceId.get(id) ?? [];
+        matches.push(product);
+        localProductsByBigCommerceId.set(id, matches);
+      }
+
+      let matched = 0;
+      let mapped = 0;
+      let remapped = 0;
+      let alreadyMapped = 0;
+      let unmatched = productsWithoutSku;
+      let ambiguous = 0;
+      let failed = 0;
+
+      for (const [sku, bcProducts] of productsByBigCommerceSku) {
+        const localMatches = localProductsBySku.get(sku) ?? [];
+        if (localMatches.length === 0) {
+          unmatched += bcProducts.length;
+          continue;
+        }
+        if (bcProducts.length !== 1 || localMatches.length !== 1) {
+          ambiguous++;
+          continue;
+        }
+
+        const bcProduct = bcProducts[0];
+        const localProduct = localMatches[0];
+        const conflictingOwners = (localProductsByBigCommerceId.get(bcProduct.id) ?? [])
+          .filter((owner) => owner.id !== localProduct.id);
+        if (conflictingOwners.length) {
+          ambiguous++;
+          continue;
+        }
+
+        matched++;
+        const previousId = Number(localProduct.bigcommerce_product_id) || null;
+        try {
+          const result = await storage.mapDropshipProductToBigCommerce(localProduct.id, bcProduct.id);
+          if (!result) {
+            failed++;
+          } else if (previousId === bcProduct.id) {
+            alreadyMapped++;
+          } else if (previousId) {
+            remapped++;
+          } else {
+            mapped++;
+          }
+        } catch {
+          failed++;
+        }
+      }
+
+      res.json({
+        ok: failed === 0,
+        brandName,
+        brandId,
+        scanned,
+        matched,
+        mapped,
+        remapped,
+        alreadyMapped,
+        unmatched,
+        ambiguous,
+        failed,
+      });
+    } catch (error: any) {
+      console.error("[Kole SKU mapping] BigCommerce brand scan failed", {
+        message: error?.message || String(error),
+      });
+      res.status(502).json({ error: error?.message || "Failed to scan BigCommerce listings for SKU matches." });
     }
   });
 

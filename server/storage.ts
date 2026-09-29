@@ -93,6 +93,8 @@ export interface IStorage {
   getDropshipVendorByCode(code: string): Promise<DropshipVendor | undefined>;
   ensureDropshipVendor(data: { code: string; name: string; provider: string }): Promise<DropshipVendor>;
   getDropshipProducts(opts: { vendorId: number; page: number; limit: number; search?: string; category?: string; subcategory?: string; inStock?: boolean; closeout?: boolean; imported?: boolean; status?: string }): Promise<{ rows: DropshipProduct[]; total: number }>;
+  getDropshipProductsBySkus(vendorId: number, skus: string[]): Promise<DropshipProduct[]>;
+  getDropshipProductsByBigCommerceIds(vendorId: number, productIds: number[]): Promise<DropshipProduct[]>;
   getDropshipProductFacets(vendorId: number): Promise<{ categories: string[]; subcategories: string[] }>;
   getDropshipProduct(id: number): Promise<DropshipProduct | undefined>;
   upsertDropshipProducts(entries: InsertDropshipProduct[]): Promise<{ created: number; updated: number }>;
@@ -1143,6 +1145,25 @@ export class DatabaseStorage implements IStorage {
         .limit(limit).offset(offset),
     ]);
     return { rows, total: Number(countRows[0]?.count ?? 0) };
+  }
+
+  async getDropshipProductsBySkus(vendorId: number, skus: string[]): Promise<DropshipProduct[]> {
+    const normalizedSkus = Array.from(new Set(skus.map((sku) => sku.trim().toLowerCase()).filter(Boolean)));
+    if (!normalizedSkus.length) return [];
+    const skuConditions = normalizedSkus.map((sku) => sql`lower(btrim(${dropshipProducts.vendor_sku})) = ${sku}`);
+    return db.select().from(dropshipProducts).where(and(
+      eq(dropshipProducts.vendor_id, vendorId),
+      or(...skuConditions)!,
+    ));
+  }
+
+  async getDropshipProductsByBigCommerceIds(vendorId: number, productIds: number[]): Promise<DropshipProduct[]> {
+    const ids = Array.from(new Set(productIds.filter((id) => Number.isInteger(id) && id > 0)));
+    if (!ids.length) return [];
+    return db.select().from(dropshipProducts).where(and(
+      eq(dropshipProducts.vendor_id, vendorId),
+      inArray(dropshipProducts.bigcommerce_product_id, ids),
+    ));
   }
 
   async getDropshipProductFacets(vendorId: number): Promise<{ categories: string[]; subcategories: string[] }> {
