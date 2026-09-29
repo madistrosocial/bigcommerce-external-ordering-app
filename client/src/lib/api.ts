@@ -263,7 +263,10 @@ async function dropshipRequest<T>(path: string, init: RequestInit = {}): Promise
       ? trimmedText.replace(/\s+/g, " ").slice(0, 300)
       : "";
     const status = `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
-    throw new Error(jsonMessage || plainTextMessage || `Dropshipping request failed (${status}).`);
+    const fallbackMessage = plainTextMessage
+      ? `Dropshipping request failed (${status}): ${plainTextMessage}`
+      : `Dropshipping request failed (${status}).`;
+    throw new Error(jsonMessage || fallbackMessage);
   }
 
   if (body === null) {
