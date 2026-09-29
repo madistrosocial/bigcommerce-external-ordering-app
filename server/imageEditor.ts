@@ -7,6 +7,7 @@ const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 const REMOTE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const OUTPUT_IMAGE_MAX_BYTES = 7 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 40_000_000;
+const LOGO_OVERLAY_SIZE = 1200;
 const OPENAI_IMAGE_MODEL = "gpt-image-2.5-sunburst";
 
 export class ImageEditorError extends Error {
@@ -170,47 +171,38 @@ async function normalizeLogo(dataUrl: unknown): Promise<Buffer> {
   if (!metadata || metadata.format !== "png" || !metadata.hasAlpha || !metadata.width || !metadata.height) {
     throw new ImageEditorError("Upload a valid transparent PNG logo.");
   }
-  if (metadata.width > 6000 || metadata.height > 6000 || metadata.width * metadata.height > 20_000_000) {
-    throw new ImageEditorError("The logo dimensions are too large.");
+  if (metadata.width !== LOGO_OVERLAY_SIZE || metadata.height !== LOGO_OVERLAY_SIZE) {
+    throw new ImageEditorError(
+      `Use a ${LOGO_OVERLAY_SIZE} × ${LOGO_OVERLAY_SIZE} transparent PNG overlay with the logo already positioned.`,
+    );
   }
   const alphaStats = await sharp(buffer, { limitInputPixels: 20_000_000 }).ensureAlpha().stats().catch(() => null);
   const alpha = alphaStats?.channels[3];
   if (!alpha || alpha.max === 0 || alpha.min >= 255) {
     throw new ImageEditorError("The logo must include visible artwork and transparent pixels.");
   }
-  return sharp(buffer, { limitInputPixels: 20_000_000 })
-    .resize(1200, 1200, {
-      fit: "contain",
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-    })
-    .png()
-    .toBuffer();
+  return buffer;
 }
 
 async function applyLogoOverlay(imageBuffer: Buffer, logoBuffer: Buffer): Promise<Buffer> {
+  const logoMetadata = await sharp(logoBuffer, { limitInputPixels: 20_000_000 }).metadata();
+  if (logoMetadata.width !== LOGO_OVERLAY_SIZE || logoMetadata.height !== LOGO_OVERLAY_SIZE) {
+    throw new ImageEditorError("The transparent logo overlay must remain 1200 × 1200 pixels.");
+  }
   const baseImage = await sharp(imageBuffer, { limitInputPixels: MAX_IMAGE_PIXELS })
     .rotate()
-    .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
+    .resize(LOGO_OVERLAY_SIZE, LOGO_OVERLAY_SIZE, { fit: "fill" })
     .flatten({ background: { r: 255, g: 255, b: 255 } })
     .jpeg({ quality: 88 })
     .toBuffer();
   const baseMetadata = await sharp(baseImage).metadata();
   if (!baseMetadata.width || !baseMetadata.height) throw new ImageEditorError("The generated image could not be processed.", 502);
 
-  const logoTargetWidth = Math.max(48, Math.round(Math.min(baseMetadata.width, baseMetadata.height) * 0.16));
-  const resizedLogo = await sharp(logoBuffer, { limitInputPixels: 20_000_000 })
-    .resize(logoTargetWidth, logoTargetWidth, { fit: "inside", withoutEnlargement: true })
-    .png()
-    .toBuffer();
-  const logoMetadata = await sharp(resizedLogo).metadata();
-  if (!logoMetadata.width || !logoMetadata.height) throw new ImageEditorError("The logo could not be processed.");
-
-  const margin = Math.max(20, Math.round(Math.min(baseMetadata.width, baseMetadata.height) * 0.035));
   let output = await sharp(baseImage)
     .composite([{
-      input: resizedLogo,
-      left: Math.max(0, baseMetadata.width - logoMetadata.width - margin),
-      top: Math.max(0, baseMetadata.height - logoMetadata.height - margin),
+      input: logoBuffer,
+      left: 0,
+      top: 0,
     }])
     .jpeg({ quality: 88 })
     .toBuffer();
