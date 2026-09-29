@@ -341,7 +341,7 @@ export async function uploadKoleCsv(file: File) {
   });
 }
 
-export function createKoleDrafts(items: Array<{ id: number; price: number }>) {
+export function createKoleDrafts(items: Array<{ id: number; price: number; categoryId: number }>) {
   return dropshipRequest<{
     ok: boolean;
     created: number;

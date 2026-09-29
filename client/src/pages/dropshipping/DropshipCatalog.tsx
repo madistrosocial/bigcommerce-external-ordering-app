@@ -57,6 +57,33 @@ function packLabel(product: api.DropshipProduct) {
     : "—";
 }
 
+function minimumQuantity(product: api.DropshipProduct): number | null {
+  const raw = product.raw_data || {};
+  const quantity = Number((raw as Record<string, unknown>).minimum_qty);
+  return Number.isFinite(quantity) && quantity > 0 ? quantity : null;
+}
+
+function suggestedRetailPrice(product: api.DropshipProduct) {
+  const cost = Number(product.cost);
+  const quantity = minimumQuantity(product);
+  if (!Number.isFinite(cost) || cost <= 0 || quantity === null) return "";
+  const price = Math.round((cost * quantity * 1.2 + Number.EPSILON) * 100) / 100;
+  return price > 0 ? price.toFixed(2) : "";
+}
+
+function categoryPath(category: api.BcCategory, categories: api.BcCategory[]) {
+  const byId = new Map(categories.map((item) => [item.id, item]));
+  const names: string[] = [];
+  const seen = new Set<number>();
+  let current: api.BcCategory | undefined = category;
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    names.push(current.name);
+    current = byId.get(current.parent_id);
+  }
+  return names.reverse().join(" / ");
+}
+
 function statusLabel(status: string) {
   return status === "queued" ? "Import queued" : status === "mapped" ? "Mapped" : status === "unavailable" ? "Unavailable" : status === "error" ? "Error" : "Available";
 }
@@ -84,6 +111,8 @@ export default function DropshipCatalogPage() {
   const [detail, setDetail] = useState<api.DropshipProduct | null>(null);
   const [draftProducts, setDraftProducts] = useState<api.DropshipProduct[]>([]);
   const [draftPrices, setDraftPrices] = useState<Record<number, string>>({});
+  const [draftCategoryIds, setDraftCategoryIds] = useState<Record<number, string>>({});
+  const [bulkDraftCategoryId, setBulkDraftCategoryId] = useState("");
   const [draftDialogOpen, setDraftDialogOpen] = useState(false);
   const [draggingCsv, setDraggingCsv] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
@@ -95,6 +124,22 @@ export default function DropshipCatalogPage() {
     queryFn: () => api.getKoleProducts(params),
     placeholderData: (previousData) => previousData,
   });
+  const {
+    data: bcCategories = [],
+    isLoading: isLoadingBcCategories,
+    error: bcCategoriesError,
+    refetch: refetchBcCategories,
+  } = useQuery({
+    queryKey: ["bigcommerce-categories"],
+    queryFn: api.getBcCategories,
+    enabled: draftDialogOpen,
+  });
+  const bcCategoryOptions = useMemo(
+    () => bcCategories
+      .map((item) => ({ id: item.id, label: categoryPath(item, bcCategories) }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [bcCategories],
+  );
 
   const sync = useMutation({
     mutationFn: api.syncKoleCatalog,
@@ -200,18 +245,25 @@ export default function DropshipCatalogPage() {
       return;
     }
     setDraftProducts(eligible);
-    setDraftPrices(Object.fromEntries(eligible.map((product) => [product.id, ""])));
+    setDraftPrices(Object.fromEntries(eligible.map((product) => [product.id, suggestedRetailPrice(product)])));
+    setDraftCategoryIds(Object.fromEntries(eligible.map((product) => [product.id, ""])));
+    setBulkDraftCategoryId("");
     setDraftDialogOpen(true);
   };
   const submitDrafts = () => {
     createDrafts.mutate(draftProducts.map((product) => ({
       id: product.id,
       price: Number(draftPrices[product.id]),
+      categoryId: Number(draftCategoryIds[product.id]),
     })));
   };
   const draftPricesValid = draftProducts.length > 0 && draftProducts.every((product) => {
     const price = Number(draftPrices[product.id]);
     return Number.isFinite(price) && price > 0;
+  });
+  const draftCategoriesValid = draftProducts.length > 0 && draftProducts.every((product) => {
+    const categoryId = Number(draftCategoryIds[product.id]);
+    return Number.isInteger(categoryId) && categoryId > 0;
   });
   const clearFilters = () => {
     setSearch(""); setAppliedSearch(""); setCategory(""); setSubcategory(""); setStockOnly(false); setCloseoutOnly(false); setImportedOnly(false); setStatus(""); setPage(1);
@@ -366,37 +418,96 @@ export default function DropshipCatalogPage() {
           <DialogHeader>
             <DialogTitle>Create hidden BigCommerce drafts</DialogTitle>
             <DialogDescription>
-              Drafts will be hidden and disabled. Enter a retail price for each item; supplier cost stays in BigCommerce cost price. Existing SKU matches are skipped and never overwritten.
+              Drafts stay hidden and disabled. The suggested price is supplier cost × Kole minimum quantity × 1.20; you can edit it. Choose an existing BigCommerce category for each item. Existing SKU matches are skipped.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            {draftProducts.map((product) => (
-              <div key={product.id} className="grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-3 rounded-md border border-slate-200 p-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-800 line-clamp-2">{product.title}</p>
-                  <p className="text-xs font-mono text-slate-500 mt-1">{product.vendor_sku}</p>
-                  <p className="text-xs text-slate-500 mt-1">Supplier cost: {formatCost(product.cost)} · Inventory: {inventoryLabel(product)}</p>
+          <div className="space-y-4">
+            <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <Label htmlFor="bulk-draft-category" className="text-xs">Apply one BigCommerce category to all selected products</Label>
+              <Select
+                value={bulkDraftCategoryId || "__choose__"}
+                onValueChange={(value) => {
+                  const nextCategoryId = value === "__choose__" ? "" : value;
+                  setBulkDraftCategoryId(nextCategoryId);
+                  setDraftCategoryIds(Object.fromEntries(draftProducts.map((product) => [product.id, nextCategoryId])));
+                }}
+                disabled={createDrafts.isPending || isLoadingBcCategories || Boolean(bcCategoriesError) || !bcCategoryOptions.length}
+              >
+                <SelectTrigger id="bulk-draft-category" className="h-9 bg-white">
+                  <SelectValue placeholder="Choose a category for all selected items" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__choose__">Choose a category for all items</SelectItem>
+                  {bcCategoryOptions.map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {isLoadingBcCategories && <p className="text-xs text-slate-500">Loading BigCommerce categories…</p>}
+              {bcCategoriesError && (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-red-600">
+                  <span>Could not load BigCommerce categories: {(bcCategoriesError as Error).message}</span>
+                  <Button type="button" size="sm" variant="outline" onClick={() => refetchBcCategories()} disabled={isLoadingBcCategories}>Retry</Button>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor={`draft-price-${product.id}`} className="text-xs">Retail price</Label>
-                  <Input
-                    id={`draft-price-${product.id}`}
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    inputMode="decimal"
-                    value={draftPrices[product.id] ?? ""}
-                    onChange={(event) => setDraftPrices((current) => ({ ...current, [product.id]: event.target.value }))}
-                    placeholder="Enter price"
-                    disabled={createDrafts.isPending}
-                  />
-                </div>
-              </div>
-            ))}
+              )}
+              {!isLoadingBcCategories && !bcCategoriesError && !bcCategoryOptions.length && (
+                <p className="text-xs text-red-600">No visible BigCommerce categories are available. Draft creation is disabled until categories can be loaded.</p>
+              )}
+              <p className="text-xs text-slate-500">You can override the category for individual products below.</p>
+            </div>
+            <div className="space-y-3">
+              {draftProducts.map((product) => {
+                const quantity = minimumQuantity(product);
+                return (
+                  <div key={product.id} className="grid grid-cols-1 sm:grid-cols-[1fr_240px] gap-3 rounded-md border border-slate-200 p-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 line-clamp-2">{product.title}</p>
+                      <p className="text-xs font-mono text-slate-500 mt-1">{product.vendor_sku}</p>
+                      <p className="text-xs text-slate-500 mt-1">Supplier cost: {formatCost(product.cost)} · Kole minimum quantity: {quantity === null ? "Not provided" : quantity.toLocaleString()}</p>
+                      <p className="text-xs text-slate-500 mt-1">Inventory: {inventoryLabel(product)}</p>
+                      {!suggestedRetailPrice(product) && <p className="text-xs text-amber-700 mt-1">A positive cost and minimum quantity are needed for an automatic price; enter the price manually.</p>}
+                    </div>
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`draft-category-${product.id}`} className="text-xs">BigCommerce category</Label>
+                        <Select
+                          value={draftCategoryIds[product.id] || "__choose__"}
+                          onValueChange={(value) => {
+                            setDraftCategoryIds((current) => ({ ...current, [product.id]: value === "__choose__" ? "" : value }));
+                            setBulkDraftCategoryId("");
+                          }}
+                          disabled={createDrafts.isPending || isLoadingBcCategories || Boolean(bcCategoriesError) || !bcCategoryOptions.length}
+                        >
+                          <SelectTrigger id={`draft-category-${product.id}`} className="h-9">
+                            <SelectValue placeholder="Choose category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__choose__">Choose category</SelectItem>
+                            {bcCategoryOptions.map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`draft-price-${product.id}`} className="text-xs">Selling price</Label>
+                        <Input
+                          id={`draft-price-${product.id}`}
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          inputMode="decimal"
+                          value={draftPrices[product.id] ?? ""}
+                          onChange={(event) => setDraftPrices((current) => ({ ...current, [product.id]: event.target.value }))}
+                          placeholder="Enter price"
+                          disabled={createDrafts.isPending}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDraftDialogOpen(false)} disabled={createDrafts.isPending}>Cancel</Button>
-            <Button onClick={submitDrafts} disabled={createDrafts.isPending || !draftPricesValid}>
+            <Button onClick={submitDrafts} disabled={createDrafts.isPending || !draftPricesValid || !draftCategoriesValid || !bcCategoryOptions.length}>
               {createDrafts.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
               Create {draftProducts.length} Draft{draftProducts.length === 1 ? "" : "s"}
             </Button>

@@ -1317,17 +1317,18 @@ export async function registerRoutes(
       return res.status(400).json({ error: "Select between 1 and 25 vendor products to create drafts." });
     }
 
-    const requestedItems: Array<{ id: number; price: number }> = [];
+    const requestedItems: Array<{ id: number; price: number; categoryId: number }> = [];
     const seenIds = new Set<number>();
     for (const item of inputItems) {
       const id = Number(item?.id);
       const price = Number(item?.price);
-      if (!Number.isInteger(id) || id <= 0 || !Number.isFinite(price) || price <= 0) {
-        return res.status(400).json({ error: "Every selected product needs a valid positive retail price." });
+      const categoryId = Number(item?.categoryId);
+      if (!Number.isInteger(id) || id <= 0 || !Number.isFinite(price) || price <= 0 || !Number.isInteger(categoryId) || categoryId <= 0) {
+        return res.status(400).json({ error: "Every selected product needs a valid positive retail price and BigCommerce category." });
       }
       if (seenIds.has(id)) return res.status(400).json({ error: "A vendor product was selected more than once." });
       seenIds.add(id);
-      requestedItems.push({ id, price });
+      requestedItems.push({ id, price, categoryId });
     }
 
     const credentials = await getBcCreds().catch(() => null);
@@ -1419,6 +1420,7 @@ export async function registerRoutes(
                 type: "physical",
                 weight: Number.isFinite(weight) && weight >= 0 ? weight : 0,
                 price: requested.price,
+                categories: [requested.categoryId],
                 sku: product.vendor_sku,
                 description: product.description,
                 cost_price: product.cost == null ? undefined : Number(product.cost),
