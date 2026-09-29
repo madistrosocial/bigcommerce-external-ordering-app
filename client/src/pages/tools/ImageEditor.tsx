@@ -13,6 +13,11 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getAuthHeaders } from "@/lib/api";
+import {
+  loadImageEditorSettings,
+  saveImageEditorSettings,
+  type ImageEditorSettings,
+} from "@/lib/image-editor-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,8 +75,12 @@ export default function ImageEditor() {
   const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
   const [referenceImageDataUrl, setReferenceImageDataUrl] = useState("");
   const [referenceImageUrl, setReferenceImageUrl] = useState("");
-  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoDataUrl, setLogoDataUrl] = useState("");
+  const [logoFileName, setLogoFileName] = useState("");
+  const [settingsReady, setSettingsReady] = useState(false);
+  const [savedSettings, setSavedSettings] = useState<ImageEditorSettings | null>(null);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsStorageError, setSettingsStorageError] = useState("");
   const [isDraggingReference, setIsDraggingReference] = useState(false);
   const [isDraggingLogo, setIsDraggingLogo] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
