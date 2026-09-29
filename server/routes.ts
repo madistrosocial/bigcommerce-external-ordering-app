@@ -837,20 +837,22 @@ export async function registerRoutes(
    * checks that the authenticated user has the given module:action permission.
    */
   const requirePermission = (module: string, action = "view") =>
-    async (req: Request, res: Response, next: NextFunction) => {
-      const user = await getAuthenticatedUser(req);
-      if (!user) return res.status(401).json({ error: "Authentication required" });
-      if (user.role === "admin") {
+    (req: Request, res: Response, next: NextFunction) => {
+      void (async () => {
+        const user = await getAuthenticatedUser(req);
+        if (!user) return res.status(401).json({ error: "Authentication required" });
+        if (user.role === "admin") {
+          (req as any).authUser = user;
+          attachAuthenticatedActivityLog(req, res, user);
+          return next();
+        }
+        const perms = await storage.getUserPermissionStrings(user.id);
+        const hasModuleAccess = module !== "attendance" || action === "view" || perms.includes("attendance:view");
+        if (!perms.includes(`${module}:${action}`) || !hasModuleAccess) return res.status(403).json({ error: "Forbidden" });
         (req as any).authUser = user;
         attachAuthenticatedActivityLog(req, res, user);
-        return next();
-      }
-      const perms = await storage.getUserPermissionStrings(user.id);
-      const hasModuleAccess = module !== "attendance" || action === "view" || perms.includes("attendance:view");
-      if (!perms.includes(`${module}:${action}`) || !hasModuleAccess) return res.status(403).json({ error: "Forbidden" });
-      (req as any).authUser = user;
-      attachAuthenticatedActivityLog(req, res, user);
-      next();
+        next();
+      })().catch(next);
     };
 
   const requireMarketingPageAccess = (pageActions: string | string[], action?: string) =>
@@ -1067,6 +1069,12 @@ export async function registerRoutes(
       const facets = await storage.getDropshipProductFacets(vendor.id);
       res.json({ ...result, page, limit, ...facets });
     } catch (error: any) {
+      console.error("[Kole catalog] product list request failed", {
+        category: typeof req.query.category === "string" ? req.query.category : undefined,
+        subcategory: typeof req.query.subcategory === "string" ? req.query.subcategory : undefined,
+        message: error?.message || String(error),
+        stack: error?.stack,
+      });
       res.status(500).json({ error: "Failed to load vendor catalog" });
     }
   });

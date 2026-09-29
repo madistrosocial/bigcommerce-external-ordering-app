@@ -48,6 +48,7 @@
 - [Product 360 category mix](product360-category-mix.md) — category IDs stay on products; category sales use the four main BigCommerce categories with primary assignment and a units/revenue toggle.
 - [Focused JSX patching](focused-jsx-patching.md) — use small, exact hunks for compressed JSX so one context mismatch does not block unrelated edits.
 - [Workflow failure diagnosis](workflow-stale-process.md) — check process, port, and HTTP response before blaming code; opaque runner errors may recover on a managed restart.
+- [Express request error containment](express-request-error-containment.md) — forward async middleware failures to Express and never throw after sending an error response.
 - [Constant Contact authorization and campaigns](constant-contact-campaign-api.md) — OAuth boundaries, aggregate-readiness limits, and on-demand contact reconciliation population rules.
 - [Cross-platform npm optional lock entries](npm-optional-lockfile.md) — `npm ci` may require platform-specific optional records omitted by the host install.
 - [Bulk Order customer override](bulk-order-customer-override.md) — the selected POS customer is authoritative; form identity mismatches warn but do not block the draft.

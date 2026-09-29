@@ -90,7 +90,11 @@ export default function DropshipCatalogPage() {
   const displayName = connection?.displayName || "Vendor Catalog";
 
   const params = useMemo(() => ({ page, limit: PAGE_SIZE, search: appliedSearch, category, subcategory, inStock: stockOnly, closeout: closeoutOnly, imported: importedOnly, status }), [page, appliedSearch, category, subcategory, stockOnly, closeoutOnly, importedOnly, status]);
-  const { data, isLoading, isFetching, error } = useQuery({ queryKey: ["dropship-products", params], queryFn: () => api.getKoleProducts(params) });
+  const { data, isLoading, isFetching, error } = useQuery({
+    queryKey: ["dropship-products", params],
+    queryFn: () => api.getKoleProducts(params),
+    placeholderData: (previousData) => previousData,
+  });
 
   const sync = useMutation({
     mutationFn: api.syncKoleCatalog,
@@ -291,7 +295,7 @@ export default function DropshipCatalogPage() {
               <Search className="h-4 w-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search SKU, title, or UPC…" className="pl-8 h-9" />
             </div>
-            <Select value={category || "__all__"} onValueChange={(value) => { setCategory(value === "__all__" ? "" : value); setPage(1); }}>
+             <Select value={category || "__all__"} onValueChange={(value) => { setCategory(value === "__all__" ? "" : value); setSubcategory(""); setPage(1); }}>
               <SelectTrigger className="h-9 w-full lg:w-44"><SelectValue placeholder="Category" /></SelectTrigger>
               <SelectContent><SelectItem value="__all__">All categories</SelectItem>{(data?.categories ?? []).map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent>
             </Select>
@@ -347,7 +351,7 @@ export default function DropshipCatalogPage() {
 
       <Dialog open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
         <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
-          {detail && <><DialogHeader><DialogTitle className="flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" />{detail.title}</DialogTitle></DialogHeader><div className="space-y-5">
+          {detail && <><DialogHeader><DialogTitle className="flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" />{detail.title}</DialogTitle><DialogDescription>Vendor product details for SKU {detail.vendor_sku}. Creating a BigCommerce draft requires an entered retail price.</DialogDescription></DialogHeader><div className="space-y-5">
             <div className="flex flex-wrap gap-2"><StatusBadge status={detail.status} />{detail.is_closeout && <Badge className="bg-orange-100 text-orange-700 border-0">Closeout</Badge>}{detail.bigcommerce_product_id ? <Badge className="bg-blue-100 text-blue-700 border-0">Mapped to BC #{detail.bigcommerce_product_id}</Badge> : <Badge className="bg-slate-100 text-slate-600 border-0">Not mapped</Badge>}</div>
             {detail.image_data?.length > 0 && <div className="flex gap-2 overflow-x-auto">{detail.image_data.slice(0, 8).map((_, index) => { const src = imageUrl([detail.image_data[index]]); return src ? <img key={index} src={src} alt="" className="h-24 w-24 object-contain border rounded bg-white" /> : null; })}</div>}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm"><div><p className="text-xs text-slate-500">SKU</p><p className="font-mono">{detail.vendor_sku}</p></div><div><p className="text-xs text-slate-500">UPC</p><p>{detail.upc || "—"}</p></div><div><p className="text-xs text-slate-500">Brand</p><p>{detail.brand || "—"}</p></div><div><p className="text-xs text-slate-500">Cost</p><p>{formatCost(detail.cost)}</p></div><div><p className="text-xs text-slate-500">Inventory</p><p>{inventoryLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Pack / minimum</p><p>{packLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Category</p><p>{detail.vendor_category || "—"}</p></div><div><p className="text-xs text-slate-500">Subcategory</p><p>{detail.vendor_subcategory || "—"}</p></div><div><p className="text-xs text-slate-500">Weight</p><p>{String((detail.raw_data as any)?.item_weight || (detail.raw_data as any)?.weight || "—")}</p></div></div>
