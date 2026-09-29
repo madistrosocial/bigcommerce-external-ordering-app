@@ -297,6 +297,8 @@ export type KoleProductMappingResult = {
   unmatched: number;
   ambiguous: number;
   failed: number;
+  staleMappingsCleared: number;
+  staleMappingChecksFailed: number;
 };
 
 export type KoleProductSyncKind = "details" | "images";
@@ -313,6 +315,7 @@ export type KoleProductSyncJobSummary = {
   skipped: number;
   photosAdded: number;
   selectedFields: KoleProductSyncField[];
+  forceImageReupload?: boolean;
   currentSku: string | null;
   startedAt: string;
   completedAt: string | null;
@@ -353,6 +356,11 @@ export function getKoleProductSyncLatest(kind: KoleProductSyncKind) {
   );
 }
 
+export function getKoleProductSyncImageHistory(productIds: number[]) {
+  const query = new URLSearchParams({ productIds: productIds.join(",") });
+  return dropshipRequest<Record<number, number>>(`/dropshipping/product-sync/image-history?${query.toString()}`);
+}
+
 export function getKoleProductSyncJob(jobId: number) {
   return dropshipRequest<KoleProductSyncJobSummary>(`/dropshipping/product-sync/jobs/${jobId}`);
 }
@@ -372,10 +380,16 @@ export function startKoleProductSync(
   kind: KoleProductSyncKind,
   productIds: number[],
   fields?: KoleProductSyncField[],
+  forceImageReupload = false,
 ) {
   return dropshipRequest<KoleProductSyncJobSummary>("/dropshipping/product-sync/jobs", {
     method: "POST",
-    body: JSON.stringify({ kind, productIds, ...(fields ? { fields } : {}) }),
+    body: JSON.stringify({
+      kind,
+      productIds,
+      ...(fields ? { fields } : {}),
+      ...(forceImageReupload ? { forceImageReupload: true } : {}),
+    }),
   });
 }
 

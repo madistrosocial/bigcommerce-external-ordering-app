@@ -31,7 +31,12 @@ import {
 const PAGE_SIZE = 25;
 type SyncKind = "details" | "images";
 type SyncField = "cost" | "description" | "inventory" | "identity";
-type StartSyncInput = { kind: SyncKind; productIds: number[]; fields: SyncField[] };
+type StartSyncInput = {
+  kind: SyncKind;
+  productIds: number[];
+  fields: SyncField[];
+  forceImageReupload: boolean;
+};
 
 type SyncJob = {
   id: number;
@@ -45,6 +50,7 @@ type SyncJob = {
   skipped: number;
   photosAdded: number;
   selectedFields: string[];
+  forceImageReupload?: boolean;
   currentSku?: string | null;
   startedAt: string;
   completedAt?: string | null;
@@ -129,6 +135,7 @@ export default function ProductSyncPage() {
   const [appliedSearch, setAppliedSearch] = useState("");
   const [page, setPage] = useState(1);
   const [logoDraft, setLogoDraft] = useState<string | null>(null);
+  const [forceImageReupload, setForceImageReupload] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -186,9 +193,11 @@ export default function ProductSyncPage() {
       input.kind,
       input.productIds,
       input.kind === "details" ? input.fields : undefined,
+      input.kind === "images" && input.forceImageReupload,
     ) as Promise<SyncJob>,
     onSuccess: (result, input) => {
       setSelectedProductIdsByKind((current) => ({ ...current, [input.kind]: new Set() }));
+      if (input.kind === "images") setForceImageReupload(false);
       queryClient.setQueryData(["kole-product-sync-latest", input.kind], result);
       queryClient.setQueryData(["kole-product-sync-job", input.kind, result.id], result);
       queryClient.invalidateQueries({ queryKey: ["kole-product-sync-items", input.kind] });
@@ -226,6 +235,13 @@ export default function ProductSyncPage() {
 
   const products = productsQuery.data?.rows ?? [];
   const mappedProducts = products.filter((product) => !!product.bigcommerce_product_id);
+  const mappedProductIds = mappedProducts.map((product) => product.id);
+  const imageHistoryQuery = useQuery({
+    queryKey: ["kole-product-sync-image-history", mappedProductIds],
+    queryFn: () => api.getKoleProductSyncImageHistory(mappedProductIds),
+    enabled: kind === "images" && mappedProductIds.length > 0,
+    refetchInterval: job?.status === "running" ? 5000 : false,
+  });
   const itemByProductId = new Map((itemsQuery.data?.rows ?? []).map((item) => [item.productId, item]));
   const selectedProductIds = selectedProductIdsByKind[kind];
   const currentPageProductIds = mappedProducts.map((product) => product.id);
@@ -237,6 +253,12 @@ export default function ProductSyncPage() {
   const logoUrl = logoDraft ?? logoQuery.data?.dataUrl ?? null;
   const syncPending = startSync.isPending || latestQuery.isLoading || jobQuery.isLoading || job?.status === "running";
   const imageSyncReady = !!logoQuery.data?.dataUrl && !logoDraft;
+
+  useEffect(() => {
+    if (kind === "images" && job && job.status !== "running") {
+      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-image-history"] });
+    }
+  }, [kind, job?.id, job?.status, queryClient]);
 
   const toggleField = (field: SyncField) => {
     setSelectedFields((current) => current.includes(field)
@@ -306,6 +328,7 @@ export default function ProductSyncPage() {
       kind,
       productIds: Array.from(selectedProductIds),
       fields: selectedFields,
+      forceImageReupload: kind === "images" && forceImageReupload,
     });
   };
 
@@ -336,7 +359,12 @@ export default function ProductSyncPage() {
           </div>
         )}
 
-        <Tabs value={kind} onValueChange={(value) => { setKind(value as SyncKind); setPage(1); }}>
+        <Tabs value={kind} onValueChange={(value) => {
+          const nextKind = value as SyncKind;
+          setKind(nextKind);
+          setPage(1);
+          if (nextKind !== "images") setForceImageReupload(false);
+        }}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <TabsList className="h-11 w-full justify-start rounded-xl border border-[#dfe6e0] bg-[#e9ede9] p-1 sm:w-auto">
               <TabsTrigger value="details" className="h-9 flex-1 gap-2 rounded-lg px-4 text-sm data-[state=active]:bg-white data-[state=active]:text-[#245143] data-[state=active]:shadow-sm sm:flex-none">
@@ -494,6 +522,25 @@ export default function ProductSyncPage() {
                     </div>
                   </div>
                   {logoQuery.isError && <p className="mt-3 text-xs text-rose-700">Could not load the saved overlay: {(logoQuery.error as Error).message}</p>}
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+                    <div className="flex items-start gap-2.5">
+                      <Checkbox
+                        id="force-image-reupload"
+                        checked={forceImageReupload}
+                        onCheckedChange={(checked) => setForceImageReupload(checked === true)}
+                        disabled={!canManage || syncPending}
+                        className="mt-0.5"
+                      />
+                      <div className="space-y-1">
+                        <Label htmlFor="force-image-reupload" className="cursor-pointer text-xs font-semibold text-amber-950">
+                          Re-upload previously synced images
+                        </Label>
+                        <p className="text-[11px] leading-4 text-amber-900/80">
+                          Bypasses upload history for this run only. Image sync appends photos, so duplicates may be added if the existing photos are still on the listing.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -523,6 +570,7 @@ export default function ProductSyncPage() {
                         <SummaryMetric label="Failed" value={job.failed} tone={job.failed ? "text-rose-700" : "text-slate-900"} />
                       </div>
                       <p className="mt-3 text-[11px] text-slate-500">Started {formatDate(job.startedAt)}</p>
+                      {job.forceImageReupload && <p className="mt-2 text-[11px] leading-4 text-amber-800">Upload history was bypassed for this run. Check for duplicate photos if any previous images remained on the listing.</p>}
                       {job.error && <p className="mt-2 flex gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{job.error}</p>}
                     </>
                   ) : (
@@ -544,6 +592,14 @@ export default function ProductSyncPage() {
               <p className="mt-1 text-xs text-slate-500">
                 {selectedProductIds.size.toLocaleString()} selected for this sync. Selection stays active across pages and searches.
               </p>
+              {kind === "images" && imageHistoryQuery.isFetching && (
+                <p className="mt-1 text-[11px] text-slate-500">Checking previous image uploads…</p>
+              )}
+              {kind === "images" && imageHistoryQuery.isError && (
+                <p className="mt-1 text-[11px] text-rose-700">
+                  Previous image-upload history could not be loaded: {(imageHistoryQuery.error as Error).message}
+                </p>
+              )}
             </div>
             <div className="flex w-full items-center gap-2 sm:w-auto">
               {selectedProductIds.size > 0 && (
@@ -593,6 +649,7 @@ export default function ProductSyncPage() {
                   {mappedProducts.map((product) => {
                     const item = itemByProductId.get(product.id);
                     const status = item?.status;
+                    const previousSourceCount = imageHistoryQuery.data?.[product.id] ?? 0;
                     return (
                       <article key={product.id} className="grid grid-cols-[20px_minmax(0,1fr)] gap-x-3 gap-y-3 px-4 py-4 transition-colors hover:bg-[#fbfcfb] md:grid-cols-[36px_minmax(0,1fr)_150px_170px] md:items-center md:gap-4 md:px-5">
                         <div className="row-span-3 flex items-center justify-center md:row-span-1">
@@ -617,6 +674,11 @@ export default function ProductSyncPage() {
                         <div className="col-start-2 flex min-w-0 items-start justify-between gap-3 md:col-start-4 md:block">
                           <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400 md:hidden">Result</span>
                           <div className="min-w-0 text-right md:text-left">
+                            {kind === "images" && previousSourceCount > 0 && (
+                              <p className="mb-1 text-xs font-medium text-emerald-700">
+                                Previously uploaded · {previousSourceCount} source image{previousSourceCount === 1 ? "" : "s"}
+                              </p>
+                            )}
                             {item ? (
                               <>
                                 {item.updatedFields.length > 0 && <p className="truncate text-xs text-slate-600">{item.updatedFields.join(", ")}</p>}

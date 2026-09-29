@@ -185,10 +185,12 @@ export default function DropshipCatalogPage() {
       setMappingResult(result);
       queryClient.setQueryData(["kole-mapping-brand"], { brandName: result.brandName });
       queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
+      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-products"] });
+      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-image-history"] });
       toast({
         title: result.failed ? "SKU mapping finished with errors" : "SKU mapping completed",
-        description: `${result.mapped} linked · ${result.remapped} remapped · ${result.alreadyMapped} already current · ${result.unmatched} unmatched · ${result.ambiguous} ambiguous · ${result.failed} failed`,
-        ...(result.failed ? { variant: "destructive" as const } : {}),
+        description: `${result.mapped} linked · ${result.remapped} remapped · ${result.alreadyMapped} already current · ${result.unmatched} unmatched · ${result.ambiguous} ambiguous · ${result.failed} failed · ${result.staleMappingsCleared} deleted listing links cleared${result.staleMappingChecksFailed ? ` · ${result.staleMappingChecksFailed} old links could not be checked` : ""}`,
+        ...(result.failed || result.staleMappingChecksFailed ? { variant: "destructive" as const } : {}),
       });
     },
     onError: (mutationError: any) => toast({ title: "SKU mapping failed", description: mutationError.message, variant: "destructive" }),
@@ -221,6 +223,8 @@ export default function DropshipCatalogPage() {
       setDetail(null);
       queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
       queryClient.invalidateQueries({ queryKey: ["dropship-sync-logs"] });
+      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-products"] });
+      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-image-history"] });
       const failure = result.results.find((item) => item.status === "failed");
       const warning = result.results.find((item) => item.status === "created" && item.message);
       const imageNote = result.created > 0
@@ -390,7 +394,7 @@ export default function DropshipCatalogPage() {
             </Button>
           </div>
           <p className="text-xs text-slate-500">
-            Manually scan every BigCommerce product under this brand and match its SKU to the imported Kole catalog. This only creates or remaps local links; it does not change BigCommerce products. You can run it again after deployment.
+            Manually scan every BigCommerce product under this brand and match its SKU to the imported Kole catalog. This updates local links and clears links confirmed to point to deleted BigCommerce products; it does not change BigCommerce products.
           </p>
           {mappingResult && (
             <div className="rounded-md bg-slate-50 px-3 py-2.5 text-xs text-slate-600 space-y-1">
@@ -398,7 +402,7 @@ export default function DropshipCatalogPage() {
                 Last run: {mappingResult.brandName} · {mappingResult.scanned.toLocaleString()} BigCommerce products scanned · {mappingResult.matched.toLocaleString()} unique SKU matches
               </p>
               <p>
-                {mappingResult.mapped.toLocaleString()} linked · {mappingResult.remapped.toLocaleString()} remapped · {mappingResult.alreadyMapped.toLocaleString()} already current · {mappingResult.unmatched.toLocaleString()} unmatched · {mappingResult.ambiguous.toLocaleString()} ambiguous · {mappingResult.failed.toLocaleString()} failed
+                {mappingResult.mapped.toLocaleString()} linked · {mappingResult.remapped.toLocaleString()} remapped · {mappingResult.alreadyMapped.toLocaleString()} already current · {mappingResult.unmatched.toLocaleString()} unmatched · {mappingResult.ambiguous.toLocaleString()} ambiguous · {mappingResult.failed.toLocaleString()} failed · {(mappingResult.staleMappingsCleared ?? 0).toLocaleString()} deleted links cleared{mappingResult.staleMappingChecksFailed ? ` · ${mappingResult.staleMappingChecksFailed} old links could not be verified` : ""}
               </p>
             </div>
           )}

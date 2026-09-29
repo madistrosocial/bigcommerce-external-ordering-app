@@ -1646,6 +1646,36 @@ export async function registerRoutes(
         localProductsByBigCommerceId.set(id, matches);
       }
 
+      const mappedCatalogProducts: any[] = [];
+      for (let page = 1; ; page++) {
+        const mappedPage = await storage.getDropshipProducts({
+          vendorId: vendor.id,
+          page,
+          limit: 100,
+          imported: true,
+        });
+        mappedCatalogProducts.push(...mappedPage.rows);
+        if (mappedPage.rows.length === 0 || mappedCatalogProducts.length >= mappedPage.total) break;
+      }
+      const scannedBigCommerceIds = new Set(bigCommerceProducts.map((product) => product.id));
+      const staleBigCommerceIds = Array.from(new Set(mappedCatalogProducts
+        .map((product) => Number(product.bigcommerce_product_id))
+        .filter((id) => Number.isSafeInteger(id) && id > 0 && !scannedBigCommerceIds.has(id))));
+      const staleCheckResults = await mapWithConcurrency(staleBigCommerceIds, KOLE_DETAILS_SYNC_CONCURRENCY, async (id) => {
+        try {
+          const response = await fetchBigCommerceWithRetry(
+            `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${id}?include_fields=id`,
+            { headers },
+          );
+          await response.arrayBuffer().catch(() => undefined);
+          return response.status === 404 ? "deleted" : response.ok ? "exists" : "failed";
+        } catch {
+          return "failed";
+        }
+      });
+      const deletedBigCommerceIds = new Set(staleBigCommerceIds.filter((_, index) => staleCheckResults[index] === "deleted"));
+      const staleMappingChecksFailed = staleCheckResults.filter((result) => result === "failed").length;
+
       let matched = 0;
       let mapped = 0;
       let remapped = 0;
@@ -1692,6 +1722,15 @@ export async function registerRoutes(
         }
       }
 
+      let staleMappingsCleared = 0;
+      for (const product of mappedCatalogProducts) {
+        const bigcommerceProductId = Number(product.bigcommerce_product_id);
+        if (!deletedBigCommerceIds.has(bigcommerceProductId)) continue;
+        if (await storage.unmapDropshipProductFromBigCommerce(product.id, bigcommerceProductId)) {
+          staleMappingsCleared++;
+        }
+      }
+
       res.json({
         ok: failed === 0,
         brandName,
@@ -1704,6 +1743,8 @@ export async function registerRoutes(
         unmatched,
         ambiguous,
         failed,
+        staleMappingsCleared,
+        staleMappingChecksFailed,
       });
     } catch (error: any) {
       console.error("[Kole SKU mapping] BigCommerce brand scan failed", {
@@ -1750,14 +1791,41 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/dropshipping/product-sync/image-history", requirePermission("dropshipping", "view"), async (req, res) => {
+    const rawProductIds = typeof req.query.productIds === "string" ? req.query.productIds : "";
+    const productIds = rawProductIds
+      ? rawProductIds.split(",").map((value) => Number(value))
+      : [];
+    if (
+      productIds.length > 100
+      || productIds.some((id) => !Number.isSafeInteger(id) || id <= 0)
+      || new Set(productIds).size !== productIds.length
+    ) {
+      return res.status(400).json({ error: "Choose up to 100 valid mapped product IDs." });
+    }
+    try {
+      const vendor = await getKoleVendor();
+      res.json(await koleProductSyncManager.getImageSyncHistory(vendor.id, productIds));
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Could not load previous image sync history." });
+    }
+  });
+
   app.post("/api/dropshipping/product-sync/jobs", requirePermission("dropshipping", "manage"), async (req, res) => {
     const kind = req.body?.kind === "details" || req.body?.kind === "images"
       ? req.body.kind as KoleProductSyncKind
       : null;
     const fieldsValue = req.body?.fields;
     const productIdsValue = req.body?.productIds;
+    const forceImageReupload = req.body?.forceImageReupload;
     const validFields = new Set<KoleProductSyncField>(["cost", "description", "inventory", "identity"]);
     if (!kind) return res.status(400).json({ error: "Choose a valid Product Sync type." });
+    if (forceImageReupload !== undefined && typeof forceImageReupload !== "boolean") {
+      return res.status(400).json({ error: "The image re-upload option must be true or false." });
+    }
+    if (forceImageReupload === true && kind !== "images") {
+      return res.status(400).json({ error: "Previously uploaded images can only be re-uploaded during Image Sync." });
+    }
     if (
       !Array.isArray(productIdsValue)
       || productIdsValue.length === 0
@@ -1772,7 +1840,13 @@ export async function registerRoutes(
     try {
       const vendor = await getKoleVendor();
       const fields = kind === "details" ? (fieldsValue ?? []) as KoleProductSyncField[] : [];
-      const job = await koleProductSyncManager.start(kind, vendor.id, productIdsValue as number[], fields);
+      const job = await koleProductSyncManager.start(
+        kind,
+        vendor.id,
+        productIdsValue as number[],
+        fields,
+        forceImageReupload === true,
+      );
       res.status(202).json(job);
     } catch (error: any) {
       const status = error instanceof KoleProductSyncError ? error.statusCode : 500;

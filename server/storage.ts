@@ -101,6 +101,7 @@ export interface IStorage {
   markDropshipProductsUnavailable(vendorId: number, seenSkus: string[]): Promise<void>;
   updateDropshipProductStatus(id: number, status: string): Promise<DropshipProduct | undefined>;
   mapDropshipProductToBigCommerce(id: number, bigcommerceProductId: number): Promise<DropshipProduct | undefined>;
+  unmapDropshipProductFromBigCommerce(id: number, expectedBigcommerceProductId: number): Promise<boolean>;
   createDropshipSyncLog(data: { vendor_id: number }): Promise<DropshipSyncLog>;
   finishDropshipSyncLog(id: number, data: Partial<InsertDropshipSyncLog>): Promise<DropshipSyncLog | undefined>;
   getDropshipSyncLogs(vendorId: number, limit?: number): Promise<DropshipSyncLog[]>;
@@ -1267,6 +1268,21 @@ export class DatabaseStorage implements IStorage {
       .where(eq(dropshipProducts.id, id))
       .returning();
     return rows[0];
+  }
+
+  async unmapDropshipProductFromBigCommerce(id: number, expectedBigcommerceProductId: number): Promise<boolean> {
+    const rows = await db.update(dropshipProducts)
+      .set({
+        bigcommerce_product_id: null,
+        status: sql`CASE WHEN ${dropshipProducts.status} = 'mapped' THEN 'available' ELSE ${dropshipProducts.status} END`,
+        updated_at: new Date(),
+      })
+      .where(and(
+        eq(dropshipProducts.id, id),
+        eq(dropshipProducts.bigcommerce_product_id, expectedBigcommerceProductId),
+      ))
+      .returning({ id: dropshipProducts.id });
+    return rows.length > 0;
   }
 
   async createDropshipSyncLog(data: { vendor_id: number }): Promise<DropshipSyncLog> {

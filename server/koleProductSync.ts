@@ -27,6 +27,7 @@ export interface KoleProductSyncJobSummary {
   skipped: number;
   photosAdded: number;
   selectedFields: KoleProductSyncField[];
+  forceImageReupload?: boolean;
   currentSku: string | null;
   startedAt: string;
   completedAt: string | null;
@@ -373,6 +374,22 @@ export class KoleProductSyncManager {
     return { dataUrl: typeof value === "string" ? value : null };
   }
 
+  async getImageSyncHistory(vendorId: number, productIds: number[]): Promise<Record<number, number>> {
+    const ids = Array.from(new Set(productIds.filter((id) => Number.isSafeInteger(id) && id > 0)));
+    const products = await Promise.all(ids.map((id) => this.storage.getDropshipProduct(id)));
+    const history: Record<number, number> = {};
+    for (const product of products) {
+      if (!product || product.vendor_id !== vendorId) continue;
+      const bigcommerceProductId = Number(product.bigcommerce_product_id);
+      if (!Number.isSafeInteger(bigcommerceProductId) || bigcommerceProductId <= 0) continue;
+      const saved = unwrapSetting(await this.storage.getSetting(`${IMAGE_LEDGER_PREFIX}${bigcommerceProductId}`));
+      if (!Array.isArray(saved)) continue;
+      const sourceCount = new Set(saved.map(normalizedImageUrl).filter(Boolean)).size;
+      if (sourceCount > 0) history[product.id] = sourceCount;
+    }
+    return history;
+  }
+
   async saveLogo(dataUrl: unknown): Promise<{ ok: true }> {
     if (typeof dataUrl !== "string") throw new KoleProductSyncError("Choose a transparent PNG logo.");
     const normalized = await normalizeLogo(dataUrl);
@@ -390,6 +407,7 @@ export class KoleProductSyncManager {
     vendorId: number,
     selectedProductIds: number[],
     selectedFields: KoleProductSyncField[] = [],
+    forceImageReupload = false,
   ): Promise<KoleProductSyncJobSummary> {
     if (this.activeJobId !== null || this.isStarting) {
       throw new KoleProductSyncError("A Product Sync job is already running.", 409);
@@ -407,6 +425,9 @@ export class KoleProductSyncManager {
     }
     if (kind === "details" && selectedFields.length === 0) {
       throw new KoleProductSyncError("Select at least one product detail to sync.");
+    }
+    if (forceImageReupload && kind !== "images") {
+      throw new KoleProductSyncError("Previously uploaded images can only be re-uploaded during Image Sync.");
     }
     const fields = Array.from(new Set(selectedFields));
     this.isStarting = true;
@@ -433,6 +454,7 @@ export class KoleProductSyncManager {
         skipped: 0,
         photosAdded: 0,
         selectedFields: kind === "details" ? fields : [],
+        forceImageReupload: kind === "images" && forceImageReupload,
         currentSku: null,
         startedAt: now,
         completedAt: null,
@@ -658,7 +680,7 @@ export class KoleProductSyncManager {
             try {
               const outcome = job.summary.kind === "details"
                 ? await this.syncDetails(candidate, job.summary.selectedFields, brandMap, brandLoadError)
-                : await this.syncImages(candidate, logoBuffer);
+                : await this.syncImages(candidate, logoBuffer, job.summary.forceImageReupload === true);
               candidate.item.status = outcome.status;
               candidate.item.updatedFields = outcome.updatedFields ?? [];
               candidate.item.photosAdded = outcome.photosAdded ?? 0;
@@ -816,7 +838,11 @@ export class KoleProductSyncManager {
     };
   }
 
-  private async syncImages(candidate: ProductCandidate, logoBuffer: Buffer | null): Promise<ProductOutcome> {
+  private async syncImages(
+    candidate: ProductCandidate,
+    logoBuffer: Buffer | null,
+    forceImageReupload: boolean,
+  ): Promise<ProductOutcome> {
     if (!logoBuffer) throw new Error("No saved watermark logo was available for this image run.");
     const currentMapping = await this.storage.getDropshipProduct(candidate.item.productId);
     if (!currentMapping || Number(currentMapping.bigcommerce_product_id) !== candidate.item.bigcommerceProductId) {
@@ -836,7 +862,7 @@ export class KoleProductSyncManager {
       throw new Error("Saved image sync history is invalid; no photos were changed.");
     }
     const ledger = new Set((Array.isArray(rawLedger) ? rawLedger : []).map(normalizedImageUrl).filter(Boolean));
-    const pendingSources = sourceUrls.filter((url) => !ledger.has(url));
+    const pendingSources = forceImageReupload ? sourceUrls : sourceUrls.filter((url) => !ledger.has(url));
     if (pendingSources.length === 0) return { status: "unchanged" };
 
     const { storeHash, headers } = await this.getBigCommerceCredentials();
