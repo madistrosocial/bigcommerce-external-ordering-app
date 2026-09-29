@@ -1499,10 +1499,6 @@ export async function registerRoutes(
             : raw.inventory !== undefined && raw.inventory !== null && String(raw.inventory).trim() !== "";
           const rawWeight = raw.item_weight ?? raw.weight;
           const weight = rawWeight == null || String(rawWeight).trim() === "" ? 0 : Number(rawWeight);
-          const imageUrls = (Array.isArray(product.image_data) ? product.image_data : [])
-            .map((image: any) => typeof image === "string" ? image : image?.url || image?.src || image?.href || "")
-            .map((image: unknown) => String(image).trim())
-            .filter((image: string) => /^https:\/\//i.test(image));
 
           const createResponse = await fetch(
             `https://api.bigcommerce.com/stores/${credentials.storeHash}/v3/catalog/products`,
@@ -1523,11 +1519,6 @@ export async function registerRoutes(
                 ...(inventoryWasProvided ? { inventory_level: product.inventory } : {}),
                 availability: "disabled",
                 is_visible: false,
-                images: imageUrls.map((image_url, imageIndex) => ({
-                  image_url,
-                  is_thumbnail: imageIndex === 0,
-                  sort_order: imageIndex,
-                })),
               }),
             },
           );

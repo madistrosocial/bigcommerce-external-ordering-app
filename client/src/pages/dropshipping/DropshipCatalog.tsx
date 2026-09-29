@@ -223,9 +223,12 @@ export default function DropshipCatalogPage() {
       queryClient.invalidateQueries({ queryKey: ["dropship-sync-logs"] });
       const failure = result.results.find((item) => item.status === "failed");
       const warning = result.results.find((item) => item.status === "created" && item.message);
+      const imageNote = result.created > 0
+        ? " New drafts start without photos; add watermarked images from Product Sync > Image Sync after mapping."
+        : "";
       toast({
         title: result.failed ? "Draft import finished with errors" : "BigCommerce draft import finished",
-        description: `${result.created} created · ${result.skipped} existing SKU${result.skipped === 1 ? "" : "s"} skipped · ${result.failed} failed${failure?.message ? ` · ${failure.message}` : warning?.message ? ` · ${warning.message}` : ""}`,
+        description: `${result.created} created · ${result.skipped} existing SKU${result.skipped === 1 ? "" : "s"} skipped · ${result.failed} failed${failure?.message ? ` · ${failure.message}` : warning?.message ? ` · ${warning.message}` : ""}${imageNote}`,
         ...(result.failed ? { variant: "destructive" as const } : {}),
       });
     },
@@ -487,7 +490,7 @@ export default function DropshipCatalogPage() {
           <DialogHeader>
             <DialogTitle>Create hidden BigCommerce drafts</DialogTitle>
             <DialogDescription>
-              Drafts stay hidden and disabled. The suggested price is the supplier ext_price × 1.20; ext_price already includes the Kole minimum quantity. You can edit the price. Choose an existing BigCommerce category for each item. Existing SKU matches are skipped.
+              Drafts stay hidden and disabled. Photos are added later through Product Sync → Image Sync so the first upload is watermarked. The suggested price is the supplier ext_price × 1.20; ext_price already includes the Kole minimum quantity. You can edit the price. Choose an existing BigCommerce category for each item. Existing SKU matches are skipped.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
