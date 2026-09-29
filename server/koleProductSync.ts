@@ -73,6 +73,8 @@ interface ProductSyncManagerOptions {
   getBigCommerceCredentials: () => Promise<BigCommerceCredentials>;
   fetchBigCommerce: (url: string, init: RequestInit) => Promise<Response>;
   getBigCommerceBrands: () => Promise<BrandOption[]>;
+  downloadImage?: (sourceUrl: string) => Promise<Buffer>;
+  createWatermarkedImage?: (sourceBuffer: Buffer, logoBuffer: Buffer) => Promise<Buffer>;
 }
 
 interface InternalProductSyncJob {
@@ -388,11 +390,31 @@ function safeImageFilename(sku: string, imageIndex: number): string {
   return `kole-${safeSku}-${imageIndex + 1}-watermarked.jpg`;
 }
 
+function normalizedImageFilename(value: unknown): string {
+  const raw = String(value ?? "").trim().split(/[?#]/, 1)[0];
+  const filename = raw.slice(raw.lastIndexOf("/") + 1);
+  try {
+    return decodeURIComponent(filename).toLowerCase();
+  } catch {
+    return filename.toLowerCase();
+  }
+}
+
+function imageLedgerSettingKey(bigcommerceProductId: number, dropshipProductId: number): string {
+  return `${IMAGE_LEDGER_PREFIX}${bigcommerceProductId}_kole_${dropshipProductId}`;
+}
+
+function legacyImageLedgerSettingKey(bigcommerceProductId: number): string {
+  return `${IMAGE_LEDGER_PREFIX}${bigcommerceProductId}`;
+}
+
 export class KoleProductSyncManager {
   private readonly storage: ProductSyncStorage;
   private readonly getBigCommerceCredentials: ProductSyncManagerOptions["getBigCommerceCredentials"];
   private readonly fetchBigCommerce: ProductSyncManagerOptions["fetchBigCommerce"];
   private readonly getBigCommerceBrands: ProductSyncManagerOptions["getBigCommerceBrands"];
+  private readonly downloadImage: NonNullable<ProductSyncManagerOptions["downloadImage"]>;
+  private readonly createWatermarkedImage: NonNullable<ProductSyncManagerOptions["createWatermarkedImage"]>;
   private readonly jobs = new Map<number, InternalProductSyncJob>();
   private readonly latestJobIdByKind = new Map<KoleProductSyncKind, number>();
   private activeJobId: number | null = null;
@@ -403,6 +425,8 @@ export class KoleProductSyncManager {
     this.getBigCommerceCredentials = options.getBigCommerceCredentials;
     this.fetchBigCommerce = options.fetchBigCommerce;
     this.getBigCommerceBrands = options.getBigCommerceBrands;
+    this.downloadImage = options.downloadImage ?? downloadKoleImage;
+    this.createWatermarkedImage = options.createWatermarkedImage ?? createWatermarkedJpeg;
   }
 
   async getLogo(): Promise<{ dataUrl: string | null }> {
@@ -418,7 +442,9 @@ export class KoleProductSyncManager {
       if (!product || product.vendor_id !== vendorId) continue;
       const bigcommerceProductId = Number(product.bigcommerce_product_id);
       if (!Number.isSafeInteger(bigcommerceProductId) || bigcommerceProductId <= 0) continue;
-      const saved = unwrapSetting(await this.storage.getSetting(`${IMAGE_LEDGER_PREFIX}${bigcommerceProductId}`));
+      const saved = unwrapSetting(
+        await this.storage.getSetting(imageLedgerSettingKey(bigcommerceProductId, product.id)),
+      );
       if (!Array.isArray(saved)) continue;
       const sourceCount = new Set(saved.map(normalizedImageUrl).filter(Boolean)).size;
       if (sourceCount > 0) history[product.id] = sourceCount;
@@ -987,15 +1013,24 @@ export class KoleProductSyncManager {
     if (sourceUrls.length === 0) return { status: "unchanged" };
 
     const productId = candidate.item.bigcommerceProductId;
-    const ledgerKey = `${IMAGE_LEDGER_PREFIX}${productId}`;
-    const ledgerSetting = await this.storage.getSetting(ledgerKey);
-    const rawLedger = unwrapSetting(ledgerSetting);
+    const ledgerKey = imageLedgerSettingKey(productId, candidate.item.productId);
+    const rawLedger = unwrapSetting(await this.storage.getSetting(ledgerKey));
     if (rawLedger !== undefined && rawLedger !== null && !Array.isArray(rawLedger)) {
       throw new Error("Saved image sync history is invalid; no photos were changed.");
     }
     const ledger = new Set((Array.isArray(rawLedger) ? rawLedger : []).map(normalizedImageUrl).filter(Boolean));
-    const pendingSources = forceImageReupload ? sourceUrls : sourceUrls.filter((url) => !ledger.has(url));
+    const pendingSources = sourceUrls
+      .map((sourceUrl, sourceIndex) => ({ sourceUrl, sourceIndex }))
+      .filter(({ sourceUrl }) => forceImageReupload || !ledger.has(sourceUrl));
     if (pendingSources.length === 0) return { status: "unchanged" };
+
+    const legacyRaw = unwrapSetting(await this.storage.getSetting(legacyImageLedgerSettingKey(productId)));
+    if (legacyRaw !== undefined && legacyRaw !== null && !Array.isArray(legacyRaw)) {
+      throw new Error("Saved image sync history is invalid; no photos were changed.");
+    }
+    const legacyLedger = new Set(
+      (Array.isArray(legacyRaw) ? legacyRaw : []).map(normalizedImageUrl).filter(Boolean),
+    );
 
     const { storeHash, headers } = await this.getBigCommerceCredentials();
     const productUrl = `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${productId}`;
@@ -1005,6 +1040,11 @@ export class KoleProductSyncManager {
       throw new Error(`BigCommerce product lookup failed (${currentResponse.status}).`);
     }
     const existingImages = Array.isArray(currentPayload.data.images) ? currentPayload.data.images : [];
+    const existingFileNames = new Set(
+      existingImages
+        .map((image: any) => normalizedImageFilename(image?.image_file))
+        .filter(Boolean),
+    );
     let maxSortOrder = existingImages.reduce((max: number, image: any) => {
       const value = Number(image?.sort_order);
       return Number.isFinite(value) ? Math.max(max, value) : max;
@@ -1012,20 +1052,29 @@ export class KoleProductSyncManager {
     let photosAdded = 0;
     const errors: string[] = [];
 
-    for (let index = 0; index < pendingSources.length; index++) {
+    for (const { sourceUrl, sourceIndex } of pendingSources) {
+      const legacyFilename = normalizedImageFilename(safeImageFilename(candidate.item.vendorSku, sourceIndex));
+      if (!forceImageReupload && legacyLedger.has(sourceUrl) && existingFileNames.has(legacyFilename)) {
+        ledger.add(sourceUrl);
+        try {
+          await this.storage.setSetting(ledgerKey, Array.from(ledger));
+        } catch {
+          errors.push("An existing photo was found, but its per-listing sync history could not be saved.");
+        }
+        continue;
+      }
       if (existingImages.length + photosAdded >= 1000) {
         errors.push("BigCommerce's 1,000 image limit was reached; remaining Kole photos were not added.");
         break;
       }
-      const sourceUrl = pendingSources[index];
       try {
-        const sourceBuffer = await downloadKoleImage(sourceUrl);
-        const processed = await createWatermarkedJpeg(sourceBuffer, logoBuffer);
+        const sourceBuffer = await this.downloadImage(sourceUrl);
+        const processed = await this.createWatermarkedImage(sourceBuffer, logoBuffer);
         const form = new FormData();
         form.append(
           "image_file",
           new Blob([new Uint8Array(processed)], { type: "image/jpeg" }),
-          safeImageFilename(candidate.item.vendorSku, index),
+          safeImageFilename(candidate.item.vendorSku, sourceIndex),
         );
         form.append("description", "Kole product photo with saved watermark");
         form.append("is_thumbnail", "false");
@@ -1046,6 +1095,7 @@ export class KoleProductSyncManager {
         await imageResponse.arrayBuffer().catch(() => undefined);
         photosAdded++;
         ledger.add(sourceUrl);
+        existingFileNames.add(legacyFilename);
         try {
           await this.storage.setSetting(ledgerKey, Array.from(ledger));
         } catch {

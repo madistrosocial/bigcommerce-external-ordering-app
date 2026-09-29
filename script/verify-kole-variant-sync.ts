@@ -198,6 +198,95 @@ async function runSiblingConflictSync() {
   assert.ok(items?.rows.every((item) => item.error?.includes("conflicting values")));
 }
 
+async function runSiblingImageAggregationSync() {
+  const sharedImages = [
+    "https://images.example.test/kole/photo-1.jpg",
+    "https://images.example.test/kole/photo-2.jpg",
+  ];
+  const rows = [
+    { ...product(1, 1002, "PARENT-100-RED", "", 6), image_data: sharedImages },
+    { ...product(2, 1003, "PARENT-100-BLUE", "", 9), image_data: sharedImages },
+    { ...product(3, 1004, "PARENT-100-WHITE", "", 11), image_data: sharedImages },
+  ];
+  const createManager = (
+    storedSettings: Map<string, unknown>,
+    existingImages: Array<{ image_file: string; sort_order: number }>,
+    uploadedFiles: string[],
+  ) => {
+    const storage = {
+      getDropshipProducts: async () => ({ rows, total: rows.length }),
+      getDropshipProduct: async (id: number) => rows.find((row) => row.id === id),
+      getSetting: async (key: string) => storedSettings.get(key),
+      setSetting: async (key: string, value: unknown) => { storedSettings.set(key, value); },
+    };
+    return new KoleProductSyncManager({
+      storage: storage as any,
+      getBigCommerceCredentials: async () => ({ storeHash: "test-store", headers: { "X-Auth-Token": "test-token" } }),
+      getBigCommerceBrands: async () => [],
+      downloadImage: async () => Buffer.from("source"),
+      createWatermarkedImage: async () => Buffer.from("watermarked"),
+      fetchBigCommerce: async (url: string, init: RequestInit = {}) => {
+        const method = String(init.method ?? "GET").toUpperCase();
+        if (url.endsWith("/products/100?include=images") && method === "GET") {
+          return jsonResponse({ id: 100, images: existingImages });
+        }
+        if (url.endsWith("/products/100/images") && method === "POST") {
+          assert.ok(init.body instanceof FormData);
+          const form = init.body as FormData;
+          const file = form.get("image_file") as File;
+          const sortOrder = Number(form.get("sort_order"));
+          uploadedFiles.push(file.name);
+          existingImages.push({ image_file: file.name, sort_order: sortOrder });
+          return jsonResponse({ id: uploadedFiles.length });
+        }
+        throw new Error(`Unexpected BigCommerce request: ${method} ${url}`);
+      },
+    } as any);
+  };
+  const storedSettings = new Map<string, unknown>([
+    ["dropshipping_product_sync_watermark_logo", "data:image/png;base64,dGVzdA=="],
+  ]);
+  const existingImages: Array<{ image_file: string; sort_order: number }> = [];
+  const uploadedFiles: string[] = [];
+  const manager = createManager(storedSettings, existingImages, uploadedFiles);
+
+  const started = await manager.start("images", 7, [1, 2, 3]);
+  const completed = await waitForJob(manager, started.id);
+  assert.equal(completed?.status, "completed");
+  assert.equal(completed?.photosAdded, 6);
+  assert.equal(uploadedFiles.length, 6);
+  for (const row of rows) {
+    assert.equal(uploadedFiles.filter((name) => name.startsWith(`kole-${row.vendor_sku}-`)).length, 2);
+  }
+
+  const rerun = await manager.start("images", 7, [1, 2, 3]);
+  const rerunCompleted = await waitForJob(manager, rerun.id);
+  assert.equal(rerunCompleted?.status, "completed");
+  assert.equal(rerunCompleted?.photosAdded, 0);
+  assert.equal(uploadedFiles.length, 6);
+
+  const legacyImages = [
+    { image_file: "kole-PARENT-100-RED-1-watermarked.jpg", sort_order: 0 },
+    { image_file: "kole-PARENT-100-RED-2-watermarked.jpg", sort_order: 1 },
+  ];
+  const legacyUploadedFiles: string[] = [];
+  const legacySettings = new Map<string, unknown>([
+    ["dropshipping_product_sync_watermark_logo", "data:image/png;base64,dGVzdA=="],
+    ["dropship_kole_watermarked_photo_sync_100", sharedImages],
+  ]);
+  const legacyManager = createManager(legacySettings, legacyImages, legacyUploadedFiles);
+  const legacyStarted = await legacyManager.start("images", 7, [1, 2, 3]);
+  const legacyCompleted = await waitForJob(legacyManager, legacyStarted.id);
+  assert.equal(legacyCompleted?.status, "completed");
+  assert.equal(legacyCompleted?.photosAdded, 4);
+  assert.equal(legacyImages.length, 6);
+  assert.equal(legacyUploadedFiles.some((name) => name.startsWith("kole-PARENT-100-RED-")), false);
+  assert.equal(legacyUploadedFiles.filter((name) => name.startsWith("kole-PARENT-100-BLUE-")).length, 2);
+  assert.equal(legacyUploadedFiles.filter((name) => name.startsWith("kole-PARENT-100-WHITE-")).length, 2);
+  assert.deepEqual(await legacyManager.getImageSyncHistory(7, [1, 2, 3]), { 1: 2, 2: 2, 3: 2 });
+}
+
 await runVariantDetailsSync();
 await runSiblingConflictSync();
+await runSiblingImageAggregationSync();
 console.log("Kole variant SKU mapping and sync checks passed.");
