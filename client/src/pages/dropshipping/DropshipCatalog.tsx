@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { usePermissions } from "@/hooks/usePermissions";
 import * as api from "@/lib/api";
 import { getKoleExtendedCost } from "@shared/kole-pricing";
 import { Badge } from "@/components/ui/badge";
@@ -100,6 +101,8 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function DropshipCatalogPage() {
   const { toast } = useToast();
+  const { hasPermission } = usePermissions();
+  const canManageDropshipping = hasPermission("dropshipping", "manage");
   const queryClient = useQueryClient();
   const { data: connection } = useQuery({ queryKey: ["dropship-connection"], queryFn: api.getKoleConnection });
   const { data: mappingBrandSetting } = useQuery({ queryKey: ["kole-mapping-brand"], queryFn: api.getKoleMappingBrand });
@@ -206,7 +209,13 @@ export default function DropshipCatalogPage() {
         ...(result.productsFailed || result.duplicateMappingsSkipped ? { variant: "destructive" as const } : {}),
       });
     },
-    onError: (mutationError: any) => toast({ title: "Details sync failed", description: mutationError.message, variant: "destructive" }),
+    onError: (mutationError: any) => toast({
+      title: "Details sync failed",
+      description: mutationError.message === "Forbidden"
+        ? "Your account needs the Dropshipping: Manage permission to run this sync. Ask an administrator to grant it."
+        : mutationError.message,
+      variant: "destructive",
+    }),
   });
 
   const updateStatus = useMutation({
@@ -426,12 +435,17 @@ export default function DropshipCatalogPage() {
               <p className="text-xs text-slate-500 mt-1">
                 Manually update all mapped BigCommerce products with Kole extended cost, available inventory, non-empty descriptions, and missing photos. Existing photos are kept. Inventory is updated only when BigCommerce uses product-level tracking.
               </p>
+              {!canManageDropshipping && (
+                <p className="text-xs text-amber-700 mt-2">
+                  Requires the Dropshipping: Manage permission. Ask an administrator to grant access.
+                </p>
+              )}
             </div>
             <Button
               variant="outline"
               className="shrink-0"
               onClick={() => setDetailsSyncConfirmOpen(true)}
-              disabled={syncMappedDetails.isPending || runSkuMapping.isPending || sync.isPending || uploadCsv.isPending || createDrafts.isPending}
+              disabled={!canManageDropshipping || syncMappedDetails.isPending || runSkuMapping.isPending || sync.isPending || uploadCsv.isPending || createDrafts.isPending}
             >
               {syncMappedDetails.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1.5" />}
               {syncMappedDetails.isPending ? "Refreshing details…" : "Sync all mapped products"}
