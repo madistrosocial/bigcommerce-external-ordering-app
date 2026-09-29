@@ -273,6 +273,22 @@ export type KoleProductMappingResult = {
   failed: number;
 };
 
+export type KoleDetailsSyncResult = {
+  ok: boolean;
+  productsScanned: number;
+  productsUpdated: number;
+  productsFailed: number;
+  productsUnchanged: number;
+  photosAdded: number;
+  costPricesUpdated: number;
+  descriptionsUpdated: number;
+  inventoryUpdated: number;
+  inventorySkipped: number;
+  inventoryUnavailable: number;
+  duplicateMappingsSkipped: number;
+  issueSamples: Array<{ sku: string; bigcommerceProductId: number; message: string }>;
+};
+
 export function getKoleMappingBrand() {
   return dropshipRequest<{ brandName: string }>("/dropshipping/kole/mapping-brand");
 }
@@ -281,6 +297,13 @@ export function mapExistingKoleProducts(brandName: string) {
   return dropshipRequest<KoleProductMappingResult>("/dropshipping/kole/products/map-existing", {
     method: "POST",
     body: JSON.stringify({ brandName }),
+  });
+}
+
+export function syncMappedKoleDetails() {
+  return dropshipRequest<KoleDetailsSyncResult>("/dropshipping/kole/products/sync-details", {
+    method: "POST",
+    body: JSON.stringify({}),
   });
 }
 
