@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
+import { getKoleExtendedCost } from "@shared/kole-pricing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -64,11 +65,7 @@ function minimumQuantity(product: api.DropshipProduct): number | null {
 }
 
 function extendedSupplierCost(product: api.DropshipProduct) {
-  const raw = product.raw_data || {};
-  const hasExtendedPrice = Object.prototype.hasOwnProperty.call(raw, "ext_price");
-  const value = hasExtendedPrice ? raw.ext_price : product.cost;
-  const cost = Number(String(value ?? "").trim().replace(/[$,]/g, ""));
-  return Number.isFinite(cost) && cost > 0 ? cost : null;
+  return getKoleExtendedCost(product.raw_data, product.cost);
 }
 
 function suggestedRetailPrice(product: api.DropshipProduct) {

@@ -11,6 +11,7 @@ import {
   type InsertInventoryRemoveLog,
   type InsertProductLinkLog,
 } from "@shared/schema";
+import { getKoleExtendedCost } from "@shared/kole-pricing";
 import { resolveBigCommerceOrderLinePrice } from "./sales-report-pricing";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
@@ -1423,7 +1424,7 @@ export async function registerRoutes(
                 categories: [requested.categoryId],
                 sku: product.vendor_sku,
                 description: product.description,
-                cost_price: product.cost == null ? undefined : Number(product.cost),
+                cost_price: getKoleExtendedCost(raw, product.cost) ?? undefined,
                 upc: product.upc || undefined,
                 inventory_tracking: inventoryWasProvided ? "product" : "none",
                 ...(inventoryWasProvided ? { inventory_level: product.inventory } : {}),

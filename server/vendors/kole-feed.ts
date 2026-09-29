@@ -1,4 +1,5 @@
 import type { KoleProduct } from "./kole-imports";
+import { getKoleExtendedCost } from "@shared/kole-pricing";
 
 export const KOLE_CSV_FEED_URL = "https://www.koleimports.com/dropship/feed/downloadfeed";
 export const MAX_KOLE_FEED_BYTES = 50 * 1024 * 1024;
@@ -116,7 +117,7 @@ export function parseKoleFeedCsv(csv: string): KoleProduct[] {
       .map((url) => String(url ?? "").trim())
       .filter((url) => /^https:\/\//i.test(url));
     const rawInventory = String(record.inventory ?? "").trim();
-    const cost = String(record[costColumn] ?? "").trim();
+    const extendedCost = getKoleExtendedCost(record);
     const itemWeight = String(record.item_weight ?? "").trim();
 
     products.push({
@@ -127,7 +128,7 @@ export function parseKoleFeedCsv(csv: string): KoleProduct[] {
       brand: String(record.brand ?? "").trim() || null,
       upc: String(record.upc ?? "").trim() || null,
       inventory: parseInventory(rawInventory),
-      cost: cost && Number.isFinite(Number(cost)) ? cost : null,
+      cost: extendedCost === null ? null : String(extendedCost),
       tierData: [],
       imageData: images,
       category: String(record.category ?? "").trim() || null,
