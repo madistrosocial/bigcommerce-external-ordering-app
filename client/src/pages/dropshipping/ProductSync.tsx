@@ -136,6 +136,7 @@ export default function ProductSyncPage() {
   const [page, setPage] = useState(1);
   const [logoDraft, setLogoDraft] = useState<string | null>(null);
   const [forceImageReupload, setForceImageReupload] = useState(false);
+  const [selectAllPending, setSelectAllPending] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -251,7 +252,7 @@ export default function ProductSyncPage() {
   const totalPages = Math.max(Math.ceil((productsQuery.data?.total ?? 0) / PAGE_SIZE), 1);
   const progress = job?.total ? Math.min(100, Math.round((job.processed / job.total) * 100)) : 0;
   const logoUrl = logoDraft ?? logoQuery.data?.dataUrl ?? null;
-  const syncPending = startSync.isPending || latestQuery.isLoading || jobQuery.isLoading || job?.status === "running";
+  const syncPending = selectAllPending || startSync.isPending || latestQuery.isLoading || jobQuery.isLoading || job?.status === "running";
   const imageSyncReady = !!logoQuery.data?.dataUrl && !logoDraft;
 
   useEffect(() => {
@@ -289,6 +290,55 @@ export default function ProductSyncPage() {
 
   const clearProductSelection = () => {
     setSelectedProductIdsByKind((current) => ({ ...current, [kind]: new Set() }));
+  };
+
+  const selectAllMappedListings = async () => {
+    if (!canManage || syncPending || productsQuery.isFetching || !productsQuery.data?.total) return;
+    const targetKind = kind;
+    const searchTerm = appliedSearch;
+    setSelectAllPending(true);
+    try {
+      const pageSize = 100;
+      const params = {
+        limit: pageSize,
+        imported: true as const,
+        ...(searchTerm ? { search: searchTerm } : {}),
+      };
+      const firstPage = await api.getKoleProducts({ ...params, page: 1 });
+      const pageCount = Math.ceil(firstPage.total / pageSize);
+      const selectedIds = new Set(
+        firstPage.rows
+          .filter((product) => !!product.bigcommerce_product_id)
+          .map((product) => product.id),
+      );
+      for (let pageNumber = 2; pageNumber <= pageCount; pageNumber++) {
+        const result = await api.getKoleProducts({ ...params, page: pageNumber });
+        for (const product of result.rows) {
+          if (product.bigcommerce_product_id) selectedIds.add(product.id);
+        }
+      }
+      if (selectedIds.size === 0) {
+        toast({ title: "No mapped listings to select" });
+        return;
+      }
+      setSelectedProductIdsByKind((current) => {
+        const next = new Set(current[targetKind]);
+        selectedIds.forEach((id) => next.add(id));
+        return { ...current, [targetKind]: next };
+      });
+      toast({
+        title: "Mapped listings selected",
+        description: `${selectedIds.size.toLocaleString()} ${searchTerm ? "matching " : ""}listing${selectedIds.size === 1 ? "" : "s"} selected across all pages for ${targetKind === "details" ? "Details Sync" : "Image Sync"}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Could not select all mapped listings",
+        description: (error as Error)?.message || "Try again in a moment.",
+        variant: "destructive",
+      });
+    } finally {
+      setSelectAllPending(false);
+    }
   };
 
   const handleLogoFile = (file?: File) => {
@@ -590,7 +640,7 @@ export default function ProductSyncPage() {
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">{kind === "details" ? "Details sync" : "Image sync"} · results</p>
               <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#243b32]">Mapped products</h2>
               <p className="mt-1 text-xs text-slate-500">
-                {selectedProductIds.size.toLocaleString()} selected for this sync. Selection stays active across pages and searches.
+                {selectedProductIds.size.toLocaleString()} selected for this sync. {appliedSearch ? "Select all matching listings across pages or check individual listings." : "Select all mapped listings across pages or check individual listings."}
               </p>
               {kind === "images" && imageHistoryQuery.isFetching && (
                 <p className="mt-1 text-[11px] text-slate-500">Checking previous image uploads…</p>
@@ -601,12 +651,26 @@ export default function ProductSyncPage() {
                 </p>
               )}
             </div>
-            <div className="flex w-full items-center gap-2 sm:w-auto">
-              {selectedProductIds.size > 0 && (
-                <Button variant="ghost" size="sm" onClick={clearProductSelection} disabled={!canManage || syncPending}>
-                  Clear selection
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={selectAllMappedListings}
+                  disabled={!canManage || syncPending || productsQuery.isFetching || !productsQuery.data?.total}
+                  aria-label={`Select all ${productsQuery.data?.total ?? 0} mapped listings${appliedSearch ? " matching the current search" : ""} across all pages`}
+                  className="shrink-0"
+                >
+                  {selectAllPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  {selectAllPending ? "Selecting…" : appliedSearch ? "Select all matches" : "Select all mapped"}
+                  <span className="font-mono text-[10px]">({productsQuery.data?.total ?? 0})</span>
                 </Button>
-              )}
+                {selectedProductIds.size > 0 && (
+                  <Button variant="ghost" size="sm" onClick={clearProductSelection} disabled={!canManage || syncPending}>
+                    Clear selection
+                  </Button>
+                )}
+              </div>
               <div className="relative w-full sm:max-w-xs">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search SKU or product name" aria-label="Search mapped products by SKU or product name" className="h-10 border-slate-200 bg-white pl-9" />
