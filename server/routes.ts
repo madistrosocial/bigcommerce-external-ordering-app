@@ -76,6 +76,7 @@ import {
   type KoleProductSyncField,
   type KoleProductSyncKind,
 } from "./koleProductSync";
+import { buildBigCommerceSkuIndex, normalizeKoleSku } from "./koleSkuMapping";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 import { MARKETING_ACTION_PERMS, MARKETING_LEGACY_PAGE_GRANTS } from "@shared/marketing-permissions";
 import { dateOnlyInTimeZone, parseDateTimeLocal } from "@shared/timezone";
@@ -1584,10 +1585,11 @@ export async function registerRoutes(
       await storage.setSetting("dropship_kole_mapping_brand_name", brandName);
 
       const pageSize = 250;
-      const bigCommerceProducts: Array<{ id: number; sku: string }> = [];
+      const bigCommerceProductData: unknown[] = [];
+      const bigCommerceProductIds: number[] = [];
       let scanned = 0;
       for (let page = 1; ; page++) {
-        const url = `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?brand_id=${brandId}&include_fields=id,sku,brand_id&limit=${pageSize}&page=${page}`;
+        const url = `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?brand_id=${brandId}&include=variants&limit=${pageSize}&page=${page}`;
         const response = await fetch(url, { headers });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -1598,7 +1600,8 @@ export async function registerRoutes(
         for (const item of pageProducts) {
           const id = Number(item?.id);
           if (!Number.isInteger(id) || id <= 0) continue;
-          bigCommerceProducts.push({ id, sku: String(item?.sku ?? "").trim() });
+          bigCommerceProductData.push(item);
+          bigCommerceProductIds.push(id);
         }
 
         const totalPages = Number(payload?.meta?.pagination?.total_pages);
@@ -1608,18 +1611,8 @@ export async function registerRoutes(
         ) break;
       }
 
-      const productsByBigCommerceSku = new Map<string, Array<{ id: number; sku: string }>>();
-      let productsWithoutSku = 0;
-      for (const product of bigCommerceProducts) {
-        const normalizedSku = product.sku.toLowerCase();
-        if (!normalizedSku) {
-          productsWithoutSku++;
-          continue;
-        }
-        const matches = productsByBigCommerceSku.get(normalizedSku) ?? [];
-        matches.push(product);
-        productsByBigCommerceSku.set(normalizedSku, matches);
-      }
+      const { productsBySku: productsByBigCommerceSku, productsWithoutSku } =
+        buildBigCommerceSkuIndex(bigCommerceProductData);
 
       const vendor = await getKoleVendor();
       const localProducts = await storage.getDropshipProductsBySkus(
@@ -1628,7 +1621,7 @@ export async function registerRoutes(
       );
       const localProductsBySku = new Map<string, typeof localProducts>();
       for (const product of localProducts) {
-        const normalizedSku = product.vendor_sku.trim().toLowerCase();
+        const normalizedSku = normalizeKoleSku(product.vendor_sku);
         const matches = localProductsBySku.get(normalizedSku) ?? [];
         matches.push(product);
         localProductsBySku.set(normalizedSku, matches);
@@ -1636,7 +1629,7 @@ export async function registerRoutes(
 
       const alreadyMappedProducts = await storage.getDropshipProductsByBigCommerceIds(
         vendor.id,
-        bigCommerceProducts.map((product) => product.id),
+        bigCommerceProductIds,
       );
       const localProductsByBigCommerceId = new Map<number, typeof alreadyMappedProducts>();
       for (const product of alreadyMappedProducts) {
@@ -1657,7 +1650,7 @@ export async function registerRoutes(
         mappedCatalogProducts.push(...mappedPage.rows);
         if (mappedPage.rows.length === 0 || mappedCatalogProducts.length >= mappedPage.total) break;
       }
-      const scannedBigCommerceIds = new Set(bigCommerceProducts.map((product) => product.id));
+      const scannedBigCommerceIds = new Set(bigCommerceProductIds);
       const staleBigCommerceIds = Array.from(new Set(mappedCatalogProducts
         .map((product) => Number(product.bigcommerce_product_id))
         .filter((id) => Number.isSafeInteger(id) && id > 0 && !scannedBigCommerceIds.has(id))));
@@ -1684,21 +1677,29 @@ export async function registerRoutes(
       let ambiguous = 0;
       let failed = 0;
 
-      for (const [sku, bcProducts] of productsByBigCommerceSku) {
+      for (const [sku, bcTargets] of productsByBigCommerceSku) {
         const localMatches = localProductsBySku.get(sku) ?? [];
         if (localMatches.length === 0) {
-          unmatched += bcProducts.length;
+          unmatched += bcTargets.length;
           continue;
         }
-        if (bcProducts.length !== 1 || localMatches.length !== 1) {
+        if (bcTargets.length !== 1 || localMatches.length !== 1) {
           ambiguous++;
           continue;
         }
 
-        const bcProduct = bcProducts[0];
+        const bcTarget = bcTargets[0];
         const localProduct = localMatches[0];
-        const conflictingOwners = (localProductsByBigCommerceId.get(bcProduct.id) ?? [])
-          .filter((owner) => owner.id !== localProduct.id);
+        const conflictingOwners = (localProductsByBigCommerceId.get(bcTarget.productId) ?? [])
+          .filter((owner) => {
+            if (owner.id === localProduct.id) return false;
+            const ownerVariantId = owner.bigcommerce_variant_id == null
+              ? null
+              : Number(owner.bigcommerce_variant_id);
+            return bcTarget.variantId === null
+              || ownerVariantId === null
+              || ownerVariantId === bcTarget.variantId;
+          });
         if (conflictingOwners.length) {
           ambiguous++;
           continue;
@@ -1706,13 +1707,22 @@ export async function registerRoutes(
 
         matched++;
         const previousId = Number(localProduct.bigcommerce_product_id) || null;
+        const previousVariantId = localProduct.bigcommerce_variant_id == null
+          ? null
+          : Number(localProduct.bigcommerce_variant_id);
+        const mappingWasCurrent = previousId === bcTarget.productId
+          && previousVariantId === bcTarget.variantId;
         try {
-          const result = await storage.mapDropshipProductToBigCommerce(localProduct.id, bcProduct.id);
+          const result = await storage.mapDropshipProductToBigCommerce(
+            localProduct.id,
+            bcTarget.productId,
+            bcTarget.variantId,
+          );
           if (!result) {
             failed++;
-          } else if (previousId === bcProduct.id) {
+          } else if (mappingWasCurrent) {
             alreadyMapped++;
-          } else if (previousId) {
+          } else if (previousId || previousVariantId !== null) {
             remapped++;
           } else {
             mapped++;

@@ -176,6 +176,7 @@ export interface DropshipProduct {
   is_closeout: boolean;
   vendor_modified_at?: string | null;
   bigcommerce_product_id?: number | null;
+  bigcommerce_variant_id?: number | null;
   status: "available" | "queued" | "mapped" | "unavailable" | "error" | string;
   raw_data: Record<string, unknown>;
   created_at: string;

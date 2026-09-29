@@ -141,6 +141,7 @@ export const dropshipProducts = pgTable("dropship_products", {
   is_closeout: boolean("is_closeout").notNull().default(false),
   vendor_modified_at: timestamp("vendor_modified_at"),
   bigcommerce_product_id: integer("bigcommerce_product_id"),
+  bigcommerce_variant_id: integer("bigcommerce_variant_id"),
   status: text("status").notNull().default("available"), // available | queued | mapped | unavailable | error
   raw_data: jsonb("raw_data").notNull().default({}),
   created_at: timestamp("created_at").notNull().defaultNow(),

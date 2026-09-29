@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { getKoleExtendedCost } from "@shared/kole-pricing";
 import type { DropshipProduct } from "@shared/schema";
 import type { IStorage } from "./storage";
+import { normalizeKoleSku } from "./koleSkuMapping";
 
 export type KoleProductSyncKind = "details" | "images";
 export type KoleProductSyncField = "cost" | "description" | "inventory" | "identity";
@@ -40,6 +41,7 @@ export interface KoleProductSyncItem {
   title: string;
   upc: string;
   bigcommerceProductId: number;
+  bigcommerceVariantId: number | null;
   status: KoleProductSyncItemStatus;
   updatedFields: string[];
   photosAdded: number;
@@ -81,6 +83,40 @@ interface InternalProductSyncJob {
 interface ProductCandidate {
   product: DropshipProduct;
   item: KoleProductSyncItem;
+}
+
+function productRawData(product: DropshipProduct): Record<string, unknown> {
+  return product.raw_data && typeof product.raw_data === "object" && !Array.isArray(product.raw_data)
+    ? product.raw_data as Record<string, unknown>
+    : {};
+}
+
+function conflictingParentFields(
+  candidates: ProductCandidate[],
+  selectedFields: KoleProductSyncField[],
+): Set<KoleProductSyncField> {
+  const conflicts = new Set<KoleProductSyncField>();
+  if (candidates.length < 2) return conflicts;
+
+  const hasMultiple = (values: string[]) => new Set(values.filter(Boolean)).size > 1;
+  if (selectedFields.includes("cost")) {
+    const values = candidates
+      .map(({ product }) => getKoleExtendedCost(productRawData(product), product.cost))
+      .filter((value): value is number => value !== null)
+      .map((value) => (Math.round((value + Number.EPSILON) * 100) / 100).toFixed(2));
+    if (hasMultiple(values)) conflicts.add("cost");
+  }
+  if (selectedFields.includes("description")) {
+    const values = candidates.map(({ product }) => String(product.description ?? "").trim());
+    if (hasMultiple(values)) conflicts.add("description");
+  }
+  if (selectedFields.includes("identity")) {
+    const titles = candidates.map(({ product }) => String(product.title ?? "").trim());
+    const upcs = candidates.map(({ product }) => String(product.upc ?? "").trim());
+    const brands = candidates.map(({ product }) => productIdentityBrandKey(product.brand));
+    if (hasMultiple(titles) || hasMultiple(upcs) || hasMultiple(brands)) conflicts.add("identity");
+  }
+  return conflicts;
 }
 
 interface ProductOutcome {
@@ -599,11 +635,13 @@ export class KoleProductSyncManager {
         page++;
       }
 
-      const ownerCountByBcId = new Map<number, number>();
+      const ownersByBcId = new Map<number, DropshipProduct[]>();
       for (const product of products) {
         const bcId = Number(product.bigcommerce_product_id);
         if (Number.isInteger(bcId) && bcId > 0) {
-          ownerCountByBcId.set(bcId, (ownerCountByBcId.get(bcId) ?? 0) + 1);
+          const owners = ownersByBcId.get(bcId) ?? [];
+          owners.push(product);
+          ownersByBcId.set(bcId, owners);
         }
       }
 
@@ -617,6 +655,9 @@ export class KoleProductSyncManager {
           title: String(product?.title ?? `Product #${productId}`),
           upc: String(product?.upc ?? ""),
           bigcommerceProductId: Number(product?.bigcommerce_product_id) || 0,
+          bigcommerceVariantId: product?.bigcommerce_variant_id == null
+            ? null
+            : Number(product.bigcommerce_variant_id),
           status: product ? "pending" : "skipped",
           updatedFields: [],
           photosAdded: 0,
@@ -641,9 +682,25 @@ export class KoleProductSyncManager {
           job.summary.processed++;
           continue;
         }
-        if ((ownerCountByBcId.get(bcId) ?? 0) !== 1) {
+        const rawVariantId = product.bigcommerce_variant_id;
+        const variantId = rawVariantId == null ? null : Number(rawVariantId);
+        if (rawVariantId != null && (!Number.isSafeInteger(variantId) || (variantId as number) <= 0)) {
           item.status = "skipped";
-          item.error = "Multiple Kole rows map to this BigCommerce product; skipped to avoid conflicting updates.";
+          item.error = "This catalog row has an invalid BigCommerce variant mapping.";
+          job.summary.skipped++;
+          job.summary.processed++;
+          continue;
+        }
+        const conflictingOwner = (ownersByBcId.get(bcId) ?? []).some((owner) => {
+          if (owner.id === product.id) return false;
+          const ownerVariantId = owner.bigcommerce_variant_id == null
+            ? null
+            : Number(owner.bigcommerce_variant_id);
+          return variantId === null || ownerVariantId === null || ownerVariantId === variantId;
+        });
+        if (conflictingOwner) {
+          item.status = "skipped";
+          item.error = "Multiple Kole rows map to the same BigCommerce product or variant; skipped to avoid conflicting updates.";
           job.summary.skipped++;
           job.summary.processed++;
           continue;
@@ -668,39 +725,57 @@ export class KoleProductSyncManager {
           }
         }
 
+        const candidatesByBcId = new Map<number, ProductCandidate[]>();
+        for (const candidate of candidates) {
+          const group = candidatesByBcId.get(candidate.item.bigcommerceProductId) ?? [];
+          group.push(candidate);
+          candidatesByBcId.set(candidate.item.bigcommerceProductId, group);
+        }
+        const candidateGroups = Array.from(candidatesByBcId.values());
         let nextIndex = 0;
-        const workerCount = Math.min(SYNC_CONCURRENCY, candidates.length);
+        const workerCount = Math.min(SYNC_CONCURRENCY, candidateGroups.length);
         await Promise.all(Array.from({ length: workerCount }, async () => {
           while (true) {
             const index = nextIndex++;
-            if (index >= candidates.length) return;
-            const candidate = candidates[index];
-            candidate.item.status = "in_progress";
-            job.summary.currentSku = candidate.item.vendorSku;
-            try {
-              const outcome = job.summary.kind === "details"
-                ? await this.syncDetails(candidate, job.summary.selectedFields, brandMap, brandLoadError)
-                : await this.syncImages(candidate, logoBuffer, job.summary.forceImageReupload === true);
-              candidate.item.status = outcome.status;
-              candidate.item.updatedFields = outcome.updatedFields ?? [];
-              candidate.item.photosAdded = outcome.photosAdded ?? 0;
-              candidate.item.error = outcome.error ?? null;
-            } catch (error) {
-              candidate.item.status = "failed";
-              candidate.item.error = safeError(error);
-            }
+            if (index >= candidateGroups.length) return;
+            const group = candidateGroups[index];
+            const parentFieldConflicts = job.summary.kind === "details"
+              ? conflictingParentFields(group, job.summary.selectedFields)
+              : new Set<KoleProductSyncField>();
+            for (const candidate of group) {
+              candidate.item.status = "in_progress";
+              job.summary.currentSku = candidate.item.vendorSku;
+              try {
+                const outcome = job.summary.kind === "details"
+                  ? await this.syncDetails(
+                    candidate,
+                    job.summary.selectedFields,
+                    brandMap,
+                    brandLoadError,
+                    parentFieldConflicts,
+                  )
+                  : await this.syncImages(candidate, logoBuffer, job.summary.forceImageReupload === true);
+                candidate.item.status = outcome.status;
+                candidate.item.updatedFields = outcome.updatedFields ?? [];
+                candidate.item.photosAdded = outcome.photosAdded ?? 0;
+                candidate.item.error = outcome.error ?? null;
+              } catch (error) {
+                candidate.item.status = "failed";
+                candidate.item.error = safeError(error);
+              }
 
-            job.summary.processed++;
-            if (candidate.item.status === "updated") job.summary.updated++;
-            else if (candidate.item.status === "unchanged") job.summary.unchanged++;
-            else if (candidate.item.status === "failed") job.summary.failed++;
-            else if (candidate.item.status === "skipped") job.summary.skipped++;
-            job.summary.photosAdded += candidate.item.photosAdded;
+              job.summary.processed++;
+              if (candidate.item.status === "updated") job.summary.updated++;
+              else if (candidate.item.status === "unchanged") job.summary.unchanged++;
+              else if (candidate.item.status === "failed") job.summary.failed++;
+              else if (candidate.item.status === "skipped") job.summary.skipped++;
+              job.summary.photosAdded += candidate.item.photosAdded;
 
-            if (job.summary.processed % CHECKPOINT_EVERY === 0) {
-              await this.saveLatest(job, true).catch((error) => {
-                console.error("[Kole Product Sync] could not save progress checkpoint", safeError(error));
-              });
+              if (job.summary.processed % CHECKPOINT_EVERY === 0) {
+                await this.saveLatest(job, true).catch((error) => {
+                  console.error("[Kole Product Sync] could not save progress checkpoint", safeError(error));
+                });
+              }
             }
           }
         }));
@@ -721,9 +796,17 @@ export class KoleProductSyncManager {
     selectedFields: KoleProductSyncField[],
     brandMap: Map<string, number | null> | null,
     brandLoadError: string | null,
+    parentFieldConflicts: Set<KoleProductSyncField>,
   ): Promise<ProductOutcome> {
     const currentMapping = await this.storage.getDropshipProduct(candidate.item.productId);
-    if (!currentMapping || Number(currentMapping.bigcommerce_product_id) !== candidate.item.bigcommerceProductId) {
+    const currentVariantId = currentMapping?.bigcommerce_variant_id == null
+      ? null
+      : Number(currentMapping.bigcommerce_variant_id);
+    if (
+      !currentMapping
+      || Number(currentMapping.bigcommerce_product_id) !== candidate.item.bigcommerceProductId
+      || currentVariantId !== candidate.item.bigcommerceVariantId
+    ) {
       return {
         status: "skipped",
         error: "The BigCommerce mapping changed during this run; this product was skipped.",
@@ -737,14 +820,23 @@ export class KoleProductSyncManager {
       throw new Error(`BigCommerce product lookup failed (${currentResponse.status}).`);
     }
     const currentProduct = currentPayload.data;
-    const raw = candidate.product.raw_data && typeof candidate.product.raw_data === "object" && !Array.isArray(candidate.product.raw_data)
-      ? candidate.product.raw_data as Record<string, unknown>
-      : {};
+    const raw = productRawData(candidate.product);
     const update: Record<string, unknown> = {};
     const fieldLabels: string[] = [];
-    const warnings: string[] = [];
+    const fieldLabelsBySyncField: Record<KoleProductSyncField, string> = {
+      cost: "Extended cost",
+      description: "Description",
+      inventory: "Inventory quantity",
+      identity: "Product identity",
+    };
+    const warnings = Array.from(parentFieldConflicts, (field) =>
+      `${fieldLabelsBySyncField[field]} left unchanged because selected Kole variant SKUs contain conflicting values for this BigCommerce product.`,
+    );
+    const fieldsToSync = selectedFields.filter((field) =>
+      field === "inventory" || !parentFieldConflicts.has(field),
+    );
 
-    if (selectedFields.includes("cost")) {
+    if (fieldsToSync.includes("cost")) {
       const extendedCost = getKoleExtendedCost(raw, candidate.product.cost);
       if (extendedCost !== null) {
         const roundedCost = Math.round((extendedCost + Number.EPSILON) * 100) / 100;
@@ -755,7 +847,7 @@ export class KoleProductSyncManager {
       }
     }
 
-    if (selectedFields.includes("description")) {
+    if (fieldsToSync.includes("description")) {
       const description = String(candidate.product.description ?? "");
       if (description.trim() && String(currentProduct.description ?? "") !== description) {
         update.description = description;
@@ -763,13 +855,46 @@ export class KoleProductSyncManager {
       }
     }
 
-    if (selectedFields.includes("inventory")) {
+    if (fieldsToSync.includes("inventory")) {
       const inventoryProvided = typeof raw.inventoryProvided === "boolean"
         ? raw.inventoryProvided
         : raw.inventory !== undefined && raw.inventory !== null && String(raw.inventory).trim() !== "";
       const inventoryLevel = Number(candidate.product.inventory);
       if (inventoryProvided && Number.isInteger(inventoryLevel) && inventoryLevel >= 0 && inventoryLevel <= 2_147_483_647) {
-        if (currentProduct.inventory_tracking === "product") {
+        const variantId = candidate.item.bigcommerceVariantId;
+        if (variantId !== null) {
+          if (currentProduct.inventory_tracking !== "variant") {
+            warnings.push("Variant inventory left unchanged because BigCommerce is not using variant-level tracking.");
+          } else {
+            const variantUrl = `${productUrl}/variants/${variantId}`;
+            const variantResponse = await this.fetchBigCommerce(variantUrl, { headers });
+            const variantPayload = await variantResponse.json().catch(() => ({}));
+            if (!variantResponse.ok || !variantPayload?.data) {
+              if (variantResponse.status === 404) {
+                warnings.push("Variant inventory left unchanged because the mapped BigCommerce variant no longer exists.");
+              } else {
+                throw new Error(`BigCommerce variant lookup failed (${variantResponse.status}).`);
+              }
+            } else if (
+              Number(variantPayload.data.product_id) !== candidate.item.bigcommerceProductId
+              || normalizeKoleSku(variantPayload.data.sku) !== normalizeKoleSku(candidate.item.vendorSku)
+            ) {
+              warnings.push("Variant inventory left unchanged because the mapped BigCommerce variant no longer matches this SKU.");
+            } else if (Number(variantPayload.data.inventory_level) !== inventoryLevel) {
+              const variantUpdateResponse = await this.fetchBigCommerce(variantUrl, {
+                method: "PUT",
+                headers,
+                body: JSON.stringify({ inventory_level: inventoryLevel }),
+              });
+              if (!variantUpdateResponse.ok) {
+                await variantUpdateResponse.text().catch(() => "");
+                throw new Error(`BigCommerce variant inventory update failed (${variantUpdateResponse.status}).`);
+              }
+              await variantUpdateResponse.arrayBuffer().catch(() => undefined);
+              fieldLabels.push("Variant inventory quantity");
+            }
+          }
+        } else if (currentProduct.inventory_tracking === "product") {
           if (Number(currentProduct.inventory_level) !== inventoryLevel) {
             update.inventory_level = inventoryLevel;
             fieldLabels.push("Inventory quantity");
@@ -782,7 +907,7 @@ export class KoleProductSyncManager {
       }
     }
 
-    if (selectedFields.includes("identity")) {
+    if (fieldsToSync.includes("identity")) {
       const title = String(candidate.product.title ?? "").trim();
       if (title && String(currentProduct.name ?? "") !== title) {
         update.name = title;
@@ -845,7 +970,14 @@ export class KoleProductSyncManager {
   ): Promise<ProductOutcome> {
     if (!logoBuffer) throw new Error("No saved watermark logo was available for this image run.");
     const currentMapping = await this.storage.getDropshipProduct(candidate.item.productId);
-    if (!currentMapping || Number(currentMapping.bigcommerce_product_id) !== candidate.item.bigcommerceProductId) {
+    const currentVariantId = currentMapping?.bigcommerce_variant_id == null
+      ? null
+      : Number(currentMapping.bigcommerce_variant_id);
+    if (
+      !currentMapping
+      || Number(currentMapping.bigcommerce_product_id) !== candidate.item.bigcommerceProductId
+      || currentVariantId !== candidate.item.bigcommerceVariantId
+    ) {
       return {
         status: "skipped",
         error: "The BigCommerce mapping changed during this run; this product was skipped.",
