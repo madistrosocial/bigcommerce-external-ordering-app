@@ -320,7 +320,6 @@ export default function DropshipCatalogPage() {
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" /> Product Catalog</h1>
-          <p className="text-sm text-slate-500 mt-1">Sync the live Kole Imports feed or upload a downloaded CSV into {displayName}, then select products to create hidden, disabled BigCommerce drafts.</p>
         </div>
         <div className="flex gap-2">
           <input
@@ -393,9 +392,6 @@ export default function DropshipCatalogPage() {
               {runSkuMapping.isPending ? "Scanning and mapping…" : "Run SKU mapping"}
             </Button>
           </div>
-          <p className="text-xs text-slate-500">
-            Manually scan every BigCommerce product under this brand and match its SKU to the imported Kole catalog. This updates local links and clears links confirmed to point to deleted BigCommerce products; it does not change BigCommerce products.
-          </p>
           {mappingResult && (
             <div className="rounded-md bg-slate-50 px-3 py-2.5 text-xs text-slate-600 space-y-1">
               <p className="font-medium text-slate-700">
