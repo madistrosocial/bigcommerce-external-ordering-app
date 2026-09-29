@@ -259,6 +259,31 @@ export function getKoleConnection() {
   }>("/dropshipping/kole/connection");
 }
 
+export type KoleProductMappingResult = {
+  ok: boolean;
+  brandName: string;
+  brandId: number;
+  scanned: number;
+  matched: number;
+  mapped: number;
+  remapped: number;
+  alreadyMapped: number;
+  unmatched: number;
+  ambiguous: number;
+  failed: number;
+};
+
+export function getKoleMappingBrand() {
+  return dropshipRequest<{ brandName: string }>("/dropshipping/kole/mapping-brand");
+}
+
+export function mapExistingKoleProducts(brandName: string) {
+  return dropshipRequest<KoleProductMappingResult>("/dropshipping/kole/products/map-existing", {
+    method: "POST",
+    body: JSON.stringify({ brandName }),
+  });
+}
+
 export function getDropshipDashboard() {
   return dropshipRequest<DropshipDashboard>("/dropshipping/dashboard");
 }

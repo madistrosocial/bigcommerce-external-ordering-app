@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChevronLeft, ChevronRight, Eye, Filter, Loader2, Package, Plus, RefreshCw, Search, Upload, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, Filter, Link2, Loader2, Package, Plus, RefreshCw, Search, Upload, X } from "lucide-react";
 
 const PAGE_SIZE = 25;
 const MAX_CSV_UPLOAD_BYTES = 50 * 1024 * 1024;
@@ -101,6 +101,9 @@ export default function DropshipCatalogPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: connection } = useQuery({ queryKey: ["dropship-connection"], queryFn: api.getKoleConnection });
+  const { data: mappingBrandSetting } = useQuery({ queryKey: ["kole-mapping-brand"], queryFn: api.getKoleMappingBrand });
+  const [mappingBrandName, setMappingBrandName] = useState<string | null>(null);
+  const [mappingResult, setMappingResult] = useState<api.KoleProductMappingResult | null>(null);
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [category, setCategory] = useState("");
@@ -170,6 +173,22 @@ export default function DropshipCatalogPage() {
       });
     },
     onError: (mutationError: any) => toast({ title: "CSV upload failed", description: mutationError.message, variant: "destructive" }),
+  });
+
+  const runSkuMapping = useMutation({
+    mutationFn: api.mapExistingKoleProducts,
+    onSuccess: (result) => {
+      setMappingBrandName(result.brandName);
+      setMappingResult(result);
+      queryClient.setQueryData(["kole-mapping-brand"], { brandName: result.brandName });
+      queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
+      toast({
+        title: result.failed ? "SKU mapping finished with errors" : "SKU mapping completed",
+        description: `${result.mapped} linked · ${result.remapped} remapped · ${result.alreadyMapped} already current · ${result.unmatched} unmatched · ${result.ambiguous} ambiguous · ${result.failed} failed`,
+        ...(result.failed ? { variant: "destructive" as const } : {}),
+      });
+    },
+    onError: (mutationError: any) => toast({ title: "SKU mapping failed", description: mutationError.message, variant: "destructive" }),
   });
 
   const updateStatus = useMutation({
@@ -334,6 +353,49 @@ export default function DropshipCatalogPage() {
             <p className="text-sm font-medium text-slate-700">Drop a downloaded Kole CSV feed here, or choose Upload CSV.</p>
             <p className="text-xs text-slate-500">Manual import · up to 50 MB · updates the Vendor Catalog only; it does not create BigCommerce products.</p>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end">
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="kole-mapping-brand">BigCommerce brand name</Label>
+              <Input
+                id="kole-mapping-brand"
+                value={mappingBrandName ?? mappingBrandSetting?.brandName ?? "KCDS"}
+                onChange={(event) => setMappingBrandName(event.target.value)}
+                maxLength={100}
+                placeholder="KCDS"
+              />
+            </div>
+            <Button
+              onClick={() => runSkuMapping.mutate(mappingBrandName ?? mappingBrandSetting?.brandName ?? "KCDS")}
+              disabled={
+                runSkuMapping.isPending
+                || !String(mappingBrandName ?? mappingBrandSetting?.brandName ?? "KCDS").trim()
+                || sync.isPending
+                || uploadCsv.isPending
+                || createDrafts.isPending
+              }
+            >
+              {runSkuMapping.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Link2 className="h-4 w-4 mr-1.5" />}
+              {runSkuMapping.isPending ? "Scanning and mapping…" : "Run SKU mapping"}
+            </Button>
+          </div>
+          <p className="text-xs text-slate-500">
+            Manually scan every BigCommerce product under this brand and match its SKU to the imported Kole catalog. This only creates or remaps local links; it does not change BigCommerce products. You can run it again after deployment.
+          </p>
+          {mappingResult && (
+            <div className="rounded-md bg-slate-50 px-3 py-2.5 text-xs text-slate-600 space-y-1">
+              <p className="font-medium text-slate-700">
+                Last run: {mappingResult.brandName} · {mappingResult.scanned.toLocaleString()} BigCommerce products scanned · {mappingResult.matched.toLocaleString()} unique SKU matches
+              </p>
+              <p>
+                {mappingResult.mapped.toLocaleString()} linked · {mappingResult.remapped.toLocaleString()} remapped · {mappingResult.alreadyMapped.toLocaleString()} already current · {mappingResult.unmatched.toLocaleString()} unmatched · {mappingResult.ambiguous.toLocaleString()} ambiguous · {mappingResult.failed.toLocaleString()} failed
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

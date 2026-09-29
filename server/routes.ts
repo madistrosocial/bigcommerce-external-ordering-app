@@ -1498,7 +1498,7 @@ export async function registerRoutes(
     if (!brandName) return res.status(400).json({ error: "Enter a BigCommerce brand name to scan." });
 
     try {
-      const brands = await getCachedBcBrandOptions();
+      const brands = await getCachedBcBrandOptions(true);
       const matchingBrands = brands.filter((brand) => brand.name.trim().toLowerCase() === brandName.toLowerCase());
       if (matchingBrands.length === 0) {
         return res.status(404).json({ error: `No BigCommerce brand named "${brandName}" was found.` });
@@ -6260,10 +6260,10 @@ export async function registerRoutes(
     return { storeHash, token, headers };
   }
 
-  async function getCachedBcBrandOptions(): Promise<Array<{ id: number; name: string }>> {
+  async function getCachedBcBrandOptions(forceRefresh = false): Promise<Array<{ id: number; name: string }>> {
     const cacheKey = "report_bc_brands_cache";
     const cached = await storage.getSetting(cacheKey);
-    if (cached?.value) {
+    if (!forceRefresh && cached?.value) {
       const { data, ts } = cached.value as any;
       if (Array.isArray(data) && Date.now() - ts < 3600_000) return data;
     }
