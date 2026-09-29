@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 const MAX_REFERENCE_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_LOGO_FILE_BYTES = 2 * 1024 * 1024;
+const LOGO_OVERLAY_SIZE = 1200;
 const ALLOWED_REFERENCE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 type BigCommerceProduct = {
@@ -140,7 +141,7 @@ export default function ImageEditor() {
     if (file.type !== "image/png") {
       toast({
         title: "Use a transparent PNG logo",
-        description: "The logo is placed over the generated image, so upload a PNG with transparency.",
+        description: "Upload a 1200 × 1200 transparent PNG overlay with the logo already positioned.",
         variant: "destructive",
       });
       return;
@@ -148,7 +149,28 @@ export default function ImageEditor() {
     if (file.size > MAX_LOGO_FILE_BYTES) {
       toast({
         title: "Logo file is too large",
-        description: "The transparent PNG logo must be 2 MB or smaller.",
+        description: "The 1200 × 1200 transparent PNG overlay must be 2 MB or smaller.",
+        variant: "destructive",
+      });
+      return;
+    }
+    let hasCorrectOverlaySize = false;
+    try {
+      const bitmap = await createImageBitmap(file);
+      hasCorrectOverlaySize = bitmap.width === LOGO_OVERLAY_SIZE && bitmap.height === LOGO_OVERLAY_SIZE;
+      bitmap.close();
+    } catch {
+      toast({
+        title: "Could not read logo",
+        description: "Choose a valid 1200 × 1200 transparent PNG overlay.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!hasCorrectOverlaySize) {
+      toast({
+        title: "Incorrect logo overlay size",
+        description: "Use a 1200 × 1200 transparent PNG with the logo already positioned where it should appear.",
         variant: "destructive",
       });
       return;
@@ -308,7 +330,7 @@ export default function ImageEditor() {
         throw new Error("The image service returned an invalid result. Please try again.");
       }
       setGeneratedImage(payload.imageDataUrl);
-      toast({ title: "Image ready", description: "Your transparent logo has been added to the lower-right corner." });
+      toast({ title: "Image ready", description: "Your 1200 × 1200 logo overlay was added at its original size and position." });
     } catch (error) {
       toast({
         title: "Image generation failed",
@@ -520,7 +542,9 @@ export default function ImageEditor() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">3. Add your logo</CardTitle>
-              <CardDescription>The editor composites this logo onto the final image after OpenAI finishes.</CardDescription>
+              <CardDescription>
+                Upload the 1200 × 1200 transparent overlay with the logo already positioned. The editor preserves its size and placement.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div
@@ -544,7 +568,7 @@ export default function ImageEditor() {
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-slate-700">{logoFileName || "Drop a transparent PNG logo"}</div>
-                  <div className="mt-1 text-xs text-slate-500">PNG with transparency · 2 MB maximum · placed at the lower-right</div>
+                  <div className="mt-1 text-xs text-slate-500">1200 × 1200 transparent PNG · 2 MB maximum · no logo resizing or repositioning</div>
                 </div>
                 <div className="flex gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={() => logoFileInputRef.current?.click()}>

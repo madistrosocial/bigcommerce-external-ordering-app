@@ -55,3 +55,4 @@
 - [Bulk Order customer override](bulk-order-customer-override.md) — the selected POS customer is authoritative; form identity mismatches warn but do not block the draft.
 - [Marketing typography scale](marketing-font-scale.md) — use 18/14/12/11px for page, section, content, and metadata; retain 14px form controls.
 - [Image model parameter compatibility](image-model-parameter-compatibility.md) — only send options accepted by the configured image model; reference edits omit `input_fidelity`.
+- [Image Editor full-canvas logo overlay](image-editor-logo-overlay.md) — preserve the transparent 1200×1200 PNG's built-in coordinates; match the generated canvas to it.
