@@ -278,7 +278,38 @@ async function generateOpenAiImage(apiKey: string, prompt: string, referenceImag
       throw new ImageEditorError("OpenAI rejected the configured API key or image-generation access.", 502);
     }
     if (response.status === 429) {
-      throw new ImageEditorError("OpenAI is temporarily rate-limited. Wait a moment and try again.", 503);
+      const providerError = body?.error ?? {};
+      const providerCode = String(providerError.code ?? "").toLowerCase();
+      const providerType = String(providerError.type ?? "").toLowerCase();
+      const providerMessage = String(providerError.message ?? "").toLowerCase();
+      const errorDescription = `${providerCode} ${providerType} ${providerMessage}`;
+
+      console.warn("[Image Editor] OpenAI returned HTTP 429:", JSON.stringify({
+        code: providerCode.slice(0, 80) || undefined,
+        type: providerType.slice(0, 80) || undefined,
+        requestId: response.headers.get("x-request-id")?.slice(0, 100) || undefined,
+        retryAfter: response.headers.get("retry-after")?.slice(0, 80) || undefined,
+      }));
+
+      if (
+        /\binsufficient_quota\b|\bbilling_hard_limit_reached\b/.test(errorDescription)
+        || /\b(quota|billing|credit balance|spending limit)\b/.test(providerMessage)
+      ) {
+        throw new ImageEditorError(
+          "The OpenAI API account configured for this app has no available quota. Check its billing status and usage limits, then try again.",
+          503,
+        );
+      }
+      if (/rate_limit_exceeded|rate limit|too many requests|requests per minute/.test(errorDescription)) {
+        throw new ImageEditorError(
+          "OpenAI's image-generation rate limit was reached. Wait a few minutes before retrying; if it keeps happening, check the API account's image-generation limits.",
+          503,
+        );
+      }
+      throw new ImageEditorError(
+        "OpenAI returned a rate-limit response. Wait briefly, then check the API account's billing and usage limits if it persists.",
+        503,
+      );
     }
     const detail = String(body?.error?.message ?? "").replace(/\s+/g, " ").trim().slice(0, 240);
     throw new ImageEditorError(detail || `OpenAI image generation failed (HTTP ${response.status}).`, 502);
