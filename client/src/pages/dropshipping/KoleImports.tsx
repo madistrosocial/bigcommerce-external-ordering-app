@@ -87,7 +87,6 @@ export default function KoleImportsPage() {
         <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
           <Plug className="h-5 w-5 text-indigo-600" /> {displayName}
         </h1>
-        <p className="text-sm text-slate-500 mt-1">Catalog sync currently reads the Kole Imports CSV feed. It updates the Vendor Catalog only; selected products can be created as hidden BigCommerce drafts.</p>
       </div>
 
       <Card className="shadow-sm">
@@ -144,7 +143,6 @@ export default function KoleImportsPage() {
       <Card className="shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold flex items-center gap-2"><KeyRound className="h-4 w-4 text-slate-500" /> Optional API Credentials</CardTitle>
-          <CardDescription>Only needed if Kole API access becomes available. CSV feed sync ignores these values. Credentials are stored server-side; leave fields blank to keep existing values.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid sm:grid-cols-2 gap-4">
