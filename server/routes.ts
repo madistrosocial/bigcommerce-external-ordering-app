@@ -1755,15 +1755,24 @@ export async function registerRoutes(
       ? req.body.kind as KoleProductSyncKind
       : null;
     const fieldsValue = req.body?.fields;
+    const productIdsValue = req.body?.productIds;
     const validFields = new Set<KoleProductSyncField>(["cost", "description", "inventory", "identity"]);
     if (!kind) return res.status(400).json({ error: "Choose a valid Product Sync type." });
+    if (
+      !Array.isArray(productIdsValue)
+      || productIdsValue.length === 0
+      || productIdsValue.some((id: unknown) => typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0)
+      || new Set(productIdsValue).size !== productIdsValue.length
+    ) {
+      return res.status(400).json({ error: "Select at least one valid mapped product." });
+    }
     if (fieldsValue !== undefined && (!Array.isArray(fieldsValue) || fieldsValue.some((field: unknown) => !validFields.has(field as KoleProductSyncField)))) {
       return res.status(400).json({ error: "The selected Product Sync fields are invalid." });
     }
     try {
       const vendor = await getKoleVendor();
       const fields = kind === "details" ? (fieldsValue ?? []) as KoleProductSyncField[] : [];
-      const job = await koleProductSyncManager.start(kind, vendor.id, fields);
+      const job = await koleProductSyncManager.start(kind, vendor.id, productIdsValue as number[], fields);
       res.status(202).json(job);
     } catch (error: any) {
       const status = error instanceof KoleProductSyncError ? error.statusCode : 500;

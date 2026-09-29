@@ -31,6 +31,7 @@ import {
 const PAGE_SIZE = 25;
 type SyncKind = "details" | "images";
 type SyncField = "cost" | "description" | "inventory" | "identity";
+type StartSyncInput = { kind: SyncKind; productIds: number[]; fields: SyncField[] };
 
 type SyncJob = {
   id: number;
@@ -120,6 +121,10 @@ export default function ProductSyncPage() {
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<SyncKind>("details");
   const [selectedFields, setSelectedFields] = useState<SyncField[]>(["cost", "description", "inventory", "identity"]);
+  const [selectedProductIdsByKind, setSelectedProductIdsByKind] = useState<Record<SyncKind, Set<number>>>({
+    details: new Set(),
+    images: new Set(),
+  });
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -177,14 +182,19 @@ export default function ProductSyncPage() {
   });
 
   const startSync = useMutation({
-    mutationFn: () => api.startKoleProductSync(kind, kind === "details" ? selectedFields : undefined) as Promise<SyncJob>,
-    onSuccess: (result) => {
-      queryClient.setQueryData(["kole-product-sync-latest", kind], result);
-      queryClient.setQueryData(["kole-product-sync-job", kind, result.id], result);
-      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-items", kind] });
+    mutationFn: (input: StartSyncInput) => api.startKoleProductSync(
+      input.kind,
+      input.productIds,
+      input.kind === "details" ? input.fields : undefined,
+    ) as Promise<SyncJob>,
+    onSuccess: (result, input) => {
+      setSelectedProductIdsByKind((current) => ({ ...current, [input.kind]: new Set() }));
+      queryClient.setQueryData(["kole-product-sync-latest", input.kind], result);
+      queryClient.setQueryData(["kole-product-sync-job", input.kind, result.id], result);
+      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-items", input.kind] });
       toast({
-        title: kind === "details" ? "Details sync started" : "Image sync started",
-        description: `${result.total.toLocaleString()} mapped products queued for processing.`,
+        title: input.kind === "details" ? "Details sync started" : "Image sync started",
+        description: `${result.total.toLocaleString()} selected mapped product${result.total === 1 ? "" : "s"} queued for processing.`,
       });
     },
     onError: (error: Error) => toast({
@@ -217,6 +227,11 @@ export default function ProductSyncPage() {
   const products = productsQuery.data?.rows ?? [];
   const mappedProducts = products.filter((product) => !!product.bigcommerce_product_id);
   const itemByProductId = new Map((itemsQuery.data?.rows ?? []).map((item) => [item.productId, item]));
+  const selectedProductIds = selectedProductIdsByKind[kind];
+  const currentPageProductIds = mappedProducts.map((product) => product.id);
+  const selectedCurrentPageCount = currentPageProductIds.filter((id) => selectedProductIds.has(id)).length;
+  const allCurrentPageSelected = currentPageProductIds.length > 0 && selectedCurrentPageCount === currentPageProductIds.length;
+  const someCurrentPageSelected = selectedCurrentPageCount > 0 && !allCurrentPageSelected;
   const totalPages = Math.max(Math.ceil((productsQuery.data?.total ?? 0) / PAGE_SIZE), 1);
   const progress = job?.total ? Math.min(100, Math.round((job.processed / job.total) * 100)) : 0;
   const logoUrl = logoDraft ?? logoQuery.data?.dataUrl ?? null;
@@ -227,6 +242,31 @@ export default function ProductSyncPage() {
     setSelectedFields((current) => current.includes(field)
       ? current.filter((item) => item !== field)
       : [...current, field]);
+  };
+
+  const toggleProductSelection = (productId: number) => {
+    setSelectedProductIdsByKind((current) => {
+      const next = new Set(current[kind]);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return { ...current, [kind]: next };
+    });
+  };
+
+  const toggleCurrentPageSelection = () => {
+    setSelectedProductIdsByKind((current) => {
+      const next = new Set(current[kind]);
+      if (allCurrentPageSelected) {
+        currentPageProductIds.forEach((id) => next.delete(id));
+      } else {
+        currentPageProductIds.forEach((id) => next.add(id));
+      }
+      return { ...current, [kind]: next };
+    });
+  };
+
+  const clearProductSelection = () => {
+    setSelectedProductIdsByKind((current) => ({ ...current, [kind]: new Set() }));
   };
 
   const handleLogoFile = (file?: File) => {
@@ -258,7 +298,15 @@ export default function ProductSyncPage() {
       toast({ title: "Select at least one detail", description: "Choose which product details to sync.", variant: "destructive" });
       return;
     }
-    startSync.mutate();
+    if (selectedProductIds.size === 0) {
+      toast({ title: "Select mapped products", description: "Choose at least one listing below to sync.", variant: "destructive" });
+      return;
+    }
+    startSync.mutate({
+      kind,
+      productIds: Array.from(selectedProductIds),
+      fields: selectedFields,
+    });
   };
 
   return (
@@ -311,15 +359,15 @@ export default function ProductSyncPage() {
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">Details sync</p>
                       <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#243b32]">Choose what to update</h2>
-                      <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Only the selected fields will be sent for mapped products.</p>
+                      <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Select listings below. Only those products and the selected fields will be synced.</p>
                     </div>
                     <Button
                       onClick={startCurrentSync}
-                      disabled={!canManage || syncPending || selectedFields.length === 0}
+                      disabled={!canManage || syncPending || selectedFields.length === 0 || selectedProductIds.size === 0}
                       className="h-10 w-full shrink-0 bg-[#315f4d] text-white hover:bg-[#274f40] sm:w-auto"
                     >
                       {startSync.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                      {job?.status === "running" ? "Sync in progress" : startSync.isPending ? "Starting sync" : "Start details sync"}
+                      {job?.status === "running" ? "Sync in progress" : startSync.isPending ? "Starting sync" : `Start details sync${selectedProductIds.size ? ` · ${selectedProductIds.size}` : ""}`}
                     </Button>
                   </div>
                   <div className="mt-5 grid gap-2 sm:grid-cols-2">
@@ -382,11 +430,11 @@ export default function ProductSyncPage() {
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">Image sync</p>
                       <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#243b32]">Apply the saved logo overlay</h2>
-                      <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Images are prepared on a 1200 × 1200 white-padded canvas with the saved transparent logo overlay.</p>
+                      <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Select listings below. Images are prepared on a 1200 × 1200 white-padded canvas with the saved transparent logo overlay.</p>
                     </div>
-                    <Button onClick={startCurrentSync} disabled={!canManage || syncPending || !imageSyncReady} className="h-10 w-full shrink-0 bg-[#315f4d] text-white hover:bg-[#274f40] sm:w-auto">
+                    <Button onClick={startCurrentSync} disabled={!canManage || syncPending || !imageSyncReady || selectedProductIds.size === 0} className="h-10 w-full shrink-0 bg-[#315f4d] text-white hover:bg-[#274f40] sm:w-auto">
                       {startSync.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
-                      {job?.status === "running" ? "Sync in progress" : startSync.isPending ? "Starting sync" : "Start image sync"}
+                      {job?.status === "running" ? "Sync in progress" : startSync.isPending ? "Starting sync" : `Start image sync${selectedProductIds.size ? ` · ${selectedProductIds.size}` : ""}`}
                     </Button>
                   </div>
 
@@ -493,10 +541,20 @@ export default function ProductSyncPage() {
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">{kind === "details" ? "Details sync" : "Image sync"} · results</p>
               <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#243b32]">Mapped products</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                {selectedProductIds.size.toLocaleString()} selected for this sync. Selection stays active across pages and searches.
+              </p>
             </div>
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search SKU or product name" aria-label="Search mapped products by SKU or product name" className="h-10 border-slate-200 bg-white pl-9" />
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              {selectedProductIds.size > 0 && (
+                <Button variant="ghost" size="sm" onClick={clearProductSelection} disabled={!canManage || syncPending}>
+                  Clear selection
+                </Button>
+              )}
+              <div className="relative w-full sm:max-w-xs">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search SKU or product name" aria-label="Search mapped products by SKU or product name" className="h-10 border-slate-200 bg-white pl-9" />
+              </div>
             </div>
           </div>
 
@@ -520,7 +578,15 @@ export default function ProductSyncPage() {
               </div>
             ) : (
               <>
-                <div className="hidden grid-cols-[minmax(0,1fr)_150px_170px] gap-4 border-b border-slate-200 bg-[#f7f9f7] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 md:grid">
+                <div className="hidden grid-cols-[36px_minmax(0,1fr)_150px_170px] gap-4 border-b border-slate-200 bg-[#f7f9f7] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 md:grid">
+                  <div className="flex items-center">
+                    <Checkbox
+                      checked={allCurrentPageSelected ? true : someCurrentPageSelected ? "indeterminate" : false}
+                      onCheckedChange={toggleCurrentPageSelection}
+                      disabled={!canManage || syncPending}
+                      aria-label="Select all mapped products on this page"
+                    />
+                  </div>
                   <span>Product</span><span>Sync status</span><span>Result</span>
                 </div>
                 <div className="divide-y divide-slate-100">
@@ -528,19 +594,27 @@ export default function ProductSyncPage() {
                     const item = itemByProductId.get(product.id);
                     const status = item?.status;
                     return (
-                      <article key={product.id} className="grid gap-3 px-4 py-4 transition-colors hover:bg-[#fbfcfb] md:grid-cols-[minmax(0,1fr)_150px_170px] md:items-center md:gap-4 md:px-5">
-                        <div className="min-w-0">
+                      <article key={product.id} className="grid grid-cols-[20px_minmax(0,1fr)] gap-x-3 gap-y-3 px-4 py-4 transition-colors hover:bg-[#fbfcfb] md:grid-cols-[36px_minmax(0,1fr)_150px_170px] md:items-center md:gap-4 md:px-5">
+                        <div className="row-span-3 flex items-center justify-center md:row-span-1">
+                          <Checkbox
+                            checked={selectedProductIds.has(product.id)}
+                            onCheckedChange={() => toggleProductSelection(product.id)}
+                            disabled={!canManage || syncPending}
+                            aria-label={`Select ${product.title || product.vendor_sku || "product"} for ${kind === "details" ? "details" : "image"} sync`}
+                          />
+                        </div>
+                        <div className="col-start-2 min-w-0">
                           <p className="truncate text-sm font-semibold text-slate-800">{product.title || item?.title || "Untitled product"}</p>
                           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
                             <span>SKU <span className="font-mono font-medium text-slate-700">{product.vendor_sku}</span></span>
                             <span>BigCommerce <span className="font-mono text-slate-700">#{product.bigcommerce_product_id}</span></span>
                           </div>
                         </div>
-                        <div className="flex items-center justify-between gap-2 md:block">
+                        <div className="col-start-2 flex items-center justify-between gap-2 md:col-start-3 md:block">
                           <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400 md:hidden">Status</span>
                           <SyncStatus status={status} />
                         </div>
-                        <div className="flex min-w-0 items-start justify-between gap-3 md:block">
+                        <div className="col-start-2 flex min-w-0 items-start justify-between gap-3 md:col-start-4 md:block">
                           <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400 md:hidden">Result</span>
                           <div className="min-w-0 text-right md:text-left">
                             {item ? (

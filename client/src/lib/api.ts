@@ -342,10 +342,14 @@ export function getKoleProductSyncItems(
   );
 }
 
-export function startKoleProductSync(kind: KoleProductSyncKind, fields?: KoleProductSyncField[]) {
+export function startKoleProductSync(
+  kind: KoleProductSyncKind,
+  productIds: number[],
+  fields?: KoleProductSyncField[],
+) {
   return dropshipRequest<KoleProductSyncJobSummary>("/dropshipping/product-sync/jobs", {
     method: "POST",
-    body: JSON.stringify({ kind, ...(fields ? { fields } : {}) }),
+    body: JSON.stringify({ kind, productIds, ...(fields ? { fields } : {}) }),
   });
 }
 

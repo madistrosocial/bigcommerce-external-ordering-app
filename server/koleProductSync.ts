@@ -388,10 +388,22 @@ export class KoleProductSyncManager {
   async start(
     kind: KoleProductSyncKind,
     vendorId: number,
+    selectedProductIds: number[],
     selectedFields: KoleProductSyncField[] = [],
   ): Promise<KoleProductSyncJobSummary> {
     if (this.activeJobId !== null || this.isStarting) {
       throw new KoleProductSyncError("A Product Sync job is already running.", 409);
+    }
+    if (
+      !Array.isArray(selectedProductIds)
+      || selectedProductIds.length === 0
+      || selectedProductIds.some((id) => !Number.isSafeInteger(id) || id <= 0)
+    ) {
+      throw new KoleProductSyncError("Select at least one valid mapped product.");
+    }
+    const productIds = Array.from(new Set(selectedProductIds));
+    if (productIds.length !== selectedProductIds.length) {
+      throw new KoleProductSyncError("The selected product list contains duplicates.");
     }
     if (kind === "details" && selectedFields.length === 0) {
       throw new KoleProductSyncError("Select at least one product detail to sync.");
@@ -406,12 +418,6 @@ export class KoleProductSyncManager {
         logoBuffer = dataUrlBuffer(logo.dataUrl);
         if (!logoBuffer) throw new KoleProductSyncError("Save a transparent PNG logo before starting image sync.");
       }
-      const firstPage = await this.storage.getDropshipProducts({
-        vendorId,
-        page: 1,
-        limit: 1,
-        imported: true,
-      });
       const id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
       createdJobId = id;
       const now = new Date().toISOString();
@@ -419,7 +425,7 @@ export class KoleProductSyncManager {
         id,
         kind,
         status: "running",
-        total: firstPage.total,
+        total: productIds.length,
         processed: 0,
         updated: 0,
         unchanged: 0,
@@ -438,7 +444,7 @@ export class KoleProductSyncManager {
       this.activeJobId = id;
       await this.saveLatest(job, false);
       this.isStarting = false;
-      void this.run(job, vendorId, logoBuffer).catch((error) => {
+      void this.run(job, vendorId, productIds, logoBuffer).catch((error) => {
         void this.failUnexpectedly(job, error);
       });
       return publicSummary(job);
@@ -546,7 +552,12 @@ export class KoleProductSyncManager {
     await this.storage.setSetting(LATEST_SETTING_KEYS[job.summary.kind], value);
   }
 
-  private async run(job: InternalProductSyncJob, vendorId: number, logoBuffer: Buffer | null): Promise<void> {
+  private async run(
+    job: InternalProductSyncJob,
+    vendorId: number,
+    selectedProductIds: number[],
+    logoBuffer: Buffer | null,
+  ): Promise<void> {
     try {
       const products: DropshipProduct[] = [];
       let page = 1;
@@ -574,23 +585,32 @@ export class KoleProductSyncManager {
         }
       }
 
+      const productById = new Map(products.map((product) => [product.id, product]));
       const candidates: ProductCandidate[] = [];
-      job.items = products.map((product) => ({
-        productId: product.id,
-        vendorSku: String(product.vendor_sku ?? ""),
-        title: String(product.title ?? ""),
-        upc: String(product.upc ?? ""),
-        bigcommerceProductId: Number(product.bigcommerce_product_id) || 0,
-        status: "pending",
-        updatedFields: [],
-        photosAdded: 0,
-        error: null,
-      }));
+      job.items = selectedProductIds.map((productId) => {
+        const product = productById.get(productId);
+        return {
+          productId,
+          vendorSku: String(product?.vendor_sku ?? ""),
+          title: String(product?.title ?? `Product #${productId}`),
+          upc: String(product?.upc ?? ""),
+          bigcommerceProductId: Number(product?.bigcommerce_product_id) || 0,
+          status: product ? "pending" : "skipped",
+          updatedFields: [],
+          photosAdded: 0,
+          error: product ? null : "This product is no longer mapped. Refresh the list and select it again.",
+        };
+      });
       job.summary.total = job.items.length;
 
-      for (let index = 0; index < products.length; index++) {
-        const product = products[index];
+      for (let index = 0; index < job.items.length; index++) {
         const item = job.items[index];
+        const product = productById.get(item.productId);
+        if (!product) {
+          job.summary.skipped++;
+          job.summary.processed++;
+          continue;
+        }
         const bcId = Number(product.bigcommerce_product_id);
         if (!Number.isInteger(bcId) || bcId <= 0) {
           item.status = "skipped";
