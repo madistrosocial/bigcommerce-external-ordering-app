@@ -1107,19 +1107,47 @@ export async function registerRoutes(
   app.post("/api/dropshipping/kole/sync", requirePermission("dropshipping", "sync"), async (_req, res) => {
     const startedAt = Date.now();
     let log: any;
+    let syncStage = "initializing catalog sync";
     try {
       const vendor = await getKoleVendor();
       log = await storage.createDropshipSyncLog({ vendor_id: vendor.id });
-      const feedResponse = await fetch(KOLE_CSV_FEED_URL, {
-        headers: { Accept: "text/csv, application/octet-stream" },
-        signal: AbortSignal.timeout(60_000),
-      });
+      syncStage = "downloading CSV feed";
+      let feedResponse: Awaited<ReturnType<typeof fetch>> | undefined;
+      let lastFetchError: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const response = await fetch(KOLE_CSV_FEED_URL, {
+            headers: { Accept: "text/csv, application/octet-stream" },
+            signal: AbortSignal.timeout(20_000),
+          });
+          if (response.ok || response.status < 500 || attempt === 2) {
+            feedResponse = response;
+            break;
+          }
+          if (response.body) await response.body.cancel().catch(() => {});
+        } catch (error) {
+          lastFetchError = error;
+          if (attempt === 2) break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+      if (!feedResponse) {
+        const detail = lastFetchError instanceof Error ? ` (${lastFetchError.message})` : "";
+        throw new Error(`Kole Imports CSV feed could not be reached after 3 attempts${detail}.`);
+      }
       if (!feedResponse.ok) {
-        throw new Error(`Kole Imports feed request failed (${feedResponse.status}).`);
+        if (feedResponse.status >= 500) {
+          throw new Error(`Kole Imports CSV feed is temporarily unavailable (HTTP ${feedResponse.status}). Try again later.`);
+        }
+        throw new Error(`Kole Imports CSV feed request was rejected (HTTP ${feedResponse.status}).`);
       }
       const contentLength = Number(feedResponse.headers.get("content-length") || 0);
       if (contentLength > MAX_KOLE_FEED_BYTES) {
         throw new Error("Kole Imports feed is larger than the supported 50 MB limit.");
+      }
+      syncStage = "validating CSV feed";
+      if (/text\/html/i.test(feedResponse.headers.get("content-type") || "")) {
+        throw new Error("Kole Imports returned an HTML error page instead of a CSV feed. Try again later.");
       }
       const csv = await feedResponse.text();
       if (Buffer.byteLength(csv, "utf8") > MAX_KOLE_FEED_BYTES) {
@@ -1127,12 +1155,15 @@ export async function registerRoutes(
       }
 
       const products = parseKoleFeedCsv(csv);
+      syncStage = "saving catalog products";
       const result = await storage.upsertDropshipProducts(
         products.map((product) => toDropshipProductInsert(vendor.id, product)),
       );
       const seenSkus = products.map((product) => product.sku);
+      syncStage = "updating catalog availability";
       await storage.markDropshipProductsUnavailable(vendor.id, seenSkus);
       const completedAt = Date.now();
+      syncStage = "finalizing sync log";
       const finished = await storage.finishDropshipSyncLog(log.id, {
         status: "completed",
         completed_at: new Date(),
@@ -1153,16 +1184,28 @@ export async function registerRoutes(
         errorCount: 0,
       });
     } catch (error: any) {
+      const errorMessage = String(error?.message || "Unexpected vendor catalog sync error.").slice(0, 400);
+      console.error("[Kole CSV sync] failed", {
+        stage: syncStage,
+        name: error?.name || "Error",
+        code: error?.code || error?.cause?.code || null,
+        message: errorMessage,
+      });
       if (log?.id) {
         await storage.finishDropshipSyncLog(log.id, {
           status: "failed",
           completed_at: new Date(),
           duration_ms: Date.now() - startedAt,
           error_count: 1,
-          error_summary: "Vendor catalog sync failed.",
+          error_summary: `${syncStage}: ${errorMessage}`,
         }).catch(() => {});
       }
-      res.status(502).json({ error: "Vendor catalog sync failed. Check the connection and try again." });
+      const publicError = syncStage === "saving catalog products"
+        ? "The feed was read, but saving products to the Vendor Catalog failed. Some rows may have been saved; retrying is safe."
+        : syncStage === "updating catalog availability"
+          ? "Products were saved, but catalog availability could not be updated. Retry the sync to finish."
+          : errorMessage;
+      res.status(502).json({ error: publicError, stage: syncStage });
     }
   });
 
