@@ -1182,8 +1182,9 @@ export class DatabaseStorage implements IStorage {
 
     for (const [vendorId, bySku] of entriesByVendor) {
       const vendorEntries = Array.from(bySku.values());
-      for (let offset = 0; offset < vendorEntries.length; offset += 50) {
-        const batch = vendorEntries.slice(offset, offset + 50);
+      const batchSize = 250;
+      for (let offset = 0; offset < vendorEntries.length; offset += batchSize) {
+        const batch = vendorEntries.slice(offset, offset + batchSize);
         const existingRows = await db.select({ vendor_sku: dropshipProducts.vendor_sku })
           .from(dropshipProducts)
           .where(and(

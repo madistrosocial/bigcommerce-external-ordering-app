@@ -325,6 +325,22 @@ export function syncKoleCatalog() {
   }>("/dropshipping/kole/sync", { method: "POST" });
 }
 
+export async function uploadKoleCsv(file: File) {
+  const csv = await file.text();
+  return dropshipRequest<{
+    ok: boolean;
+    productsProcessed: number;
+    productsCreated: number;
+    productsUpdated: number;
+    errorCount: number;
+    log: DropshipSyncLog;
+  }>("/dropshipping/kole/upload-csv", {
+    method: "POST",
+    headers: { "Content-Type": "text/csv; charset=utf-8" },
+    body: csv,
+  });
+}
+
 export function createKoleDrafts(items: Array<{ id: number; price: number }>) {
   return dropshipRequest<{
     ok: boolean;

@@ -1,4 +1,4 @@
-import type { Express, Request, Response, NextFunction } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import {
@@ -1208,6 +1208,100 @@ export async function registerRoutes(
       res.status(502).json({ error: publicError, stage: syncStage });
     }
   });
+
+  const parseKoleCsvUpload = express.text({
+    type: ["text/csv", "text/plain"],
+    limit: `${MAX_KOLE_FEED_BYTES}b`,
+  });
+  app.post(
+    "/api/dropshipping/kole/upload-csv",
+    requirePermission("dropshipping", "sync"),
+    (req, res, next) => {
+      parseKoleCsvUpload(req, res, (error: any) => {
+        if (error) {
+          const tooLarge = error.status === 413 || error.statusCode === 413;
+          return res.status(tooLarge ? 413 : 400).json({
+            error: tooLarge
+              ? "The uploaded CSV is larger than the supported 50 MB limit."
+              : "The uploaded CSV could not be read. Choose a plain CSV file and try again.",
+          });
+        }
+        next();
+      });
+    },
+    async (req, res) => {
+      const startedAt = Date.now();
+      let log: any;
+      let syncStage = "initializing uploaded CSV import";
+      try {
+        const csv = req.body;
+        if (typeof csv !== "string" || !csv.trim()) {
+          return res.status(400).json({ error: "Choose a non-empty CSV file to import." });
+        }
+        if (Buffer.byteLength(csv, "utf8") > MAX_KOLE_FEED_BYTES) {
+          return res.status(413).json({ error: "The uploaded CSV is larger than the supported 50 MB limit." });
+        }
+
+        const vendor = await getKoleVendor();
+        log = await storage.createDropshipSyncLog({ vendor_id: vendor.id });
+        syncStage = "validating uploaded CSV";
+        if (/^\s*</.test(csv) && /<html[\s>]/i.test(csv.slice(0, 2048))) {
+          throw new Error("The uploaded file is an HTML page, not a CSV feed.");
+        }
+        const products = parseKoleFeedCsv(csv);
+        syncStage = "saving uploaded catalog products";
+        const result = await storage.upsertDropshipProducts(
+          products.map((product) => toDropshipProductInsert(vendor.id, product)),
+        );
+        syncStage = "updating catalog availability";
+        await storage.markDropshipProductsUnavailable(vendor.id, products.map((product) => product.sku));
+        syncStage = "finalizing upload log";
+        const finished = await storage.finishDropshipSyncLog(log.id, {
+          status: "completed",
+          completed_at: new Date(),
+          duration_ms: Date.now() - startedAt,
+          products_processed: products.length,
+          products_created: result.created,
+          products_updated: result.updated,
+          error_count: 0,
+          error_summary: null,
+          detail: { source: "uploaded_csv" },
+        });
+        res.json({
+          ok: true,
+          log: finished,
+          productsProcessed: products.length,
+          productsCreated: result.created,
+          productsUpdated: result.updated,
+          errorCount: 0,
+        });
+      } catch (error: any) {
+        const errorMessage = String(error?.message || "Unexpected uploaded CSV error.").slice(0, 400);
+        console.error("[Kole CSV upload] failed", {
+          stage: syncStage,
+          name: error?.name || "Error",
+          code: error?.code || error?.cause?.code || null,
+          message: errorMessage,
+        });
+        if (log?.id) {
+          await storage.finishDropshipSyncLog(log.id, {
+            status: "failed",
+            completed_at: new Date(),
+            duration_ms: Date.now() - startedAt,
+            error_count: 1,
+            error_summary: `${syncStage}: ${errorMessage}`,
+          }).catch(() => {});
+        }
+        const isInvalidCsv = syncStage === "validating uploaded CSV";
+        const publicError = syncStage === "saving uploaded catalog products"
+          ? "The CSV is valid, but saving it to the Vendor Catalog failed. Some rows may have been saved; uploading the same file again is safe."
+          : syncStage === "updating catalog availability"
+            ? "Products were saved, but catalog availability could not be updated. Upload the file again to finish."
+            : errorMessage;
+        res.status(isInvalidCsv ? 400 : 500).json({ error: publicError, stage: syncStage });
+      }
+    },
+  );
 
   app.post("/api/dropshipping/kole/products/create-drafts", requirePermission("dropshipping", "manage"), async (req, res) => {
     const inputItems = req.body?.items;
