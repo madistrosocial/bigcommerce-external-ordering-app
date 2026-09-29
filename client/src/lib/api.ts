@@ -244,8 +244,31 @@ async function dropshipRequest<T>(path: string, init: RequestInit = {}): Promise
     ...init,
     headers: { "Content-Type": "application/json", ...getAuthHeaders(), ...(init.headers || {}) },
   });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || body.message || "Dropshipping request failed");
+  const responseText = await res.text();
+  let body: any;
+  try {
+    body = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    body = null;
+  }
+
+  if (!res.ok) {
+    const jsonMessage = typeof body?.error === "string"
+      ? body.error
+      : typeof body?.message === "string"
+        ? body.message
+        : "";
+    const trimmedText = responseText.trim();
+    const plainTextMessage = trimmedText && !/<(?:!doctype|html|head|body)\b/i.test(trimmedText)
+      ? trimmedText.replace(/\s+/g, " ").slice(0, 300)
+      : "";
+    const status = `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
+    throw new Error(jsonMessage || plainTextMessage || `Dropshipping request failed (${status}).`);
+  }
+
+  if (body === null) {
+    throw new Error(`The dropshipping server returned an unreadable response (HTTP ${res.status}).`);
+  }
   return body as T;
 }
 
