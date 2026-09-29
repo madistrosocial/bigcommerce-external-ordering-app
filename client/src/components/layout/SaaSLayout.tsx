@@ -231,6 +231,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("dropshipping") ? [{ label: "Dashboard", path: "/dropshipping/dashboard" }] : []),
     ...(hasPermission("dropshipping") ? [{ label: dropshipDisplayName, path: "/dropshipping/kole" }] : []),
     ...(hasPermission("dropshipping") ? [{ label: "Product Catalog", path: "/dropshipping/products" }] : []),
+    ...(hasPermission("dropshipping") ? [{ label: "Product Sync", path: "/dropshipping/product-sync" }] : []),
     ...(hasPermission("dropshipping") ? [{ label: "Sync Logs", path: "/dropshipping/sync-logs" }] : []),
   ];
 

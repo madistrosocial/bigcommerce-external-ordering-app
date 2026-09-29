@@ -273,20 +273,41 @@ export type KoleProductMappingResult = {
   failed: number;
 };
 
-export type KoleDetailsSyncResult = {
-  ok: boolean;
-  productsScanned: number;
-  productsUpdated: number;
-  productsFailed: number;
-  productsUnchanged: number;
+export type KoleProductSyncKind = "details" | "images";
+export type KoleProductSyncField = "cost" | "description" | "inventory" | "identity";
+export type KoleProductSyncJobSummary = {
+  id: number;
+  kind: KoleProductSyncKind;
+  status: "running" | "completed" | "failed";
+  total: number;
+  processed: number;
+  updated: number;
+  unchanged: number;
+  failed: number;
+  skipped: number;
   photosAdded: number;
-  costPricesUpdated: number;
-  descriptionsUpdated: number;
-  inventoryUpdated: number;
-  inventorySkipped: number;
-  inventoryUnavailable: number;
-  duplicateMappingsSkipped: number;
-  issueSamples: Array<{ sku: string; bigcommerceProductId: number; message: string }>;
+  selectedFields: KoleProductSyncField[];
+  currentSku: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  error: string | null;
+};
+export type KoleProductSyncItem = {
+  productId: number;
+  vendorSku: string;
+  title: string;
+  upc: string;
+  bigcommerceProductId: number;
+  status: "pending" | "in_progress" | "updated" | "unchanged" | "failed" | "skipped";
+  updatedFields: string[];
+  photosAdded: number;
+  error: string | null;
+};
+export type KoleProductSyncItemsPage = {
+  rows: KoleProductSyncItem[];
+  total: number;
+  page: number;
+  limit: number;
 };
 
 export function getKoleMappingBrand() {
@@ -300,10 +321,48 @@ export function mapExistingKoleProducts(brandName: string) {
   });
 }
 
-export function syncMappedKoleDetails() {
-  return dropshipRequest<KoleDetailsSyncResult>("/dropshipping/kole/products/sync-details", {
+export function getKoleProductSyncLatest(kind: KoleProductSyncKind) {
+  return dropshipRequest<KoleProductSyncJobSummary | null>(
+    `/dropshipping/product-sync/jobs/latest?kind=${encodeURIComponent(kind)}`,
+  );
+}
+
+export function getKoleProductSyncJob(jobId: number) {
+  return dropshipRequest<KoleProductSyncJobSummary>(`/dropshipping/product-sync/jobs/${jobId}`);
+}
+
+export function getKoleProductSyncItems(
+  jobId: number,
+  params: { page: number; limit: number; search?: string },
+) {
+  const query = new URLSearchParams({ page: String(params.page), limit: String(params.limit) });
+  if (params.search?.trim()) query.set("search", params.search.trim());
+  return dropshipRequest<KoleProductSyncItemsPage>(
+    `/dropshipping/product-sync/jobs/${jobId}/items?${query.toString()}`,
+  );
+}
+
+export function startKoleProductSync(kind: KoleProductSyncKind, fields?: KoleProductSyncField[]) {
+  return dropshipRequest<KoleProductSyncJobSummary>("/dropshipping/product-sync/jobs", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ kind, ...(fields ? { fields } : {}) }),
+  });
+}
+
+export function getKoleProductSyncLogo() {
+  return dropshipRequest<{ dataUrl: string | null }>("/dropshipping/product-sync/logo");
+}
+
+export function saveKoleProductSyncLogo(dataUrl: string) {
+  return dropshipRequest<{ ok: boolean }>("/dropshipping/product-sync/logo", {
+    method: "PUT",
+    body: JSON.stringify({ dataUrl }),
+  });
+}
+
+export function deleteKoleProductSyncLogo() {
+  return dropshipRequest<{ ok: boolean }>("/dropshipping/product-sync/logo", {
+    method: "DELETE",
   });
 }
 

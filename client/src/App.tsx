@@ -68,6 +68,7 @@ import AttendanceAdminPage, { AttendanceSettingsPage } from "@/pages/attendance/
 import KoleImportsPage from "@/pages/dropshipping/KoleImports";
 import DropshipDashboardPage from "@/pages/dropshipping/DropshipDashboard";
 import DropshipCatalogPage from "@/pages/dropshipping/DropshipCatalog";
+import ProductSyncPage from "@/pages/dropshipping/ProductSync";
 import DropshipSyncLogsPage from "@/pages/dropshipping/DropshipSyncLogs";
 import NotFound from "@/pages/not-found";
 import AccountSettings from "@/pages/AccountSettings";
@@ -405,6 +406,9 @@ function Router() {
       </Route>
       <Route path="/dropshipping/products">
         {() => <PermissionRoute component={DropshipCatalogPage} module="dropshipping" />}
+      </Route>
+      <Route path="/dropshipping/product-sync">
+        {() => <PermissionRoute component={ProductSyncPage} module="dropshipping" />}
       </Route>
       <Route path="/dropshipping/sync-logs">
         {() => <PermissionRoute component={DropshipSyncLogsPage} module="dropshipping" />}

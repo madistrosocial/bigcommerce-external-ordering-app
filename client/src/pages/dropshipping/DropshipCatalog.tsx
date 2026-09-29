@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -108,8 +107,6 @@ export default function DropshipCatalogPage() {
   const { data: mappingBrandSetting } = useQuery({ queryKey: ["kole-mapping-brand"], queryFn: api.getKoleMappingBrand });
   const [mappingBrandName, setMappingBrandName] = useState<string | null>(null);
   const [mappingResult, setMappingResult] = useState<api.KoleProductMappingResult | null>(null);
-  const [detailsSyncResult, setDetailsSyncResult] = useState<api.KoleDetailsSyncResult | null>(null);
-  const [detailsSyncConfirmOpen, setDetailsSyncConfirmOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [category, setCategory] = useState("");
@@ -195,27 +192,6 @@ export default function DropshipCatalogPage() {
       });
     },
     onError: (mutationError: any) => toast({ title: "SKU mapping failed", description: mutationError.message, variant: "destructive" }),
-  });
-
-  const syncMappedDetails = useMutation({
-    mutationFn: api.syncMappedKoleDetails,
-    onSuccess: (result) => {
-      setDetailsSyncResult(result);
-      setDetailsSyncConfirmOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
-      toast({
-        title: result.productsFailed || result.duplicateMappingsSkipped ? "Details sync finished with warnings" : "Mapped product details synced",
-        description: `${result.productsUpdated} products updated · ${result.photosAdded} photos added · ${result.inventoryUpdated} inventory counts updated · ${result.productsFailed} failed · ${result.duplicateMappingsSkipped} duplicate mappings skipped`,
-        ...(result.productsFailed || result.duplicateMappingsSkipped ? { variant: "destructive" as const } : {}),
-      });
-    },
-    onError: (mutationError: any) => toast({
-      title: "Details sync failed",
-      description: mutationError.message === "Forbidden"
-        ? "Your account needs the Dropshipping: Manage permission to run this sync. Ask an administrator to grant it."
-        : mutationError.message,
-      variant: "destructive",
-    }),
   });
 
   const updateStatus = useMutation({
@@ -320,7 +296,7 @@ export default function DropshipCatalogPage() {
   };
   const startCsvUpload = (file?: File) => {
     if (!file) return;
-    if (sync.isPending || uploadCsv.isPending || syncMappedDetails.isPending) return;
+    if (sync.isPending || uploadCsv.isPending) return;
     if (!file.size) {
       toast({ title: "CSV upload failed", description: "The selected file is empty.", variant: "destructive" });
       return;
@@ -351,12 +327,12 @@ export default function DropshipCatalogPage() {
             }}
           />
           {selected.size > 0 && <Button variant="outline" size="sm" onClick={queueSelected} disabled={updateStatus.isPending}><Plus className="h-4 w-4 mr-1.5" />Queue {selected.size}</Button>}
-          {selected.size > 0 && <Button size="sm" onClick={() => openDraftDialog(Array.from(selectedProducts.values()))} disabled={createDrafts.isPending || syncMappedDetails.isPending}><Plus className="h-4 w-4 mr-1.5" />Create {selected.size} Draft{selected.size === 1 ? "" : "s"}</Button>}
-          <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()} disabled={sync.isPending || uploadCsv.isPending || syncMappedDetails.isPending}>
+          {selected.size > 0 && <Button size="sm" onClick={() => openDraftDialog(Array.from(selectedProducts.values()))} disabled={createDrafts.isPending}><Plus className="h-4 w-4 mr-1.5" />Create {selected.size} Draft{selected.size === 1 ? "" : "s"}</Button>}
+          <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()} disabled={sync.isPending || uploadCsv.isPending}>
             {uploadCsv.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Upload className="h-4 w-4 mr-1.5" />}
             {uploadCsv.isPending ? "Uploading CSV…" : "Upload CSV"}
           </Button>
-          <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending || uploadCsv.isPending || syncMappedDetails.isPending}><RefreshCw className={`h-4 w-4 mr-1.5 ${sync.isPending ? "animate-spin" : ""}`} />Sync CSV Feed</Button>
+          <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending || uploadCsv.isPending}><RefreshCw className={`h-4 w-4 mr-1.5 ${sync.isPending ? "animate-spin" : ""}`} />Sync CSV Feed</Button>
         </div>
       </div>
 
@@ -404,7 +380,6 @@ export default function DropshipCatalogPage() {
                 || sync.isPending
                 || uploadCsv.isPending
                 || createDrafts.isPending
-                || syncMappedDetails.isPending
               }
             >
               {runSkuMapping.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Link2 className="h-4 w-4 mr-1.5" />}
@@ -422,50 +397,6 @@ export default function DropshipCatalogPage() {
               <p>
                 {mappingResult.mapped.toLocaleString()} linked · {mappingResult.remapped.toLocaleString()} remapped · {mappingResult.alreadyMapped.toLocaleString()} already current · {mappingResult.unmatched.toLocaleString()} unmatched · {mappingResult.ambiguous.toLocaleString()} ambiguous · {mappingResult.failed.toLocaleString()} failed
               </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-4 space-y-3">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-slate-800">Refresh mapped product details</h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Manually update all mapped BigCommerce products with Kole extended cost, available inventory, non-empty descriptions, and missing photos. Existing photos are kept. Inventory is updated only when BigCommerce uses product-level tracking.
-              </p>
-              {!canManageDropshipping && (
-                <p className="text-xs text-amber-700 mt-2">
-                  Requires the Dropshipping: Manage permission. Ask an administrator to grant access.
-                </p>
-              )}
-            </div>
-            <Button
-              variant="outline"
-              className="shrink-0"
-              onClick={() => setDetailsSyncConfirmOpen(true)}
-              disabled={!canManageDropshipping || syncMappedDetails.isPending || runSkuMapping.isPending || sync.isPending || uploadCsv.isPending || createDrafts.isPending}
-            >
-              {syncMappedDetails.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1.5" />}
-              {syncMappedDetails.isPending ? "Refreshing details…" : "Sync all mapped products"}
-            </Button>
-          </div>
-          {detailsSyncResult && (
-            <div className="rounded-md bg-slate-50 px-3 py-2.5 text-xs text-slate-600 space-y-1">
-              <p className="font-medium text-slate-700">
-                Last run: {detailsSyncResult.productsScanned.toLocaleString()} mapped products scanned · {detailsSyncResult.productsUpdated.toLocaleString()} updated · {detailsSyncResult.productsUnchanged.toLocaleString()} unchanged · {detailsSyncResult.productsFailed.toLocaleString()} failed
-              </p>
-              <p>
-                {detailsSyncResult.costPricesUpdated.toLocaleString()} costs updated · {detailsSyncResult.descriptionsUpdated.toLocaleString()} descriptions updated · {detailsSyncResult.inventoryUpdated.toLocaleString()} inventory counts updated · {detailsSyncResult.inventorySkipped.toLocaleString()} skipped due to tracking mode · {detailsSyncResult.inventoryUnavailable.toLocaleString()} missing from feed · {detailsSyncResult.photosAdded.toLocaleString()} photos added · {detailsSyncResult.duplicateMappingsSkipped.toLocaleString()} duplicate mappings skipped
-              </p>
-              {detailsSyncResult.issueSamples.length > 0 && (
-                <ul className="list-disc pl-5 pt-1 text-red-700">
-                  {detailsSyncResult.issueSamples.slice(0, 5).map((issue, index) => (
-                    <li key={`${issue.bigcommerceProductId}-${index}`}>{issue.sku} (BC #{issue.bigcommerceProductId}): {issue.message}</li>
-                  ))}
-                </ul>
-              )}
             </div>
           )}
         </CardContent>
@@ -653,23 +584,6 @@ export default function DropshipCatalogPage() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={detailsSyncConfirmOpen} onOpenChange={setDetailsSyncConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Sync details for all mapped products?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This writes Kole extended cost, non-empty descriptions, and provided inventory counts to mapped BigCommerce products. Inventory changes only for products already using product-level tracking; tracking settings and variant inventory are left unchanged. Kole photos are added only when they are not already present, and existing photos are never removed. Product selling prices are not changed.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={syncMappedDetails.isPending}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => syncMappedDetails.mutate()} disabled={syncMappedDetails.isPending}>
-              {syncMappedDetails.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-              Sync mapped products
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

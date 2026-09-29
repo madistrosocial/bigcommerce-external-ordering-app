@@ -70,6 +70,12 @@ import {
 } from "./constant-contact";
 import { DEFAULT_VENDOR_DISPLAY_NAME, KOLE_VENDOR, KoleImportsAdapter, toDropshipProductInsert, type KoleCredentials } from "./vendors/kole-imports";
 import { KOLE_CSV_FEED_URL, MAX_KOLE_FEED_BYTES, parseKoleFeedCsv } from "./vendors/kole-feed";
+import {
+  KoleProductSyncError,
+  KoleProductSyncManager,
+  type KoleProductSyncField,
+  type KoleProductSyncKind,
+} from "./koleProductSync";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 import { MARKETING_ACTION_PERMS, MARKETING_LEGACY_PAGE_GRANTS } from "@shared/marketing-permissions";
 import { dateOnlyInTimeZone, parseDateTimeLocal } from "@shared/timezone";
@@ -1055,6 +1061,13 @@ export async function registerRoutes(
     provider: KOLE_VENDOR.provider,
   });
 
+  const koleProductSyncManager = new KoleProductSyncManager({
+    storage,
+    getBigCommerceCredentials: () => getBcCreds(),
+    fetchBigCommerce: (url, init) => fetchBigCommerceWithRetry(url, init),
+    getBigCommerceBrands: () => getCachedBcBrandOptions(),
+  });
+
   app.get("/api/dropshipping/kole/connection", requirePermission("dropshipping", "view"), async (_req, res) => {
     try {
       const vendor = await getKoleVendor();
@@ -1709,7 +1722,95 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/dropshipping/product-sync/logo", requirePermission("dropshipping", "view"), async (_req, res) => {
+    try {
+      res.json(await koleProductSyncManager.getLogo());
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Could not load the saved Product Sync logo." });
+    }
+  });
+
+  app.put("/api/dropshipping/product-sync/logo", requirePermission("dropshipping", "manage"), async (req, res) => {
+    try {
+      res.json(await koleProductSyncManager.saveLogo(req.body?.dataUrl));
+    } catch (error: any) {
+      const status = error instanceof KoleProductSyncError ? error.statusCode : 500;
+      res.status(status).json({ error: error?.message || "Could not save the Product Sync logo." });
+    }
+  });
+
+  app.delete("/api/dropshipping/product-sync/logo", requirePermission("dropshipping", "manage"), async (_req, res) => {
+    try {
+      res.json(await koleProductSyncManager.removeLogo());
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Could not remove the Product Sync logo." });
+    }
+  });
+
+  app.get("/api/dropshipping/product-sync/jobs/latest", requirePermission("dropshipping", "view"), async (req, res) => {
+    const kind = req.query.kind === "details" || req.query.kind === "images"
+      ? req.query.kind as KoleProductSyncKind
+      : null;
+    if (!kind) return res.status(400).json({ error: "Choose a valid Product Sync type." });
+    try {
+      res.json(await koleProductSyncManager.getLatest(kind));
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Could not load the latest Product Sync run." });
+    }
+  });
+
+  app.post("/api/dropshipping/product-sync/jobs", requirePermission("dropshipping", "manage"), async (req, res) => {
+    const kind = req.body?.kind === "details" || req.body?.kind === "images"
+      ? req.body.kind as KoleProductSyncKind
+      : null;
+    const fieldsValue = req.body?.fields;
+    const validFields = new Set<KoleProductSyncField>(["cost", "description", "inventory", "identity"]);
+    if (!kind) return res.status(400).json({ error: "Choose a valid Product Sync type." });
+    if (fieldsValue !== undefined && (!Array.isArray(fieldsValue) || fieldsValue.some((field: unknown) => !validFields.has(field as KoleProductSyncField)))) {
+      return res.status(400).json({ error: "The selected Product Sync fields are invalid." });
+    }
+    try {
+      const vendor = await getKoleVendor();
+      const fields = kind === "details" ? (fieldsValue ?? []) as KoleProductSyncField[] : [];
+      const job = await koleProductSyncManager.start(kind, vendor.id, fields);
+      res.status(202).json(job);
+    } catch (error: any) {
+      const status = error instanceof KoleProductSyncError ? error.statusCode : 500;
+      res.status(status).json({ error: error?.message || "Could not start Product Sync." });
+    }
+  });
+
+  app.get("/api/dropshipping/product-sync/jobs/:id/items", requirePermission("dropshipping", "view"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid Product Sync job ID." });
+    try {
+      const page = await koleProductSyncManager.getItems(id, {
+        page: req.query.page,
+        limit: req.query.limit,
+        search: req.query.search,
+      });
+      if (!page) return res.status(404).json({ error: "Product Sync job was not found." });
+      res.json(page);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Could not load Product Sync results." });
+    }
+  });
+
+  app.get("/api/dropshipping/product-sync/jobs/:id", requirePermission("dropshipping", "view"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid Product Sync job ID." });
+    try {
+      const job = await koleProductSyncManager.getJob(id);
+      if (!job) return res.status(404).json({ error: "Product Sync job was not found." });
+      res.json(job);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Could not load Product Sync status." });
+    }
+  });
+
   app.post("/api/dropshipping/kole/products/sync-details", requirePermission("dropshipping", "manage"), async (_req, res) => {
+    return res.status(410).json({ error: "Mapped product sync has moved to the Dropshipping Product Sync page." });
+
     if (koleDetailsSyncInProgress) {
       return res.status(409).json({ error: "A mapped product details sync is already running." });
     }

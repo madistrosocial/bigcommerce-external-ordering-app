@@ -30,6 +30,7 @@
 - [Activity-log IP geolocation](activity-log-ip-geolocation.md) — use FreeIPAPI’s no-key HTTPS endpoint with caching and conservative rate limiting for approximate location.
 - [Draft invoice safety](draft-invoice-safety.md) — draft PDFs must stay visibly non-final and never expose staff notes or SMTP credentials.
 - [Dropshipping phase boundaries](dropshipping-phase-boundaries.md) — feed sync stays local; only a selected-item action can create hidden, disabled BigCommerce drafts.
+- [Kole Product Sync safety contract](kole-product-sync-safety.md) — preserve selected-field writes, inventory tracking guards, and append-only watermarked image sync.
 - [Kole feed draft pricing](kole-feed-draft-pricing.md) — selected drafts use an editable 20%-over-MOQ price suggestion and require a real BigCommerce category.
 - [Dropship brand dashboard counts](dropship-brand-dashboard-counts.md) — resolve BigCommerce brand products directly; count distinct synced line-item orders, not just locally pinned products.
 - [Dropshipping display labels](dropshipping-display-labels.md) — vendor provider identity stays server-side; user-facing labels are persisted placeholders editable from the connector.
