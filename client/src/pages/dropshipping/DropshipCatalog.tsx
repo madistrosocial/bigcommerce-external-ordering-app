@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import * as api from "@/lib/api";
+import { toPublicVendorMessage } from "@/lib/vendor-display";
 import { getKoleExtendedCost } from "@shared/kole-pricing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -160,7 +161,7 @@ export default function DropshipCatalogPage() {
       setSelectedProducts(new Map());
       toast({ title: "Catalog sync completed", description: `${result.productsProcessed} products processed · ${result.productsCreated} new · ${result.productsUpdated} updated` });
     },
-    onError: (mutationError: any) => toast({ title: "Catalog sync failed", description: mutationError.message, variant: "destructive" }),
+    onError: (mutationError: any) => toast({ title: "Catalog sync failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
   });
 
   const uploadCsv = useMutation({
@@ -175,7 +176,7 @@ export default function DropshipCatalogPage() {
         description: `${result.productsProcessed} products processed · ${result.productsCreated} new · ${result.productsUpdated} updated. No BigCommerce products were created.`,
       });
     },
-    onError: (mutationError: any) => toast({ title: "CSV upload failed", description: mutationError.message, variant: "destructive" }),
+    onError: (mutationError: any) => toast({ title: "CSV upload failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
   });
 
   const runSkuMapping = useMutation({
@@ -193,7 +194,7 @@ export default function DropshipCatalogPage() {
         ...(result.failed || result.staleMappingChecksFailed ? { variant: "destructive" as const } : {}),
       });
     },
-    onError: (mutationError: any) => toast({ title: "SKU mapping failed", description: mutationError.message, variant: "destructive" }),
+    onError: (mutationError: any) => toast({ title: "SKU mapping failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
   });
 
   const updateStatus = useMutation({
@@ -202,7 +203,7 @@ export default function DropshipCatalogPage() {
       queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
       toast({ title: "Import status updated" });
     },
-    onError: (mutationError: any) => toast({ title: "Status update failed", description: mutationError.message, variant: "destructive" }),
+    onError: (mutationError: any) => toast({ title: "Status update failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
   });
 
   const createDrafts = useMutation({
@@ -232,11 +233,11 @@ export default function DropshipCatalogPage() {
         : "";
       toast({
         title: result.failed ? "Draft import finished with errors" : "BigCommerce draft import finished",
-        description: `${result.created} created · ${result.skipped} existing SKU${result.skipped === 1 ? "" : "s"} skipped · ${result.failed} failed${failure?.message ? ` · ${failure.message}` : warning?.message ? ` · ${warning.message}` : ""}${imageNote}`,
+        description: `${result.created} created · ${result.skipped} existing SKU${result.skipped === 1 ? "" : "s"} skipped · ${result.failed} failed${failure?.message ? ` · ${toPublicVendorMessage(failure.message)}` : warning?.message ? ` · ${toPublicVendorMessage(warning.message)}` : ""}${imageNote}`,
         ...(result.failed ? { variant: "destructive" as const } : {}),
       });
     },
-    onError: (mutationError: any) => toast({ title: "Draft creation failed", description: mutationError.message, variant: "destructive" }),
+    onError: (mutationError: any) => toast({ title: "Draft creation failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
   });
 
   useEffect(() => {
@@ -359,7 +360,7 @@ export default function DropshipCatalogPage() {
         >
           <Upload className={`h-5 w-5 shrink-0 ${draggingCsv ? "text-indigo-600" : "text-slate-400"}`} />
           <div className="min-w-0">
-            <p className="text-sm font-medium text-slate-700">Drop a downloaded Kole CSV feed here, or choose Upload CSV.</p>
+            <p className="text-sm font-medium text-slate-700">Drop a downloaded vendor CSV feed here, or choose Upload CSV.</p>
             <p className="text-xs text-slate-500">Manual import · up to 50 MB · updates the Vendor Catalog only; it does not create BigCommerce products.</p>
           </div>
         </CardContent>
@@ -407,7 +408,7 @@ export default function DropshipCatalogPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Catalog products</p><p className="text-xl font-bold text-slate-800">{data?.total ?? "—"}</p></CardContent></Card>
-        <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Feed source</p><p className="text-xl font-bold text-slate-800">CSV</p><p className="text-[10px] text-slate-400">Kole Imports inventory feed</p></CardContent></Card>
+        <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Feed source</p><p className="text-xl font-bold text-slate-800">CSV</p><p className="text-[10px] text-slate-400">Vendor inventory feed</p></CardContent></Card>
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Current page</p><p className="text-xl font-bold text-slate-800">{page} / {totalPages}</p></CardContent></Card>
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Selected</p><p className="text-xl font-bold text-indigo-600">{selected.size}</p></CardContent></Card>
       </div>
@@ -443,7 +444,7 @@ export default function DropshipCatalogPage() {
       </Card>
 
       <Card className="shadow-sm overflow-hidden">
-        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {(error as Error).message}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters. Run Sync CSV Feed or upload a downloaded CSV to populate the catalog.</div> : (
+        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {toPublicVendorMessage((error as Error).message)}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters. Run Sync CSV Feed or upload a downloaded CSV to populate the catalog.</div> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200"><tr className="text-left text-[11px] uppercase tracking-wide text-slate-500">
@@ -490,7 +491,7 @@ export default function DropshipCatalogPage() {
           <DialogHeader>
             <DialogTitle>Create hidden BigCommerce drafts</DialogTitle>
             <DialogDescription>
-              Drafts stay hidden and disabled. Photos are added later through Product Sync → Image Sync so the first upload is watermarked. The suggested price is the supplier ext_price × 1.20; ext_price already includes the Kole minimum quantity. You can edit the price. Choose an existing BigCommerce category for each item. Existing SKU matches are skipped.
+              Drafts stay hidden and disabled. Photos are added later through Product Sync → Image Sync so the first upload is watermarked. The suggested price is the supplier ext_price × 1.20; ext_price already includes the minimum order quantity. You can edit the price. Choose an existing BigCommerce category for each item. Existing SKU matches are skipped.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -516,7 +517,7 @@ export default function DropshipCatalogPage() {
               {isLoadingBcCategories && <p className="text-xs text-slate-500">Loading BigCommerce categories…</p>}
               {bcCategoriesError && (
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-red-600">
-                  <span>Could not load BigCommerce categories: {(bcCategoriesError as Error).message}</span>
+                  <span>Could not load BigCommerce categories: {toPublicVendorMessage((bcCategoriesError as Error).message)}</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => refetchBcCategories()} disabled={isLoadingBcCategories}>Retry</Button>
                 </div>
               )}
@@ -533,7 +534,7 @@ export default function DropshipCatalogPage() {
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-slate-800 line-clamp-2">{product.title}</p>
                       <p className="text-xs font-mono text-slate-500 mt-1">{product.vendor_sku}</p>
-                      <p className="text-xs text-slate-500 mt-1">Extended supplier cost (MOQ included): {formatCost(extendedSupplierCost(product)?.toFixed(2) ?? null)} · Kole minimum quantity: {quantity === null ? "Not provided" : quantity.toLocaleString()}</p>
+                      <p className="text-xs text-slate-500 mt-1">Extended supplier cost (MOQ included): {formatCost(extendedSupplierCost(product)?.toFixed(2) ?? null)} · Minimum order quantity: {quantity === null ? "Not provided" : quantity.toLocaleString()}</p>
                       <p className="text-xs text-slate-500 mt-1">Inventory: {inventoryLabel(product)}</p>
                       {!suggestedRetailPrice(product) && <p className="text-xs text-amber-700 mt-1">A positive ext_price is needed for an automatic price; enter the price manually.</p>}
                     </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getKoleConnection, getUsersSummary, searchGlobal, type GlobalSearchResult } from "@/lib/api";
+import { toPublicVendorName } from "@/lib/vendor-display";
 import { useLocation } from "wouter";
 import { useStore } from "@/lib/store";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -54,7 +55,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     queryFn: getKoleConnection,
     enabled: hasPermission("dropshipping"),
   });
-  const dropshipDisplayName = dropshipConnection?.displayName || "Vendor Catalog";
+  const dropshipDisplayName = toPublicVendorName(dropshipConnection?.displayName);
   const { toast } = useToast();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {

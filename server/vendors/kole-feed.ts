@@ -44,7 +44,7 @@ function parseCsvRows(csv: string): string[][] {
     }
   }
 
-  if (quoted) throw new Error("Kole Imports feed contains an unterminated quoted field.");
+  if (quoted) throw new Error("The vendor feed contains an unterminated quoted field.");
   if (field.length > 0 || row.length > 0) {
     row.push(field);
     if (row.some((value) => value.length > 0)) rows.push(row);
@@ -88,31 +88,31 @@ function parseInventory(value: string | undefined): number {
 
 export function parseKoleFeedCsv(csv: string): KoleProduct[] {
   const rows = parseCsvRows(csv);
-  if (rows.length < 2) throw new Error("Kole Imports feed is empty or missing product rows.");
+  if (rows.length < 2) throw new Error("The vendor feed is empty or missing product rows.");
 
   const headers = rows[0].map((header, index) => (index === 0 ? header.replace(/^\uFEFF/, "") : header).trim());
   const headerSet = new Set(headers);
   for (const required of ["id", "title", "description", "inventory", "image_large"]) {
-    if (!headerSet.has(required)) throw new Error(`Kole Imports feed is missing the "${required}" column.`);
+    if (!headerSet.has(required)) throw new Error(`The vendor feed is missing the "${required}" column.`);
   }
   const costColumn = headerSet.has("ext_price")
     ? "ext_price"
     : headerSet.has("item_piece_price")
       ? "item_piece_price"
       : null;
-  if (!costColumn) throw new Error('Kole Imports feed is missing the "ext_price" or "item_piece_price" cost column.');
+  if (!costColumn) throw new Error('The vendor feed is missing the "ext_price" or "item_piece_price" cost column.');
 
   const products: KoleProduct[] = [];
   for (let rowIndex = 1; rowIndex < rows.length; rowIndex++) {
     const values = rows[rowIndex];
     if (values.length !== headers.length) {
-      throw new Error(`Kole Imports feed row ${rowIndex + 1} has ${values.length} columns; expected ${headers.length}.`);
+      throw new Error(`Vendor feed row ${rowIndex + 1} has ${values.length} columns; expected ${headers.length}.`);
     }
     const record: Record<string, string> = {};
     for (let column = 0; column < headers.length; column++) record[headers[column]] = values[column];
 
     const sku = String(record.id ?? "").trim();
-    if (!sku) throw new Error(`Kole Imports feed row ${rowIndex + 1} is missing a product SKU.`);
+    if (!sku) throw new Error(`Vendor feed row ${rowIndex + 1} is missing a product SKU.`);
     const images = [record.image_large, record.image2_large, record.image3_large]
       .map((url) => String(url ?? "").trim())
       .filter((url) => /^https:\/\//i.test(url));

@@ -217,7 +217,7 @@ async function assertSafeImageUrl(rawUrl: string): Promise<URL> {
   try {
     url = new URL(rawUrl);
   } catch {
-    throw new Error("Kole supplied an invalid image URL.");
+    throw new Error("The supplier provided an invalid image URL.");
   }
   if (
     url.protocol !== "https:"
@@ -240,7 +240,7 @@ async function assertSafeImageUrl(rawUrl: string): Promise<URL> {
     try {
       addresses = await dnsLookup(hostname, { all: true, verbatim: true });
     } catch {
-      throw new Error("The Kole image host could not be resolved.");
+      throw new Error("The supplier image host could not be resolved.");
     }
     if (addresses.length === 0 || addresses.some((entry) => !isPublicIp(entry.address))) {
       throw new Error("The image URL does not point to a public address.");
@@ -252,9 +252,9 @@ async function assertSafeImageUrl(rawUrl: string): Promise<URL> {
 async function readResponseWithLimit(response: Response, limitBytes: number): Promise<Buffer> {
   const declaredSize = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredSize) && declaredSize > limitBytes) {
-    throw new Error("The Kole image exceeds the permitted download size.");
+    throw new Error("The supplier image exceeds the permitted download size.");
   }
-  if (!response.body) throw new Error("The Kole image response was empty.");
+  if (!response.body) throw new Error("The supplier image response was empty.");
 
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -266,7 +266,7 @@ async function readResponseWithLimit(response: Response, limitBytes: number): Pr
       totalBytes += value.byteLength;
       if (totalBytes > limitBytes) {
         await reader.cancel().catch(() => undefined);
-        throw new Error("The Kole image exceeds the permitted download size.");
+        throw new Error("The supplier image exceeds the permitted download size.");
       }
       chunks.push(value);
     }
@@ -289,17 +289,17 @@ async function downloadKoleImage(sourceUrl: string): Promise<Buffer> {
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       await response.body?.cancel().catch(() => undefined);
-      if (!location || redirectCount === 4) throw new Error("The Kole image redirected too many times.");
+      if (!location || redirectCount === 4) throw new Error("The supplier image redirected too many times.");
       currentUrl = new URL(location, validatedUrl).toString();
       continue;
     }
-    if (!response.ok) throw new Error(`Kole image download failed (${response.status}).`);
+    if (!response.ok) throw new Error(`Supplier image download failed (${response.status}).`);
     if (!(response.headers.get("content-type") || "").toLowerCase().startsWith("image/")) {
-      throw new Error("The Kole image URL did not return an image.");
+      throw new Error("The supplier image URL did not return an image.");
     }
     return readResponseWithLimit(response, IMAGE_MAX_BYTES);
   }
-  throw new Error("The Kole image could not be downloaded.");
+  throw new Error("The supplier image could not be downloaded.");
 }
 
 async function normalizeLogo(dataUrl: string): Promise<string> {
@@ -386,6 +386,11 @@ function productIdentityBrandKey(value: unknown): string {
 }
 
 function safeImageFilename(sku: string, imageIndex: number): string {
+  const safeSku = sku.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70) || "product";
+  return `catalog-${safeSku}-${imageIndex + 1}-watermarked.jpg`;
+}
+
+function legacyImageFilename(sku: string, imageIndex: number): string {
   const safeSku = sku.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70) || "product";
   return `kole-${safeSku}-${imageIndex + 1}-watermarked.jpg`;
 }
@@ -726,7 +731,7 @@ export class KoleProductSyncManager {
         });
         if (conflictingOwner) {
           item.status = "skipped";
-          item.error = "Multiple Kole rows map to the same BigCommerce product or variant; skipped to avoid conflicting updates.";
+          item.error = "Multiple vendor catalog rows map to the same BigCommerce product or variant; skipped to avoid conflicting updates.";
           job.summary.skipped++;
           job.summary.processed++;
           continue;
@@ -856,7 +861,7 @@ export class KoleProductSyncManager {
       identity: "Product identity",
     };
     const warnings = Array.from(parentFieldConflicts, (field) =>
-      `${fieldLabelsBySyncField[field]} left unchanged because selected Kole variant SKUs contain conflicting values for this BigCommerce product.`,
+      `${fieldLabelsBySyncField[field]} left unchanged because selected variant SKUs contain conflicting values for this BigCommerce product.`,
     );
     const fieldsToSync = selectedFields.filter((field) =>
       field === "inventory" || !parentFieldConflicts.has(field),
@@ -929,7 +934,7 @@ export class KoleProductSyncManager {
           warnings.push("Inventory left unchanged because BigCommerce is not using product-level tracking.");
         }
       } else if (inventoryProvided) {
-        warnings.push("Kole inventory is outside BigCommerce's supported range.");
+        warnings.push("Supplier inventory is outside BigCommerce's supported range.");
       }
     }
 
@@ -1053,7 +1058,8 @@ export class KoleProductSyncManager {
     const errors: string[] = [];
 
     for (const { sourceUrl, sourceIndex } of pendingSources) {
-      const legacyFilename = normalizedImageFilename(safeImageFilename(candidate.item.vendorSku, sourceIndex));
+      const legacyFilename = normalizedImageFilename(legacyImageFilename(candidate.item.vendorSku, sourceIndex));
+      const currentFilename = normalizedImageFilename(safeImageFilename(candidate.item.vendorSku, sourceIndex));
       if (!forceImageReupload && legacyLedger.has(sourceUrl) && existingFileNames.has(legacyFilename)) {
         ledger.add(sourceUrl);
         try {
@@ -1064,7 +1070,7 @@ export class KoleProductSyncManager {
         continue;
       }
       if (existingImages.length + photosAdded >= 1000) {
-        errors.push("BigCommerce's 1,000 image limit was reached; remaining Kole photos were not added.");
+        errors.push("BigCommerce's 1,000 image limit was reached; remaining supplier photos were not added.");
         break;
       }
       try {
@@ -1076,7 +1082,7 @@ export class KoleProductSyncManager {
           new Blob([new Uint8Array(processed)], { type: "image/jpeg" }),
           safeImageFilename(candidate.item.vendorSku, sourceIndex),
         );
-        form.append("description", "Kole product photo with saved watermark");
+        form.append("description", "Watermarked product photo");
         form.append("is_thumbnail", "false");
         form.append("sort_order", String(++maxSortOrder));
 
@@ -1095,7 +1101,7 @@ export class KoleProductSyncManager {
         await imageResponse.arrayBuffer().catch(() => undefined);
         photosAdded++;
         ledger.add(sourceUrl);
-        existingFileNames.add(legacyFilename);
+        existingFileNames.add(currentFilename);
         try {
           await this.storage.setSetting(ledgerKey, Array.from(ledger));
         } catch {

@@ -85,7 +85,7 @@ function parseDate(value: unknown): Date | null {
 function parseProduct(input: unknown): KoleProduct {
   const record = asRecord(input);
   const sku = String(firstValue(record, ["sku", "SKU", "product_sku", "productSku"]) ?? "").trim();
-  if (!sku) throw new Error("Kole product response did not include a SKU");
+  if (!sku) throw new Error("The vendor product response did not include a SKU.");
 
   return {
     sku,
@@ -139,17 +139,17 @@ export class KoleImportsAdapter implements DropshipVendorAdapter {
     if (!response.ok) {
       const message = text.replace(/\s+/g, " ").slice(0, 300);
       if (response.status === 401 || response.status === 403) {
-        throw new Error("Kole Imports rejected the configured credentials.");
+        throw new Error("The vendor API rejected the configured credentials.");
       }
       if (response.status === 429) {
-        throw new Error("Kole Imports rate limit reached. Please try again later.");
+        throw new Error("The vendor API rate limit was reached. Please try again later.");
       }
-      throw new Error(`Kole Imports API error (${response.status})${message ? `: ${message}` : ""}`);
+      throw new Error(`Vendor API error (${response.status})${message ? `: ${message}` : ""}`);
     }
     try {
       return JSON.parse(text);
     } catch {
-      throw new Error("Kole Imports returned an unsupported response format. JSON is required for catalog sync.");
+      throw new Error("The vendor API returned an unsupported response format. JSON is required for catalog sync.");
     }
   }
 
@@ -179,15 +179,15 @@ export class KoleImportsAdapter implements DropshipVendorAdapter {
   }
 
   async createOrder(..._args: never[]): Promise<never> {
-    throw new Error("Kole Imports ordering is not implemented in Phase 1.");
+    throw new Error("Vendor ordering is not available.");
   }
 
   async getOrder(..._args: never[]): Promise<never> {
-    throw new Error("Kole Imports ordering is not implemented in Phase 1.");
+    throw new Error("Vendor ordering is not available.");
   }
 
   async getShipment(..._args: never[]): Promise<never> {
-    throw new Error("Kole Imports shipment sync is not implemented in Phase 1.");
+    throw new Error("Vendor shipment sync is not available.");
   }
 }
 

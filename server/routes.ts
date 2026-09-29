@@ -288,6 +288,14 @@ function normalizeKoleSourceImageUrl(value: unknown): string {
   }
 }
 
+function sanitizeVendorFacingMessage(value: unknown): string {
+  return String(value ?? "")
+    .replace(/(?:https?:\/\/)?(?:[\w-]+\.)*koleimports\.com[^\s]*/gi, "supplier feed")
+    .replace(/\bkoleimports\b/gi, "supplier")
+    .replace(/\bkole\s+imports\b/gi, "supplier")
+    .replace(/\bkole\b/gi, "supplier");
+}
+
 function imageFileName(value: unknown): string {
   const text = String(value ?? "").trim();
   if (!text) return "";
@@ -1043,7 +1051,7 @@ export async function registerRoutes(
 
   const normalizeVendorDisplayName = (value: unknown): string => {
     const name = String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
-    return name || DEFAULT_VENDOR_DISPLAY_NAME;
+    return name && !/kole/i.test(name) ? name : DEFAULT_VENDOR_DISPLAY_NAME;
   };
 
   const getKoleDisplayName = async (setting?: Record<string, any>) =>
@@ -1189,7 +1197,11 @@ export async function registerRoutes(
   app.get("/api/dropshipping/kole/sync-logs", requirePermission("dropshipping", "view"), async (_req, res) => {
     try {
       const vendor = await getKoleVendor();
-      res.json(await storage.getDropshipSyncLogs(vendor.id));
+      const logs = await storage.getDropshipSyncLogs(vendor.id);
+      res.json(logs.map((log) => ({
+        ...log,
+        error_summary: log.error_summary ? sanitizeVendorFacingMessage(log.error_summary) : null,
+      })));
     } catch (error: any) {
       res.status(500).json({ error: "Failed to load vendor sync logs" });
     }
@@ -1236,25 +1248,25 @@ export async function registerRoutes(
       }
       if (!feedResponse) {
         const detail = lastFetchError instanceof Error ? ` (${lastFetchError.message})` : "";
-        throw new Error(`Kole Imports CSV feed could not be reached after 3 attempts${detail}.`);
+        throw new Error(`The vendor CSV feed could not be reached after 3 attempts${detail}.`);
       }
       if (!feedResponse.ok) {
         if (feedResponse.status >= 500) {
-          throw new Error(`Kole Imports CSV feed is temporarily unavailable (HTTP ${feedResponse.status}). Try again later.`);
+          throw new Error(`The vendor CSV feed is temporarily unavailable (HTTP ${feedResponse.status}). Try again later.`);
         }
-        throw new Error(`Kole Imports CSV feed request was rejected (HTTP ${feedResponse.status}).`);
+        throw new Error(`The vendor CSV feed request was rejected (HTTP ${feedResponse.status}).`);
       }
       const contentLength = Number(feedResponse.headers.get("content-length") || 0);
       if (contentLength > MAX_KOLE_FEED_BYTES) {
-        throw new Error("Kole Imports feed is larger than the supported 50 MB limit.");
+        throw new Error("The vendor feed is larger than the supported 50 MB limit.");
       }
       syncStage = "validating CSV feed";
       if (/text\/html/i.test(feedResponse.headers.get("content-type") || "")) {
-        throw new Error("Kole Imports returned an HTML error page instead of a CSV feed. Try again later.");
+        throw new Error("The vendor returned an HTML error page instead of a CSV feed. Try again later.");
       }
       const csv = await feedResponse.text();
       if (Buffer.byteLength(csv, "utf8") > MAX_KOLE_FEED_BYTES) {
-        throw new Error("Kole Imports feed is larger than the supported 50 MB limit.");
+        throw new Error("The vendor feed is larger than the supported 50 MB limit.");
       }
 
       const products = parseKoleFeedCsv(csv);
@@ -1287,12 +1299,13 @@ export async function registerRoutes(
         errorCount: 0,
       });
     } catch (error: any) {
-      const errorMessage = String(error?.message || "Unexpected vendor catalog sync error.").slice(0, 400);
+      const rawErrorMessage = String(error?.message || "Unexpected vendor catalog sync error.").slice(0, 400);
+      const errorMessage = sanitizeVendorFacingMessage(rawErrorMessage);
       console.error("[Kole CSV sync] failed", {
         stage: syncStage,
         name: error?.name || "Error",
         code: error?.code || error?.cause?.code || null,
-        message: errorMessage,
+        message: rawErrorMessage,
       });
       if (log?.id) {
         await storage.finishDropshipSyncLog(log.id, {
@@ -1379,12 +1392,13 @@ export async function registerRoutes(
           errorCount: 0,
         });
       } catch (error: any) {
-        const errorMessage = String(error?.message || "Unexpected uploaded CSV error.").slice(0, 400);
+        const rawErrorMessage = String(error?.message || "Unexpected uploaded CSV error.").slice(0, 400);
+        const errorMessage = sanitizeVendorFacingMessage(rawErrorMessage);
         console.error("[Kole CSV upload] failed", {
           stage: syncStage,
           name: error?.name || "Error",
           code: error?.code || error?.cause?.code || null,
-          message: errorMessage,
+          message: rawErrorMessage,
         });
         if (log?.id) {
           await storage.finishDropshipSyncLog(log.id, {
@@ -1956,7 +1970,7 @@ export async function registerRoutes(
             issueSamples.push({
               sku: owners.map((owner) => String(owner.vendor_sku ?? "")).join(", "),
               bigcommerceProductId,
-              message: "Multiple Kole catalog rows point to this BigCommerce product; skipped to avoid conflicting updates.",
+              message: "Multiple vendor catalog rows point to this BigCommerce product; skipped to avoid conflicting updates.",
             });
           }
           continue;
@@ -2043,7 +2057,7 @@ export async function registerRoutes(
           if (!inventoryProvided) {
             outcome.inventoryUnavailable = true;
           } else if (!Number.isInteger(inventoryLevel) || inventoryLevel < 0 || inventoryLevel > 2_147_483_647) {
-            outcome.errors.push("The Kole inventory count is outside BigCommerce's supported range.");
+            outcome.errors.push("The vendor inventory count is outside BigCommerce's supported range.");
           } else if (currentProduct.inventory_tracking === "product") {
             if (Number(currentProduct.inventory_level) !== inventoryLevel) {
               update.inventory_level = inventoryLevel;
@@ -2101,7 +2115,7 @@ export async function registerRoutes(
               }
             } catch {
               photoLedgerReadable = false;
-              outcome.errors.push("Could not load photo sync history; Kole photos were not changed.");
+              outcome.errors.push("Could not load photo sync history; vendor photos were not changed.");
             }
 
             const bigcommerceImages = Array.isArray(currentProduct.images) ? currentProduct.images : [];
@@ -2129,12 +2143,12 @@ export async function registerRoutes(
                 try {
                   await storage.setSetting(photoLedgerKey, Array.from(ledger));
                 } catch {
-                  outcome.errors.push("A matching Kole photo exists, but its sync history could not be saved.");
+                  outcome.errors.push("A matching vendor photo exists, but its sync history could not be saved.");
                 }
                 continue;
               }
               if (imageUrl.length > 255) {
-                outcome.errors.push("A Kole photo URL exceeds BigCommerce's 255-character limit.");
+                outcome.errors.push("A vendor photo URL exceeds BigCommerce's 255-character limit.");
                 continue;
               }
 
@@ -2228,7 +2242,7 @@ export async function registerRoutes(
       console.error("[Kole details sync] failed before product updates completed", {
         message: error?.message || String(error),
       });
-      res.status(502).json({ error: error?.message || "Failed to sync mapped Kole product details." });
+      res.status(502).json({ error: sanitizeVendorFacingMessage(error?.message || "Failed to sync mapped vendor product details.") });
     } finally {
       koleDetailsSyncInProgress = false;
     }

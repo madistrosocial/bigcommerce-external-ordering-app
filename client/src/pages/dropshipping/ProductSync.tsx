@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "@/lib/api";
+import { toPublicVendorMessage } from "@/lib/vendor-display";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -69,7 +70,7 @@ type SyncItem = {
 };
 
 const SYNC_FIELDS: Array<{ value: SyncField; label: string; note: string }> = [
-  { value: "cost", label: "Extended cost", note: "Kole extended cost" },
+  { value: "cost", label: "Extended cost", note: "Supplier extended cost" },
   { value: "description", label: "Description", note: "Product description" },
   { value: "inventory", label: "Inventory quantity", note: "Available inventory" },
   { value: "identity", label: "Product name, brand, UPC", note: "Catalog identity fields" },
@@ -209,7 +210,7 @@ export default function ProductSyncPage() {
     },
     onError: (error: Error) => toast({
       title: "Could not start sync",
-      description: error.message || "Try again in a moment.",
+      description: toPublicVendorMessage(error.message || "Try again in a moment."),
       variant: "destructive",
     }),
   });
@@ -221,7 +222,7 @@ export default function ProductSyncPage() {
       queryClient.invalidateQueries({ queryKey: ["kole-product-sync-logo"] });
       toast({ title: "Logo overlay saved", description: "The saved overlay will be used for image sync." });
     },
-    onError: (error: Error) => toast({ title: "Could not save logo overlay", description: error.message, variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Could not save logo overlay", description: toPublicVendorMessage(error.message), variant: "destructive" }),
   });
 
   const deleteLogo = useMutation({
@@ -231,7 +232,7 @@ export default function ProductSyncPage() {
       queryClient.setQueryData(["kole-product-sync-logo"], { dataUrl: null });
       toast({ title: "Logo overlay removed" });
     },
-    onError: (error: Error) => toast({ title: "Could not remove logo overlay", description: error.message, variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Could not remove logo overlay", description: toPublicVendorMessage(error.message), variant: "destructive" }),
   });
 
   const products = productsQuery.data?.rows ?? [];
@@ -333,7 +334,7 @@ export default function ProductSyncPage() {
     } catch (error) {
       toast({
         title: "Could not select all mapped listings",
-        description: (error as Error)?.message || "Try again in a moment.",
+        description: toPublicVendorMessage((error as Error)?.message || "Try again in a moment."),
         variant: "destructive",
       });
     } finally {
@@ -389,7 +390,7 @@ export default function ProductSyncPage() {
           <div className="min-w-0">
             <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#527367]">
               <span className="h-px w-5 bg-[#89a79a]" />
-              Kole · BigCommerce
+              Vendor Catalog · BigCommerce
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-[#1e332d] sm:text-[30px]">Product sync</h1>
             <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-600">
@@ -488,7 +489,7 @@ export default function ProductSyncPage() {
                         <SummaryMetric label="Skipped" value={job.skipped} tone={job.skipped ? "text-orange-700" : "text-slate-900"} />
                       </div>
                       <p className="mt-3 text-[11px] text-slate-500">Started {formatDate(job.startedAt)}</p>
-                      {job.error && <p className="mt-2 flex gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{job.error}</p>}
+                      {job.error && <p className="mt-2 flex gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{toPublicVendorMessage(job.error)}</p>}
                     </>
                   ) : (
                     <p className="mt-4 rounded-md border border-dashed border-[#bdcec2] bg-white/60 px-3 py-4 text-xs leading-5 text-slate-600">
@@ -571,7 +572,7 @@ export default function ProductSyncPage() {
                       <p className="mt-2 text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">{logoDraft ? "Unsaved preview" : logoUrl ? "Current overlay" : "Overlay preview"}</p>
                     </div>
                   </div>
-                  {logoQuery.isError && <p className="mt-3 text-xs text-rose-700">Could not load the saved overlay: {(logoQuery.error as Error).message}</p>}
+                  {logoQuery.isError && <p className="mt-3 text-xs text-rose-700">Could not load the saved overlay: {toPublicVendorMessage((logoQuery.error as Error).message)}</p>}
                   <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
                     <div className="flex items-start gap-2.5">
                       <Checkbox
@@ -621,7 +622,7 @@ export default function ProductSyncPage() {
                       </div>
                       <p className="mt-3 text-[11px] text-slate-500">Started {formatDate(job.startedAt)}</p>
                       {job.forceImageReupload && <p className="mt-2 text-[11px] leading-4 text-amber-800">Upload history was bypassed for this run. Check for duplicate photos if any previous images remained on the listing.</p>}
-                      {job.error && <p className="mt-2 flex gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{job.error}</p>}
+                      {job.error && <p className="mt-2 flex gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{toPublicVendorMessage(job.error)}</p>}
                     </>
                   ) : (
                     <p className="mt-4 rounded-md border border-dashed border-[#bdcec2] bg-white/60 px-3 py-4 text-xs leading-5 text-slate-600">
@@ -647,7 +648,7 @@ export default function ProductSyncPage() {
               )}
               {kind === "images" && imageHistoryQuery.isError && (
                 <p className="mt-1 text-[11px] text-rose-700">
-                  Previous image-upload history could not be loaded: {(imageHistoryQuery.error as Error).message}
+                  Previous image-upload history could not be loaded: {toPublicVendorMessage((imageHistoryQuery.error as Error).message)}
                 </p>
               )}
             </div>
@@ -686,7 +687,7 @@ export default function ProductSyncPage() {
               <div className="flex flex-col items-center px-5 py-12 text-center">
                 <AlertTriangle className="h-6 w-6 text-rose-600" />
                 <p className="mt-3 text-sm font-semibold text-slate-800">Mapped products could not be loaded</p>
-                <p className="mt-1 text-xs text-slate-500">{(productsQuery.error as Error).message}</p>
+                <p className="mt-1 text-xs text-slate-500">{toPublicVendorMessage((productsQuery.error as Error).message)}</p>
                 <Button variant="outline" size="sm" className="mt-4" onClick={() => productsQuery.refetch()}>Retry</Button>
               </div>
             ) : mappedProducts.length === 0 ? (
@@ -746,7 +747,7 @@ export default function ProductSyncPage() {
                               <>
                                 {item.updatedFields.length > 0 && <p className="truncate text-xs text-slate-600">{item.updatedFields.join(", ")}</p>}
                                 {kind === "images" && item.photosAdded > 0 && <p className="mt-0.5 text-xs text-slate-600">{item.photosAdded} photo{item.photosAdded === 1 ? "" : "s"} added</p>}
-                                {item.error && <p className="mt-0.5 line-clamp-2 text-xs text-rose-700">{item.error}</p>}
+                                {item.error && <p className="mt-0.5 line-clamp-2 text-xs text-rose-700">{toPublicVendorMessage(item.error)}</p>}
                                 {!item.updatedFields.length && !item.photosAdded && !item.error && <p className="text-xs text-slate-400">—</p>}
                               </>
                             ) : <p className="text-xs text-slate-400">No run result</p>}

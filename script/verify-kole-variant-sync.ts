@@ -234,6 +234,7 @@ async function runSiblingImageAggregationSync() {
           assert.ok(init.body instanceof FormData);
           const form = init.body as FormData;
           const file = form.get("image_file") as File;
+          assert.equal(form.get("description"), "Watermarked product photo");
           const sortOrder = Number(form.get("sort_order"));
           uploadedFiles.push(file.name);
           existingImages.push({ image_file: file.name, sort_order: sortOrder });
@@ -256,7 +257,7 @@ async function runSiblingImageAggregationSync() {
   assert.equal(completed?.photosAdded, 6);
   assert.equal(uploadedFiles.length, 6);
   for (const row of rows) {
-    assert.equal(uploadedFiles.filter((name) => name.startsWith(`kole-${row.vendor_sku}-`)).length, 2);
+    assert.equal(uploadedFiles.filter((name) => name.startsWith(`catalog-${row.vendor_sku}-`)).length, 2);
   }
 
   const rerun = await manager.start("images", 7, [1, 2, 3]);
@@ -281,8 +282,8 @@ async function runSiblingImageAggregationSync() {
   assert.equal(legacyCompleted?.photosAdded, 4);
   assert.equal(legacyImages.length, 6);
   assert.equal(legacyUploadedFiles.some((name) => name.startsWith("kole-PARENT-100-RED-")), false);
-  assert.equal(legacyUploadedFiles.filter((name) => name.startsWith("kole-PARENT-100-BLUE-")).length, 2);
-  assert.equal(legacyUploadedFiles.filter((name) => name.startsWith("kole-PARENT-100-WHITE-")).length, 2);
+  assert.equal(legacyUploadedFiles.filter((name) => name.startsWith("catalog-PARENT-100-BLUE-")).length, 2);
+  assert.equal(legacyUploadedFiles.filter((name) => name.startsWith("catalog-PARENT-100-WHITE-")).length, 2);
   assert.deepEqual(await legacyManager.getImageSyncHistory(7, [1, 2, 3]), { 1: 2, 2: 2, 3: 2 });
 }
 
