@@ -70,6 +70,27 @@ function extendedSupplierCost(product: api.DropshipProduct) {
   return getKoleExtendedCost(product.raw_data, product.cost);
 }
 
+function importSourceLabel(log?: api.DropshipSyncLog) {
+  const source = log?.detail?.source;
+  if (source === "uploaded_csv") return "Uploaded CSV";
+  if (source === "csv_feed") return "URL feed";
+  return log ? "Vendor catalog import" : "URL feed or uploaded CSV";
+}
+
+function formatImportDate(log?: api.DropshipSyncLog) {
+  const value = log?.completed_at || log?.started_at;
+  if (!value) return "No successful import yet";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Date unavailable";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function suggestedRetailPrice(product: api.DropshipProduct) {
   const cost = extendedSupplierCost(product);
   if (cost === null) return "";
@@ -105,6 +126,12 @@ export default function DropshipCatalogPage() {
   const canManageDropshipping = hasPermission("dropshipping", "manage");
   const queryClient = useQueryClient();
   const { data: connection } = useQuery({ queryKey: ["dropship-connection"], queryFn: api.getKoleConnection });
+  const {
+    data: syncLogs = [],
+    isLoading: isSyncLogsLoading,
+    isError: isSyncLogsError,
+  } = useQuery({ queryKey: ["dropship-sync-logs"], queryFn: api.getKoleSyncLogs });
+  const latestSuccessfulImport = syncLogs.find((log) => log.status === "completed");
   const { data: mappingBrandSetting } = useQuery({ queryKey: ["kole-mapping-brand"], queryFn: api.getKoleMappingBrand });
   const [mappingBrandName, setMappingBrandName] = useState<string | null>(null);
   const [mappingResult, setMappingResult] = useState<api.KoleProductMappingResult | null>(null);
@@ -408,7 +435,20 @@ export default function DropshipCatalogPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Catalog products</p><p className="text-xl font-bold text-slate-800">{data?.total ?? "—"}</p></CardContent></Card>
-        <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Feed source</p><p className="text-xl font-bold text-slate-800">CSV</p><p className="text-[10px] text-slate-400">Vendor inventory feed</p></CardContent></Card>
+        <Card>
+          <CardContent className="p-3">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500">Last successful import</p>
+            <p
+              className="mt-1 text-sm font-semibold leading-5 text-slate-800"
+              title={(latestSuccessfulImport?.completed_at || latestSuccessfulImport?.started_at) ?? undefined}
+            >
+              {isSyncLogsLoading ? "Loading…" : isSyncLogsError ? "Import history unavailable" : formatImportDate(latestSuccessfulImport)}
+            </p>
+            <p className="text-[10px] text-slate-400">
+              {isSyncLogsError ? "Could not load import history" : importSourceLabel(latestSuccessfulImport)}
+            </p>
+          </CardContent>
+        </Card>
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Current page</p><p className="text-xl font-bold text-slate-800">{page} / {totalPages}</p></CardContent></Card>
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Selected</p><p className="text-xl font-bold text-indigo-600">{selected.size}</p></CardContent></Card>
       </div>
