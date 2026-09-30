@@ -339,6 +339,29 @@ export type KoleProductSyncItemsPage = {
   page: number;
   limit: number;
 };
+export type KoleProductCostComparisonItem = {
+  productId: number;
+  vendorSku: string;
+  title: string;
+  bigcommerceProductId: number | null;
+  status: "changed" | "match" | "unavailable" | "failed" | "skipped" | "conflict";
+  sheetExtendedCost: number | null;
+  listingCost: number | null;
+  delta: number | null;
+  message: string | null;
+};
+export type KoleProductCostComparisonResult = {
+  checkedAt: string;
+  total: number;
+  compared: number;
+  changed: number;
+  matched: number;
+  unavailable: number;
+  failed: number;
+  skipped: number;
+  conflicts: number;
+  items: KoleProductCostComparisonItem[];
+};
 
 export function getKoleMappingBrand() {
   return dropshipRequest<{ brandName: string }>("/dropshipping/kole/mapping-brand");
@@ -391,6 +414,13 @@ export function startKoleProductSync(
       ...(fields ? { fields } : {}),
       ...(forceImageReupload ? { forceImageReupload: true } : {}),
     }),
+  });
+}
+
+export function compareKoleProductSyncCosts(productIds: number[]) {
+  return dropshipRequest<KoleProductCostComparisonResult>("/dropshipping/product-sync/cost-comparison", {
+    method: "POST",
+    body: JSON.stringify({ productIds }),
   });
 }
 

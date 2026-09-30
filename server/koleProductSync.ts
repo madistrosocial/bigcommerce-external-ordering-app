@@ -55,6 +55,39 @@ export interface KoleProductSyncItemsPage {
   limit: number;
 }
 
+export type KoleProductCostComparisonStatus =
+  | "changed"
+  | "match"
+  | "unavailable"
+  | "failed"
+  | "skipped"
+  | "conflict";
+
+export interface KoleProductCostComparisonItem {
+  productId: number;
+  vendorSku: string;
+  title: string;
+  bigcommerceProductId: number | null;
+  status: KoleProductCostComparisonStatus;
+  sheetExtendedCost: number | null;
+  listingCost: number | null;
+  delta: number | null;
+  message: string | null;
+}
+
+export interface KoleProductCostComparisonResult {
+  checkedAt: string;
+  total: number;
+  compared: number;
+  changed: number;
+  matched: number;
+  unavailable: number;
+  failed: number;
+  skipped: number;
+  conflicts: number;
+  items: KoleProductCostComparisonItem[];
+}
+
 interface ProductSyncStorage extends Pick<IStorage, "getDropshipProducts" | "getDropshipProduct" | "getSetting" | "setSetting"> {}
 
 interface BigCommerceCredentials {
@@ -424,6 +457,7 @@ export class KoleProductSyncManager {
   private readonly latestJobIdByKind = new Map<KoleProductSyncKind, number>();
   private activeJobId: number | null = null;
   private isStarting = false;
+  private isComparingCosts = false;
 
   constructor(options: ProductSyncManagerOptions) {
     this.storage = options.storage;
@@ -476,7 +510,7 @@ export class KoleProductSyncManager {
     selectedFields: KoleProductSyncField[] = [],
     forceImageReupload = false,
   ): Promise<KoleProductSyncJobSummary> {
-    if (this.activeJobId !== null || this.isStarting) {
+    if (this.activeJobId !== null || this.isStarting || this.isComparingCosts) {
       throw new KoleProductSyncError("A Product Sync job is already running.", 409);
     }
     if (
@@ -545,6 +579,196 @@ export class KoleProductSyncManager {
         if (this.latestJobIdByKind.get(kind) === createdJobId) this.latestJobIdByKind.delete(kind);
       }
       throw error;
+    }
+  }
+
+  async compareCosts(vendorId: number, selectedProductIds: number[]): Promise<KoleProductCostComparisonResult> {
+    if (this.activeJobId !== null || this.isStarting || this.isComparingCosts) {
+      throw new KoleProductSyncError("Wait for the current Product Sync activity to finish before checking costs.", 409);
+    }
+    if (
+      !Array.isArray(selectedProductIds)
+      || selectedProductIds.length === 0
+      || selectedProductIds.some((id) => !Number.isSafeInteger(id) || id <= 0)
+    ) {
+      throw new KoleProductSyncError("Select at least one valid mapped product.");
+    }
+    const productIds = Array.from(new Set(selectedProductIds));
+    if (productIds.length !== selectedProductIds.length) {
+      throw new KoleProductSyncError("The selected product list contains duplicates.");
+    }
+
+    this.isComparingCosts = true;
+    try {
+      const mappedProducts: DropshipProduct[] = [];
+      let page = 1;
+      let rowsRead = 0;
+      let expectedTotal = 0;
+      while (true) {
+        const result = await this.storage.getDropshipProducts({
+          vendorId,
+          page,
+          limit: 100,
+          imported: true,
+        });
+        mappedProducts.push(...result.rows);
+        rowsRead += result.rows.length;
+        expectedTotal = result.total;
+        if (result.rows.length === 0 || rowsRead >= expectedTotal) break;
+        page++;
+      }
+
+      const productById = new Map(mappedProducts.map((product) => [product.id, product]));
+      const ownersByBcId = new Map<number, DropshipProduct[]>();
+      for (const product of mappedProducts) {
+        const bigcommerceProductId = Number(product.bigcommerce_product_id);
+        if (!Number.isSafeInteger(bigcommerceProductId) || bigcommerceProductId <= 0) continue;
+        const owners = ownersByBcId.get(bigcommerceProductId) ?? [];
+        owners.push(product);
+        ownersByBcId.set(bigcommerceProductId, owners);
+      }
+
+      const items: KoleProductCostComparisonItem[] = productIds.map((productId) => {
+        const product = productById.get(productId);
+        const bigcommerceProductId = Number(product?.bigcommerce_product_id);
+        const extendedCost = product
+          ? getKoleExtendedCost(productRawData(product), product.cost)
+          : null;
+        return {
+          productId,
+          vendorSku: String(product?.vendor_sku ?? ""),
+          title: String(product?.title ?? `Product #${productId}`),
+          bigcommerceProductId: Number.isSafeInteger(bigcommerceProductId) && bigcommerceProductId > 0
+            ? bigcommerceProductId
+            : null,
+          status: "skipped",
+          sheetExtendedCost: extendedCost === null
+            ? null
+            : Math.round((extendedCost + Number.EPSILON) * 100) / 100,
+          listingCost: null,
+          delta: null,
+          message: product
+            ? "This catalog row no longer has a valid BigCommerce product mapping."
+            : "This product is no longer mapped. Refresh the list and select it again.",
+        };
+      });
+      const itemByProductId = new Map(items.map((item) => [item.productId, item]));
+      const candidatesByBcId = new Map<number, Array<{ product: DropshipProduct; item: KoleProductCostComparisonItem }>>();
+
+      for (const productId of productIds) {
+        const product = productById.get(productId);
+        const item = itemByProductId.get(productId)!;
+        if (!product) continue;
+        const bigcommerceProductId = Number(product.bigcommerce_product_id);
+        if (!Number.isSafeInteger(bigcommerceProductId) || bigcommerceProductId <= 0) continue;
+
+        const rawVariantId = product.bigcommerce_variant_id;
+        const variantId = rawVariantId == null ? null : Number(rawVariantId);
+        if (rawVariantId != null && (!Number.isSafeInteger(variantId) || (variantId as number) <= 0)) {
+          item.message = "This catalog row has an invalid BigCommerce variant mapping.";
+          continue;
+        }
+
+        const conflictingOwner = (ownersByBcId.get(bigcommerceProductId) ?? []).some((owner) => {
+          if (owner.id === product.id) return false;
+          const ownerVariantId = owner.bigcommerce_variant_id == null
+            ? null
+            : Number(owner.bigcommerce_variant_id);
+          return variantId === null || ownerVariantId === null || variantId === ownerVariantId;
+        });
+        if (conflictingOwner) {
+          item.message = "Multiple vendor catalog rows map to the same BigCommerce product or variant; skipped to avoid ambiguous costs.";
+          continue;
+        }
+
+        const group = candidatesByBcId.get(bigcommerceProductId) ?? [];
+        group.push({ product, item });
+        candidatesByBcId.set(bigcommerceProductId, group);
+      }
+
+      const groups = Array.from(candidatesByBcId.entries());
+      if (groups.length > 0) {
+        const { storeHash, headers } = await this.getBigCommerceCredentials();
+        let nextIndex = 0;
+        const workerCount = Math.min(SYNC_CONCURRENCY, groups.length);
+        await Promise.all(Array.from({ length: workerCount }, async () => {
+          while (true) {
+            const index = nextIndex++;
+            if (index >= groups.length) return;
+            const [bigcommerceProductId, group] = groups[index];
+            const sourceCosts = group.map(({ item }) => item.sheetExtendedCost);
+            const knownSourceCosts = sourceCosts
+              .filter((value): value is number => value !== null)
+              .map((value) => value.toFixed(2));
+            const hasCostConflict = new Set(knownSourceCosts).size > 1;
+
+            let currentProduct: any;
+            try {
+              const response = await this.fetchBigCommerce(
+                `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${bigcommerceProductId}`,
+                { headers },
+              );
+              const payload = await response.json().catch(() => ({}));
+              if (!response.ok || !payload?.data) {
+                throw new Error(`BigCommerce product lookup failed (${response.status}).`);
+              }
+              currentProduct = payload.data;
+            } catch (error) {
+              for (const { item } of group) {
+                item.status = "failed";
+                item.message = safeError(error);
+              }
+              continue;
+            }
+
+            const rawListingCost = currentProduct.cost_price;
+            const parsedListingCost = rawListingCost === undefined || rawListingCost === null || String(rawListingCost).trim() === ""
+              ? null
+              : Number(rawListingCost);
+            const listingCost = parsedListingCost !== null && Number.isFinite(parsedListingCost) && parsedListingCost >= 0
+              ? Math.round((parsedListingCost + Number.EPSILON) * 100) / 100
+              : null;
+
+            for (let candidateIndex = 0; candidateIndex < group.length; candidateIndex++) {
+              const { item } = group[candidateIndex];
+              const sheetExtendedCost = sourceCosts[candidateIndex];
+              item.listingCost = listingCost;
+              if (sheetExtendedCost === null) {
+                item.status = "unavailable";
+                item.message = "The sheet does not contain a valid extended cost.";
+              } else if (hasCostConflict) {
+                item.status = "conflict";
+                item.message = "Selected sheet rows mapped to this listing have different extended costs.";
+              } else if (listingCost === null) {
+                item.status = "unavailable";
+                item.message = "The BigCommerce listing does not have a valid cost price.";
+              } else {
+                item.delta = Math.round((sheetExtendedCost - listingCost + Number.EPSILON) * 100) / 100;
+                item.status = item.delta === 0 ? "match" : "changed";
+                item.message = null;
+              }
+            }
+          }
+        }));
+      }
+
+      const count = (status: KoleProductCostComparisonStatus) => items.filter((item) => item.status === status).length;
+      const changed = count("changed");
+      const matched = count("match");
+      return {
+        checkedAt: new Date().toISOString(),
+        total: items.length,
+        compared: changed + matched,
+        changed,
+        matched,
+        unavailable: count("unavailable"),
+        failed: count("failed"),
+        skipped: count("skipped"),
+        conflicts: count("conflict"),
+        items,
+      };
+    } finally {
+      this.isComparingCosts = false;
     }
   }
 

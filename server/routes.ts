@@ -1840,6 +1840,22 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/dropshipping/product-sync/cost-comparison", requirePermission("dropshipping", "manage"), async (req, res) => {
+    const productIds = req.body?.productIds;
+    if (!Array.isArray(productIds)) {
+      return res.status(400).json({ error: "Select mapped products to compare." });
+    }
+    try {
+      const vendor = await getKoleVendor();
+      res.json(await koleProductSyncManager.compareCosts(vendor.id, productIds));
+    } catch (error: any) {
+      const status = error instanceof KoleProductSyncError ? error.statusCode : 502;
+      res.status(status).json({
+        error: sanitizeVendorFacingMessage(error?.message || "Could not compare supplier and BigCommerce costs."),
+      });
+    }
+  });
+
   app.post("/api/dropshipping/product-sync/jobs", requirePermission("dropshipping", "manage"), async (req, res) => {
     const kind = req.body?.kind === "details" || req.body?.kind === "images"
       ? req.body.kind as KoleProductSyncKind

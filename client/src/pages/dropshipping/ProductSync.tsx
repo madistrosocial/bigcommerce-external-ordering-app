@@ -84,6 +84,33 @@ function formatDate(value?: string | null) {
     : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
+function formatCost(value: number | null) {
+  return value === null ? "—" : `$${value.toFixed(2)}`;
+}
+
+function formatCostDelta(value: number | null) {
+  if (value === null) return "—";
+  const amount = `$${Math.abs(value).toFixed(2)}`;
+  return value > 0 ? `+${amount}` : value < 0 ? `−${amount}` : "$0.00";
+}
+
+function costComparisonPresentation(status: api.KoleProductCostComparisonItem["status"]) {
+  switch (status) {
+    case "changed":
+      return { label: "Cost changed", className: "border-amber-200 bg-amber-50 text-amber-800" };
+    case "match":
+      return { label: "Match", className: "border-emerald-200 bg-emerald-50 text-emerald-800" };
+    case "conflict":
+      return { label: "Conflicting sheet costs", className: "border-rose-200 bg-rose-50 text-rose-800" };
+    case "failed":
+      return { label: "Lookup failed", className: "border-rose-200 bg-rose-50 text-rose-800" };
+    case "skipped":
+      return { label: "Skipped", className: "border-orange-200 bg-orange-50 text-orange-800" };
+    case "unavailable":
+      return { label: "Cost unavailable", className: "border-slate-200 bg-slate-100 text-slate-700" };
+  }
+}
+
 function statusPresentation(status?: SyncItem["status"]) {
   switch (status) {
     case "in_progress":
@@ -138,6 +165,7 @@ export default function ProductSyncPage() {
   const [logoDraft, setLogoDraft] = useState<string | null>(null);
   const [forceImageReupload, setForceImageReupload] = useState(false);
   const [selectAllPending, setSelectAllPending] = useState(false);
+  const [costComparisonResult, setCostComparisonResult] = useState<api.KoleProductCostComparisonResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -215,6 +243,25 @@ export default function ProductSyncPage() {
     }),
   });
 
+  const costComparison = useMutation({
+    mutationFn: (productIds: number[]) => api.compareKoleProductSyncCosts(productIds),
+    onMutate: () => setCostComparisonResult(null),
+    onSuccess: (result) => {
+      setCostComparisonResult(result);
+      toast({
+        title: result.changed > 0
+          ? `${result.changed.toLocaleString()} extended-cost difference${result.changed === 1 ? "" : "s"} found`
+          : "Cost comparison complete",
+        description: `${result.matched.toLocaleString()} matched; ${result.unavailable + result.failed + result.skipped + result.conflicts} need attention. No BigCommerce listings were changed.`,
+      });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not compare costs",
+      description: toPublicVendorMessage(error.message || "Try again in a moment."),
+      variant: "destructive",
+    }),
+  });
+
   const saveLogo = useMutation({
     mutationFn: (dataUrl: string) => api.saveKoleProductSyncLogo(dataUrl),
     onSuccess: () => {
@@ -253,7 +300,7 @@ export default function ProductSyncPage() {
   const totalPages = Math.max(Math.ceil((productsQuery.data?.total ?? 0) / PAGE_SIZE), 1);
   const progress = job?.total ? Math.min(100, Math.round((job.processed / job.total) * 100)) : 0;
   const logoUrl = logoDraft ?? logoQuery.data?.dataUrl ?? null;
-  const syncPending = selectAllPending || startSync.isPending || latestQuery.isLoading || jobQuery.isLoading || job?.status === "running";
+  const syncPending = selectAllPending || startSync.isPending || costComparison.isPending || latestQuery.isLoading || jobQuery.isLoading || job?.status === "running";
   const imageSyncReady = !!logoQuery.data?.dataUrl && !logoDraft;
 
   useEffect(() => {
@@ -383,6 +430,15 @@ export default function ProductSyncPage() {
     });
   };
 
+  const compareSelectedCosts = () => {
+    if (!canManage || syncPending) return;
+    if (selectedProductIds.size === 0) {
+      toast({ title: "Select mapped products", description: "Choose at least one listing below to compare costs.", variant: "destructive" });
+      return;
+    }
+    costComparison.mutate(Array.from(selectedProductIds));
+  };
+
   return (
     <main className="min-h-[100dvh] bg-[#f3f5f2] px-3 py-5 text-slate-800 sm:px-5 lg:px-8">
       <div className="mx-auto max-w-[1440px] space-y-5">
@@ -438,16 +494,27 @@ export default function ProductSyncPage() {
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">Details sync</p>
                       <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#243b32]">Choose what to update</h2>
-                      <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Select listings below. Only those products and the selected fields will be synced.</p>
+                      <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Compare the selected listings’ sheet extended cost with BigCommerce’s current cost price, or sync only the selected fields. Cost comparison never changes listings.</p>
                     </div>
-                    <Button
-                      onClick={startCurrentSync}
-                      disabled={!canManage || syncPending || selectedFields.length === 0 || selectedProductIds.size === 0}
-                      className="h-10 w-full shrink-0 bg-[#315f4d] text-white hover:bg-[#274f40] sm:w-auto"
-                    >
-                      {startSync.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                      {job?.status === "running" ? "Sync in progress" : startSync.isPending ? "Starting sync" : `Start details sync${selectedProductIds.size ? ` · ${selectedProductIds.size}` : ""}`}
-                    </Button>
+                    <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+                      <Button
+                        variant="outline"
+                        onClick={compareSelectedCosts}
+                        disabled={!canManage || syncPending || selectedProductIds.size === 0}
+                        className="h-10 w-full sm:w-auto"
+                      >
+                        {costComparison.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                        {costComparison.isPending ? "Checking costs…" : `Compare costs${selectedProductIds.size ? ` · ${selectedProductIds.size}` : ""}`}
+                      </Button>
+                      <Button
+                        onClick={startCurrentSync}
+                        disabled={!canManage || syncPending || selectedFields.length === 0 || selectedProductIds.size === 0}
+                        className="h-10 w-full bg-[#315f4d] text-white hover:bg-[#274f40] sm:w-auto"
+                      >
+                        {startSync.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        {job?.status === "running" ? "Sync in progress" : startSync.isPending ? "Starting sync" : `Start details sync${selectedProductIds.size ? ` · ${selectedProductIds.size}` : ""}`}
+                      </Button>
+                    </div>
                   </div>
                   <div className="mt-5 grid gap-2 sm:grid-cols-2">
                     {SYNC_FIELDS.map((field) => (
@@ -499,6 +566,79 @@ export default function ProductSyncPage() {
                 </CardContent>
               </Card>
             </div>
+            {costComparisonResult && (
+              <Card className="overflow-hidden border-[#dce4dd] bg-white shadow-sm">
+                <CardContent className="p-4 sm:p-5">
+                  <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">Read-only cost check</p>
+                      <h3 className="mt-1 text-base font-semibold text-[#243b32]">Sheet extended cost vs. BigCommerce cost price</h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Checked {costComparisonResult.total.toLocaleString()} selected listing{costComparisonResult.total === 1 ? "" : "s"} · {formatDate(costComparisonResult.checkedAt)}. No listing fields were changed.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={costComparisonResult.changed > 0 ? "w-fit border-amber-200 bg-amber-50 text-amber-800" : "w-fit border-emerald-200 bg-emerald-50 text-emerald-800"}>
+                      {costComparisonResult.changed > 0
+                        ? `${costComparisonResult.changed.toLocaleString()} cost difference${costComparisonResult.changed === 1 ? "" : "s"}`
+                        : costComparisonResult.compared === costComparisonResult.total && costComparisonResult.total > 0
+                          ? "No cost differences"
+                          : "Review cost results"}
+                    </Badge>
+                  </div>
+                  <div className="mt-5 grid grid-cols-2 gap-4 border-y border-slate-100 py-4 sm:grid-cols-4">
+                    <SummaryMetric label="Compared" value={costComparisonResult.compared} />
+                    <SummaryMetric label="Matched" value={costComparisonResult.matched} tone="text-emerald-800" />
+                    <SummaryMetric label="Changed" value={costComparisonResult.changed} tone={costComparisonResult.changed ? "text-amber-800" : "text-slate-900"} />
+                    <SummaryMetric
+                      label="Needs attention"
+                      value={costComparisonResult.unavailable + costComparisonResult.failed + costComparisonResult.skipped + costComparisonResult.conflicts}
+                      tone={costComparisonResult.unavailable + costComparisonResult.failed + costComparisonResult.skipped + costComparisonResult.conflicts ? "text-rose-700" : "text-slate-900"}
+                    />
+                  </div>
+                  {costComparisonResult.items.some((item) => item.status !== "match") ? (
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full min-w-[760px] text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-200 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                            <th className="py-2 pr-4">Mapped product</th>
+                            <th className="py-2 pr-4">Sheet extended cost</th>
+                            <th className="py-2 pr-4">Listing cost price</th>
+                            <th className="py-2 pr-4">Sheet − listing</th>
+                            <th className="py-2">Result</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {costComparisonResult.items.filter((item) => item.status !== "match").map((item) => {
+                            const presentation = costComparisonPresentation(item.status);
+                            return (
+                              <tr key={item.productId} className="align-top">
+                                <td className="py-3 pr-4">
+                                  <p className="font-medium text-slate-800">{item.title}</p>
+                                  <p className="mt-0.5 font-mono text-[11px] text-slate-500">{item.vendorSku || "No SKU"}</p>
+                                  {item.message && <p className="mt-1 max-w-xs leading-4 text-slate-500">{toPublicVendorMessage(item.message)}</p>}
+                                </td>
+                                <td className="py-3 pr-4 font-mono tabular-nums text-slate-700">{formatCost(item.sheetExtendedCost)}</td>
+                                <td className="py-3 pr-4 font-mono tabular-nums text-slate-700">{formatCost(item.listingCost)}</td>
+                                <td className={`py-3 pr-4 font-mono tabular-nums ${item.delta === null ? "text-slate-400" : item.delta > 0 ? "font-semibold text-amber-800" : "font-semibold text-sky-800"}`}>
+                                  {formatCostDelta(item.delta)}
+                                </td>
+                                <td className="py-3">
+                                  <Badge variant="outline" className={presentation.className}>{presentation.label}</Badge>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-800">
+                      All selected listings with available costs match the sheet’s extended cost.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="images" className="mt-4 space-y-4">
