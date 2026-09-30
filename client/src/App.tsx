@@ -403,19 +403,19 @@ function Router() {
 
       {/* ── Dropshipping ── */}
       <Route path="/dropshipping/dashboard">
-        {() => <PermissionRoute component={DropshipDashboardPage} module="dropshipping" />}
+        {() => <PermissionRoute component={DropshipDashboardPage} module="dropshipping_dashboard" />}
       </Route>
       <Route path="/dropshipping/kole">
-        {() => <PermissionRoute component={KoleImportsPage} module="dropshipping" />}
+        {() => <PermissionRoute component={KoleImportsPage} module="dropshipping_vendor" />}
       </Route>
       <Route path="/dropshipping/products">
-        {() => <PermissionRoute component={DropshipCatalogPage} module="dropshipping" />}
+        {() => <PermissionRoute component={DropshipCatalogPage} module="dropshipping_catalog" />}
       </Route>
       <Route path="/dropshipping/product-sync">
-        {() => <PermissionRoute component={ProductSyncPage} module="dropshipping" />}
+        {() => <PermissionRoute component={ProductSyncPage} module="dropshipping_product_sync" />}
       </Route>
       <Route path="/dropshipping/sync-logs">
-        {() => <PermissionRoute component={DropshipSyncLogsPage} module="dropshipping" />}
+        {() => <PermissionRoute component={DropshipSyncLogsPage} module="dropshipping_sync_logs" />}
       </Route>
 
       {/* ── CRM routes ── */}

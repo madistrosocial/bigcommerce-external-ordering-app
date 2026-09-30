@@ -53,7 +53,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const { data: dropshipConnection } = useQuery({
     queryKey: ["dropship-connection"],
     queryFn: getKoleConnection,
-    enabled: hasPermission("dropshipping"),
+    enabled: hasPermission("dropshipping_vendor"),
   });
   const dropshipDisplayName = toPublicVendorName(dropshipConnection?.displayName);
   const { toast } = useToast();
@@ -230,11 +230,11 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   ];
 
   const dropshippingChildren: NavLeaf[] = [
-    ...(hasPermission("dropshipping") ? [{ label: "Dashboard", path: "/dropshipping/dashboard" }] : []),
-    ...(hasPermission("dropshipping") ? [{ label: dropshipDisplayName, path: "/dropshipping/kole" }] : []),
-    ...(hasPermission("dropshipping") ? [{ label: "Product Catalog", path: "/dropshipping/products" }] : []),
-    ...(hasPermission("dropshipping") ? [{ label: "Product Sync", path: "/dropshipping/product-sync" }] : []),
-    ...(hasPermission("dropshipping") ? [{ label: "Sync Logs", path: "/dropshipping/sync-logs" }] : []),
+    ...(hasPermission("dropshipping_dashboard") ? [{ label: "Dashboard", path: "/dropshipping/dashboard" }] : []),
+    ...(hasPermission("dropshipping_vendor") ? [{ label: dropshipDisplayName, path: "/dropshipping/kole" }] : []),
+    ...(hasPermission("dropshipping_catalog") ? [{ label: "Product Catalog", path: "/dropshipping/products" }] : []),
+    ...(hasPermission("dropshipping_product_sync") ? [{ label: "Product Sync", path: "/dropshipping/product-sync" }] : []),
+    ...(hasPermission("dropshipping_sync_logs") ? [{ label: "Sync Logs", path: "/dropshipping/sync-logs" }] : []),
   ];
 
   // Attendance children — employees see their own clock; managers see scoped admin views.

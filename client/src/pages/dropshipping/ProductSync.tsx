@@ -150,7 +150,7 @@ function SummaryMetric({ label, value, tone = "text-slate-900" }: { label: strin
 
 export default function ProductSyncPage() {
   const { hasPermission } = usePermissions();
-  const canManage = hasPermission("dropshipping", "manage");
+  const canManage = hasPermission("dropshipping_product_sync", "manage");
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<SyncKind>("details");

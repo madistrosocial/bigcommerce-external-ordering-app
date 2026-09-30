@@ -84,6 +84,7 @@ import {
 import { buildBigCommerceSkuIndex, normalizeKoleSku } from "./koleSkuMapping";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 import { MARKETING_ACTION_PERMS, MARKETING_LEGACY_PAGE_GRANTS } from "@shared/marketing-permissions";
+import { DROPSHIPPING_LEGACY_PERMISSION_GRANTS, DROPSHIPPING_PERMISSIONS } from "@shared/dropshipping-permissions";
 import { dateOnlyInTimeZone, parseDateTimeLocal } from "@shared/timezone";
 import {
   ATTENDANCE_PERMISSION_DEFINITIONS,
@@ -944,6 +945,25 @@ export async function registerRoutes(
       })().catch(next);
     };
 
+  const requireAnyPermission = (requirements: Array<{ module: string; action: string }>) =>
+    (req: Request, res: Response, next: NextFunction) => {
+      void (async () => {
+        const user = await getAuthenticatedUser(req);
+        if (!user) return res.status(401).json({ error: "Authentication required" });
+        if (user.role === "admin") {
+          (req as any).authUser = user;
+          attachAuthenticatedActivityLog(req, res, user);
+          return next();
+        }
+        const perms = await storage.getUserPermissionStrings(user.id);
+        const allowed = requirements.some(({ module, action }) => perms.includes(`${module}:${action}`));
+        if (!allowed) return res.status(403).json({ error: "Forbidden" });
+        (req as any).authUser = user;
+        attachAuthenticatedActivityLog(req, res, user);
+        next();
+      })().catch(next);
+    };
+
   const requireMarketingPageAccess = (pageActions: string | string[], action?: string) =>
     async (req: Request, res: Response, next: NextFunction) => {
       const user = await getAuthenticatedUser(req);
@@ -1082,7 +1102,11 @@ export async function registerRoutes(
     getBigCommerceBrands: () => getCachedBcBrandOptions(),
   });
 
-  app.get("/api/dropshipping/kole/connection", requirePermission("dropshipping", "view"), async (_req, res) => {
+  app.get("/api/dropshipping/kole/connection", requireAnyPermission([
+    { module: "dropshipping_vendor", action: "view" },
+    { module: "dropshipping_catalog", action: "view" },
+    { module: "dropshipping_sync_logs", action: "view" },
+  ]), async (_req, res) => {
     try {
       const vendor = await getKoleVendor();
       const value = await getKoleSetting();
@@ -1098,7 +1122,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/dropshipping/kole/connection", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.put("/api/dropshipping/kole/connection", requirePermission("dropshipping_vendor", "manage"), async (req, res) => {
     try {
       const currentValue = await getKoleSetting();
       const suppliedAccountId = String(req.body?.accountId ?? "").trim();
@@ -1124,7 +1148,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropshipping/kole/connection/test", requirePermission("dropshipping", "manage"), async (_req, res) => {
+  app.post("/api/dropshipping/kole/connection/test", requirePermission("dropshipping_vendor", "manage"), async (_req, res) => {
     const testedAt = new Date().toISOString();
     try {
       const credentials = await getKoleConfig();
@@ -1145,7 +1169,10 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/kole/products", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/kole/products", requireAnyPermission([
+    { module: "dropshipping_catalog", action: "view" },
+    { module: "dropshipping_product_sync", action: "view" },
+  ]), async (req, res) => {
     try {
       const vendor = await getKoleVendor();
       const page = Math.max(Number(req.query.page) || 1, 1);
@@ -1175,7 +1202,10 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/kole/products/:id", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/kole/products/:id", requireAnyPermission([
+    { module: "dropshipping_catalog", action: "view" },
+    { module: "dropshipping_product_sync", action: "view" },
+  ]), async (req, res) => {
     try {
       const product = await storage.getDropshipProduct(Number(req.params.id));
       if (!product) return res.status(404).json({ error: "Vendor product not found" });
@@ -1185,7 +1215,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/dropshipping/kole/products/:id/status", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.patch("/api/dropshipping/kole/products/:id/status", requirePermission("dropshipping_catalog", "manage"), async (req, res) => {
     try {
       const status = String(req.body?.status || "").trim();
       if (!["available", "queued", "mapped", "unavailable", "error"].includes(status)) {
@@ -1199,7 +1229,10 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/kole/sync-logs", requirePermission("dropshipping", "view"), async (_req, res) => {
+  app.get("/api/dropshipping/kole/sync-logs", requireAnyPermission([
+    { module: "dropshipping_catalog", action: "view" },
+    { module: "dropshipping_sync_logs", action: "view" },
+  ]), async (_req, res) => {
     try {
       const vendor = await getKoleVendor();
       const logs = await storage.getDropshipSyncLogs(vendor.id);
@@ -1212,7 +1245,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/kole/mapping-brand", requirePermission("dropshipping", "view"), async (_req, res) => {
+  app.get("/api/dropshipping/kole/mapping-brand", requirePermission("dropshipping_catalog", "view"), async (_req, res) => {
     try {
       const setting = await storage.getSetting("dropship_kole_mapping_brand_name");
       const brandName = typeof setting?.value === "string" && setting.value.trim()
@@ -1224,7 +1257,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropshipping/kole/sync", requirePermission("dropshipping", "sync"), async (_req, res) => {
+  app.post("/api/dropshipping/kole/sync", requirePermission("dropshipping_vendor", "sync"), async (_req, res) => {
     const startedAt = Date.now();
     let log: any;
     let syncStage = "initializing catalog sync";
@@ -1336,7 +1369,7 @@ export async function registerRoutes(
   });
   app.post(
     "/api/dropshipping/kole/upload-csv",
-    requirePermission("dropshipping", "sync"),
+    requirePermission("dropshipping_vendor", "sync"),
     (req, res, next) => {
       parseKoleCsvUpload(req, res, (error: any) => {
         if (error) {
@@ -1425,7 +1458,7 @@ export async function registerRoutes(
     },
   );
 
-  app.post("/api/dropshipping/kole/products/create-drafts", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.post("/api/dropshipping/kole/products/create-drafts", requirePermission("dropshipping_catalog", "manage"), async (req, res) => {
     const inputItems = req.body?.items;
     if (!Array.isArray(inputItems) || inputItems.length < 1 || inputItems.length > 25) {
       return res.status(400).json({ error: "Select between 1 and 25 vendor products to create drafts." });
@@ -1585,7 +1618,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropshipping/kole/products/map-existing", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.post("/api/dropshipping/kole/products/map-existing", requirePermission("dropshipping_catalog", "manage"), async (req, res) => {
     const brandName = String(req.body?.brandName ?? "").trim().slice(0, 100);
     if (!brandName) return res.status(400).json({ error: "Enter a BigCommerce brand name to scan." });
 
@@ -1783,7 +1816,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/product-sync/logo", requirePermission("dropshipping", "view"), async (_req, res) => {
+  app.get("/api/dropshipping/product-sync/logo", requirePermission("dropshipping_product_sync", "view"), async (_req, res) => {
     try {
       res.json(await koleProductSyncManager.getLogo());
     } catch (error: any) {
@@ -1791,7 +1824,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/dropshipping/product-sync/logo", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.put("/api/dropshipping/product-sync/logo", requirePermission("dropshipping_product_sync", "manage"), async (req, res) => {
     try {
       res.json(await koleProductSyncManager.saveLogo(req.body?.dataUrl));
     } catch (error: any) {
@@ -1800,7 +1833,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/dropshipping/product-sync/logo", requirePermission("dropshipping", "manage"), async (_req, res) => {
+  app.delete("/api/dropshipping/product-sync/logo", requirePermission("dropshipping_product_sync", "manage"), async (_req, res) => {
     try {
       res.json(await koleProductSyncManager.removeLogo());
     } catch (error: any) {
@@ -1808,7 +1841,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/product-sync/jobs/latest", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/product-sync/jobs/latest", requirePermission("dropshipping_product_sync", "view"), async (req, res) => {
     const kind = req.query.kind === "details" || req.query.kind === "images"
       ? req.query.kind as KoleProductSyncKind
       : null;
@@ -1820,7 +1853,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/product-sync/image-history", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/product-sync/image-history", requirePermission("dropshipping_product_sync", "view"), async (req, res) => {
     const rawProductIds = typeof req.query.productIds === "string" ? req.query.productIds : "";
     const productIds = rawProductIds
       ? rawProductIds.split(",").map((value) => Number(value))
@@ -1840,7 +1873,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropshipping/product-sync/cost-comparison", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.post("/api/dropshipping/product-sync/cost-comparison", requirePermission("dropshipping_product_sync", "manage"), async (req, res) => {
     const productIds = req.body?.productIds;
     if (!Array.isArray(productIds)) {
       return res.status(400).json({ error: "Select mapped products to compare." });
@@ -1856,7 +1889,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropshipping/product-sync/jobs", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.post("/api/dropshipping/product-sync/jobs", requirePermission("dropshipping_product_sync", "manage"), async (req, res) => {
     const kind = req.body?.kind === "details" || req.body?.kind === "images"
       ? req.body.kind as KoleProductSyncKind
       : null;
@@ -1899,7 +1932,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/product-sync/jobs/:id/items", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/product-sync/jobs/:id/items", requirePermission("dropshipping_product_sync", "view"), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid Product Sync job ID." });
     try {
@@ -1915,7 +1948,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/product-sync/jobs/:id", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/product-sync/jobs/:id", requirePermission("dropshipping_product_sync", "view"), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid Product Sync job ID." });
     try {
@@ -1927,7 +1960,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropshipping/kole/products/sync-details", requirePermission("dropshipping", "manage"), async (_req, res) => {
+  app.post("/api/dropshipping/kole/products/sync-details", requirePermission("dropshipping_product_sync", "manage"), async (_req, res) => {
     return res.status(410).json({ error: "Mapped product sync has moved to the Dropshipping Product Sync page." });
 
     if (koleDetailsSyncInProgress) {
@@ -6924,7 +6957,7 @@ export async function registerRoutes(
 
   // Pinned BigCommerce brands are stored per user; the underlying statistics
   // use synced BigCommerce order lines joined to the current local product catalog.
-  app.get("/api/dropshipping/dashboard/brands", requirePermission("dropshipping", "view"), async (_req, res) => {
+  app.get("/api/dropshipping/dashboard/brands", requirePermission("dropshipping_dashboard", "view"), async (_req, res) => {
     try {
       res.json(await getCachedBcBrandOptions());
     } catch (error: any) {
@@ -6932,7 +6965,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/dashboard", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/dashboard", requirePermission("dropshipping_dashboard", "view"), async (req, res) => {
     try {
       const authUser = (req as any).authUser;
       const setting = await storage.getSetting(`dropship_dashboard_pins_${authUser.id}`);
@@ -7003,7 +7036,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/dropshipping/dashboard/pins", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.put("/api/dropshipping/dashboard/pins", requirePermission("dropshipping_dashboard", "view"), async (req, res) => {
     try {
       const parsed = z.object({
         brandIds: z.array(z.number().int().positive()).max(1000),
@@ -9769,22 +9802,73 @@ export async function registerRoutes(
     } catch (_) { /* non-fatal — permissions may already exist */ }
   })();
 
-  // ── Dropshipping permission auto-seed ─────────────────────────────────────────
+  // ── Dropshipping submodule permissions and legacy grant migration ─────────────
   await (async () => {
-    const DROPSHIP_PERMS: Array<{ module: string; action: string; description: string }> = [
-      { module: "dropshipping", action: "view", description: "Dropshipping: view vendor connections and catalogs" },
-      { module: "dropshipping", action: "manage", description: "Dropshipping: manage vendor connections and import queues" },
-      { module: "dropshipping", action: "sync", description: "Dropshipping: run vendor catalog synchronization" },
-    ];
-    try {
-      const existing = await storage.getAllPermissions();
-      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
-      for (const p of DROPSHIP_PERMS) {
-        if (!existingSet.has(`${p.module}:${p.action}`)) {
-          await storage.createPermission(p);
-        }
+    const migrationKey = "dropshipping_submodule_permissions_migrated_v1";
+    const existing = await storage.getAllPermissions();
+    const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+    for (const permission of DROPSHIPPING_PERMISSIONS) {
+      const key = `${permission.module}:${permission.action}`;
+      if (!existingSet.has(key)) {
+        await storage.createPermission({
+          module: permission.module,
+          action: permission.action,
+          description: permission.description,
+        });
       }
-    } catch (_) { /* non-fatal */ }
+    }
+
+    const migrationState = await storage.getSetting(migrationKey);
+    if (migrationState?.value) return;
+
+    // Preserve each legacy grant once, then remove the broad assignments so
+    // admins can narrow access without the old permission silently restoring it.
+    for (const grant of DROPSHIPPING_LEGACY_PERMISSION_GRANTS) {
+      await db.execute(sql`
+        INSERT INTO role_permissions (role_id, permission_id)
+        SELECT DISTINCT assigned.role_id, target.id
+        FROM role_permissions AS assigned
+        JOIN permissions AS source ON source.id = assigned.permission_id
+        JOIN permissions AS target
+          ON target.module = ${grant.module} AND target.action = ${grant.action}
+        WHERE source.module = 'dropshipping' AND source.action = ${grant.sourceAction}
+          AND NOT EXISTS (
+            SELECT 1 FROM role_permissions AS existing_assignment
+            WHERE existing_assignment.role_id = assigned.role_id
+              AND existing_assignment.permission_id = target.id
+          )
+      `);
+      await db.execute(sql`
+        INSERT INTO user_permissions (user_id, permission_id)
+        SELECT DISTINCT assigned.user_id, target.id
+        FROM user_permissions AS assigned
+        JOIN permissions AS source ON source.id = assigned.permission_id
+        JOIN permissions AS target
+          ON target.module = ${grant.module} AND target.action = ${grant.action}
+        WHERE source.module = 'dropshipping' AND source.action = ${grant.sourceAction}
+          AND NOT EXISTS (
+            SELECT 1 FROM user_permissions AS existing_assignment
+            WHERE existing_assignment.user_id = assigned.user_id
+              AND existing_assignment.permission_id = target.id
+          )
+      `);
+    }
+
+    await db.execute(sql`
+      DELETE FROM role_permissions AS assigned
+      USING permissions AS legacy
+      WHERE assigned.permission_id = legacy.id
+        AND legacy.module = 'dropshipping'
+        AND legacy.action IN ('view', 'manage', 'sync')
+    `);
+    await db.execute(sql`
+      DELETE FROM user_permissions AS assigned
+      USING permissions AS legacy
+      WHERE assigned.permission_id = legacy.id
+        AND legacy.module = 'dropshipping'
+        AND legacy.action IN ('view', 'manage', 'sync')
+    `);
+    await storage.setSetting(migrationKey, true);
   })();
 
   // ── Inventory Audit permission auto-seed ──────────────────────────────────────

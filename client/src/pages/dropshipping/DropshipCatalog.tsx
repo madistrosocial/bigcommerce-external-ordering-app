@@ -123,7 +123,8 @@ function StatusBadge({ status }: { status: string }) {
 export default function DropshipCatalogPage() {
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
-  const canManageDropshipping = hasPermission("dropshipping", "manage");
+  const canManageDropshipping = hasPermission("dropshipping_catalog", "manage");
+  const canSyncVendor = hasPermission("dropshipping_vendor", "sync");
   const queryClient = useQueryClient();
   const { data: connection } = useQuery({ queryKey: ["dropship-connection"], queryFn: api.getKoleConnection });
   const {
@@ -330,6 +331,7 @@ export default function DropshipCatalogPage() {
     setSearch(""); setAppliedSearch(""); setCategory(""); setSubcategory(""); setStockOnly(false); setCloseoutOnly(false); setImportedOnly(false); setStatus(""); setPage(1);
   };
   const startCsvUpload = (file?: File) => {
+    if (!canSyncVendor) return;
     if (!file) return;
     if (sync.isPending || uploadCsv.isPending) return;
     if (!file.size) {
@@ -350,27 +352,33 @@ export default function DropshipCatalogPage() {
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" /> Product Catalog</h1>
         </div>
         <div className="flex gap-2">
-          <input
-            ref={csvInputRef}
-            type="file"
-            accept=".csv,text/csv,text/plain,application/octet-stream"
-            className="hidden"
-            onChange={(event) => {
-              startCsvUpload(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          {selected.size > 0 && <Button variant="outline" size="sm" onClick={queueSelected} disabled={updateStatus.isPending}><Plus className="h-4 w-4 mr-1.5" />Queue {selected.size}</Button>}
-          {selected.size > 0 && <Button size="sm" onClick={() => openDraftDialog(Array.from(selectedProducts.values()))} disabled={createDrafts.isPending}><Plus className="h-4 w-4 mr-1.5" />Create {selected.size} Draft{selected.size === 1 ? "" : "s"}</Button>}
-          <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()} disabled={sync.isPending || uploadCsv.isPending}>
-            {uploadCsv.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Upload className="h-4 w-4 mr-1.5" />}
-            {uploadCsv.isPending ? "Uploading CSV…" : "Upload CSV"}
-          </Button>
-          <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending || uploadCsv.isPending}><RefreshCw className={`h-4 w-4 mr-1.5 ${sync.isPending ? "animate-spin" : ""}`} />Sync CSV Feed</Button>
+          {canSyncVendor && (
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv,text/csv,text/plain,application/octet-stream"
+              className="hidden"
+              onChange={(event) => {
+                startCsvUpload(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          )}
+          {canManageDropshipping && selected.size > 0 && <Button variant="outline" size="sm" onClick={queueSelected} disabled={updateStatus.isPending}><Plus className="h-4 w-4 mr-1.5" />Queue {selected.size}</Button>}
+          {canManageDropshipping && selected.size > 0 && <Button size="sm" onClick={() => openDraftDialog(Array.from(selectedProducts.values()))} disabled={createDrafts.isPending}><Plus className="h-4 w-4 mr-1.5" />Create {selected.size} Draft{selected.size === 1 ? "" : "s"}</Button>}
+          {canSyncVendor && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()} disabled={sync.isPending || uploadCsv.isPending}>
+                {uploadCsv.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Upload className="h-4 w-4 mr-1.5" />}
+                {uploadCsv.isPending ? "Uploading CSV…" : "Upload CSV"}
+              </Button>
+              <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending || uploadCsv.isPending}><RefreshCw className={`h-4 w-4 mr-1.5 ${sync.isPending ? "animate-spin" : ""}`} />Sync CSV Feed</Button>
+            </>
+          )}
         </div>
       </div>
 
-      <Card className={`border-dashed transition-colors ${draggingCsv ? "border-indigo-500 bg-indigo-50/60" : "border-slate-300"}`}>
+      {canSyncVendor && <Card className={`border-dashed transition-colors ${draggingCsv ? "border-indigo-500 bg-indigo-50/60" : "border-slate-300"}`}>
         <CardContent
           className="p-3 flex items-center gap-3"
           onDragEnter={(event) => { event.preventDefault(); setDraggingCsv(true); }}
@@ -391,7 +399,7 @@ export default function DropshipCatalogPage() {
             <p className="text-xs text-slate-500">Manual import · up to 50 MB · updates the Vendor Catalog only; it does not create BigCommerce products.</p>
           </div>
         </CardContent>
-      </Card>
+      </Card>}
 
       <Card>
         <CardContent className="p-4 space-y-3">
@@ -404,11 +412,14 @@ export default function DropshipCatalogPage() {
                 onChange={(event) => setMappingBrandName(event.target.value)}
                 maxLength={100}
                 placeholder="KCDS"
+                disabled={!canManageDropshipping}
               />
             </div>
             <Button
               onClick={() => runSkuMapping.mutate(mappingBrandName ?? mappingBrandSetting?.brandName ?? "KCDS")}
               disabled={
+                !canManageDropshipping
+                ||
                 runSkuMapping.isPending
                 || !String(mappingBrandName ?? mappingBrandSetting?.brandName ?? "KCDS").trim()
                 || sync.isPending
@@ -484,7 +495,7 @@ export default function DropshipCatalogPage() {
       </Card>
 
       <Card className="shadow-sm overflow-hidden">
-        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {toPublicVendorMessage((error as Error).message)}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters. Run Sync CSV Feed or upload a downloaded CSV to populate the catalog.</div> : (
+        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {toPublicVendorMessage((error as Error).message)}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters.{canSyncVendor ? " Run Sync CSV Feed or upload a downloaded CSV to populate the catalog." : ""}</div> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200"><tr className="text-left text-[11px] uppercase tracking-wide text-slate-500">
@@ -501,7 +512,7 @@ export default function DropshipCatalogPage() {
                     <td className="px-3 py-3 text-xs text-slate-600 whitespace-nowrap">{packLabel(product)}</td>
                     <td className="px-3 py-3 font-medium whitespace-nowrap">{inventoryLabel(product)}</td>
                     <td className="px-3 py-3 whitespace-nowrap"><StatusBadge status={product.status} /></td>
-                    <td className="px-3 py-3"><div className="flex justify-end gap-1"><Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDetail(product)}><Eye className="h-3.5 w-3.5 mr-1" />View Details</Button>{product.status !== "queued" && !product.bigcommerce_product_id && <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => updateStatus.mutate({ id: product.id, nextStatus: "queued" })}><Plus className="h-3.5 w-3.5 mr-1" />Queue</Button>}</div></td>
+                     <td className="px-3 py-3"><div className="flex justify-end gap-1"><Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDetail(product)}><Eye className="h-3.5 w-3.5 mr-1" />View Details</Button>{canManageDropshipping && product.status !== "queued" && !product.bigcommerce_product_id && <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => updateStatus.mutate({ id: product.id, nextStatus: "queued" })}><Plus className="h-3.5 w-3.5 mr-1" />Queue</Button>}</div></td>
                   </tr>;
                 })}
               </tbody>
@@ -521,7 +532,7 @@ export default function DropshipCatalogPage() {
             {detail.image_data?.length > 0 && <div className="flex gap-2 overflow-x-auto">{detail.image_data.slice(0, 8).map((_, index) => { const src = imageUrl([detail.image_data[index]]); return src ? <img key={index} src={src} alt="" className="h-24 w-24 object-contain border rounded bg-white" /> : null; })}</div>}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm"><div><p className="text-xs text-slate-500">SKU</p><p className="font-mono">{detail.vendor_sku}</p></div><div><p className="text-xs text-slate-500">UPC</p><p>{detail.upc || "—"}</p></div><div><p className="text-xs text-slate-500">Brand</p><p>{detail.brand || "—"}</p></div><div><p className="text-xs text-slate-500">Extended cost (MOQ included)</p><p>{formatCost(extendedSupplierCost(detail)?.toFixed(2) ?? null)}</p></div><div><p className="text-xs text-slate-500">Inventory</p><p>{inventoryLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Pack / minimum</p><p>{packLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Category</p><p>{detail.vendor_category || "—"}</p></div><div><p className="text-xs text-slate-500">Subcategory</p><p>{detail.vendor_subcategory || "—"}</p></div><div><p className="text-xs text-slate-500">Weight</p><p>{String((detail.raw_data as any)?.item_weight || (detail.raw_data as any)?.weight || "—")}</p></div></div>
             {detail.description && <div><p className="text-xs font-medium text-slate-500 mb-1">Description</p><p className="text-sm text-slate-700 whitespace-pre-wrap">{detail.description}</p></div>}
-            <div className="flex flex-wrap gap-2">{!detail.bigcommerce_product_id && <Button onClick={() => openDraftDialog([detail])}><Plus className="h-4 w-4 mr-1.5" />Create BigCommerce Draft</Button>}<Button variant="outline" onClick={() => updateStatus.mutate({ id: detail.id, nextStatus: "queued" })} disabled={detail.status === "queued" || Boolean(detail.bigcommerce_product_id)}><Plus className="h-4 w-4 mr-1.5" />Add to Import Queue</Button><Button variant="ghost" onClick={() => setDetail(null)}>Close</Button></div>
+            <div className="flex flex-wrap gap-2">{canManageDropshipping && !detail.bigcommerce_product_id && <Button onClick={() => openDraftDialog([detail])}><Plus className="h-4 w-4 mr-1.5" />Create BigCommerce Draft</Button>}{canManageDropshipping && <Button variant="outline" onClick={() => updateStatus.mutate({ id: detail.id, nextStatus: "queued" })} disabled={detail.status === "queued" || Boolean(detail.bigcommerce_product_id)}><Plus className="h-4 w-4 mr-1.5" />Add to Import Queue</Button>}<Button variant="ghost" onClick={() => setDetail(null)}>Close</Button></div>
           </div></>}
         </DialogContent>
       </Dialog>
