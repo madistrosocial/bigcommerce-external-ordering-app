@@ -112,6 +112,9 @@ export const ATTENDANCE_ACTION_PERMS = [
   { module: "attendance", action: "manage_settings", label: "Manage Settings", description: "Can configure warehouse, checkpoints, and pay periods." },
   { module: "attendance", action: "manage", label: "Manage Attendance", description: "Can perform administrative attendance actions." },
   { module: "attendance", action: "audit", label: "Attendance Audit", description: "Can approve one additional work session for an employee on a date." },
+  { module: "attendance", action: "approve_overtime", label: "Review Overtime Claims", description: "Can approve, adjust, or reject employee overtime claims. Requires View All Employees." },
+  { module: "attendance", action: "approve_leave", label: "Review Leave Requests", description: "Can approve or reject employee leave requests. Requires View All Employees." },
+  { module: "attendance", action: "manage_payroll", label: "Manage Payroll", description: "Can manage employee hourly rates, payroll schedules, recurring pay items, runs, and payslips." },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

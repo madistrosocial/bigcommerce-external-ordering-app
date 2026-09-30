@@ -17,6 +17,9 @@ export const ATTENDANCE_PERMISSION_DEFINITIONS = [
   { module: "attendance", action: "manage", description: "Attendance: manage attendance records" },
   { module: "attendance", action: "approve", description: "Attendance: approve and lock attendance records" },
   { module: "attendance", action: "audit", description: "Attendance: approve one additional work session for an employee" },
+  { module: "attendance", action: "approve_overtime", description: "Attendance: review employee overtime claims" },
+  { module: "attendance", action: "approve_leave", description: "Attendance: review employee leave requests" },
+  { module: "attendance", action: "manage_payroll", description: "Attendance: manage employee pay profiles and payroll runs" },
 ] as const;
 
 export type AttendanceSettings = {

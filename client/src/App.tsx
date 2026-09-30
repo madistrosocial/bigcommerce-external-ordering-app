@@ -66,6 +66,8 @@ import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, Marketi
 import { MarketingAnalytics, MarketingTemplates, MarketingAutomations } from "@/pages/marketing/MarketingPhase2";
 import AttendancePage from "@/pages/attendance/Attendance";
 import AttendanceAdminPage, { AttendanceSettingsPage } from "@/pages/attendance/AttendanceAdmin";
+import AttendancePayrollPage from "@/pages/attendance/Payroll";
+import AttendanceLeavePage from "@/pages/attendance/Leave";
 import KoleImportsPage from "@/pages/dropshipping/KoleImports";
 import DropshipDashboardPage from "@/pages/dropshipping/DropshipDashboard";
 import DropshipCatalogPage from "@/pages/dropshipping/DropshipCatalog";
@@ -263,6 +265,12 @@ function Router() {
       </Route>
       <Route path="/attendance/locations">
         {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_home_locations" />}
+      </Route>
+      <Route path="/attendance/payroll">
+        {() => <PermissionRoute component={AttendancePayrollPage} module="attendance" action="view" />}
+      </Route>
+      <Route path="/attendance/leave">
+        {() => <PermissionRoute component={AttendanceLeavePage} module="attendance" action="view" />}
       </Route>
       <Route path="/attendance/settings">
         {() => <Redirect to="/admin/attendance" />}

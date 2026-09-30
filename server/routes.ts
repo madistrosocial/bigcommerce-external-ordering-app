@@ -97,6 +97,7 @@ import {
   parseAccuracy,
   parseCoordinate,
 } from "./attendance";
+import { registerAttendancePayrollRoutes } from "./attendance-payroll";
 import { lookupActivityLogLocation, normalizeClientIp } from "./activity-log-location";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
@@ -11150,6 +11151,8 @@ export async function registerRoutes(
   });
 
   // ── Attendance ──────────────────────────────────────────────────────────────────
+  registerAttendancePayrollRoutes(app, requirePermission);
+
   app.get("/api/attendance/today", requireAuth, async (req, res) => {
     try {
       const user = (req as any).authUser;
