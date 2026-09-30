@@ -3,9 +3,11 @@ import { isIP } from "node:net";
 import sharp from "sharp";
 
 const REFERENCE_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 const REMOTE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const OUTPUT_IMAGE_MAX_BYTES = 7 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 40_000_000;
+const LOGO_OVERLAY_SIZE = 1200;
 const OPENAI_IMAGE_MODEL = "gpt-image-2.5-sunburst";
 
 export class ImageEditorError extends Error {
@@ -163,6 +165,60 @@ async function normalizeReferenceImage(buffer: Buffer): Promise<string> {
   return `data:image/jpeg;base64,${normalized.toString("base64")}`;
 }
 
+async function normalizeLogo(dataUrl: unknown): Promise<Buffer> {
+  const { buffer } = decodeImageDataUrl(dataUrl, LOGO_MAX_BYTES, ["image/png"]);
+  const metadata = await sharp(buffer, { limitInputPixels: 20_000_000 }).metadata().catch(() => null);
+  if (!metadata || metadata.format !== "png" || !metadata.hasAlpha || !metadata.width || !metadata.height) {
+    throw new ImageEditorError("Upload a valid transparent PNG logo.");
+  }
+  if (metadata.width !== LOGO_OVERLAY_SIZE || metadata.height !== LOGO_OVERLAY_SIZE) {
+    throw new ImageEditorError(
+      `Use a ${LOGO_OVERLAY_SIZE} × ${LOGO_OVERLAY_SIZE} transparent PNG overlay with the logo already positioned.`,
+    );
+  }
+  const alphaStats = await sharp(buffer, { limitInputPixels: 20_000_000 }).ensureAlpha().stats().catch(() => null);
+  const alpha = alphaStats?.channels[3];
+  if (!alpha || alpha.max === 0 || alpha.min >= 255) {
+    throw new ImageEditorError("The logo must include visible artwork and transparent pixels.");
+  }
+  return buffer;
+}
+
+async function applyLogoOverlay(imageBuffer: Buffer, logoBuffer: Buffer): Promise<Buffer> {
+  const logoMetadata = await sharp(logoBuffer, { limitInputPixels: 20_000_000 }).metadata();
+  if (logoMetadata.width !== LOGO_OVERLAY_SIZE || logoMetadata.height !== LOGO_OVERLAY_SIZE) {
+    throw new ImageEditorError("The transparent logo overlay must remain 1200 × 1200 pixels.");
+  }
+  const baseImage = await sharp(imageBuffer, { limitInputPixels: MAX_IMAGE_PIXELS })
+    .rotate()
+    .resize(LOGO_OVERLAY_SIZE, LOGO_OVERLAY_SIZE, { fit: "fill" })
+    .flatten({ background: { r: 255, g: 255, b: 255 } })
+    .jpeg({ quality: 88 })
+    .toBuffer();
+  const baseMetadata = await sharp(baseImage).metadata();
+  if (!baseMetadata.width || !baseMetadata.height) throw new ImageEditorError("The generated image could not be processed.", 502);
+
+  let output = await sharp(baseImage)
+    .composite([{
+      input: logoBuffer,
+      left: 0,
+      top: 0,
+    }])
+    .jpeg({ quality: 88 })
+    .toBuffer();
+
+  if (output.length > OUTPUT_IMAGE_MAX_BYTES) {
+    output = await sharp(output, { limitInputPixels: MAX_IMAGE_PIXELS })
+      .resize(1600, 1600, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 78 })
+      .toBuffer();
+  }
+  if (output.length > OUTPUT_IMAGE_MAX_BYTES) {
+    throw new ImageEditorError("The processed image is too large to download or upload.", 502);
+  }
+  return output;
+}
+
 function buildPrompt(generalDirection: string, specificCustomization: string): string {
   const parts = [
     "Create one polished square ecommerce product image based on the following direction.",
@@ -173,7 +229,7 @@ function buildPrompt(generalDirection: string, specificCustomization: string): s
   }
   parts.push(
     "If a reference image is provided, use it as the product reference and preserve the product's recognizable shape, materials, packaging, and existing marks unless the customization explicitly requests a change.",
-    "Do not add a separate logo, watermark, signature, or extra lettering; the business logo is applied separately in the BigCommerce preview after generation.",
+    "Do not add a separate logo, watermark, signature, or extra lettering; a supplied business logo will be applied after generation.",
     "Use a clean, professional composition suitable for a BigCommerce product listing.",
   );
   return parts.join("\n\n");
@@ -263,6 +319,7 @@ export async function generateImageEditorOutput(input: {
   specificCustomization: string;
   referenceImageDataUrl?: string;
   referenceImageUrl?: string;
+  logoDataUrl: string;
 }): Promise<Buffer> {
   if (!input.apiKey) throw new ImageEditorError("OpenAI image generation is not configured.", 503);
   const direction = String(input.generalDirection ?? "").trim();
@@ -276,6 +333,7 @@ export async function generateImageEditorOutput(input: {
   if (dataUrl && imageUrl) throw new ImageEditorError("Choose either an uploaded reference image or an image URL, not both.");
   if (imageUrl.length > 2048) throw new ImageEditorError("The image URL is too long.");
 
+  const logo = await normalizeLogo(input.logoDataUrl);
   let referenceImage: string | undefined;
   if (dataUrl) {
     const decoded = decodeImageDataUrl(dataUrl, REFERENCE_IMAGE_MAX_BYTES, ["image/png", "image/jpeg", "image/webp"]);
@@ -285,10 +343,7 @@ export async function generateImageEditorOutput(input: {
   }
 
   const generated = await generateOpenAiImage(input.apiKey, buildPrompt(direction, customization), referenceImage);
-  if (generated.length > OUTPUT_IMAGE_MAX_BYTES) {
-    throw new ImageEditorError("The generated image is too large to download or upload.", 502);
-  }
-  return generated;
+  return applyLogoOverlay(generated, logo);
 }
 
 export function decodeGeneratedImageDataUrl(value: unknown): Buffer {
