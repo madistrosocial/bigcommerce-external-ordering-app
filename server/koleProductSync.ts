@@ -69,7 +69,7 @@ export interface KoleProductCostComparisonItem {
   title: string;
   bigcommerceProductId: number | null;
   status: KoleProductCostComparisonStatus;
-  sheetExtendedCost: number | null;
+  catalogExtendedCost: number | null;
   listingCost: number | null;
   delta: number | null;
   message: string | null;
@@ -642,7 +642,7 @@ export class KoleProductSyncManager {
             ? bigcommerceProductId
             : null,
           status: "skipped",
-          sheetExtendedCost: extendedCost === null
+          catalogExtendedCost: extendedCost === null
             ? null
             : Math.round((extendedCost + Number.EPSILON) * 100) / 100,
           listingCost: null,
@@ -696,7 +696,7 @@ export class KoleProductSyncManager {
             const index = nextIndex++;
             if (index >= groups.length) return;
             const [bigcommerceProductId, group] = groups[index];
-            const sourceCosts = group.map(({ item }) => item.sheetExtendedCost);
+            const sourceCosts = group.map(({ item }) => item.catalogExtendedCost);
             const knownSourceCosts = sourceCosts
               .filter((value): value is number => value !== null)
               .map((value) => value.toFixed(2));
@@ -731,19 +731,19 @@ export class KoleProductSyncManager {
 
             for (let candidateIndex = 0; candidateIndex < group.length; candidateIndex++) {
               const { item } = group[candidateIndex];
-              const sheetExtendedCost = sourceCosts[candidateIndex];
+              const catalogExtendedCost = sourceCosts[candidateIndex];
               item.listingCost = listingCost;
-              if (sheetExtendedCost === null) {
+              if (catalogExtendedCost === null) {
                 item.status = "unavailable";
-                item.message = "The sheet does not contain a valid extended cost.";
+                item.message = "The Product Catalog row does not contain a valid extended cost.";
               } else if (hasCostConflict) {
                 item.status = "conflict";
-                item.message = "Selected sheet rows mapped to this listing have different extended costs.";
+                item.message = "Selected Product Catalog rows mapped to this listing have different extended costs.";
               } else if (listingCost === null) {
                 item.status = "unavailable";
                 item.message = "The BigCommerce listing does not have a valid cost price.";
               } else {
-                item.delta = Math.round((sheetExtendedCost - listingCost + Number.EPSILON) * 100) / 100;
+                item.delta = Math.round((catalogExtendedCost - listingCost + Number.EPSILON) * 100) / 100;
                 item.status = item.delta === 0 ? "match" : "changed";
                 item.message = null;
               }

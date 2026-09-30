@@ -345,7 +345,7 @@ export type KoleProductCostComparisonItem = {
   title: string;
   bigcommerceProductId: number | null;
   status: "changed" | "match" | "unavailable" | "failed" | "skipped" | "conflict";
-  sheetExtendedCost: number | null;
+  catalogExtendedCost: number | null;
   listingCost: number | null;
   delta: number | null;
   message: string | null;

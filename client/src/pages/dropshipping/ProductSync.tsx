@@ -494,7 +494,7 @@ export default function ProductSyncPage() {
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">Details sync</p>
                       <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#243b32]">Choose what to update</h2>
-                      <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Compare the selected listings’ sheet extended cost with BigCommerce’s current cost price, or sync only the selected fields. Cost comparison never changes listings.</p>
+                      <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Compare selected listings against the current Product Catalog import (URL feed or uploaded CSV), or sync only the selected fields. Cost comparison never changes listings.</p>
                     </div>
                     <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
                       <Button
@@ -572,7 +572,7 @@ export default function ProductSyncPage() {
                   <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">Read-only cost check</p>
-                      <h3 className="mt-1 text-base font-semibold text-[#243b32]">Sheet extended cost vs. BigCommerce cost price</h3>
+                      <h3 className="mt-1 text-base font-semibold text-[#243b32]">Product Catalog extended cost vs. BigCommerce cost price</h3>
                       <p className="mt-1 text-xs text-slate-500">
                         Checked {costComparisonResult.total.toLocaleString()} selected listing{costComparisonResult.total === 1 ? "" : "s"} · {formatDate(costComparisonResult.checkedAt)}. No listing fields were changed.
                       </p>
@@ -601,7 +601,7 @@ export default function ProductSyncPage() {
                         <thead>
                           <tr className="border-b border-slate-200 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
                             <th className="py-2 pr-4">Mapped product</th>
-                            <th className="py-2 pr-4">Sheet extended cost</th>
+                            <th className="py-2 pr-4">Catalog extended cost</th>
                             <th className="py-2 pr-4">Listing cost price</th>
                             <th className="py-2 pr-4">Sheet − listing</th>
                             <th className="py-2">Result</th>
@@ -617,7 +617,7 @@ export default function ProductSyncPage() {
                                   <p className="mt-0.5 font-mono text-[11px] text-slate-500">{item.vendorSku || "No SKU"}</p>
                                   {item.message && <p className="mt-1 max-w-xs leading-4 text-slate-500">{toPublicVendorMessage(item.message)}</p>}
                                 </td>
-                                <td className="py-3 pr-4 font-mono tabular-nums text-slate-700">{formatCost(item.sheetExtendedCost)}</td>
+                                <td className="py-3 pr-4 font-mono tabular-nums text-slate-700">{formatCost(item.catalogExtendedCost)}</td>
                                 <td className="py-3 pr-4 font-mono tabular-nums text-slate-700">{formatCost(item.listingCost)}</td>
                                 <td className={`py-3 pr-4 font-mono tabular-nums ${item.delta === null ? "text-slate-400" : item.delta > 0 ? "font-semibold text-amber-800" : "font-semibold text-sky-800"}`}>
                                   {formatCostDelta(item.delta)}
@@ -633,7 +633,7 @@ export default function ProductSyncPage() {
                     </div>
                   ) : (
                     <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-800">
-                      All selected listings with available costs match the sheet’s extended cost.
+                      All selected listings with available costs match the Product Catalog extended cost.
                     </p>
                   )}
                 </CardContent>
