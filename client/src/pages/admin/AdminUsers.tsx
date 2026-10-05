@@ -17,7 +17,9 @@ import { Loader2, Users, ShieldCheck, ChevronRight, ArrowLeft, User, Lock, Shiel
 import { cn } from "@/lib/utils";
 import CreateUserDialog from "@/components/admin/CreateUserDialog";
 import { MARKETING_ACTION_PERMS } from "@shared/marketing-permissions";
+import { DROPSHIPPING_PERMISSION_GROUPS, DROPSHIPPING_PERMISSIONS } from "@shared/dropshipping-permissions";
 export { MARKETING_ACTION_PERMS };
+export { DROPSHIPPING_PERMISSION_GROUPS, DROPSHIPPING_PERMISSIONS };
 
 function googleMapsUrl(latitude: unknown, longitude: unknown) {
   const lat = Number(latitude);
@@ -47,7 +49,6 @@ export const MODULES = [
   { key: "pos",                label: "POS" },
   { key: "catalog",            label: "Catalog" },
   { key: "cart",               label: "Cart" },
-  { key: "dropshipping",       label: "Dropshipping" },
   { key: "orders_drafts",      label: "Orders › Drafts" },
   { key: "orders_bulk",        label: "Orders › Bulk Order" },
   { key: "orders_all",         label: "Orders › Sales History" },
@@ -63,6 +64,7 @@ export const MODULES = [
   { key: "reporting_price_override_audit", label: "Reporting › Price Override Audit" },
   { key: "reporting_sales",                label: "Reporting › Sales Report" },
   { key: "reporting_exports",              label: "Reporting › Exports" },
+  { key: "tools_image_editor", label: "Tools › Image Editor" },
   { key: "tools_bc_link",      label: "Tools › BC Product Link" },
   { key: "tools_bc_link_logs", label: "Tools › Product Link Logs" },
   { key: "promo_sku_tracker",  label: "Tools › Promo SKU Tracker" },
@@ -110,6 +112,9 @@ export const ATTENDANCE_ACTION_PERMS = [
   { module: "attendance", action: "manage_settings", label: "Manage Settings", description: "Can configure warehouse, checkpoints, and pay periods." },
   { module: "attendance", action: "manage", label: "Manage Attendance", description: "Can perform administrative attendance actions." },
   { module: "attendance", action: "audit", label: "Attendance Audit", description: "Can approve one additional work session for an employee on a date." },
+  { module: "attendance", action: "approve_overtime", label: "Review Overtime Claims", description: "Can approve, adjust, or reject employee overtime claims. Requires View All Employees." },
+  { module: "attendance", action: "approve_leave", label: "Review Leave Requests", description: "Can approve or reject employee leave requests. Requires View All Employees." },
+  { module: "attendance", action: "manage_payroll", label: "Manage Payroll", description: "Can manage employee hourly rates, payroll schedules, recurring pay items, runs, and payslips." },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -424,6 +429,66 @@ function UserDetail({
           </p>
         </div>
 
+        {/* Dropshipping permissions */}
+        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Lock className="h-3.5 w-3.5 text-slate-500" />
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Dropshipping Permissions</span>
+            </div>
+            {groupId !== "none" && (
+              <span className="text-[10px] text-blue-600 flex items-center gap-1">
+                <UsersRound className="h-3 w-3" /> (G) = from group
+              </span>
+            )}
+          </div>
+          <div className="divide-y">
+            {DROPSHIPPING_PERMISSION_GROUPS.map((group) => (
+              <section key={group.label}>
+                <div className="px-4 py-2 bg-slate-50 border-b">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{group.label}</p>
+                </div>
+                {group.permissions.map((p) => {
+                  const perm = permMap.get(`${p.module}:${p.action}`);
+                  const permId = perm?.id ?? null;
+                  const toggleKey = `dropshipping-${p.module}-${p.action}`;
+                  const isBusy = busyKey === `${user.id}-${toggleKey}`;
+                  const directEnabled = perm ? userHasPerm(user, perm.id) : false;
+                  const fromGroup = !directEnabled && perm ? groupPerms.has(perm.id) : false;
+                  const effectiveEnabled = directEnabled || fromGroup;
+
+                  return (
+                    <div key={`${p.module}:${p.action}`} className="flex items-center justify-between px-4 py-3">
+                      <div className="flex-1 min-w-0 pr-4">
+                        <p className="text-sm text-slate-700">
+                          {p.label}
+                          {fromGroup && <span className="ml-2 text-[10px] text-blue-500 font-medium">(G)</span>}
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{p.description}</p>
+                      </div>
+                      {permId === null ? (
+                        <span className="text-[10px] text-slate-400 italic shrink-0">N/A</span>
+                      ) : isBusy ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" />
+                      ) : (
+                        <Switch
+                          checked={effectiveEnabled}
+                          disabled={fromGroup}
+                          onCheckedChange={(v) => onToggleModule(user.id, toggleKey, v, permId)}
+                          data-testid={`toggle-${p.module}-${p.action}-${user.id}`}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </section>
+            ))}
+          </div>
+          <p className="px-4 py-2 text-[11px] text-slate-400 border-t bg-slate-50">
+            Each page and action is controlled independently. Direct user grants can be changed here; inherited group grants are managed in User Groups.
+          </p>
+        </div>
+
         {/* CRM-specific permissions */}
         <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
@@ -729,6 +794,15 @@ export default function AdminUsersPage() {
   useEffect(() => {
     if (permsLoading) return;
     const missing = MARKETING_ACTION_PERMS.filter(p => !permMap.has(`${p.module}:${p.action}`));
+    if (!missing.length) return;
+    Promise.all(
+      missing.map(p => createPermission({ module: p.module, action: p.action, description: p.description }).catch(() => {})),
+    ).then(() => queryClient.invalidateQueries({ queryKey: ["permissions"] }));
+  }, [permsLoading, permissions.length]);
+
+  useEffect(() => {
+    if (permsLoading) return;
+    const missing = DROPSHIPPING_PERMISSIONS.filter(p => !permMap.has(`${p.module}:${p.action}`));
     if (!missing.length) return;
     Promise.all(
       missing.map(p => createPermission({ module: p.module, action: p.action, description: p.description }).catch(() => {})),

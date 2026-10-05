@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "@/lib/api";
+import { toPublicVendorMessage } from "@/lib/vendor-display";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +32,12 @@ import {
 const PAGE_SIZE = 25;
 type SyncKind = "details" | "images";
 type SyncField = "cost" | "description" | "inventory" | "identity";
-type StartSyncInput = { kind: SyncKind; productIds: number[]; fields: SyncField[] };
+type StartSyncInput = {
+  kind: SyncKind;
+  productIds: number[];
+  fields: SyncField[];
+  forceImageReupload: boolean;
+};
 
 type SyncJob = {
   id: number;
@@ -45,6 +51,7 @@ type SyncJob = {
   skipped: number;
   photosAdded: number;
   selectedFields: string[];
+  forceImageReupload?: boolean;
   currentSku?: string | null;
   startedAt: string;
   completedAt?: string | null;
@@ -63,7 +70,7 @@ type SyncItem = {
 };
 
 const SYNC_FIELDS: Array<{ value: SyncField; label: string; note: string }> = [
-  { value: "cost", label: "Extended cost", note: "Kole extended cost" },
+  { value: "cost", label: "Extended cost", note: "Supplier extended cost" },
   { value: "description", label: "Description", note: "Product description" },
   { value: "inventory", label: "Inventory quantity", note: "Available inventory" },
   { value: "identity", label: "Product name, brand, UPC", note: "Catalog identity fields" },
@@ -75,6 +82,33 @@ function formatDate(value?: string | null) {
   return Number.isNaN(date.getTime())
     ? value
     : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function formatCost(value: number | null) {
+  return value === null ? "—" : `$${value.toFixed(2)}`;
+}
+
+function formatCostDelta(value: number | null) {
+  if (value === null) return "—";
+  const amount = `$${Math.abs(value).toFixed(2)}`;
+  return value > 0 ? `+${amount}` : value < 0 ? `−${amount}` : "$0.00";
+}
+
+function costComparisonPresentation(status: api.KoleProductCostComparisonItem["status"]) {
+  switch (status) {
+    case "changed":
+      return { label: "Cost changed", className: "border-amber-200 bg-amber-50 text-amber-800" };
+    case "match":
+      return { label: "Match", className: "border-emerald-200 bg-emerald-50 text-emerald-800" };
+    case "conflict":
+      return { label: "Conflicting sheet costs", className: "border-rose-200 bg-rose-50 text-rose-800" };
+    case "failed":
+      return { label: "Lookup failed", className: "border-rose-200 bg-rose-50 text-rose-800" };
+    case "skipped":
+      return { label: "Skipped", className: "border-orange-200 bg-orange-50 text-orange-800" };
+    case "unavailable":
+      return { label: "Cost unavailable", className: "border-slate-200 bg-slate-100 text-slate-700" };
+  }
 }
 
 function statusPresentation(status?: SyncItem["status"]) {
@@ -116,7 +150,7 @@ function SummaryMetric({ label, value, tone = "text-slate-900" }: { label: strin
 
 export default function ProductSyncPage() {
   const { hasPermission } = usePermissions();
-  const canManage = hasPermission("dropshipping", "manage");
+  const canManage = hasPermission("dropshipping_product_sync", "manage");
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<SyncKind>("details");
@@ -129,6 +163,9 @@ export default function ProductSyncPage() {
   const [appliedSearch, setAppliedSearch] = useState("");
   const [page, setPage] = useState(1);
   const [logoDraft, setLogoDraft] = useState<string | null>(null);
+  const [forceImageReupload, setForceImageReupload] = useState(false);
+  const [selectAllPending, setSelectAllPending] = useState(false);
+  const [costComparisonResult, setCostComparisonResult] = useState<api.KoleProductCostComparisonResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -186,9 +223,11 @@ export default function ProductSyncPage() {
       input.kind,
       input.productIds,
       input.kind === "details" ? input.fields : undefined,
+      input.kind === "images" && input.forceImageReupload,
     ) as Promise<SyncJob>,
     onSuccess: (result, input) => {
       setSelectedProductIdsByKind((current) => ({ ...current, [input.kind]: new Set() }));
+      if (input.kind === "images") setForceImageReupload(false);
       queryClient.setQueryData(["kole-product-sync-latest", input.kind], result);
       queryClient.setQueryData(["kole-product-sync-job", input.kind, result.id], result);
       queryClient.invalidateQueries({ queryKey: ["kole-product-sync-items", input.kind] });
@@ -199,7 +238,26 @@ export default function ProductSyncPage() {
     },
     onError: (error: Error) => toast({
       title: "Could not start sync",
-      description: error.message || "Try again in a moment.",
+      description: toPublicVendorMessage(error.message || "Try again in a moment."),
+      variant: "destructive",
+    }),
+  });
+
+  const costComparison = useMutation({
+    mutationFn: (productIds: number[]) => api.compareKoleProductSyncCosts(productIds),
+    onMutate: () => setCostComparisonResult(null),
+    onSuccess: (result) => {
+      setCostComparisonResult(result);
+      toast({
+        title: result.changed > 0
+          ? `${result.changed.toLocaleString()} extended-cost difference${result.changed === 1 ? "" : "s"} found`
+          : "Cost comparison complete",
+        description: `${result.matched.toLocaleString()} matched; ${result.unavailable + result.failed + result.skipped + result.conflicts} need attention. No BigCommerce listings were changed.`,
+      });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not compare costs",
+      description: toPublicVendorMessage(error.message || "Try again in a moment."),
       variant: "destructive",
     }),
   });
@@ -211,7 +269,7 @@ export default function ProductSyncPage() {
       queryClient.invalidateQueries({ queryKey: ["kole-product-sync-logo"] });
       toast({ title: "Logo overlay saved", description: "The saved overlay will be used for image sync." });
     },
-    onError: (error: Error) => toast({ title: "Could not save logo overlay", description: error.message, variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Could not save logo overlay", description: toPublicVendorMessage(error.message), variant: "destructive" }),
   });
 
   const deleteLogo = useMutation({
@@ -221,11 +279,18 @@ export default function ProductSyncPage() {
       queryClient.setQueryData(["kole-product-sync-logo"], { dataUrl: null });
       toast({ title: "Logo overlay removed" });
     },
-    onError: (error: Error) => toast({ title: "Could not remove logo overlay", description: error.message, variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Could not remove logo overlay", description: toPublicVendorMessage(error.message), variant: "destructive" }),
   });
 
   const products = productsQuery.data?.rows ?? [];
   const mappedProducts = products.filter((product) => !!product.bigcommerce_product_id);
+  const mappedProductIds = mappedProducts.map((product) => product.id);
+  const imageHistoryQuery = useQuery({
+    queryKey: ["kole-product-sync-image-history", mappedProductIds],
+    queryFn: () => api.getKoleProductSyncImageHistory(mappedProductIds),
+    enabled: kind === "images" && mappedProductIds.length > 0,
+    refetchInterval: job?.status === "running" ? 5000 : false,
+  });
   const itemByProductId = new Map((itemsQuery.data?.rows ?? []).map((item) => [item.productId, item]));
   const selectedProductIds = selectedProductIdsByKind[kind];
   const currentPageProductIds = mappedProducts.map((product) => product.id);
@@ -235,8 +300,14 @@ export default function ProductSyncPage() {
   const totalPages = Math.max(Math.ceil((productsQuery.data?.total ?? 0) / PAGE_SIZE), 1);
   const progress = job?.total ? Math.min(100, Math.round((job.processed / job.total) * 100)) : 0;
   const logoUrl = logoDraft ?? logoQuery.data?.dataUrl ?? null;
-  const syncPending = startSync.isPending || latestQuery.isLoading || jobQuery.isLoading || job?.status === "running";
+  const syncPending = selectAllPending || startSync.isPending || costComparison.isPending || latestQuery.isLoading || jobQuery.isLoading || job?.status === "running";
   const imageSyncReady = !!logoQuery.data?.dataUrl && !logoDraft;
+
+  useEffect(() => {
+    if (kind === "images" && job && job.status !== "running") {
+      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-image-history"] });
+    }
+  }, [kind, job?.id, job?.status, queryClient]);
 
   const toggleField = (field: SyncField) => {
     setSelectedFields((current) => current.includes(field)
@@ -267,6 +338,55 @@ export default function ProductSyncPage() {
 
   const clearProductSelection = () => {
     setSelectedProductIdsByKind((current) => ({ ...current, [kind]: new Set() }));
+  };
+
+  const selectAllMappedListings = async () => {
+    if (!canManage || syncPending || productsQuery.isFetching || !productsQuery.data?.total) return;
+    const targetKind = kind;
+    const searchTerm = appliedSearch;
+    setSelectAllPending(true);
+    try {
+      const pageSize = 100;
+      const params = {
+        limit: pageSize,
+        imported: true as const,
+        ...(searchTerm ? { search: searchTerm } : {}),
+      };
+      const firstPage = await api.getKoleProducts({ ...params, page: 1 });
+      const pageCount = Math.ceil(firstPage.total / pageSize);
+      const selectedIds = new Set(
+        firstPage.rows
+          .filter((product) => !!product.bigcommerce_product_id)
+          .map((product) => product.id),
+      );
+      for (let pageNumber = 2; pageNumber <= pageCount; pageNumber++) {
+        const result = await api.getKoleProducts({ ...params, page: pageNumber });
+        for (const product of result.rows) {
+          if (product.bigcommerce_product_id) selectedIds.add(product.id);
+        }
+      }
+      if (selectedIds.size === 0) {
+        toast({ title: "No mapped listings to select" });
+        return;
+      }
+      setSelectedProductIdsByKind((current) => {
+        const next = new Set(current[targetKind]);
+        selectedIds.forEach((id) => next.add(id));
+        return { ...current, [targetKind]: next };
+      });
+      toast({
+        title: "Mapped listings selected",
+        description: `${selectedIds.size.toLocaleString()} ${searchTerm ? "matching " : ""}listing${selectedIds.size === 1 ? "" : "s"} selected across all pages for ${targetKind === "details" ? "Details Sync" : "Image Sync"}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Could not select all mapped listings",
+        description: toPublicVendorMessage((error as Error)?.message || "Try again in a moment."),
+        variant: "destructive",
+      });
+    } finally {
+      setSelectAllPending(false);
+    }
   };
 
   const handleLogoFile = (file?: File) => {
@@ -306,7 +426,17 @@ export default function ProductSyncPage() {
       kind,
       productIds: Array.from(selectedProductIds),
       fields: selectedFields,
+      forceImageReupload: kind === "images" && forceImageReupload,
     });
+  };
+
+  const compareSelectedCosts = () => {
+    if (!canManage || syncPending) return;
+    if (selectedProductIds.size === 0) {
+      toast({ title: "Select mapped products", description: "Choose at least one listing below to compare costs.", variant: "destructive" });
+      return;
+    }
+    costComparison.mutate(Array.from(selectedProductIds));
   };
 
   return (
@@ -316,7 +446,7 @@ export default function ProductSyncPage() {
           <div className="min-w-0">
             <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#527367]">
               <span className="h-px w-5 bg-[#89a79a]" />
-              Kole · BigCommerce
+              Vendor Catalog · BigCommerce
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-[#1e332d] sm:text-[30px]">Product sync</h1>
             <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-600">
@@ -336,7 +466,12 @@ export default function ProductSyncPage() {
           </div>
         )}
 
-        <Tabs value={kind} onValueChange={(value) => { setKind(value as SyncKind); setPage(1); }}>
+        <Tabs value={kind} onValueChange={(value) => {
+          const nextKind = value as SyncKind;
+          setKind(nextKind);
+          setPage(1);
+          if (nextKind !== "images") setForceImageReupload(false);
+        }}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <TabsList className="h-11 w-full justify-start rounded-xl border border-[#dfe6e0] bg-[#e9ede9] p-1 sm:w-auto">
               <TabsTrigger value="details" className="h-9 flex-1 gap-2 rounded-lg px-4 text-sm data-[state=active]:bg-white data-[state=active]:text-[#245143] data-[state=active]:shadow-sm sm:flex-none">
@@ -359,16 +494,27 @@ export default function ProductSyncPage() {
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">Details sync</p>
                       <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#243b32]">Choose what to update</h2>
-                      <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Select listings below. Only those products and the selected fields will be synced.</p>
+                      <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Compare selected listings against the current Product Catalog import (URL feed or uploaded CSV), or sync only the selected fields. Cost comparison never changes listings.</p>
                     </div>
-                    <Button
-                      onClick={startCurrentSync}
-                      disabled={!canManage || syncPending || selectedFields.length === 0 || selectedProductIds.size === 0}
-                      className="h-10 w-full shrink-0 bg-[#315f4d] text-white hover:bg-[#274f40] sm:w-auto"
-                    >
-                      {startSync.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                      {job?.status === "running" ? "Sync in progress" : startSync.isPending ? "Starting sync" : `Start details sync${selectedProductIds.size ? ` · ${selectedProductIds.size}` : ""}`}
-                    </Button>
+                    <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+                      <Button
+                        variant="outline"
+                        onClick={compareSelectedCosts}
+                        disabled={!canManage || syncPending || selectedProductIds.size === 0}
+                        className="h-10 w-full sm:w-auto"
+                      >
+                        {costComparison.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                        {costComparison.isPending ? "Checking costs…" : `Compare costs${selectedProductIds.size ? ` · ${selectedProductIds.size}` : ""}`}
+                      </Button>
+                      <Button
+                        onClick={startCurrentSync}
+                        disabled={!canManage || syncPending || selectedFields.length === 0 || selectedProductIds.size === 0}
+                        className="h-10 w-full bg-[#315f4d] text-white hover:bg-[#274f40] sm:w-auto"
+                      >
+                        {startSync.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        {job?.status === "running" ? "Sync in progress" : startSync.isPending ? "Starting sync" : `Start details sync${selectedProductIds.size ? ` · ${selectedProductIds.size}` : ""}`}
+                      </Button>
+                    </div>
                   </div>
                   <div className="mt-5 grid gap-2 sm:grid-cols-2">
                     {SYNC_FIELDS.map((field) => (
@@ -410,7 +556,7 @@ export default function ProductSyncPage() {
                         <SummaryMetric label="Skipped" value={job.skipped} tone={job.skipped ? "text-orange-700" : "text-slate-900"} />
                       </div>
                       <p className="mt-3 text-[11px] text-slate-500">Started {formatDate(job.startedAt)}</p>
-                      {job.error && <p className="mt-2 flex gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{job.error}</p>}
+                      {job.error && <p className="mt-2 flex gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{toPublicVendorMessage(job.error)}</p>}
                     </>
                   ) : (
                     <p className="mt-4 rounded-md border border-dashed border-[#bdcec2] bg-white/60 px-3 py-4 text-xs leading-5 text-slate-600">
@@ -420,6 +566,79 @@ export default function ProductSyncPage() {
                 </CardContent>
               </Card>
             </div>
+            {costComparisonResult && (
+              <Card className="overflow-hidden border-[#dce4dd] bg-white shadow-sm">
+                <CardContent className="p-4 sm:p-5">
+                  <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">Read-only cost check</p>
+                      <h3 className="mt-1 text-base font-semibold text-[#243b32]">Product Catalog extended cost vs. BigCommerce cost price</h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Checked {costComparisonResult.total.toLocaleString()} selected listing{costComparisonResult.total === 1 ? "" : "s"} · {formatDate(costComparisonResult.checkedAt)}. No listing fields were changed.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={costComparisonResult.changed > 0 ? "w-fit border-amber-200 bg-amber-50 text-amber-800" : "w-fit border-emerald-200 bg-emerald-50 text-emerald-800"}>
+                      {costComparisonResult.changed > 0
+                        ? `${costComparisonResult.changed.toLocaleString()} cost difference${costComparisonResult.changed === 1 ? "" : "s"}`
+                        : costComparisonResult.compared === costComparisonResult.total && costComparisonResult.total > 0
+                          ? "No cost differences"
+                          : "Review cost results"}
+                    </Badge>
+                  </div>
+                  <div className="mt-5 grid grid-cols-2 gap-4 border-y border-slate-100 py-4 sm:grid-cols-4">
+                    <SummaryMetric label="Compared" value={costComparisonResult.compared} />
+                    <SummaryMetric label="Matched" value={costComparisonResult.matched} tone="text-emerald-800" />
+                    <SummaryMetric label="Changed" value={costComparisonResult.changed} tone={costComparisonResult.changed ? "text-amber-800" : "text-slate-900"} />
+                    <SummaryMetric
+                      label="Needs attention"
+                      value={costComparisonResult.unavailable + costComparisonResult.failed + costComparisonResult.skipped + costComparisonResult.conflicts}
+                      tone={costComparisonResult.unavailable + costComparisonResult.failed + costComparisonResult.skipped + costComparisonResult.conflicts ? "text-rose-700" : "text-slate-900"}
+                    />
+                  </div>
+                  {costComparisonResult.items.some((item) => item.status !== "match") ? (
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full min-w-[760px] text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-200 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                            <th className="py-2 pr-4">Mapped product</th>
+                            <th className="py-2 pr-4">Catalog extended cost</th>
+                            <th className="py-2 pr-4">Listing cost price</th>
+                            <th className="py-2 pr-4">Sheet − listing</th>
+                            <th className="py-2">Result</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {costComparisonResult.items.filter((item) => item.status !== "match").map((item) => {
+                            const presentation = costComparisonPresentation(item.status);
+                            return (
+                              <tr key={item.productId} className="align-top">
+                                <td className="py-3 pr-4">
+                                  <p className="font-medium text-slate-800">{item.title}</p>
+                                  <p className="mt-0.5 font-mono text-[11px] text-slate-500">{item.vendorSku || "No SKU"}</p>
+                                  {item.message && <p className="mt-1 max-w-xs leading-4 text-slate-500">{toPublicVendorMessage(item.message)}</p>}
+                                </td>
+                                <td className="py-3 pr-4 font-mono tabular-nums text-slate-700">{formatCost(item.catalogExtendedCost)}</td>
+                                <td className="py-3 pr-4 font-mono tabular-nums text-slate-700">{formatCost(item.listingCost)}</td>
+                                <td className={`py-3 pr-4 font-mono tabular-nums ${item.delta === null ? "text-slate-400" : item.delta > 0 ? "font-semibold text-amber-800" : "font-semibold text-sky-800"}`}>
+                                  {formatCostDelta(item.delta)}
+                                </td>
+                                <td className="py-3">
+                                  <Badge variant="outline" className={presentation.className}>{presentation.label}</Badge>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-800">
+                      All selected listings with available costs match the Product Catalog extended cost.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="images" className="mt-4 space-y-4">
@@ -493,7 +712,26 @@ export default function ProductSyncPage() {
                       <p className="mt-2 text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">{logoDraft ? "Unsaved preview" : logoUrl ? "Current overlay" : "Overlay preview"}</p>
                     </div>
                   </div>
-                  {logoQuery.isError && <p className="mt-3 text-xs text-rose-700">Could not load the saved overlay: {(logoQuery.error as Error).message}</p>}
+                  {logoQuery.isError && <p className="mt-3 text-xs text-rose-700">Could not load the saved overlay: {toPublicVendorMessage((logoQuery.error as Error).message)}</p>}
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+                    <div className="flex items-start gap-2.5">
+                      <Checkbox
+                        id="force-image-reupload"
+                        checked={forceImageReupload}
+                        onCheckedChange={(checked) => setForceImageReupload(checked === true)}
+                        disabled={!canManage || syncPending}
+                        className="mt-0.5"
+                      />
+                      <div className="space-y-1">
+                        <Label htmlFor="force-image-reupload" className="cursor-pointer text-xs font-semibold text-amber-950">
+                          Re-upload previously synced images
+                        </Label>
+                        <p className="text-[11px] leading-4 text-amber-900/80">
+                          Bypasses upload history for this run only. Image sync appends photos, so duplicates may be added if the existing photos are still on the listing.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -523,7 +761,8 @@ export default function ProductSyncPage() {
                         <SummaryMetric label="Failed" value={job.failed} tone={job.failed ? "text-rose-700" : "text-slate-900"} />
                       </div>
                       <p className="mt-3 text-[11px] text-slate-500">Started {formatDate(job.startedAt)}</p>
-                      {job.error && <p className="mt-2 flex gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{job.error}</p>}
+                      {job.forceImageReupload && <p className="mt-2 text-[11px] leading-4 text-amber-800">Upload history was bypassed for this run. Check for duplicate photos if any previous images remained on the listing.</p>}
+                      {job.error && <p className="mt-2 flex gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{toPublicVendorMessage(job.error)}</p>}
                     </>
                   ) : (
                     <p className="mt-4 rounded-md border border-dashed border-[#bdcec2] bg-white/60 px-3 py-4 text-xs leading-5 text-slate-600">
@@ -542,15 +781,36 @@ export default function ProductSyncPage() {
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">{kind === "details" ? "Details sync" : "Image sync"} · results</p>
               <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#243b32]">Mapped products</h2>
               <p className="mt-1 text-xs text-slate-500">
-                {selectedProductIds.size.toLocaleString()} selected for this sync. Selection stays active across pages and searches.
+                {selectedProductIds.size.toLocaleString()} selected for this sync. {appliedSearch ? "Select all matching listings across pages or check individual listings." : "Select all mapped listings across pages or check individual listings."}
               </p>
-            </div>
-            <div className="flex w-full items-center gap-2 sm:w-auto">
-              {selectedProductIds.size > 0 && (
-                <Button variant="ghost" size="sm" onClick={clearProductSelection} disabled={!canManage || syncPending}>
-                  Clear selection
-                </Button>
+              {kind === "images" && imageHistoryQuery.isFetching && (
+                <p className="mt-1 text-[11px] text-slate-500">Checking previous image uploads…</p>
               )}
+              {kind === "images" && imageHistoryQuery.isError && (
+                <p className="mt-1 text-[11px] text-rose-700">
+                  Previous image-upload history could not be loaded: {toPublicVendorMessage((imageHistoryQuery.error as Error).message)}
+                </p>
+              )}
+            </div>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={selectAllMappedListings}
+                  disabled={!canManage || syncPending || productsQuery.isFetching || !productsQuery.data?.total}
+                  aria-label={`Select all mapped listings${appliedSearch ? " matching the current search" : ""} across all pages`}
+                  className="shrink-0"
+                >
+                  {selectAllPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  {selectAllPending ? "Selecting…" : appliedSearch ? "Select all matches" : "Select all mapped"}
+                </Button>
+                {selectedProductIds.size > 0 && (
+                  <Button variant="ghost" size="sm" onClick={clearProductSelection} disabled={!canManage || syncPending}>
+                    Clear selection
+                  </Button>
+                )}
+              </div>
               <div className="relative w-full sm:max-w-xs">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search SKU or product name" aria-label="Search mapped products by SKU or product name" className="h-10 border-slate-200 bg-white pl-9" />
@@ -567,7 +827,7 @@ export default function ProductSyncPage() {
               <div className="flex flex-col items-center px-5 py-12 text-center">
                 <AlertTriangle className="h-6 w-6 text-rose-600" />
                 <p className="mt-3 text-sm font-semibold text-slate-800">Mapped products could not be loaded</p>
-                <p className="mt-1 text-xs text-slate-500">{(productsQuery.error as Error).message}</p>
+                <p className="mt-1 text-xs text-slate-500">{toPublicVendorMessage((productsQuery.error as Error).message)}</p>
                 <Button variant="outline" size="sm" className="mt-4" onClick={() => productsQuery.refetch()}>Retry</Button>
               </div>
             ) : mappedProducts.length === 0 ? (
@@ -593,6 +853,7 @@ export default function ProductSyncPage() {
                   {mappedProducts.map((product) => {
                     const item = itemByProductId.get(product.id);
                     const status = item?.status;
+                    const previousSourceCount = imageHistoryQuery.data?.[product.id] ?? 0;
                     return (
                       <article key={product.id} className="grid grid-cols-[20px_minmax(0,1fr)] gap-x-3 gap-y-3 px-4 py-4 transition-colors hover:bg-[#fbfcfb] md:grid-cols-[36px_minmax(0,1fr)_150px_170px] md:items-center md:gap-4 md:px-5">
                         <div className="row-span-3 flex items-center justify-center md:row-span-1">
@@ -617,11 +878,16 @@ export default function ProductSyncPage() {
                         <div className="col-start-2 flex min-w-0 items-start justify-between gap-3 md:col-start-4 md:block">
                           <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400 md:hidden">Result</span>
                           <div className="min-w-0 text-right md:text-left">
+                            {kind === "images" && previousSourceCount > 0 && (
+                              <p className="mb-1 text-xs font-medium text-emerald-700">
+                                Previously uploaded · {previousSourceCount} source image{previousSourceCount === 1 ? "" : "s"}
+                              </p>
+                            )}
                             {item ? (
                               <>
                                 {item.updatedFields.length > 0 && <p className="truncate text-xs text-slate-600">{item.updatedFields.join(", ")}</p>}
                                 {kind === "images" && item.photosAdded > 0 && <p className="mt-0.5 text-xs text-slate-600">{item.photosAdded} photo{item.photosAdded === 1 ? "" : "s"} added</p>}
-                                {item.error && <p className="mt-0.5 line-clamp-2 text-xs text-rose-700">{item.error}</p>}
+                                {item.error && <p className="mt-0.5 line-clamp-2 text-xs text-rose-700">{toPublicVendorMessage(item.error)}</p>}
                                 {!item.updatedFields.length && !item.photosAdded && !item.error && <p className="text-xs text-slate-400">—</p>}
                               </>
                             ) : <p className="text-xs text-slate-400">No run result</p>}

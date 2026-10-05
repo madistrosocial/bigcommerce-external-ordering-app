@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { getKoleExtendedCost } from "@shared/kole-pricing";
 import type { DropshipProduct } from "@shared/schema";
 import type { IStorage } from "./storage";
+import { normalizeKoleSku } from "./koleSkuMapping";
 
 export type KoleProductSyncKind = "details" | "images";
 export type KoleProductSyncField = "cost" | "description" | "inventory" | "identity";
@@ -27,6 +28,7 @@ export interface KoleProductSyncJobSummary {
   skipped: number;
   photosAdded: number;
   selectedFields: KoleProductSyncField[];
+  forceImageReupload?: boolean;
   currentSku: string | null;
   startedAt: string;
   completedAt: string | null;
@@ -39,6 +41,7 @@ export interface KoleProductSyncItem {
   title: string;
   upc: string;
   bigcommerceProductId: number;
+  bigcommerceVariantId: number | null;
   status: KoleProductSyncItemStatus;
   updatedFields: string[];
   photosAdded: number;
@@ -50,6 +53,39 @@ export interface KoleProductSyncItemsPage {
   total: number;
   page: number;
   limit: number;
+}
+
+export type KoleProductCostComparisonStatus =
+  | "changed"
+  | "match"
+  | "unavailable"
+  | "failed"
+  | "skipped"
+  | "conflict";
+
+export interface KoleProductCostComparisonItem {
+  productId: number;
+  vendorSku: string;
+  title: string;
+  bigcommerceProductId: number | null;
+  status: KoleProductCostComparisonStatus;
+  catalogExtendedCost: number | null;
+  listingCost: number | null;
+  delta: number | null;
+  message: string | null;
+}
+
+export interface KoleProductCostComparisonResult {
+  checkedAt: string;
+  total: number;
+  compared: number;
+  changed: number;
+  matched: number;
+  unavailable: number;
+  failed: number;
+  skipped: number;
+  conflicts: number;
+  items: KoleProductCostComparisonItem[];
 }
 
 interface ProductSyncStorage extends Pick<IStorage, "getDropshipProducts" | "getDropshipProduct" | "getSetting" | "setSetting"> {}
@@ -70,6 +106,8 @@ interface ProductSyncManagerOptions {
   getBigCommerceCredentials: () => Promise<BigCommerceCredentials>;
   fetchBigCommerce: (url: string, init: RequestInit) => Promise<Response>;
   getBigCommerceBrands: () => Promise<BrandOption[]>;
+  downloadImage?: (sourceUrl: string) => Promise<Buffer>;
+  createWatermarkedImage?: (sourceBuffer: Buffer, logoBuffer: Buffer) => Promise<Buffer>;
 }
 
 interface InternalProductSyncJob {
@@ -80,6 +118,40 @@ interface InternalProductSyncJob {
 interface ProductCandidate {
   product: DropshipProduct;
   item: KoleProductSyncItem;
+}
+
+function productRawData(product: DropshipProduct): Record<string, unknown> {
+  return product.raw_data && typeof product.raw_data === "object" && !Array.isArray(product.raw_data)
+    ? product.raw_data as Record<string, unknown>
+    : {};
+}
+
+function conflictingParentFields(
+  candidates: ProductCandidate[],
+  selectedFields: KoleProductSyncField[],
+): Set<KoleProductSyncField> {
+  const conflicts = new Set<KoleProductSyncField>();
+  if (candidates.length < 2) return conflicts;
+
+  const hasMultiple = (values: string[]) => new Set(values.filter(Boolean)).size > 1;
+  if (selectedFields.includes("cost")) {
+    const values = candidates
+      .map(({ product }) => getKoleExtendedCost(productRawData(product), product.cost))
+      .filter((value): value is number => value !== null)
+      .map((value) => (Math.round((value + Number.EPSILON) * 100) / 100).toFixed(2));
+    if (hasMultiple(values)) conflicts.add("cost");
+  }
+  if (selectedFields.includes("description")) {
+    const values = candidates.map(({ product }) => String(product.description ?? "").trim());
+    if (hasMultiple(values)) conflicts.add("description");
+  }
+  if (selectedFields.includes("identity")) {
+    const titles = candidates.map(({ product }) => String(product.title ?? "").trim());
+    const upcs = candidates.map(({ product }) => String(product.upc ?? "").trim());
+    const brands = candidates.map(({ product }) => productIdentityBrandKey(product.brand));
+    if (hasMultiple(titles) || hasMultiple(upcs) || hasMultiple(brands)) conflicts.add("identity");
+  }
+  return conflicts;
 }
 
 interface ProductOutcome {
@@ -178,7 +250,7 @@ async function assertSafeImageUrl(rawUrl: string): Promise<URL> {
   try {
     url = new URL(rawUrl);
   } catch {
-    throw new Error("Kole supplied an invalid image URL.");
+    throw new Error("The supplier provided an invalid image URL.");
   }
   if (
     url.protocol !== "https:"
@@ -201,7 +273,7 @@ async function assertSafeImageUrl(rawUrl: string): Promise<URL> {
     try {
       addresses = await dnsLookup(hostname, { all: true, verbatim: true });
     } catch {
-      throw new Error("The Kole image host could not be resolved.");
+      throw new Error("The supplier image host could not be resolved.");
     }
     if (addresses.length === 0 || addresses.some((entry) => !isPublicIp(entry.address))) {
       throw new Error("The image URL does not point to a public address.");
@@ -213,9 +285,9 @@ async function assertSafeImageUrl(rawUrl: string): Promise<URL> {
 async function readResponseWithLimit(response: Response, limitBytes: number): Promise<Buffer> {
   const declaredSize = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredSize) && declaredSize > limitBytes) {
-    throw new Error("The Kole image exceeds the permitted download size.");
+    throw new Error("The supplier image exceeds the permitted download size.");
   }
-  if (!response.body) throw new Error("The Kole image response was empty.");
+  if (!response.body) throw new Error("The supplier image response was empty.");
 
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -227,7 +299,7 @@ async function readResponseWithLimit(response: Response, limitBytes: number): Pr
       totalBytes += value.byteLength;
       if (totalBytes > limitBytes) {
         await reader.cancel().catch(() => undefined);
-        throw new Error("The Kole image exceeds the permitted download size.");
+        throw new Error("The supplier image exceeds the permitted download size.");
       }
       chunks.push(value);
     }
@@ -250,17 +322,17 @@ async function downloadKoleImage(sourceUrl: string): Promise<Buffer> {
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       await response.body?.cancel().catch(() => undefined);
-      if (!location || redirectCount === 4) throw new Error("The Kole image redirected too many times.");
+      if (!location || redirectCount === 4) throw new Error("The supplier image redirected too many times.");
       currentUrl = new URL(location, validatedUrl).toString();
       continue;
     }
-    if (!response.ok) throw new Error(`Kole image download failed (${response.status}).`);
+    if (!response.ok) throw new Error(`Supplier image download failed (${response.status}).`);
     if (!(response.headers.get("content-type") || "").toLowerCase().startsWith("image/")) {
-      throw new Error("The Kole image URL did not return an image.");
+      throw new Error("The supplier image URL did not return an image.");
     }
     return readResponseWithLimit(response, IMAGE_MAX_BYTES);
   }
-  throw new Error("The Kole image could not be downloaded.");
+  throw new Error("The supplier image could not be downloaded.");
 }
 
 async function normalizeLogo(dataUrl: string): Promise<string> {
@@ -348,7 +420,30 @@ function productIdentityBrandKey(value: unknown): string {
 
 function safeImageFilename(sku: string, imageIndex: number): string {
   const safeSku = sku.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70) || "product";
+  return `catalog-${safeSku}-${imageIndex + 1}-watermarked.jpg`;
+}
+
+function legacyImageFilename(sku: string, imageIndex: number): string {
+  const safeSku = sku.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70) || "product";
   return `kole-${safeSku}-${imageIndex + 1}-watermarked.jpg`;
+}
+
+function normalizedImageFilename(value: unknown): string {
+  const raw = String(value ?? "").trim().split(/[?#]/, 1)[0];
+  const filename = raw.slice(raw.lastIndexOf("/") + 1);
+  try {
+    return decodeURIComponent(filename).toLowerCase();
+  } catch {
+    return filename.toLowerCase();
+  }
+}
+
+function imageLedgerSettingKey(bigcommerceProductId: number, dropshipProductId: number): string {
+  return `${IMAGE_LEDGER_PREFIX}${bigcommerceProductId}_kole_${dropshipProductId}`;
+}
+
+function legacyImageLedgerSettingKey(bigcommerceProductId: number): string {
+  return `${IMAGE_LEDGER_PREFIX}${bigcommerceProductId}`;
 }
 
 export class KoleProductSyncManager {
@@ -356,21 +451,44 @@ export class KoleProductSyncManager {
   private readonly getBigCommerceCredentials: ProductSyncManagerOptions["getBigCommerceCredentials"];
   private readonly fetchBigCommerce: ProductSyncManagerOptions["fetchBigCommerce"];
   private readonly getBigCommerceBrands: ProductSyncManagerOptions["getBigCommerceBrands"];
+  private readonly downloadImage: NonNullable<ProductSyncManagerOptions["downloadImage"]>;
+  private readonly createWatermarkedImage: NonNullable<ProductSyncManagerOptions["createWatermarkedImage"]>;
   private readonly jobs = new Map<number, InternalProductSyncJob>();
   private readonly latestJobIdByKind = new Map<KoleProductSyncKind, number>();
   private activeJobId: number | null = null;
   private isStarting = false;
+  private isComparingCosts = false;
 
   constructor(options: ProductSyncManagerOptions) {
     this.storage = options.storage;
     this.getBigCommerceCredentials = options.getBigCommerceCredentials;
     this.fetchBigCommerce = options.fetchBigCommerce;
     this.getBigCommerceBrands = options.getBigCommerceBrands;
+    this.downloadImage = options.downloadImage ?? downloadKoleImage;
+    this.createWatermarkedImage = options.createWatermarkedImage ?? createWatermarkedJpeg;
   }
 
   async getLogo(): Promise<{ dataUrl: string | null }> {
     const value = unwrapSetting(await this.storage.getSetting(LOGO_SETTING_KEY));
     return { dataUrl: typeof value === "string" ? value : null };
+  }
+
+  async getImageSyncHistory(vendorId: number, productIds: number[]): Promise<Record<number, number>> {
+    const ids = Array.from(new Set(productIds.filter((id) => Number.isSafeInteger(id) && id > 0)));
+    const products = await Promise.all(ids.map((id) => this.storage.getDropshipProduct(id)));
+    const history: Record<number, number> = {};
+    for (const product of products) {
+      if (!product || product.vendor_id !== vendorId) continue;
+      const bigcommerceProductId = Number(product.bigcommerce_product_id);
+      if (!Number.isSafeInteger(bigcommerceProductId) || bigcommerceProductId <= 0) continue;
+      const saved = unwrapSetting(
+        await this.storage.getSetting(imageLedgerSettingKey(bigcommerceProductId, product.id)),
+      );
+      if (!Array.isArray(saved)) continue;
+      const sourceCount = new Set(saved.map(normalizedImageUrl).filter(Boolean)).size;
+      if (sourceCount > 0) history[product.id] = sourceCount;
+    }
+    return history;
   }
 
   async saveLogo(dataUrl: unknown): Promise<{ ok: true }> {
@@ -390,8 +508,9 @@ export class KoleProductSyncManager {
     vendorId: number,
     selectedProductIds: number[],
     selectedFields: KoleProductSyncField[] = [],
+    forceImageReupload = false,
   ): Promise<KoleProductSyncJobSummary> {
-    if (this.activeJobId !== null || this.isStarting) {
+    if (this.activeJobId !== null || this.isStarting || this.isComparingCosts) {
       throw new KoleProductSyncError("A Product Sync job is already running.", 409);
     }
     if (
@@ -407,6 +526,9 @@ export class KoleProductSyncManager {
     }
     if (kind === "details" && selectedFields.length === 0) {
       throw new KoleProductSyncError("Select at least one product detail to sync.");
+    }
+    if (forceImageReupload && kind !== "images") {
+      throw new KoleProductSyncError("Previously uploaded images can only be re-uploaded during Image Sync.");
     }
     const fields = Array.from(new Set(selectedFields));
     this.isStarting = true;
@@ -433,6 +555,7 @@ export class KoleProductSyncManager {
         skipped: 0,
         photosAdded: 0,
         selectedFields: kind === "details" ? fields : [],
+        forceImageReupload: kind === "images" && forceImageReupload,
         currentSku: null,
         startedAt: now,
         completedAt: null,
@@ -456,6 +579,196 @@ export class KoleProductSyncManager {
         if (this.latestJobIdByKind.get(kind) === createdJobId) this.latestJobIdByKind.delete(kind);
       }
       throw error;
+    }
+  }
+
+  async compareCosts(vendorId: number, selectedProductIds: number[]): Promise<KoleProductCostComparisonResult> {
+    if (this.activeJobId !== null || this.isStarting || this.isComparingCosts) {
+      throw new KoleProductSyncError("Wait for the current Product Sync activity to finish before checking costs.", 409);
+    }
+    if (
+      !Array.isArray(selectedProductIds)
+      || selectedProductIds.length === 0
+      || selectedProductIds.some((id) => !Number.isSafeInteger(id) || id <= 0)
+    ) {
+      throw new KoleProductSyncError("Select at least one valid mapped product.");
+    }
+    const productIds = Array.from(new Set(selectedProductIds));
+    if (productIds.length !== selectedProductIds.length) {
+      throw new KoleProductSyncError("The selected product list contains duplicates.");
+    }
+
+    this.isComparingCosts = true;
+    try {
+      const mappedProducts: DropshipProduct[] = [];
+      let page = 1;
+      let rowsRead = 0;
+      let expectedTotal = 0;
+      while (true) {
+        const result = await this.storage.getDropshipProducts({
+          vendorId,
+          page,
+          limit: 100,
+          imported: true,
+        });
+        mappedProducts.push(...result.rows);
+        rowsRead += result.rows.length;
+        expectedTotal = result.total;
+        if (result.rows.length === 0 || rowsRead >= expectedTotal) break;
+        page++;
+      }
+
+      const productById = new Map(mappedProducts.map((product) => [product.id, product]));
+      const ownersByBcId = new Map<number, DropshipProduct[]>();
+      for (const product of mappedProducts) {
+        const bigcommerceProductId = Number(product.bigcommerce_product_id);
+        if (!Number.isSafeInteger(bigcommerceProductId) || bigcommerceProductId <= 0) continue;
+        const owners = ownersByBcId.get(bigcommerceProductId) ?? [];
+        owners.push(product);
+        ownersByBcId.set(bigcommerceProductId, owners);
+      }
+
+      const items: KoleProductCostComparisonItem[] = productIds.map((productId) => {
+        const product = productById.get(productId);
+        const bigcommerceProductId = Number(product?.bigcommerce_product_id);
+        const extendedCost = product
+          ? getKoleExtendedCost(productRawData(product), product.cost)
+          : null;
+        return {
+          productId,
+          vendorSku: String(product?.vendor_sku ?? ""),
+          title: String(product?.title ?? `Product #${productId}`),
+          bigcommerceProductId: Number.isSafeInteger(bigcommerceProductId) && bigcommerceProductId > 0
+            ? bigcommerceProductId
+            : null,
+          status: "skipped",
+          catalogExtendedCost: extendedCost === null
+            ? null
+            : Math.round((extendedCost + Number.EPSILON) * 100) / 100,
+          listingCost: null,
+          delta: null,
+          message: product
+            ? "This catalog row no longer has a valid BigCommerce product mapping."
+            : "This product is no longer mapped. Refresh the list and select it again.",
+        };
+      });
+      const itemByProductId = new Map(items.map((item) => [item.productId, item]));
+      const candidatesByBcId = new Map<number, Array<{ product: DropshipProduct; item: KoleProductCostComparisonItem }>>();
+
+      for (const productId of productIds) {
+        const product = productById.get(productId);
+        const item = itemByProductId.get(productId)!;
+        if (!product) continue;
+        const bigcommerceProductId = Number(product.bigcommerce_product_id);
+        if (!Number.isSafeInteger(bigcommerceProductId) || bigcommerceProductId <= 0) continue;
+
+        const rawVariantId = product.bigcommerce_variant_id;
+        const variantId = rawVariantId == null ? null : Number(rawVariantId);
+        if (rawVariantId != null && (!Number.isSafeInteger(variantId) || (variantId as number) <= 0)) {
+          item.message = "This catalog row has an invalid BigCommerce variant mapping.";
+          continue;
+        }
+
+        const conflictingOwner = (ownersByBcId.get(bigcommerceProductId) ?? []).some((owner) => {
+          if (owner.id === product.id) return false;
+          const ownerVariantId = owner.bigcommerce_variant_id == null
+            ? null
+            : Number(owner.bigcommerce_variant_id);
+          return variantId === null || ownerVariantId === null || variantId === ownerVariantId;
+        });
+        if (conflictingOwner) {
+          item.message = "Multiple vendor catalog rows map to the same BigCommerce product or variant; skipped to avoid ambiguous costs.";
+          continue;
+        }
+
+        const group = candidatesByBcId.get(bigcommerceProductId) ?? [];
+        group.push({ product, item });
+        candidatesByBcId.set(bigcommerceProductId, group);
+      }
+
+      const groups = Array.from(candidatesByBcId.entries());
+      if (groups.length > 0) {
+        const { storeHash, headers } = await this.getBigCommerceCredentials();
+        let nextIndex = 0;
+        const workerCount = Math.min(SYNC_CONCURRENCY, groups.length);
+        await Promise.all(Array.from({ length: workerCount }, async () => {
+          while (true) {
+            const index = nextIndex++;
+            if (index >= groups.length) return;
+            const [bigcommerceProductId, group] = groups[index];
+            const sourceCosts = group.map(({ item }) => item.catalogExtendedCost);
+            const knownSourceCosts = sourceCosts
+              .filter((value): value is number => value !== null)
+              .map((value) => value.toFixed(2));
+            const hasCostConflict = new Set(knownSourceCosts).size > 1;
+
+            let currentProduct: any;
+            try {
+              const response = await this.fetchBigCommerce(
+                `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${bigcommerceProductId}`,
+                { headers },
+              );
+              const payload = await response.json().catch(() => ({}));
+              if (!response.ok || !payload?.data) {
+                throw new Error(`BigCommerce product lookup failed (${response.status}).`);
+              }
+              currentProduct = payload.data;
+            } catch (error) {
+              for (const { item } of group) {
+                item.status = "failed";
+                item.message = safeError(error);
+              }
+              continue;
+            }
+
+            const rawListingCost = currentProduct.cost_price;
+            const parsedListingCost = rawListingCost === undefined || rawListingCost === null || String(rawListingCost).trim() === ""
+              ? null
+              : Number(rawListingCost);
+            const listingCost = parsedListingCost !== null && Number.isFinite(parsedListingCost) && parsedListingCost >= 0
+              ? Math.round((parsedListingCost + Number.EPSILON) * 100) / 100
+              : null;
+
+            for (let candidateIndex = 0; candidateIndex < group.length; candidateIndex++) {
+              const { item } = group[candidateIndex];
+              const catalogExtendedCost = sourceCosts[candidateIndex];
+              item.listingCost = listingCost;
+              if (catalogExtendedCost === null) {
+                item.status = "unavailable";
+                item.message = "The Product Catalog row does not contain a valid extended cost.";
+              } else if (hasCostConflict) {
+                item.status = "conflict";
+                item.message = "Selected Product Catalog rows mapped to this listing have different extended costs.";
+              } else if (listingCost === null) {
+                item.status = "unavailable";
+                item.message = "The BigCommerce listing does not have a valid cost price.";
+              } else {
+                item.delta = Math.round((catalogExtendedCost - listingCost + Number.EPSILON) * 100) / 100;
+                item.status = item.delta === 0 ? "match" : "changed";
+                item.message = null;
+              }
+            }
+          }
+        }));
+      }
+
+      const count = (status: KoleProductCostComparisonStatus) => items.filter((item) => item.status === status).length;
+      const changed = count("changed");
+      const matched = count("match");
+      return {
+        checkedAt: new Date().toISOString(),
+        total: items.length,
+        compared: changed + matched,
+        changed,
+        matched,
+        unavailable: count("unavailable"),
+        failed: count("failed"),
+        skipped: count("skipped"),
+        conflicts: count("conflict"),
+        items,
+      };
+    } finally {
+      this.isComparingCosts = false;
     }
   }
 
@@ -577,11 +890,13 @@ export class KoleProductSyncManager {
         page++;
       }
 
-      const ownerCountByBcId = new Map<number, number>();
+      const ownersByBcId = new Map<number, DropshipProduct[]>();
       for (const product of products) {
         const bcId = Number(product.bigcommerce_product_id);
         if (Number.isInteger(bcId) && bcId > 0) {
-          ownerCountByBcId.set(bcId, (ownerCountByBcId.get(bcId) ?? 0) + 1);
+          const owners = ownersByBcId.get(bcId) ?? [];
+          owners.push(product);
+          ownersByBcId.set(bcId, owners);
         }
       }
 
@@ -595,6 +910,9 @@ export class KoleProductSyncManager {
           title: String(product?.title ?? `Product #${productId}`),
           upc: String(product?.upc ?? ""),
           bigcommerceProductId: Number(product?.bigcommerce_product_id) || 0,
+          bigcommerceVariantId: product?.bigcommerce_variant_id == null
+            ? null
+            : Number(product.bigcommerce_variant_id),
           status: product ? "pending" : "skipped",
           updatedFields: [],
           photosAdded: 0,
@@ -619,9 +937,25 @@ export class KoleProductSyncManager {
           job.summary.processed++;
           continue;
         }
-        if ((ownerCountByBcId.get(bcId) ?? 0) !== 1) {
+        const rawVariantId = product.bigcommerce_variant_id;
+        const variantId = rawVariantId == null ? null : Number(rawVariantId);
+        if (rawVariantId != null && (!Number.isSafeInteger(variantId) || (variantId as number) <= 0)) {
           item.status = "skipped";
-          item.error = "Multiple Kole rows map to this BigCommerce product; skipped to avoid conflicting updates.";
+          item.error = "This catalog row has an invalid BigCommerce variant mapping.";
+          job.summary.skipped++;
+          job.summary.processed++;
+          continue;
+        }
+        const conflictingOwner = (ownersByBcId.get(bcId) ?? []).some((owner) => {
+          if (owner.id === product.id) return false;
+          const ownerVariantId = owner.bigcommerce_variant_id == null
+            ? null
+            : Number(owner.bigcommerce_variant_id);
+          return variantId === null || ownerVariantId === null || ownerVariantId === variantId;
+        });
+        if (conflictingOwner) {
+          item.status = "skipped";
+          item.error = "Multiple vendor catalog rows map to the same BigCommerce product or variant; skipped to avoid conflicting updates.";
           job.summary.skipped++;
           job.summary.processed++;
           continue;
@@ -646,39 +980,57 @@ export class KoleProductSyncManager {
           }
         }
 
+        const candidatesByBcId = new Map<number, ProductCandidate[]>();
+        for (const candidate of candidates) {
+          const group = candidatesByBcId.get(candidate.item.bigcommerceProductId) ?? [];
+          group.push(candidate);
+          candidatesByBcId.set(candidate.item.bigcommerceProductId, group);
+        }
+        const candidateGroups = Array.from(candidatesByBcId.values());
         let nextIndex = 0;
-        const workerCount = Math.min(SYNC_CONCURRENCY, candidates.length);
+        const workerCount = Math.min(SYNC_CONCURRENCY, candidateGroups.length);
         await Promise.all(Array.from({ length: workerCount }, async () => {
           while (true) {
             const index = nextIndex++;
-            if (index >= candidates.length) return;
-            const candidate = candidates[index];
-            candidate.item.status = "in_progress";
-            job.summary.currentSku = candidate.item.vendorSku;
-            try {
-              const outcome = job.summary.kind === "details"
-                ? await this.syncDetails(candidate, job.summary.selectedFields, brandMap, brandLoadError)
-                : await this.syncImages(candidate, logoBuffer);
-              candidate.item.status = outcome.status;
-              candidate.item.updatedFields = outcome.updatedFields ?? [];
-              candidate.item.photosAdded = outcome.photosAdded ?? 0;
-              candidate.item.error = outcome.error ?? null;
-            } catch (error) {
-              candidate.item.status = "failed";
-              candidate.item.error = safeError(error);
-            }
+            if (index >= candidateGroups.length) return;
+            const group = candidateGroups[index];
+            const parentFieldConflicts = job.summary.kind === "details"
+              ? conflictingParentFields(group, job.summary.selectedFields)
+              : new Set<KoleProductSyncField>();
+            for (const candidate of group) {
+              candidate.item.status = "in_progress";
+              job.summary.currentSku = candidate.item.vendorSku;
+              try {
+                const outcome = job.summary.kind === "details"
+                  ? await this.syncDetails(
+                    candidate,
+                    job.summary.selectedFields,
+                    brandMap,
+                    brandLoadError,
+                    parentFieldConflicts,
+                  )
+                  : await this.syncImages(candidate, logoBuffer, job.summary.forceImageReupload === true);
+                candidate.item.status = outcome.status;
+                candidate.item.updatedFields = outcome.updatedFields ?? [];
+                candidate.item.photosAdded = outcome.photosAdded ?? 0;
+                candidate.item.error = outcome.error ?? null;
+              } catch (error) {
+                candidate.item.status = "failed";
+                candidate.item.error = safeError(error);
+              }
 
-            job.summary.processed++;
-            if (candidate.item.status === "updated") job.summary.updated++;
-            else if (candidate.item.status === "unchanged") job.summary.unchanged++;
-            else if (candidate.item.status === "failed") job.summary.failed++;
-            else if (candidate.item.status === "skipped") job.summary.skipped++;
-            job.summary.photosAdded += candidate.item.photosAdded;
+              job.summary.processed++;
+              if (candidate.item.status === "updated") job.summary.updated++;
+              else if (candidate.item.status === "unchanged") job.summary.unchanged++;
+              else if (candidate.item.status === "failed") job.summary.failed++;
+              else if (candidate.item.status === "skipped") job.summary.skipped++;
+              job.summary.photosAdded += candidate.item.photosAdded;
 
-            if (job.summary.processed % CHECKPOINT_EVERY === 0) {
-              await this.saveLatest(job, true).catch((error) => {
-                console.error("[Kole Product Sync] could not save progress checkpoint", safeError(error));
-              });
+              if (job.summary.processed % CHECKPOINT_EVERY === 0) {
+                await this.saveLatest(job, true).catch((error) => {
+                  console.error("[Kole Product Sync] could not save progress checkpoint", safeError(error));
+                });
+              }
             }
           }
         }));
@@ -699,9 +1051,17 @@ export class KoleProductSyncManager {
     selectedFields: KoleProductSyncField[],
     brandMap: Map<string, number | null> | null,
     brandLoadError: string | null,
+    parentFieldConflicts: Set<KoleProductSyncField>,
   ): Promise<ProductOutcome> {
     const currentMapping = await this.storage.getDropshipProduct(candidate.item.productId);
-    if (!currentMapping || Number(currentMapping.bigcommerce_product_id) !== candidate.item.bigcommerceProductId) {
+    const currentVariantId = currentMapping?.bigcommerce_variant_id == null
+      ? null
+      : Number(currentMapping.bigcommerce_variant_id);
+    if (
+      !currentMapping
+      || Number(currentMapping.bigcommerce_product_id) !== candidate.item.bigcommerceProductId
+      || currentVariantId !== candidate.item.bigcommerceVariantId
+    ) {
       return {
         status: "skipped",
         error: "The BigCommerce mapping changed during this run; this product was skipped.",
@@ -715,14 +1075,23 @@ export class KoleProductSyncManager {
       throw new Error(`BigCommerce product lookup failed (${currentResponse.status}).`);
     }
     const currentProduct = currentPayload.data;
-    const raw = candidate.product.raw_data && typeof candidate.product.raw_data === "object" && !Array.isArray(candidate.product.raw_data)
-      ? candidate.product.raw_data as Record<string, unknown>
-      : {};
+    const raw = productRawData(candidate.product);
     const update: Record<string, unknown> = {};
     const fieldLabels: string[] = [];
-    const warnings: string[] = [];
+    const fieldLabelsBySyncField: Record<KoleProductSyncField, string> = {
+      cost: "Extended cost",
+      description: "Description",
+      inventory: "Inventory quantity",
+      identity: "Product identity",
+    };
+    const warnings = Array.from(parentFieldConflicts, (field) =>
+      `${fieldLabelsBySyncField[field]} left unchanged because selected variant SKUs contain conflicting values for this BigCommerce product.`,
+    );
+    const fieldsToSync = selectedFields.filter((field) =>
+      field === "inventory" || !parentFieldConflicts.has(field),
+    );
 
-    if (selectedFields.includes("cost")) {
+    if (fieldsToSync.includes("cost")) {
       const extendedCost = getKoleExtendedCost(raw, candidate.product.cost);
       if (extendedCost !== null) {
         const roundedCost = Math.round((extendedCost + Number.EPSILON) * 100) / 100;
@@ -733,7 +1102,7 @@ export class KoleProductSyncManager {
       }
     }
 
-    if (selectedFields.includes("description")) {
+    if (fieldsToSync.includes("description")) {
       const description = String(candidate.product.description ?? "");
       if (description.trim() && String(currentProduct.description ?? "") !== description) {
         update.description = description;
@@ -741,13 +1110,46 @@ export class KoleProductSyncManager {
       }
     }
 
-    if (selectedFields.includes("inventory")) {
+    if (fieldsToSync.includes("inventory")) {
       const inventoryProvided = typeof raw.inventoryProvided === "boolean"
         ? raw.inventoryProvided
         : raw.inventory !== undefined && raw.inventory !== null && String(raw.inventory).trim() !== "";
       const inventoryLevel = Number(candidate.product.inventory);
       if (inventoryProvided && Number.isInteger(inventoryLevel) && inventoryLevel >= 0 && inventoryLevel <= 2_147_483_647) {
-        if (currentProduct.inventory_tracking === "product") {
+        const variantId = candidate.item.bigcommerceVariantId;
+        if (variantId !== null) {
+          if (currentProduct.inventory_tracking !== "variant") {
+            warnings.push("Variant inventory left unchanged because BigCommerce is not using variant-level tracking.");
+          } else {
+            const variantUrl = `${productUrl}/variants/${variantId}`;
+            const variantResponse = await this.fetchBigCommerce(variantUrl, { headers });
+            const variantPayload = await variantResponse.json().catch(() => ({}));
+            if (!variantResponse.ok || !variantPayload?.data) {
+              if (variantResponse.status === 404) {
+                warnings.push("Variant inventory left unchanged because the mapped BigCommerce variant no longer exists.");
+              } else {
+                throw new Error(`BigCommerce variant lookup failed (${variantResponse.status}).`);
+              }
+            } else if (
+              Number(variantPayload.data.product_id) !== candidate.item.bigcommerceProductId
+              || normalizeKoleSku(variantPayload.data.sku) !== normalizeKoleSku(candidate.item.vendorSku)
+            ) {
+              warnings.push("Variant inventory left unchanged because the mapped BigCommerce variant no longer matches this SKU.");
+            } else if (Number(variantPayload.data.inventory_level) !== inventoryLevel) {
+              const variantUpdateResponse = await this.fetchBigCommerce(variantUrl, {
+                method: "PUT",
+                headers,
+                body: JSON.stringify({ inventory_level: inventoryLevel }),
+              });
+              if (!variantUpdateResponse.ok) {
+                await variantUpdateResponse.text().catch(() => "");
+                throw new Error(`BigCommerce variant inventory update failed (${variantUpdateResponse.status}).`);
+              }
+              await variantUpdateResponse.arrayBuffer().catch(() => undefined);
+              fieldLabels.push("Variant inventory quantity");
+            }
+          }
+        } else if (currentProduct.inventory_tracking === "product") {
           if (Number(currentProduct.inventory_level) !== inventoryLevel) {
             update.inventory_level = inventoryLevel;
             fieldLabels.push("Inventory quantity");
@@ -756,11 +1158,11 @@ export class KoleProductSyncManager {
           warnings.push("Inventory left unchanged because BigCommerce is not using product-level tracking.");
         }
       } else if (inventoryProvided) {
-        warnings.push("Kole inventory is outside BigCommerce's supported range.");
+        warnings.push("Supplier inventory is outside BigCommerce's supported range.");
       }
     }
 
-    if (selectedFields.includes("identity")) {
+    if (fieldsToSync.includes("identity")) {
       const title = String(candidate.product.title ?? "").trim();
       if (title && String(currentProduct.name ?? "") !== title) {
         update.name = title;
@@ -816,10 +1218,21 @@ export class KoleProductSyncManager {
     };
   }
 
-  private async syncImages(candidate: ProductCandidate, logoBuffer: Buffer | null): Promise<ProductOutcome> {
+  private async syncImages(
+    candidate: ProductCandidate,
+    logoBuffer: Buffer | null,
+    forceImageReupload: boolean,
+  ): Promise<ProductOutcome> {
     if (!logoBuffer) throw new Error("No saved watermark logo was available for this image run.");
     const currentMapping = await this.storage.getDropshipProduct(candidate.item.productId);
-    if (!currentMapping || Number(currentMapping.bigcommerce_product_id) !== candidate.item.bigcommerceProductId) {
+    const currentVariantId = currentMapping?.bigcommerce_variant_id == null
+      ? null
+      : Number(currentMapping.bigcommerce_variant_id);
+    if (
+      !currentMapping
+      || Number(currentMapping.bigcommerce_product_id) !== candidate.item.bigcommerceProductId
+      || currentVariantId !== candidate.item.bigcommerceVariantId
+    ) {
       return {
         status: "skipped",
         error: "The BigCommerce mapping changed during this run; this product was skipped.",
@@ -829,15 +1242,24 @@ export class KoleProductSyncManager {
     if (sourceUrls.length === 0) return { status: "unchanged" };
 
     const productId = candidate.item.bigcommerceProductId;
-    const ledgerKey = `${IMAGE_LEDGER_PREFIX}${productId}`;
-    const ledgerSetting = await this.storage.getSetting(ledgerKey);
-    const rawLedger = unwrapSetting(ledgerSetting);
+    const ledgerKey = imageLedgerSettingKey(productId, candidate.item.productId);
+    const rawLedger = unwrapSetting(await this.storage.getSetting(ledgerKey));
     if (rawLedger !== undefined && rawLedger !== null && !Array.isArray(rawLedger)) {
       throw new Error("Saved image sync history is invalid; no photos were changed.");
     }
     const ledger = new Set((Array.isArray(rawLedger) ? rawLedger : []).map(normalizedImageUrl).filter(Boolean));
-    const pendingSources = sourceUrls.filter((url) => !ledger.has(url));
+    const pendingSources = sourceUrls
+      .map((sourceUrl, sourceIndex) => ({ sourceUrl, sourceIndex }))
+      .filter(({ sourceUrl }) => forceImageReupload || !ledger.has(sourceUrl));
     if (pendingSources.length === 0) return { status: "unchanged" };
+
+    const legacyRaw = unwrapSetting(await this.storage.getSetting(legacyImageLedgerSettingKey(productId)));
+    if (legacyRaw !== undefined && legacyRaw !== null && !Array.isArray(legacyRaw)) {
+      throw new Error("Saved image sync history is invalid; no photos were changed.");
+    }
+    const legacyLedger = new Set(
+      (Array.isArray(legacyRaw) ? legacyRaw : []).map(normalizedImageUrl).filter(Boolean),
+    );
 
     const { storeHash, headers } = await this.getBigCommerceCredentials();
     const productUrl = `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${productId}`;
@@ -847,6 +1269,11 @@ export class KoleProductSyncManager {
       throw new Error(`BigCommerce product lookup failed (${currentResponse.status}).`);
     }
     const existingImages = Array.isArray(currentPayload.data.images) ? currentPayload.data.images : [];
+    const existingFileNames = new Set(
+      existingImages
+        .map((image: any) => normalizedImageFilename(image?.image_file))
+        .filter(Boolean),
+    );
     let maxSortOrder = existingImages.reduce((max: number, image: any) => {
       const value = Number(image?.sort_order);
       return Number.isFinite(value) ? Math.max(max, value) : max;
@@ -854,22 +1281,32 @@ export class KoleProductSyncManager {
     let photosAdded = 0;
     const errors: string[] = [];
 
-    for (let index = 0; index < pendingSources.length; index++) {
+    for (const { sourceUrl, sourceIndex } of pendingSources) {
+      const legacyFilename = normalizedImageFilename(legacyImageFilename(candidate.item.vendorSku, sourceIndex));
+      const currentFilename = normalizedImageFilename(safeImageFilename(candidate.item.vendorSku, sourceIndex));
+      if (!forceImageReupload && legacyLedger.has(sourceUrl) && existingFileNames.has(legacyFilename)) {
+        ledger.add(sourceUrl);
+        try {
+          await this.storage.setSetting(ledgerKey, Array.from(ledger));
+        } catch {
+          errors.push("An existing photo was found, but its per-listing sync history could not be saved.");
+        }
+        continue;
+      }
       if (existingImages.length + photosAdded >= 1000) {
-        errors.push("BigCommerce's 1,000 image limit was reached; remaining Kole photos were not added.");
+        errors.push("BigCommerce's 1,000 image limit was reached; remaining supplier photos were not added.");
         break;
       }
-      const sourceUrl = pendingSources[index];
       try {
-        const sourceBuffer = await downloadKoleImage(sourceUrl);
-        const processed = await createWatermarkedJpeg(sourceBuffer, logoBuffer);
+        const sourceBuffer = await this.downloadImage(sourceUrl);
+        const processed = await this.createWatermarkedImage(sourceBuffer, logoBuffer);
         const form = new FormData();
         form.append(
           "image_file",
           new Blob([new Uint8Array(processed)], { type: "image/jpeg" }),
-          safeImageFilename(candidate.item.vendorSku, index),
+          safeImageFilename(candidate.item.vendorSku, sourceIndex),
         );
-        form.append("description", "Kole product photo with saved watermark");
+        form.append("description", "Watermarked product photo");
         form.append("is_thumbnail", "false");
         form.append("sort_order", String(++maxSortOrder));
 
@@ -888,6 +1325,7 @@ export class KoleProductSyncManager {
         await imageResponse.arrayBuffer().catch(() => undefined);
         photosAdded++;
         ledger.add(sourceUrl);
+        existingFileNames.add(currentFilename);
         try {
           await this.storage.setSetting(ledgerKey, Array.from(ledger));
         } catch {

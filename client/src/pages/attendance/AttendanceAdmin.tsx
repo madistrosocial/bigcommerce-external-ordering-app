@@ -271,7 +271,7 @@ function AdminShell({ activeTab, children }: { activeTab: string; children: Reac
 
   return (
     <div className="min-h-full bg-slate-50 px-4 py-5 md:px-6">
-      <div className="mx-auto max-w-7xl">
+      <div className={activeTab === "reports" ? "w-full" : "mx-auto max-w-7xl"}>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="flex items-center gap-2"><Clock3 className="h-5 w-5 text-red-600" /><h1 className="text-xl font-bold text-slate-900">Attendance</h1></div>

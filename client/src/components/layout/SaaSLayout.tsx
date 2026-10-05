@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getKoleConnection, getUsersSummary, searchGlobal, type GlobalSearchResult } from "@/lib/api";
+import { toPublicVendorName } from "@/lib/vendor-display";
 import { useLocation } from "wouter";
 import { useStore } from "@/lib/store";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -52,9 +53,9 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
   const { data: dropshipConnection } = useQuery({
     queryKey: ["dropship-connection"],
     queryFn: getKoleConnection,
-    enabled: hasPermission("dropshipping"),
+    enabled: hasPermission("dropshipping_vendor"),
   });
-  const dropshipDisplayName = dropshipConnection?.displayName || "Vendor Catalog";
+  const dropshipDisplayName = toPublicVendorName(dropshipConnection?.displayName);
   const { toast } = useToast();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -222,17 +223,18 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
 
   // Tools children — permission-gated
   const toolsChildren: NavLeaf[] = [
+    ...(hasPermission("tools_image_editor") ? [{ label: "Image Editor", path: "/tools/image-editor" }] : []),
     ...(hasPermission("tools_bc_link") ? [{ label: "BC Product Link", path: "/tools/bc-product-link" }] : []),
     ...(hasPermission("tools_bc_link_logs") ? [{ label: "Product Link Logs", path: "/tools/bc-product-link-logs" }] : []),
     ...(hasPermission("promo_sku_tracker") ? [{ label: "Promo SKU Tracker", path: "/tools/promo-sku-tracker" }] : []),
   ];
 
   const dropshippingChildren: NavLeaf[] = [
-    ...(hasPermission("dropshipping") ? [{ label: "Dashboard", path: "/dropshipping/dashboard" }] : []),
-    ...(hasPermission("dropshipping") ? [{ label: dropshipDisplayName, path: "/dropshipping/kole" }] : []),
-    ...(hasPermission("dropshipping") ? [{ label: "Product Catalog", path: "/dropshipping/products" }] : []),
-    ...(hasPermission("dropshipping") ? [{ label: "Product Sync", path: "/dropshipping/product-sync" }] : []),
-    ...(hasPermission("dropshipping") ? [{ label: "Sync Logs", path: "/dropshipping/sync-logs" }] : []),
+    ...(hasPermission("dropshipping_dashboard") ? [{ label: "Dashboard", path: "/dropshipping/dashboard" }] : []),
+    ...(hasPermission("dropshipping_vendor") ? [{ label: dropshipDisplayName, path: "/dropshipping/kole" }] : []),
+    ...(hasPermission("dropshipping_catalog") ? [{ label: "Product Catalog", path: "/dropshipping/products" }] : []),
+    ...(hasPermission("dropshipping_product_sync") ? [{ label: "Product Sync", path: "/dropshipping/product-sync" }] : []),
+    ...(hasPermission("dropshipping_sync_logs") ? [{ label: "Sync Logs", path: "/dropshipping/sync-logs" }] : []),
   ];
 
   // Attendance children — employees see their own clock; managers see scoped admin views.
@@ -242,6 +244,8 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("attendance", "view_logs") ? [{ label: "Attendance Logs", path: "/attendance/logs" }] : []),
     ...(canViewAllAttendance && hasPermission("attendance", "view_reports") ? [{ label: "Reports", path: "/attendance/reports" }] : []),
     ...(hasPermission("attendance", "view_home_locations") ? [{ label: "Home Locations", path: "/attendance/locations" }] : []),
+    ...(hasPermission("attendance", "view") ? [{ label: "Payroll", path: "/attendance/payroll" }] : []),
+    ...(hasPermission("attendance", "view") ? [{ label: "Leave", path: "/attendance/leave" }] : []),
   ];
 
   // CRM children

@@ -42,6 +42,7 @@ import BCOrders from "@/pages/agent/BCOrders";
 import AdminGroups from "@/pages/admin/AdminGroups";
 import BCProductLink from "@/pages/tools/BCProductLink";
 import BCProductLinkLogs from "@/pages/tools/BCProductLinkLogs";
+import ImageEditor from "@/pages/tools/ImageEditor";
 import PromoSkuTracker from "@/pages/tools/PromoSkuTracker";
 import InvoicePrintPage from "@/pages/InvoicePrintPage";
 import ShipStationExportPage from "@/pages/admin/ShipStationExport";
@@ -65,6 +66,8 @@ import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, Marketi
 import { MarketingAnalytics, MarketingTemplates, MarketingAutomations } from "@/pages/marketing/MarketingPhase2";
 import AttendancePage from "@/pages/attendance/Attendance";
 import AttendanceAdminPage, { AttendanceSettingsPage } from "@/pages/attendance/AttendanceAdmin";
+import AttendancePayrollPage from "@/pages/attendance/Payroll";
+import AttendanceLeavePage from "@/pages/attendance/Leave";
 import KoleImportsPage from "@/pages/dropshipping/KoleImports";
 import DropshipDashboardPage from "@/pages/dropshipping/DropshipDashboard";
 import DropshipCatalogPage from "@/pages/dropshipping/DropshipCatalog";
@@ -263,6 +266,12 @@ function Router() {
       <Route path="/attendance/locations">
         {() => <PermissionRoute component={AttendanceAdminPage} module="attendance" action="view_home_locations" />}
       </Route>
+      <Route path="/attendance/payroll">
+        {() => <PermissionRoute component={AttendancePayrollPage} module="attendance" action="view" />}
+      </Route>
+      <Route path="/attendance/leave">
+        {() => <PermissionRoute component={AttendanceLeavePage} module="attendance" action="view" />}
+      </Route>
       <Route path="/attendance/settings">
         {() => <Redirect to="/admin/attendance" />}
       </Route>
@@ -393,25 +402,28 @@ function Router() {
       <Route path="/tools/bc-product-link-logs">
         {() => <ProtectedRoute component={BCProductLinkLogs} />}
       </Route>
+      <Route path="/tools/image-editor">
+        {() => <PermissionRoute component={ImageEditor} module="tools_image_editor" />}
+      </Route>
       <Route path="/tools/promo-sku-tracker">
         {() => <ProtectedRoute component={PromoSkuTracker} />}
       </Route>
 
       {/* ── Dropshipping ── */}
       <Route path="/dropshipping/dashboard">
-        {() => <PermissionRoute component={DropshipDashboardPage} module="dropshipping" />}
+        {() => <PermissionRoute component={DropshipDashboardPage} module="dropshipping_dashboard" />}
       </Route>
       <Route path="/dropshipping/kole">
-        {() => <PermissionRoute component={KoleImportsPage} module="dropshipping" />}
+        {() => <PermissionRoute component={KoleImportsPage} module="dropshipping_vendor" />}
       </Route>
       <Route path="/dropshipping/products">
-        {() => <PermissionRoute component={DropshipCatalogPage} module="dropshipping" />}
+        {() => <PermissionRoute component={DropshipCatalogPage} module="dropshipping_catalog" />}
       </Route>
       <Route path="/dropshipping/product-sync">
-        {() => <PermissionRoute component={ProductSyncPage} module="dropshipping" />}
+        {() => <PermissionRoute component={ProductSyncPage} module="dropshipping_product_sync" />}
       </Route>
       <Route path="/dropshipping/sync-logs">
-        {() => <PermissionRoute component={DropshipSyncLogsPage} module="dropshipping" />}
+        {() => <PermissionRoute component={DropshipSyncLogsPage} module="dropshipping_sync_logs" />}
       </Route>
 
       {/* ── CRM routes ── */}

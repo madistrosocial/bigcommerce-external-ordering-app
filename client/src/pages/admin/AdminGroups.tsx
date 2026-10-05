@@ -14,6 +14,8 @@ import {
   INVENTORY_AUDIT_ACTION_PERMS,
   MARKETING_ACTION_PERMS,
   ATTENDANCE_ACTION_PERMS,
+  DROPSHIPPING_PERMISSION_GROUPS,
+  DROPSHIPPING_PERMISSIONS,
 } from "./AdminUsers";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -265,6 +267,49 @@ function GroupDetail({
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        {/* Dropshipping permissions */}
+        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-slate-50 flex items-center gap-2">
+            <Lock className="h-3.5 w-3.5 text-slate-500" />
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Dropshipping Permissions</span>
+          </div>
+          <div className="divide-y">
+            {DROPSHIPPING_PERMISSION_GROUPS.map((permissionGroup) => (
+              <section key={permissionGroup.label}>
+                <div className="px-4 py-2 bg-slate-50 border-b">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{permissionGroup.label}</p>
+                </div>
+                {permissionGroup.permissions.map((p) => {
+                  const perm = permMap.get(`${p.module}:${p.action}`);
+                  const busyId = `dropshipping-${p.module}-${p.action}`;
+                  const isBusy = busyPerm === busyId;
+                  const enabled = perm ? group.permissions.some((groupPermission) => groupPermission.id === perm.id) : false;
+
+                  return (
+                    <div key={`${p.module}:${p.action}`} className="flex items-center justify-between px-4 py-3">
+                      <div className="flex-1 min-w-0 pr-4">
+                        <p className="text-sm text-slate-700">{p.label}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{p.description}</p>
+                      </div>
+                      {perm === undefined ? (
+                        <span className="text-[10px] text-slate-400 italic shrink-0">N/A</span>
+                      ) : isBusy ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" />
+                      ) : (
+                        <Switch
+                          checked={enabled}
+                          onCheckedChange={(v) => handleToggleActionPerm(p.module, p.action, busyId, v)}
+                          data-testid={`toggle-group-${p.module}-${p.action}-${group.id}`}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </section>
+            ))}
           </div>
         </div>
 
@@ -533,6 +578,7 @@ export default function AdminGroups() {
       ...INVENTORY_AUDIT_ACTION_PERMS,
       ...MARKETING_ACTION_PERMS,
       ...ATTENDANCE_ACTION_PERMS,
+      ...DROPSHIPPING_PERMISSIONS,
     ];
     const missing = actionPerms.filter(p => !permMap.has(`${p.module}:${p.action}`));
     if (!missing.length) return;

@@ -23,6 +23,7 @@
 - [Marketing Order Form architecture](marketing-order-form.md) — CRM identity stays authoritative; XLSX imports must ignore merged group-header cells and blank quantities.
 - [Zoho marketing delivery boundary](zoho-marketing-delivery.md) — ZeptoMail is transactional-only; compliant campaign delivery requires Zoho Campaigns/Email API access.
 - [Attendance accounting baseline](attendance-accounting-baseline.md) — ledger excludes weekends and observed US holidays; short hours use an 8-hour weekday expectation until schedules are configurable.
+- [Payroll and leave boundaries](payroll-leave-boundaries.md) — reuse Attendance users, sessions, and role groups; calculate from net completed shifts and never convert employee currencies.
 - [Attendance breaks and daily notes](attendance-breaks-notes.md) — breaks pause the same session; daily notes are stored once per employee/work date.
 - [Stale session recovery](stale-session-recovery.md) — invalid saved auth must fail safely and expose a cache-clearing force-logout path.
 - [Attendance review and audit](attendance-review-audit.md) — completion state stays separate from manager approval; corrections preserve reasoned old/new history.
@@ -33,7 +34,7 @@
 - [Kole Product Sync safety contract](kole-product-sync-safety.md) — preserve selected-field writes, inventory tracking guards, and append-only watermarked image sync.
 - [Kole feed draft pricing](kole-feed-draft-pricing.md) — selected drafts use an editable 20%-over-MOQ price suggestion and require a real BigCommerce category.
 - [Dropship brand dashboard counts](dropship-brand-dashboard-counts.md) — resolve BigCommerce brand products directly; count distinct synced line-item orders, not just locally pinned products.
-- [Dropshipping display labels](dropshipping-display-labels.md) — vendor provider identity stays server-side; user-facing labels are persisted placeholders editable from the connector.
+- [Dropshipping display labels](dropshipping-display-labels.md) — keep provider names/domains out of labels, errors, sync logs, and other staff-facing copy.
 - [ShipStation dropship automation](shipstation-dropship-automation.md) — product tags can flow to order tags, but shipment splitting needs separate product or routing configuration.
 - [GitHub push authentication](github-push-auth.md) — Git HTTPS push may reject the installed GitHub integration; use its authenticated Git data API for branch-only updates.
 - [BigCommerce customer search filters](bigcommerce-customer-search-filters.md) — this store rejects v3 company:like and phone:like; use cached v2 directory filtering for those fields.
@@ -54,3 +55,5 @@
 - [Cross-platform npm optional lock entries](npm-optional-lockfile.md) — `npm ci` may require platform-specific optional records omitted by the host install.
 - [Bulk Order customer override](bulk-order-customer-override.md) — the selected POS customer is authoritative; form identity mismatches warn but do not block the draft.
 - [Marketing typography scale](marketing-font-scale.md) — use 18/14/12/11px for page, section, content, and metadata; retain 14px form controls.
+- [Image model parameter compatibility](image-model-parameter-compatibility.md) — only send options accepted by the configured image model; reference edits omit `input_fidelity`.
+- [Image Editor full-canvas logo overlay](image-editor-logo-overlay.md) — preserve the transparent 1200×1200 PNG's built-in coordinates; match the generated canvas to it.

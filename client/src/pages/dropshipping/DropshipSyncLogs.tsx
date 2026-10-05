@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, RefreshCw } from "lucide-react";
+import { toPublicVendorName } from "@/lib/vendor-display";
 
 function statusClass(status: string) {
   return status === "completed" ? "bg-green-100 text-green-700" : status === "failed" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700";
@@ -12,7 +13,7 @@ function statusClass(status: string) {
 export default function DropshipSyncLogsPage() {
   const { data: connection } = useQuery({ queryKey: ["dropship-connection"], queryFn: api.getKoleConnection });
   const { data = [], isLoading, refetch, isFetching } = useQuery({ queryKey: ["dropship-sync-logs"], queryFn: api.getKoleSyncLogs });
-  const displayName = connection?.displayName || "Vendor Catalog";
+  const displayName = toPublicVendorName(connection?.displayName);
   return (
     <div className="px-4 md:px-6 py-5 space-y-4">
       <div className="flex items-start justify-between gap-3"><div><h1 className="text-xl font-bold text-slate-800">Sync Logs</h1><p className="text-sm text-slate-500 mt-1">{displayName} catalog ingestion history. No BigCommerce or SkuVault writes are performed by these syncs.</p></div><Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}><RefreshCw className={`h-4 w-4 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />Refresh</Button></div>

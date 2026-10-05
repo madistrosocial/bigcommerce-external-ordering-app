@@ -76,8 +76,15 @@ import {
   type KoleProductSyncField,
   type KoleProductSyncKind,
 } from "./koleProductSync";
+import {
+  decodeGeneratedImageDataUrl,
+  generateImageEditorOutput,
+  ImageEditorError,
+} from "./imageEditor";
+import { buildBigCommerceSkuIndex, normalizeKoleSku } from "./koleSkuMapping";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 import { MARKETING_ACTION_PERMS, MARKETING_LEGACY_PAGE_GRANTS } from "@shared/marketing-permissions";
+import { DROPSHIPPING_LEGACY_PERMISSION_GRANTS, DROPSHIPPING_PERMISSIONS } from "@shared/dropshipping-permissions";
 import { dateOnlyInTimeZone, parseDateTimeLocal } from "@shared/timezone";
 import {
   ATTENDANCE_PERMISSION_DEFINITIONS,
@@ -90,6 +97,7 @@ import {
   parseAccuracy,
   parseCoordinate,
 } from "./attendance";
+import { registerAttendancePayrollRoutes } from "./attendance-payroll";
 import { lookupActivityLogLocation, normalizeClientIp } from "./activity-log-location";
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
@@ -285,6 +293,14 @@ function normalizeKoleSourceImageUrl(value: unknown): string {
   } catch {
     return "";
   }
+}
+
+function sanitizeVendorFacingMessage(value: unknown): string {
+  return String(value ?? "")
+    .replace(/(?:https?:\/\/)?(?:[\w-]+\.)*koleimports\.com[^\s]*/gi, "supplier feed")
+    .replace(/\bkoleimports\b/gi, "supplier")
+    .replace(/\bkole\s+imports\b/gi, "supplier")
+    .replace(/\bkole\b/gi, "supplier");
 }
 
 function imageFileName(value: unknown): string {
@@ -930,6 +946,25 @@ export async function registerRoutes(
       })().catch(next);
     };
 
+  const requireAnyPermission = (requirements: Array<{ module: string; action: string }>) =>
+    (req: Request, res: Response, next: NextFunction) => {
+      void (async () => {
+        const user = await getAuthenticatedUser(req);
+        if (!user) return res.status(401).json({ error: "Authentication required" });
+        if (user.role === "admin") {
+          (req as any).authUser = user;
+          attachAuthenticatedActivityLog(req, res, user);
+          return next();
+        }
+        const perms = await storage.getUserPermissionStrings(user.id);
+        const allowed = requirements.some(({ module, action }) => perms.includes(`${module}:${action}`));
+        if (!allowed) return res.status(403).json({ error: "Forbidden" });
+        (req as any).authUser = user;
+        attachAuthenticatedActivityLog(req, res, user);
+        next();
+      })().catch(next);
+    };
+
   const requireMarketingPageAccess = (pageActions: string | string[], action?: string) =>
     async (req: Request, res: Response, next: NextFunction) => {
       const user = await getAuthenticatedUser(req);
@@ -1042,7 +1077,7 @@ export async function registerRoutes(
 
   const normalizeVendorDisplayName = (value: unknown): string => {
     const name = String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
-    return name || DEFAULT_VENDOR_DISPLAY_NAME;
+    return name && !/kole/i.test(name) ? name : DEFAULT_VENDOR_DISPLAY_NAME;
   };
 
   const getKoleDisplayName = async (setting?: Record<string, any>) =>
@@ -1068,7 +1103,11 @@ export async function registerRoutes(
     getBigCommerceBrands: () => getCachedBcBrandOptions(),
   });
 
-  app.get("/api/dropshipping/kole/connection", requirePermission("dropshipping", "view"), async (_req, res) => {
+  app.get("/api/dropshipping/kole/connection", requireAnyPermission([
+    { module: "dropshipping_vendor", action: "view" },
+    { module: "dropshipping_catalog", action: "view" },
+    { module: "dropshipping_sync_logs", action: "view" },
+  ]), async (_req, res) => {
     try {
       const vendor = await getKoleVendor();
       const value = await getKoleSetting();
@@ -1084,7 +1123,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/dropshipping/kole/connection", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.put("/api/dropshipping/kole/connection", requirePermission("dropshipping_vendor", "manage"), async (req, res) => {
     try {
       const currentValue = await getKoleSetting();
       const suppliedAccountId = String(req.body?.accountId ?? "").trim();
@@ -1110,7 +1149,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropshipping/kole/connection/test", requirePermission("dropshipping", "manage"), async (_req, res) => {
+  app.post("/api/dropshipping/kole/connection/test", requirePermission("dropshipping_vendor", "manage"), async (_req, res) => {
     const testedAt = new Date().toISOString();
     try {
       const credentials = await getKoleConfig();
@@ -1131,7 +1170,10 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/kole/products", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/kole/products", requireAnyPermission([
+    { module: "dropshipping_catalog", action: "view" },
+    { module: "dropshipping_product_sync", action: "view" },
+  ]), async (req, res) => {
     try {
       const vendor = await getKoleVendor();
       const page = Math.max(Number(req.query.page) || 1, 1);
@@ -1161,7 +1203,10 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/kole/products/:id", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/kole/products/:id", requireAnyPermission([
+    { module: "dropshipping_catalog", action: "view" },
+    { module: "dropshipping_product_sync", action: "view" },
+  ]), async (req, res) => {
     try {
       const product = await storage.getDropshipProduct(Number(req.params.id));
       if (!product) return res.status(404).json({ error: "Vendor product not found" });
@@ -1171,7 +1216,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/dropshipping/kole/products/:id/status", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.patch("/api/dropshipping/kole/products/:id/status", requirePermission("dropshipping_catalog", "manage"), async (req, res) => {
     try {
       const status = String(req.body?.status || "").trim();
       if (!["available", "queued", "mapped", "unavailable", "error"].includes(status)) {
@@ -1185,16 +1230,23 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/kole/sync-logs", requirePermission("dropshipping", "view"), async (_req, res) => {
+  app.get("/api/dropshipping/kole/sync-logs", requireAnyPermission([
+    { module: "dropshipping_catalog", action: "view" },
+    { module: "dropshipping_sync_logs", action: "view" },
+  ]), async (_req, res) => {
     try {
       const vendor = await getKoleVendor();
-      res.json(await storage.getDropshipSyncLogs(vendor.id));
+      const logs = await storage.getDropshipSyncLogs(vendor.id);
+      res.json(logs.map((log) => ({
+        ...log,
+        error_summary: log.error_summary ? sanitizeVendorFacingMessage(log.error_summary) : null,
+      })));
     } catch (error: any) {
       res.status(500).json({ error: "Failed to load vendor sync logs" });
     }
   });
 
-  app.get("/api/dropshipping/kole/mapping-brand", requirePermission("dropshipping", "view"), async (_req, res) => {
+  app.get("/api/dropshipping/kole/mapping-brand", requirePermission("dropshipping_catalog", "view"), async (_req, res) => {
     try {
       const setting = await storage.getSetting("dropship_kole_mapping_brand_name");
       const brandName = typeof setting?.value === "string" && setting.value.trim()
@@ -1206,7 +1258,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropshipping/kole/sync", requirePermission("dropshipping", "sync"), async (_req, res) => {
+  app.post("/api/dropshipping/kole/sync", requirePermission("dropshipping_vendor", "sync"), async (_req, res) => {
     const startedAt = Date.now();
     let log: any;
     let syncStage = "initializing catalog sync";
@@ -1235,25 +1287,25 @@ export async function registerRoutes(
       }
       if (!feedResponse) {
         const detail = lastFetchError instanceof Error ? ` (${lastFetchError.message})` : "";
-        throw new Error(`Kole Imports CSV feed could not be reached after 3 attempts${detail}.`);
+        throw new Error(`The vendor CSV feed could not be reached after 3 attempts${detail}.`);
       }
       if (!feedResponse.ok) {
         if (feedResponse.status >= 500) {
-          throw new Error(`Kole Imports CSV feed is temporarily unavailable (HTTP ${feedResponse.status}). Try again later.`);
+          throw new Error(`The vendor CSV feed is temporarily unavailable (HTTP ${feedResponse.status}). Try again later.`);
         }
-        throw new Error(`Kole Imports CSV feed request was rejected (HTTP ${feedResponse.status}).`);
+        throw new Error(`The vendor CSV feed request was rejected (HTTP ${feedResponse.status}).`);
       }
       const contentLength = Number(feedResponse.headers.get("content-length") || 0);
       if (contentLength > MAX_KOLE_FEED_BYTES) {
-        throw new Error("Kole Imports feed is larger than the supported 50 MB limit.");
+        throw new Error("The vendor feed is larger than the supported 50 MB limit.");
       }
       syncStage = "validating CSV feed";
       if (/text\/html/i.test(feedResponse.headers.get("content-type") || "")) {
-        throw new Error("Kole Imports returned an HTML error page instead of a CSV feed. Try again later.");
+        throw new Error("The vendor returned an HTML error page instead of a CSV feed. Try again later.");
       }
       const csv = await feedResponse.text();
       if (Buffer.byteLength(csv, "utf8") > MAX_KOLE_FEED_BYTES) {
-        throw new Error("Kole Imports feed is larger than the supported 50 MB limit.");
+        throw new Error("The vendor feed is larger than the supported 50 MB limit.");
       }
 
       const products = parseKoleFeedCsv(csv);
@@ -1286,12 +1338,13 @@ export async function registerRoutes(
         errorCount: 0,
       });
     } catch (error: any) {
-      const errorMessage = String(error?.message || "Unexpected vendor catalog sync error.").slice(0, 400);
+      const rawErrorMessage = String(error?.message || "Unexpected vendor catalog sync error.").slice(0, 400);
+      const errorMessage = sanitizeVendorFacingMessage(rawErrorMessage);
       console.error("[Kole CSV sync] failed", {
         stage: syncStage,
         name: error?.name || "Error",
         code: error?.code || error?.cause?.code || null,
-        message: errorMessage,
+        message: rawErrorMessage,
       });
       if (log?.id) {
         await storage.finishDropshipSyncLog(log.id, {
@@ -1317,7 +1370,7 @@ export async function registerRoutes(
   });
   app.post(
     "/api/dropshipping/kole/upload-csv",
-    requirePermission("dropshipping", "sync"),
+    requirePermission("dropshipping_vendor", "sync"),
     (req, res, next) => {
       parseKoleCsvUpload(req, res, (error: any) => {
         if (error) {
@@ -1378,12 +1431,13 @@ export async function registerRoutes(
           errorCount: 0,
         });
       } catch (error: any) {
-        const errorMessage = String(error?.message || "Unexpected uploaded CSV error.").slice(0, 400);
+        const rawErrorMessage = String(error?.message || "Unexpected uploaded CSV error.").slice(0, 400);
+        const errorMessage = sanitizeVendorFacingMessage(rawErrorMessage);
         console.error("[Kole CSV upload] failed", {
           stage: syncStage,
           name: error?.name || "Error",
           code: error?.code || error?.cause?.code || null,
-          message: errorMessage,
+          message: rawErrorMessage,
         });
         if (log?.id) {
           await storage.finishDropshipSyncLog(log.id, {
@@ -1405,7 +1459,7 @@ export async function registerRoutes(
     },
   );
 
-  app.post("/api/dropshipping/kole/products/create-drafts", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.post("/api/dropshipping/kole/products/create-drafts", requirePermission("dropshipping_catalog", "manage"), async (req, res) => {
     const inputItems = req.body?.items;
     if (!Array.isArray(inputItems) || inputItems.length < 1 || inputItems.length > 25) {
       return res.status(400).json({ error: "Select between 1 and 25 vendor products to create drafts." });
@@ -1565,7 +1619,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropshipping/kole/products/map-existing", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.post("/api/dropshipping/kole/products/map-existing", requirePermission("dropshipping_catalog", "manage"), async (req, res) => {
     const brandName = String(req.body?.brandName ?? "").trim().slice(0, 100);
     if (!brandName) return res.status(400).json({ error: "Enter a BigCommerce brand name to scan." });
 
@@ -1584,10 +1638,11 @@ export async function registerRoutes(
       await storage.setSetting("dropship_kole_mapping_brand_name", brandName);
 
       const pageSize = 250;
-      const bigCommerceProducts: Array<{ id: number; sku: string }> = [];
+      const bigCommerceProductData: unknown[] = [];
+      const bigCommerceProductIds: number[] = [];
       let scanned = 0;
       for (let page = 1; ; page++) {
-        const url = `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?brand_id=${brandId}&include_fields=id,sku,brand_id&limit=${pageSize}&page=${page}`;
+        const url = `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products?brand_id=${brandId}&include=variants&limit=${pageSize}&page=${page}`;
         const response = await fetch(url, { headers });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -1598,7 +1653,8 @@ export async function registerRoutes(
         for (const item of pageProducts) {
           const id = Number(item?.id);
           if (!Number.isInteger(id) || id <= 0) continue;
-          bigCommerceProducts.push({ id, sku: String(item?.sku ?? "").trim() });
+          bigCommerceProductData.push(item);
+          bigCommerceProductIds.push(id);
         }
 
         const totalPages = Number(payload?.meta?.pagination?.total_pages);
@@ -1608,18 +1664,8 @@ export async function registerRoutes(
         ) break;
       }
 
-      const productsByBigCommerceSku = new Map<string, Array<{ id: number; sku: string }>>();
-      let productsWithoutSku = 0;
-      for (const product of bigCommerceProducts) {
-        const normalizedSku = product.sku.toLowerCase();
-        if (!normalizedSku) {
-          productsWithoutSku++;
-          continue;
-        }
-        const matches = productsByBigCommerceSku.get(normalizedSku) ?? [];
-        matches.push(product);
-        productsByBigCommerceSku.set(normalizedSku, matches);
-      }
+      const { productsBySku: productsByBigCommerceSku, productsWithoutSku } =
+        buildBigCommerceSkuIndex(bigCommerceProductData);
 
       const vendor = await getKoleVendor();
       const localProducts = await storage.getDropshipProductsBySkus(
@@ -1628,7 +1674,7 @@ export async function registerRoutes(
       );
       const localProductsBySku = new Map<string, typeof localProducts>();
       for (const product of localProducts) {
-        const normalizedSku = product.vendor_sku.trim().toLowerCase();
+        const normalizedSku = normalizeKoleSku(product.vendor_sku);
         const matches = localProductsBySku.get(normalizedSku) ?? [];
         matches.push(product);
         localProductsBySku.set(normalizedSku, matches);
@@ -1636,7 +1682,7 @@ export async function registerRoutes(
 
       const alreadyMappedProducts = await storage.getDropshipProductsByBigCommerceIds(
         vendor.id,
-        bigCommerceProducts.map((product) => product.id),
+        bigCommerceProductIds,
       );
       const localProductsByBigCommerceId = new Map<number, typeof alreadyMappedProducts>();
       for (const product of alreadyMappedProducts) {
@@ -1646,6 +1692,36 @@ export async function registerRoutes(
         localProductsByBigCommerceId.set(id, matches);
       }
 
+      const mappedCatalogProducts: any[] = [];
+      for (let page = 1; ; page++) {
+        const mappedPage = await storage.getDropshipProducts({
+          vendorId: vendor.id,
+          page,
+          limit: 100,
+          imported: true,
+        });
+        mappedCatalogProducts.push(...mappedPage.rows);
+        if (mappedPage.rows.length === 0 || mappedCatalogProducts.length >= mappedPage.total) break;
+      }
+      const scannedBigCommerceIds = new Set(bigCommerceProductIds);
+      const staleBigCommerceIds = Array.from(new Set(mappedCatalogProducts
+        .map((product) => Number(product.bigcommerce_product_id))
+        .filter((id) => Number.isSafeInteger(id) && id > 0 && !scannedBigCommerceIds.has(id))));
+      const staleCheckResults = await mapWithConcurrency(staleBigCommerceIds, KOLE_DETAILS_SYNC_CONCURRENCY, async (id) => {
+        try {
+          const response = await fetchBigCommerceWithRetry(
+            `https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${id}?include_fields=id`,
+            { headers },
+          );
+          await response.arrayBuffer().catch(() => undefined);
+          return response.status === 404 ? "deleted" : response.ok ? "exists" : "failed";
+        } catch {
+          return "failed";
+        }
+      });
+      const deletedBigCommerceIds = new Set(staleBigCommerceIds.filter((_, index) => staleCheckResults[index] === "deleted"));
+      const staleMappingChecksFailed = staleCheckResults.filter((result) => result === "failed").length;
+
       let matched = 0;
       let mapped = 0;
       let remapped = 0;
@@ -1654,21 +1730,29 @@ export async function registerRoutes(
       let ambiguous = 0;
       let failed = 0;
 
-      for (const [sku, bcProducts] of productsByBigCommerceSku) {
+      for (const [sku, bcTargets] of productsByBigCommerceSku) {
         const localMatches = localProductsBySku.get(sku) ?? [];
         if (localMatches.length === 0) {
-          unmatched += bcProducts.length;
+          unmatched += bcTargets.length;
           continue;
         }
-        if (bcProducts.length !== 1 || localMatches.length !== 1) {
+        if (bcTargets.length !== 1 || localMatches.length !== 1) {
           ambiguous++;
           continue;
         }
 
-        const bcProduct = bcProducts[0];
+        const bcTarget = bcTargets[0];
         const localProduct = localMatches[0];
-        const conflictingOwners = (localProductsByBigCommerceId.get(bcProduct.id) ?? [])
-          .filter((owner) => owner.id !== localProduct.id);
+        const conflictingOwners = (localProductsByBigCommerceId.get(bcTarget.productId) ?? [])
+          .filter((owner) => {
+            if (owner.id === localProduct.id) return false;
+            const ownerVariantId = owner.bigcommerce_variant_id == null
+              ? null
+              : Number(owner.bigcommerce_variant_id);
+            return bcTarget.variantId === null
+              || ownerVariantId === null
+              || ownerVariantId === bcTarget.variantId;
+          });
         if (conflictingOwners.length) {
           ambiguous++;
           continue;
@@ -1676,19 +1760,37 @@ export async function registerRoutes(
 
         matched++;
         const previousId = Number(localProduct.bigcommerce_product_id) || null;
+        const previousVariantId = localProduct.bigcommerce_variant_id == null
+          ? null
+          : Number(localProduct.bigcommerce_variant_id);
+        const mappingWasCurrent = previousId === bcTarget.productId
+          && previousVariantId === bcTarget.variantId;
         try {
-          const result = await storage.mapDropshipProductToBigCommerce(localProduct.id, bcProduct.id);
+          const result = await storage.mapDropshipProductToBigCommerce(
+            localProduct.id,
+            bcTarget.productId,
+            bcTarget.variantId,
+          );
           if (!result) {
             failed++;
-          } else if (previousId === bcProduct.id) {
+          } else if (mappingWasCurrent) {
             alreadyMapped++;
-          } else if (previousId) {
+          } else if (previousId || previousVariantId !== null) {
             remapped++;
           } else {
             mapped++;
           }
         } catch {
           failed++;
+        }
+      }
+
+      let staleMappingsCleared = 0;
+      for (const product of mappedCatalogProducts) {
+        const bigcommerceProductId = Number(product.bigcommerce_product_id);
+        if (!deletedBigCommerceIds.has(bigcommerceProductId)) continue;
+        if (await storage.unmapDropshipProductFromBigCommerce(product.id, bigcommerceProductId)) {
+          staleMappingsCleared++;
         }
       }
 
@@ -1704,6 +1806,8 @@ export async function registerRoutes(
         unmatched,
         ambiguous,
         failed,
+        staleMappingsCleared,
+        staleMappingChecksFailed,
       });
     } catch (error: any) {
       console.error("[Kole SKU mapping] BigCommerce brand scan failed", {
@@ -1713,7 +1817,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/product-sync/logo", requirePermission("dropshipping", "view"), async (_req, res) => {
+  app.get("/api/dropshipping/product-sync/logo", requirePermission("dropshipping_product_sync", "view"), async (_req, res) => {
     try {
       res.json(await koleProductSyncManager.getLogo());
     } catch (error: any) {
@@ -1721,7 +1825,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/dropshipping/product-sync/logo", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.put("/api/dropshipping/product-sync/logo", requirePermission("dropshipping_product_sync", "manage"), async (req, res) => {
     try {
       res.json(await koleProductSyncManager.saveLogo(req.body?.dataUrl));
     } catch (error: any) {
@@ -1730,7 +1834,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/dropshipping/product-sync/logo", requirePermission("dropshipping", "manage"), async (_req, res) => {
+  app.delete("/api/dropshipping/product-sync/logo", requirePermission("dropshipping_product_sync", "manage"), async (_req, res) => {
     try {
       res.json(await koleProductSyncManager.removeLogo());
     } catch (error: any) {
@@ -1738,7 +1842,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/product-sync/jobs/latest", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/product-sync/jobs/latest", requirePermission("dropshipping_product_sync", "view"), async (req, res) => {
     const kind = req.query.kind === "details" || req.query.kind === "images"
       ? req.query.kind as KoleProductSyncKind
       : null;
@@ -1750,14 +1854,57 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropshipping/product-sync/jobs", requirePermission("dropshipping", "manage"), async (req, res) => {
+  app.get("/api/dropshipping/product-sync/image-history", requirePermission("dropshipping_product_sync", "view"), async (req, res) => {
+    const rawProductIds = typeof req.query.productIds === "string" ? req.query.productIds : "";
+    const productIds = rawProductIds
+      ? rawProductIds.split(",").map((value) => Number(value))
+      : [];
+    if (
+      productIds.length > 100
+      || productIds.some((id) => !Number.isSafeInteger(id) || id <= 0)
+      || new Set(productIds).size !== productIds.length
+    ) {
+      return res.status(400).json({ error: "Choose up to 100 valid mapped product IDs." });
+    }
+    try {
+      const vendor = await getKoleVendor();
+      res.json(await koleProductSyncManager.getImageSyncHistory(vendor.id, productIds));
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Could not load previous image sync history." });
+    }
+  });
+
+  app.post("/api/dropshipping/product-sync/cost-comparison", requirePermission("dropshipping_product_sync", "manage"), async (req, res) => {
+    const productIds = req.body?.productIds;
+    if (!Array.isArray(productIds)) {
+      return res.status(400).json({ error: "Select mapped products to compare." });
+    }
+    try {
+      const vendor = await getKoleVendor();
+      res.json(await koleProductSyncManager.compareCosts(vendor.id, productIds));
+    } catch (error: any) {
+      const status = error instanceof KoleProductSyncError ? error.statusCode : 502;
+      res.status(status).json({
+        error: sanitizeVendorFacingMessage(error?.message || "Could not compare supplier and BigCommerce costs."),
+      });
+    }
+  });
+
+  app.post("/api/dropshipping/product-sync/jobs", requirePermission("dropshipping_product_sync", "manage"), async (req, res) => {
     const kind = req.body?.kind === "details" || req.body?.kind === "images"
       ? req.body.kind as KoleProductSyncKind
       : null;
     const fieldsValue = req.body?.fields;
     const productIdsValue = req.body?.productIds;
+    const forceImageReupload = req.body?.forceImageReupload;
     const validFields = new Set<KoleProductSyncField>(["cost", "description", "inventory", "identity"]);
     if (!kind) return res.status(400).json({ error: "Choose a valid Product Sync type." });
+    if (forceImageReupload !== undefined && typeof forceImageReupload !== "boolean") {
+      return res.status(400).json({ error: "The image re-upload option must be true or false." });
+    }
+    if (forceImageReupload === true && kind !== "images") {
+      return res.status(400).json({ error: "Previously uploaded images can only be re-uploaded during Image Sync." });
+    }
     if (
       !Array.isArray(productIdsValue)
       || productIdsValue.length === 0
@@ -1772,7 +1919,13 @@ export async function registerRoutes(
     try {
       const vendor = await getKoleVendor();
       const fields = kind === "details" ? (fieldsValue ?? []) as KoleProductSyncField[] : [];
-      const job = await koleProductSyncManager.start(kind, vendor.id, productIdsValue as number[], fields);
+      const job = await koleProductSyncManager.start(
+        kind,
+        vendor.id,
+        productIdsValue as number[],
+        fields,
+        forceImageReupload === true,
+      );
       res.status(202).json(job);
     } catch (error: any) {
       const status = error instanceof KoleProductSyncError ? error.statusCode : 500;
@@ -1780,7 +1933,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/product-sync/jobs/:id/items", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/product-sync/jobs/:id/items", requirePermission("dropshipping_product_sync", "view"), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid Product Sync job ID." });
     try {
@@ -1796,7 +1949,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/product-sync/jobs/:id", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/product-sync/jobs/:id", requirePermission("dropshipping_product_sync", "view"), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid Product Sync job ID." });
     try {
@@ -1808,7 +1961,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropshipping/kole/products/sync-details", requirePermission("dropshipping", "manage"), async (_req, res) => {
+  app.post("/api/dropshipping/kole/products/sync-details", requirePermission("dropshipping_product_sync", "manage"), async (_req, res) => {
     return res.status(410).json({ error: "Mapped product sync has moved to the Dropshipping Product Sync page." });
 
     if (koleDetailsSyncInProgress) {
@@ -1872,7 +2025,7 @@ export async function registerRoutes(
             issueSamples.push({
               sku: owners.map((owner) => String(owner.vendor_sku ?? "")).join(", "),
               bigcommerceProductId,
-              message: "Multiple Kole catalog rows point to this BigCommerce product; skipped to avoid conflicting updates.",
+              message: "Multiple vendor catalog rows point to this BigCommerce product; skipped to avoid conflicting updates.",
             });
           }
           continue;
@@ -1959,7 +2112,7 @@ export async function registerRoutes(
           if (!inventoryProvided) {
             outcome.inventoryUnavailable = true;
           } else if (!Number.isInteger(inventoryLevel) || inventoryLevel < 0 || inventoryLevel > 2_147_483_647) {
-            outcome.errors.push("The Kole inventory count is outside BigCommerce's supported range.");
+            outcome.errors.push("The vendor inventory count is outside BigCommerce's supported range.");
           } else if (currentProduct.inventory_tracking === "product") {
             if (Number(currentProduct.inventory_level) !== inventoryLevel) {
               update.inventory_level = inventoryLevel;
@@ -2017,7 +2170,7 @@ export async function registerRoutes(
               }
             } catch {
               photoLedgerReadable = false;
-              outcome.errors.push("Could not load photo sync history; Kole photos were not changed.");
+              outcome.errors.push("Could not load photo sync history; vendor photos were not changed.");
             }
 
             const bigcommerceImages = Array.isArray(currentProduct.images) ? currentProduct.images : [];
@@ -2045,12 +2198,12 @@ export async function registerRoutes(
                 try {
                   await storage.setSetting(photoLedgerKey, Array.from(ledger));
                 } catch {
-                  outcome.errors.push("A matching Kole photo exists, but its sync history could not be saved.");
+                  outcome.errors.push("A matching vendor photo exists, but its sync history could not be saved.");
                 }
                 continue;
               }
               if (imageUrl.length > 255) {
-                outcome.errors.push("A Kole photo URL exceeds BigCommerce's 255-character limit.");
+                outcome.errors.push("A vendor photo URL exceeds BigCommerce's 255-character limit.");
                 continue;
               }
 
@@ -2144,7 +2297,7 @@ export async function registerRoutes(
       console.error("[Kole details sync] failed before product updates completed", {
         message: error?.message || String(error),
       });
-      res.status(502).json({ error: error?.message || "Failed to sync mapped Kole product details." });
+      res.status(502).json({ error: sanitizeVendorFacingMessage(error?.message || "Failed to sync mapped vendor product details.") });
     } finally {
       koleDetailsSyncInProgress = false;
     }
@@ -6805,7 +6958,7 @@ export async function registerRoutes(
 
   // Pinned BigCommerce brands are stored per user; the underlying statistics
   // use synced BigCommerce order lines joined to the current local product catalog.
-  app.get("/api/dropshipping/dashboard/brands", requirePermission("dropshipping", "view"), async (_req, res) => {
+  app.get("/api/dropshipping/dashboard/brands", requirePermission("dropshipping_dashboard", "view"), async (_req, res) => {
     try {
       res.json(await getCachedBcBrandOptions());
     } catch (error: any) {
@@ -6813,7 +6966,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropshipping/dashboard", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.get("/api/dropshipping/dashboard", requirePermission("dropshipping_dashboard", "view"), async (req, res) => {
     try {
       const authUser = (req as any).authUser;
       const setting = await storage.getSetting(`dropship_dashboard_pins_${authUser.id}`);
@@ -6884,7 +7037,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/dropshipping/dashboard/pins", requirePermission("dropshipping", "view"), async (req, res) => {
+  app.put("/api/dropshipping/dashboard/pins", requirePermission("dropshipping_dashboard", "view"), async (req, res) => {
     try {
       const parsed = z.object({
         brandIds: z.array(z.number().int().positive()).max(1000),
@@ -7493,6 +7646,152 @@ export async function registerRoutes(
       res.json({ ...result, rows, page, limit, can_view_all: canViewAll, filters: { dateFrom, dateTo, signedUpBy: signedUpByUserId ?? null } });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ===== TOOLS: IMAGE EDITOR =====
+  const imageEditorGenerationUsage = new Map<number, { windowStartedAt: number; count: number }>();
+  const imageEditorGenerationSchema = z.object({
+    generalDirection: z.string().trim().min(3).max(1500),
+    specificCustomization: z.string().max(2000).optional().default(""),
+    referenceImageDataUrl: z.string().max(6_000_000).optional().default(""),
+    referenceImageUrl: z.string().trim().max(2048).optional().default(""),
+  }).strict();
+
+  app.post("/api/tools/image-editor/generate", requirePermission("tools_image_editor"), async (req, res) => {
+    const parsed = imageEditorGenerationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Add a general direction and keep each instruction within its character limit." });
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({ error: "OpenAI image generation is not configured." });
+    }
+
+    const userId = Number((req as any).authUser?.id ?? 0);
+    const now = Date.now();
+    const usage = imageEditorGenerationUsage.get(userId);
+    if (usage && now - usage.windowStartedAt < 60 * 60 * 1000 && usage.count >= 10) {
+      return res.status(429).json({ error: "You have reached the limit of 10 image generations per hour. Try again later." });
+    }
+    if (!usage || now - usage.windowStartedAt >= 60 * 60 * 1000) {
+      imageEditorGenerationUsage.set(userId, { windowStartedAt: now, count: 1 });
+    } else {
+      usage.count += 1;
+    }
+
+    try {
+      const image = await generateImageEditorOutput({
+        apiKey: process.env.OPENAI_API_KEY,
+        ...parsed.data,
+      });
+      return res.json({ imageDataUrl: `data:image/jpeg;base64,${image.toString("base64")}` });
+    } catch (error: any) {
+      const status = error instanceof ImageEditorError ? error.statusCode : 500;
+      const message = error instanceof Error ? error.message : "Image generation failed unexpectedly.";
+      if (status >= 500) console.error("[Image Editor] Generation request failed:", message);
+      return res.status(status).json({
+        error: status === 500 ? "Image generation failed unexpectedly. Please try again." : message,
+      });
+    }
+  });
+
+  app.get("/api/tools/image-editor/products", requirePermission("tools_image_editor"), async (req, res) => {
+    try {
+      const query = String(req.query.q ?? "").trim();
+      if (query.length < 2) return res.json([]);
+      if (query.length > 120) return res.status(400).json({ error: "Search text must be 120 characters or fewer." });
+      const { storeHash, headers } = await getBcCreds();
+      const url = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products?keyword=${encodeURIComponent(query)}&limit=12&include=primary_image,variants`;
+      const response = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) {
+        console.error("[Image Editor] BigCommerce product search failed:", response.status);
+        return res.status(502).json({ error: "BigCommerce product search failed." });
+      }
+      const payload = await response.json() as any;
+      const products = (Array.isArray(payload?.data) ? payload.data : []).map((product: any) => ({
+        id: Number(product.id),
+        name: String(product.name ?? ""),
+        sku: String(product.sku ?? ""),
+        image: String(product.primary_image?.url_standard ?? ""),
+        variantSkus: Array.isArray(product.variants)
+          ? product.variants.map((variant: any) => String(variant.sku ?? "")).filter(Boolean)
+          : [],
+      })).filter((product: any) => Number.isSafeInteger(product.id) && product.id > 0 && product.name);
+      return res.json(products);
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : "Product search failed.";
+      console.error("[Image Editor] BigCommerce product search failed:", message);
+      return res.status(502).json({ error: "BigCommerce product search failed. Check the store connection and try again." });
+    }
+  });
+
+  app.post("/api/tools/image-editor/upload", requirePermission("tools_image_editor"), async (req, res) => {
+    let imageBuffer: Buffer;
+    try {
+      const productId = Number(req.body?.productId);
+      if (!Number.isSafeInteger(productId) || productId <= 0) {
+        return res.status(400).json({ error: "Select a valid BigCommerce product." });
+      }
+      imageBuffer = decodeGeneratedImageDataUrl(req.body?.imageDataUrl);
+
+      const { storeHash, token, headers } = await getBcCreds();
+      const productUrl = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products/${productId}`;
+      const productResponse = await fetch(`${productUrl}?include=images`, {
+        headers,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (productResponse.status === 404) return res.status(404).json({ error: "That BigCommerce product no longer exists." });
+      if (!productResponse.ok) {
+        return res.status(502).json({ error: "Could not verify the selected BigCommerce product." });
+      }
+      const productPayload = await productResponse.json() as any;
+      const product = productPayload?.data;
+      if (!product?.id) return res.status(404).json({ error: "That BigCommerce product could not be found." });
+      const existingImages = Array.isArray(product.images) ? product.images : [];
+      if (existingImages.length >= 1000) {
+        return res.status(409).json({ error: "BigCommerce's 1,000-image limit has been reached for this product." });
+      }
+      const sortOrder = existingImages.reduce((maximum: number, image: any) => {
+        const value = Number(image?.sort_order);
+        return Number.isFinite(value) ? Math.max(maximum, value) : maximum;
+      }, -1) + 1;
+
+      const form = new FormData();
+      form.append(
+        "image_file",
+        new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" }),
+        `image-editor-${productId}.jpg`,
+      );
+      form.append("description", "Image Editor product image");
+      form.append("is_thumbnail", "false");
+      form.append("sort_order", String(sortOrder));
+
+      const uploadResponse = await fetch(`${productUrl}/images`, {
+        method: "POST",
+        headers: { "X-Auth-Token": token, Accept: "application/json" },
+        body: form,
+        signal: AbortSignal.timeout(60_000),
+      });
+      const uploadPayload = await uploadResponse.json().catch(() => null) as any;
+      if (!uploadResponse.ok || !uploadPayload?.data?.id) {
+        console.error("[Image Editor] BigCommerce image upload failed:", uploadResponse.status);
+        return res.status(502).json({ error: "BigCommerce could not add the image to this product." });
+      }
+      return res.json({
+        imageId: Number(uploadPayload.data.id),
+        imageUrl: String(uploadPayload.data.url_standard ?? uploadPayload.data.url_zoom ?? ""),
+        productName: String(product.name ?? ""),
+      });
+    } catch (error: any) {
+      if (error instanceof ImageEditorError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      const message = error instanceof Error ? error.message : "BigCommerce image upload failed.";
+      console.error("[Image Editor] BigCommerce upload failed:", message);
+      return res.status(502).json({ error: "BigCommerce image upload failed. Check the store connection and try again." });
     }
   });
 
@@ -9504,22 +9803,73 @@ export async function registerRoutes(
     } catch (_) { /* non-fatal — permissions may already exist */ }
   })();
 
-  // ── Dropshipping permission auto-seed ─────────────────────────────────────────
+  // ── Dropshipping submodule permissions and legacy grant migration ─────────────
   await (async () => {
-    const DROPSHIP_PERMS: Array<{ module: string; action: string; description: string }> = [
-      { module: "dropshipping", action: "view", description: "Dropshipping: view vendor connections and catalogs" },
-      { module: "dropshipping", action: "manage", description: "Dropshipping: manage vendor connections and import queues" },
-      { module: "dropshipping", action: "sync", description: "Dropshipping: run vendor catalog synchronization" },
-    ];
-    try {
-      const existing = await storage.getAllPermissions();
-      const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
-      for (const p of DROPSHIP_PERMS) {
-        if (!existingSet.has(`${p.module}:${p.action}`)) {
-          await storage.createPermission(p);
-        }
+    const migrationKey = "dropshipping_submodule_permissions_migrated_v1";
+    const existing = await storage.getAllPermissions();
+    const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+    for (const permission of DROPSHIPPING_PERMISSIONS) {
+      const key = `${permission.module}:${permission.action}`;
+      if (!existingSet.has(key)) {
+        await storage.createPermission({
+          module: permission.module,
+          action: permission.action,
+          description: permission.description,
+        });
       }
-    } catch (_) { /* non-fatal */ }
+    }
+
+    const migrationState = await storage.getSetting(migrationKey);
+    if (migrationState?.value) return;
+
+    // Preserve each legacy grant once, then remove the broad assignments so
+    // admins can narrow access without the old permission silently restoring it.
+    for (const grant of DROPSHIPPING_LEGACY_PERMISSION_GRANTS) {
+      await db.execute(sql`
+        INSERT INTO role_permissions (role_id, permission_id)
+        SELECT DISTINCT assigned.role_id, target.id
+        FROM role_permissions AS assigned
+        JOIN permissions AS source ON source.id = assigned.permission_id
+        JOIN permissions AS target
+          ON target.module = ${grant.module} AND target.action = ${grant.action}
+        WHERE source.module = 'dropshipping' AND source.action = ${grant.sourceAction}
+          AND NOT EXISTS (
+            SELECT 1 FROM role_permissions AS existing_assignment
+            WHERE existing_assignment.role_id = assigned.role_id
+              AND existing_assignment.permission_id = target.id
+          )
+      `);
+      await db.execute(sql`
+        INSERT INTO user_permissions (user_id, permission_id)
+        SELECT DISTINCT assigned.user_id, target.id
+        FROM user_permissions AS assigned
+        JOIN permissions AS source ON source.id = assigned.permission_id
+        JOIN permissions AS target
+          ON target.module = ${grant.module} AND target.action = ${grant.action}
+        WHERE source.module = 'dropshipping' AND source.action = ${grant.sourceAction}
+          AND NOT EXISTS (
+            SELECT 1 FROM user_permissions AS existing_assignment
+            WHERE existing_assignment.user_id = assigned.user_id
+              AND existing_assignment.permission_id = target.id
+          )
+      `);
+    }
+
+    await db.execute(sql`
+      DELETE FROM role_permissions AS assigned
+      USING permissions AS legacy
+      WHERE assigned.permission_id = legacy.id
+        AND legacy.module = 'dropshipping'
+        AND legacy.action IN ('view', 'manage', 'sync')
+    `);
+    await db.execute(sql`
+      DELETE FROM user_permissions AS assigned
+      USING permissions AS legacy
+      WHERE assigned.permission_id = legacy.id
+        AND legacy.module = 'dropshipping'
+        AND legacy.action IN ('view', 'manage', 'sync')
+    `);
+    await storage.setSetting(migrationKey, true);
   })();
 
   // ── Inventory Audit permission auto-seed ──────────────────────────────────────
@@ -10801,6 +11151,8 @@ export async function registerRoutes(
   });
 
   // ── Attendance ──────────────────────────────────────────────────────────────────
+  registerAttendancePayrollRoutes(app, requirePermission);
+
   app.get("/api/attendance/today", requireAuth, async (req, res) => {
     try {
       const user = (req as any).authUser;

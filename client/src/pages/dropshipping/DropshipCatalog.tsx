@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import * as api from "@/lib/api";
+import { toPublicVendorMessage } from "@/lib/vendor-display";
 import { getKoleExtendedCost } from "@shared/kole-pricing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -69,6 +70,27 @@ function extendedSupplierCost(product: api.DropshipProduct) {
   return getKoleExtendedCost(product.raw_data, product.cost);
 }
 
+function importSourceLabel(log?: api.DropshipSyncLog) {
+  const source = log?.detail?.source;
+  if (source === "uploaded_csv") return "Uploaded CSV";
+  if (source === "csv_feed") return "URL feed";
+  return log ? "Vendor catalog import" : "URL feed or uploaded CSV";
+}
+
+function formatImportDate(log?: api.DropshipSyncLog) {
+  const value = log?.completed_at || log?.started_at;
+  if (!value) return "No successful import yet";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Date unavailable";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function suggestedRetailPrice(product: api.DropshipProduct) {
   const cost = extendedSupplierCost(product);
   if (cost === null) return "";
@@ -101,9 +123,16 @@ function StatusBadge({ status }: { status: string }) {
 export default function DropshipCatalogPage() {
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
-  const canManageDropshipping = hasPermission("dropshipping", "manage");
+  const canManageDropshipping = hasPermission("dropshipping_catalog", "manage");
+  const canSyncVendor = hasPermission("dropshipping_vendor", "sync");
   const queryClient = useQueryClient();
   const { data: connection } = useQuery({ queryKey: ["dropship-connection"], queryFn: api.getKoleConnection });
+  const {
+    data: syncLogs = [],
+    isLoading: isSyncLogsLoading,
+    isError: isSyncLogsError,
+  } = useQuery({ queryKey: ["dropship-sync-logs"], queryFn: api.getKoleSyncLogs });
+  const latestSuccessfulImport = syncLogs.find((log) => log.status === "completed");
   const { data: mappingBrandSetting } = useQuery({ queryKey: ["kole-mapping-brand"], queryFn: api.getKoleMappingBrand });
   const [mappingBrandName, setMappingBrandName] = useState<string | null>(null);
   const [mappingResult, setMappingResult] = useState<api.KoleProductMappingResult | null>(null);
@@ -160,7 +189,7 @@ export default function DropshipCatalogPage() {
       setSelectedProducts(new Map());
       toast({ title: "Catalog sync completed", description: `${result.productsProcessed} products processed · ${result.productsCreated} new · ${result.productsUpdated} updated` });
     },
-    onError: (mutationError: any) => toast({ title: "Catalog sync failed", description: mutationError.message, variant: "destructive" }),
+    onError: (mutationError: any) => toast({ title: "Catalog sync failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
   });
 
   const uploadCsv = useMutation({
@@ -175,7 +204,7 @@ export default function DropshipCatalogPage() {
         description: `${result.productsProcessed} products processed · ${result.productsCreated} new · ${result.productsUpdated} updated. No BigCommerce products were created.`,
       });
     },
-    onError: (mutationError: any) => toast({ title: "CSV upload failed", description: mutationError.message, variant: "destructive" }),
+    onError: (mutationError: any) => toast({ title: "CSV upload failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
   });
 
   const runSkuMapping = useMutation({
@@ -185,13 +214,15 @@ export default function DropshipCatalogPage() {
       setMappingResult(result);
       queryClient.setQueryData(["kole-mapping-brand"], { brandName: result.brandName });
       queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
+      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-products"] });
+      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-image-history"] });
       toast({
         title: result.failed ? "SKU mapping finished with errors" : "SKU mapping completed",
-        description: `${result.mapped} linked · ${result.remapped} remapped · ${result.alreadyMapped} already current · ${result.unmatched} unmatched · ${result.ambiguous} ambiguous · ${result.failed} failed`,
-        ...(result.failed ? { variant: "destructive" as const } : {}),
+        description: `${result.mapped} linked · ${result.remapped} remapped · ${result.alreadyMapped} already current · ${result.unmatched} unmatched · ${result.ambiguous} ambiguous · ${result.failed} failed · ${result.staleMappingsCleared} deleted listing links cleared${result.staleMappingChecksFailed ? ` · ${result.staleMappingChecksFailed} old links could not be checked` : ""}`,
+        ...(result.failed || result.staleMappingChecksFailed ? { variant: "destructive" as const } : {}),
       });
     },
-    onError: (mutationError: any) => toast({ title: "SKU mapping failed", description: mutationError.message, variant: "destructive" }),
+    onError: (mutationError: any) => toast({ title: "SKU mapping failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
   });
 
   const updateStatus = useMutation({
@@ -200,7 +231,7 @@ export default function DropshipCatalogPage() {
       queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
       toast({ title: "Import status updated" });
     },
-    onError: (mutationError: any) => toast({ title: "Status update failed", description: mutationError.message, variant: "destructive" }),
+    onError: (mutationError: any) => toast({ title: "Status update failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
   });
 
   const createDrafts = useMutation({
@@ -221,6 +252,8 @@ export default function DropshipCatalogPage() {
       setDetail(null);
       queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
       queryClient.invalidateQueries({ queryKey: ["dropship-sync-logs"] });
+      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-products"] });
+      queryClient.invalidateQueries({ queryKey: ["kole-product-sync-image-history"] });
       const failure = result.results.find((item) => item.status === "failed");
       const warning = result.results.find((item) => item.status === "created" && item.message);
       const imageNote = result.created > 0
@@ -228,11 +261,11 @@ export default function DropshipCatalogPage() {
         : "";
       toast({
         title: result.failed ? "Draft import finished with errors" : "BigCommerce draft import finished",
-        description: `${result.created} created · ${result.skipped} existing SKU${result.skipped === 1 ? "" : "s"} skipped · ${result.failed} failed${failure?.message ? ` · ${failure.message}` : warning?.message ? ` · ${warning.message}` : ""}${imageNote}`,
+        description: `${result.created} created · ${result.skipped} existing SKU${result.skipped === 1 ? "" : "s"} skipped · ${result.failed} failed${failure?.message ? ` · ${toPublicVendorMessage(failure.message)}` : warning?.message ? ` · ${toPublicVendorMessage(warning.message)}` : ""}${imageNote}`,
         ...(result.failed ? { variant: "destructive" as const } : {}),
       });
     },
-    onError: (mutationError: any) => toast({ title: "Draft creation failed", description: mutationError.message, variant: "destructive" }),
+    onError: (mutationError: any) => toast({ title: "Draft creation failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
   });
 
   useEffect(() => {
@@ -298,6 +331,7 @@ export default function DropshipCatalogPage() {
     setSearch(""); setAppliedSearch(""); setCategory(""); setSubcategory(""); setStockOnly(false); setCloseoutOnly(false); setImportedOnly(false); setStatus(""); setPage(1);
   };
   const startCsvUpload = (file?: File) => {
+    if (!canSyncVendor) return;
     if (!file) return;
     if (sync.isPending || uploadCsv.isPending) return;
     if (!file.size) {
@@ -316,30 +350,35 @@ export default function DropshipCatalogPage() {
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" /> Product Catalog</h1>
-          <p className="text-sm text-slate-500 mt-1">Sync the live Kole Imports feed or upload a downloaded CSV into {displayName}, then select products to create hidden, disabled BigCommerce drafts.</p>
         </div>
         <div className="flex gap-2">
-          <input
-            ref={csvInputRef}
-            type="file"
-            accept=".csv,text/csv,text/plain,application/octet-stream"
-            className="hidden"
-            onChange={(event) => {
-              startCsvUpload(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          {selected.size > 0 && <Button variant="outline" size="sm" onClick={queueSelected} disabled={updateStatus.isPending}><Plus className="h-4 w-4 mr-1.5" />Queue {selected.size}</Button>}
-          {selected.size > 0 && <Button size="sm" onClick={() => openDraftDialog(Array.from(selectedProducts.values()))} disabled={createDrafts.isPending}><Plus className="h-4 w-4 mr-1.5" />Create {selected.size} Draft{selected.size === 1 ? "" : "s"}</Button>}
-          <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()} disabled={sync.isPending || uploadCsv.isPending}>
-            {uploadCsv.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Upload className="h-4 w-4 mr-1.5" />}
-            {uploadCsv.isPending ? "Uploading CSV…" : "Upload CSV"}
-          </Button>
-          <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending || uploadCsv.isPending}><RefreshCw className={`h-4 w-4 mr-1.5 ${sync.isPending ? "animate-spin" : ""}`} />Sync CSV Feed</Button>
+          {canSyncVendor && (
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv,text/csv,text/plain,application/octet-stream"
+              className="hidden"
+              onChange={(event) => {
+                startCsvUpload(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          )}
+          {canManageDropshipping && selected.size > 0 && <Button variant="outline" size="sm" onClick={queueSelected} disabled={updateStatus.isPending}><Plus className="h-4 w-4 mr-1.5" />Queue {selected.size}</Button>}
+          {canManageDropshipping && selected.size > 0 && <Button size="sm" onClick={() => openDraftDialog(Array.from(selectedProducts.values()))} disabled={createDrafts.isPending}><Plus className="h-4 w-4 mr-1.5" />Create {selected.size} Draft{selected.size === 1 ? "" : "s"}</Button>}
+          {canSyncVendor && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()} disabled={sync.isPending || uploadCsv.isPending}>
+                {uploadCsv.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Upload className="h-4 w-4 mr-1.5" />}
+                {uploadCsv.isPending ? "Uploading CSV…" : "Upload CSV"}
+              </Button>
+              <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending || uploadCsv.isPending}><RefreshCw className={`h-4 w-4 mr-1.5 ${sync.isPending ? "animate-spin" : ""}`} />Sync CSV Feed</Button>
+            </>
+          )}
         </div>
       </div>
 
-      <Card className={`border-dashed transition-colors ${draggingCsv ? "border-indigo-500 bg-indigo-50/60" : "border-slate-300"}`}>
+      {canSyncVendor && <Card className={`border-dashed transition-colors ${draggingCsv ? "border-indigo-500 bg-indigo-50/60" : "border-slate-300"}`}>
         <CardContent
           className="p-3 flex items-center gap-3"
           onDragEnter={(event) => { event.preventDefault(); setDraggingCsv(true); }}
@@ -356,11 +395,11 @@ export default function DropshipCatalogPage() {
         >
           <Upload className={`h-5 w-5 shrink-0 ${draggingCsv ? "text-indigo-600" : "text-slate-400"}`} />
           <div className="min-w-0">
-            <p className="text-sm font-medium text-slate-700">Drop a downloaded Kole CSV feed here, or choose Upload CSV.</p>
+            <p className="text-sm font-medium text-slate-700">Drop a downloaded vendor CSV feed here, or choose Upload CSV.</p>
             <p className="text-xs text-slate-500">Manual import · up to 50 MB · updates the Vendor Catalog only; it does not create BigCommerce products.</p>
           </div>
         </CardContent>
-      </Card>
+      </Card>}
 
       <Card>
         <CardContent className="p-4 space-y-3">
@@ -373,11 +412,14 @@ export default function DropshipCatalogPage() {
                 onChange={(event) => setMappingBrandName(event.target.value)}
                 maxLength={100}
                 placeholder="KCDS"
+                disabled={!canManageDropshipping}
               />
             </div>
             <Button
               onClick={() => runSkuMapping.mutate(mappingBrandName ?? mappingBrandSetting?.brandName ?? "KCDS")}
               disabled={
+                !canManageDropshipping
+                ||
                 runSkuMapping.isPending
                 || !String(mappingBrandName ?? mappingBrandSetting?.brandName ?? "KCDS").trim()
                 || sync.isPending
@@ -389,16 +431,13 @@ export default function DropshipCatalogPage() {
               {runSkuMapping.isPending ? "Scanning and mapping…" : "Run SKU mapping"}
             </Button>
           </div>
-          <p className="text-xs text-slate-500">
-            Manually scan every BigCommerce product under this brand and match its SKU to the imported Kole catalog. This only creates or remaps local links; it does not change BigCommerce products. You can run it again after deployment.
-          </p>
           {mappingResult && (
             <div className="rounded-md bg-slate-50 px-3 py-2.5 text-xs text-slate-600 space-y-1">
               <p className="font-medium text-slate-700">
                 Last run: {mappingResult.brandName} · {mappingResult.scanned.toLocaleString()} BigCommerce products scanned · {mappingResult.matched.toLocaleString()} unique SKU matches
               </p>
               <p>
-                {mappingResult.mapped.toLocaleString()} linked · {mappingResult.remapped.toLocaleString()} remapped · {mappingResult.alreadyMapped.toLocaleString()} already current · {mappingResult.unmatched.toLocaleString()} unmatched · {mappingResult.ambiguous.toLocaleString()} ambiguous · {mappingResult.failed.toLocaleString()} failed
+                {mappingResult.mapped.toLocaleString()} linked · {mappingResult.remapped.toLocaleString()} remapped · {mappingResult.alreadyMapped.toLocaleString()} already current · {mappingResult.unmatched.toLocaleString()} unmatched · {mappingResult.ambiguous.toLocaleString()} ambiguous · {mappingResult.failed.toLocaleString()} failed · {(mappingResult.staleMappingsCleared ?? 0).toLocaleString()} deleted links cleared{mappingResult.staleMappingChecksFailed ? ` · ${mappingResult.staleMappingChecksFailed} old links could not be verified` : ""}
               </p>
             </div>
           )}
@@ -407,7 +446,20 @@ export default function DropshipCatalogPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Catalog products</p><p className="text-xl font-bold text-slate-800">{data?.total ?? "—"}</p></CardContent></Card>
-        <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Feed source</p><p className="text-xl font-bold text-slate-800">CSV</p><p className="text-[10px] text-slate-400">Kole Imports inventory feed</p></CardContent></Card>
+        <Card>
+          <CardContent className="p-3">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500">Last successful import</p>
+            <p
+              className="mt-1 text-sm font-semibold leading-5 text-slate-800"
+              title={(latestSuccessfulImport?.completed_at || latestSuccessfulImport?.started_at) ?? undefined}
+            >
+              {isSyncLogsLoading ? "Loading…" : isSyncLogsError ? "Import history unavailable" : formatImportDate(latestSuccessfulImport)}
+            </p>
+            <p className="text-[10px] text-slate-400">
+              {isSyncLogsError ? "Could not load import history" : importSourceLabel(latestSuccessfulImport)}
+            </p>
+          </CardContent>
+        </Card>
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Current page</p><p className="text-xl font-bold text-slate-800">{page} / {totalPages}</p></CardContent></Card>
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Selected</p><p className="text-xl font-bold text-indigo-600">{selected.size}</p></CardContent></Card>
       </div>
@@ -443,7 +495,7 @@ export default function DropshipCatalogPage() {
       </Card>
 
       <Card className="shadow-sm overflow-hidden">
-        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {(error as Error).message}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters. Run Sync CSV Feed or upload a downloaded CSV to populate the catalog.</div> : (
+        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {toPublicVendorMessage((error as Error).message)}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters.{canSyncVendor ? " Run Sync CSV Feed or upload a downloaded CSV to populate the catalog." : ""}</div> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200"><tr className="text-left text-[11px] uppercase tracking-wide text-slate-500">
@@ -460,7 +512,7 @@ export default function DropshipCatalogPage() {
                     <td className="px-3 py-3 text-xs text-slate-600 whitespace-nowrap">{packLabel(product)}</td>
                     <td className="px-3 py-3 font-medium whitespace-nowrap">{inventoryLabel(product)}</td>
                     <td className="px-3 py-3 whitespace-nowrap"><StatusBadge status={product.status} /></td>
-                    <td className="px-3 py-3"><div className="flex justify-end gap-1"><Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDetail(product)}><Eye className="h-3.5 w-3.5 mr-1" />View Details</Button>{product.status !== "queued" && !product.bigcommerce_product_id && <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => updateStatus.mutate({ id: product.id, nextStatus: "queued" })}><Plus className="h-3.5 w-3.5 mr-1" />Queue</Button>}</div></td>
+                     <td className="px-3 py-3"><div className="flex justify-end gap-1"><Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDetail(product)}><Eye className="h-3.5 w-3.5 mr-1" />View Details</Button>{canManageDropshipping && product.status !== "queued" && !product.bigcommerce_product_id && <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => updateStatus.mutate({ id: product.id, nextStatus: "queued" })}><Plus className="h-3.5 w-3.5 mr-1" />Queue</Button>}</div></td>
                   </tr>;
                 })}
               </tbody>
@@ -476,11 +528,11 @@ export default function DropshipCatalogPage() {
       <Dialog open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
         <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
           {detail && <><DialogHeader><DialogTitle className="flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" />{detail.title}</DialogTitle><DialogDescription>Vendor product details for SKU {detail.vendor_sku}. Creating a BigCommerce draft requires an entered retail price.</DialogDescription></DialogHeader><div className="space-y-5">
-            <div className="flex flex-wrap gap-2"><StatusBadge status={detail.status} />{detail.is_closeout && <Badge className="bg-orange-100 text-orange-700 border-0">Closeout</Badge>}{detail.bigcommerce_product_id ? <Badge className="bg-blue-100 text-blue-700 border-0">Mapped to BC #{detail.bigcommerce_product_id}</Badge> : <Badge className="bg-slate-100 text-slate-600 border-0">Not mapped</Badge>}</div>
+            <div className="flex flex-wrap gap-2"><StatusBadge status={detail.status} />{detail.is_closeout && <Badge className="bg-orange-100 text-orange-700 border-0">Closeout</Badge>}{detail.bigcommerce_product_id ? <><Badge className="bg-blue-100 text-blue-700 border-0">Mapped to BC #{detail.bigcommerce_product_id}</Badge>{detail.bigcommerce_variant_id != null && <Badge className="bg-indigo-100 text-indigo-700 border-0">Variant ID #{detail.bigcommerce_variant_id}</Badge>}</> : <Badge className="bg-slate-100 text-slate-600 border-0">Not mapped</Badge>}</div>
             {detail.image_data?.length > 0 && <div className="flex gap-2 overflow-x-auto">{detail.image_data.slice(0, 8).map((_, index) => { const src = imageUrl([detail.image_data[index]]); return src ? <img key={index} src={src} alt="" className="h-24 w-24 object-contain border rounded bg-white" /> : null; })}</div>}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm"><div><p className="text-xs text-slate-500">SKU</p><p className="font-mono">{detail.vendor_sku}</p></div><div><p className="text-xs text-slate-500">UPC</p><p>{detail.upc || "—"}</p></div><div><p className="text-xs text-slate-500">Brand</p><p>{detail.brand || "—"}</p></div><div><p className="text-xs text-slate-500">Extended cost (MOQ included)</p><p>{formatCost(extendedSupplierCost(detail)?.toFixed(2) ?? null)}</p></div><div><p className="text-xs text-slate-500">Inventory</p><p>{inventoryLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Pack / minimum</p><p>{packLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Category</p><p>{detail.vendor_category || "—"}</p></div><div><p className="text-xs text-slate-500">Subcategory</p><p>{detail.vendor_subcategory || "—"}</p></div><div><p className="text-xs text-slate-500">Weight</p><p>{String((detail.raw_data as any)?.item_weight || (detail.raw_data as any)?.weight || "—")}</p></div></div>
             {detail.description && <div><p className="text-xs font-medium text-slate-500 mb-1">Description</p><p className="text-sm text-slate-700 whitespace-pre-wrap">{detail.description}</p></div>}
-            <div className="flex flex-wrap gap-2">{!detail.bigcommerce_product_id && <Button onClick={() => openDraftDialog([detail])}><Plus className="h-4 w-4 mr-1.5" />Create BigCommerce Draft</Button>}<Button variant="outline" onClick={() => updateStatus.mutate({ id: detail.id, nextStatus: "queued" })} disabled={detail.status === "queued" || Boolean(detail.bigcommerce_product_id)}><Plus className="h-4 w-4 mr-1.5" />Add to Import Queue</Button><Button variant="ghost" onClick={() => setDetail(null)}>Close</Button></div>
+            <div className="flex flex-wrap gap-2">{canManageDropshipping && !detail.bigcommerce_product_id && <Button onClick={() => openDraftDialog([detail])}><Plus className="h-4 w-4 mr-1.5" />Create BigCommerce Draft</Button>}{canManageDropshipping && <Button variant="outline" onClick={() => updateStatus.mutate({ id: detail.id, nextStatus: "queued" })} disabled={detail.status === "queued" || Boolean(detail.bigcommerce_product_id)}><Plus className="h-4 w-4 mr-1.5" />Add to Import Queue</Button>}<Button variant="ghost" onClick={() => setDetail(null)}>Close</Button></div>
           </div></>}
         </DialogContent>
       </Dialog>
@@ -490,7 +542,7 @@ export default function DropshipCatalogPage() {
           <DialogHeader>
             <DialogTitle>Create hidden BigCommerce drafts</DialogTitle>
             <DialogDescription>
-              Drafts stay hidden and disabled. Photos are added later through Product Sync → Image Sync so the first upload is watermarked. The suggested price is the supplier ext_price × 1.20; ext_price already includes the Kole minimum quantity. You can edit the price. Choose an existing BigCommerce category for each item. Existing SKU matches are skipped.
+              Drafts stay hidden and disabled. Photos are added later through Product Sync → Image Sync so the first upload is watermarked. The suggested price is the supplier ext_price × 1.20; ext_price already includes the minimum order quantity. You can edit the price. Choose an existing BigCommerce category for each item. Existing SKU matches are skipped.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -516,7 +568,7 @@ export default function DropshipCatalogPage() {
               {isLoadingBcCategories && <p className="text-xs text-slate-500">Loading BigCommerce categories…</p>}
               {bcCategoriesError && (
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-red-600">
-                  <span>Could not load BigCommerce categories: {(bcCategoriesError as Error).message}</span>
+                  <span>Could not load BigCommerce categories: {toPublicVendorMessage((bcCategoriesError as Error).message)}</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => refetchBcCategories()} disabled={isLoadingBcCategories}>Retry</Button>
                 </div>
               )}
@@ -533,7 +585,7 @@ export default function DropshipCatalogPage() {
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-slate-800 line-clamp-2">{product.title}</p>
                       <p className="text-xs font-mono text-slate-500 mt-1">{product.vendor_sku}</p>
-                      <p className="text-xs text-slate-500 mt-1">Extended supplier cost (MOQ included): {formatCost(extendedSupplierCost(product)?.toFixed(2) ?? null)} · Kole minimum quantity: {quantity === null ? "Not provided" : quantity.toLocaleString()}</p>
+                      <p className="text-xs text-slate-500 mt-1">Extended supplier cost (MOQ included): {formatCost(extendedSupplierCost(product)?.toFixed(2) ?? null)} · Minimum order quantity: {quantity === null ? "Not provided" : quantity.toLocaleString()}</p>
                       <p className="text-xs text-slate-500 mt-1">Inventory: {inventoryLabel(product)}</p>
                       {!suggestedRetailPrice(product) && <p className="text-xs text-amber-700 mt-1">A positive ext_price is needed for an automatic price; enter the price manually.</p>}
                     </div>

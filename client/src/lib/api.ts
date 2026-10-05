@@ -176,6 +176,7 @@ export interface DropshipProduct {
   is_closeout: boolean;
   vendor_modified_at?: string | null;
   bigcommerce_product_id?: number | null;
+  bigcommerce_variant_id?: number | null;
   status: "available" | "queued" | "mapped" | "unavailable" | "error" | string;
   raw_data: Record<string, unknown>;
   created_at: string;
@@ -244,8 +245,34 @@ async function dropshipRequest<T>(path: string, init: RequestInit = {}): Promise
     ...init,
     headers: { "Content-Type": "application/json", ...getAuthHeaders(), ...(init.headers || {}) },
   });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || body.message || "Dropshipping request failed");
+  const responseText = await res.text();
+  let body: any;
+  try {
+    body = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    body = null;
+  }
+
+  if (!res.ok) {
+    const jsonMessage = typeof body?.error === "string"
+      ? body.error
+      : typeof body?.message === "string"
+        ? body.message
+        : "";
+    const trimmedText = responseText.trim();
+    const plainTextMessage = trimmedText && !/<(?:!doctype|html|head|body)\b/i.test(trimmedText)
+      ? trimmedText.replace(/\s+/g, " ").slice(0, 300)
+      : "";
+    const status = `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
+    const fallbackMessage = plainTextMessage
+      ? `Dropshipping request failed (${status}): ${plainTextMessage}`
+      : `Dropshipping request failed (${status}).`;
+    throw new Error(jsonMessage || fallbackMessage);
+  }
+
+  if (body === null) {
+    throw new Error(`The dropshipping server returned an unreadable response (HTTP ${res.status}).`);
+  }
   return body as T;
 }
 
@@ -271,6 +298,8 @@ export type KoleProductMappingResult = {
   unmatched: number;
   ambiguous: number;
   failed: number;
+  staleMappingsCleared: number;
+  staleMappingChecksFailed: number;
 };
 
 export type KoleProductSyncKind = "details" | "images";
@@ -287,6 +316,7 @@ export type KoleProductSyncJobSummary = {
   skipped: number;
   photosAdded: number;
   selectedFields: KoleProductSyncField[];
+  forceImageReupload?: boolean;
   currentSku: string | null;
   startedAt: string;
   completedAt: string | null;
@@ -309,6 +339,29 @@ export type KoleProductSyncItemsPage = {
   page: number;
   limit: number;
 };
+export type KoleProductCostComparisonItem = {
+  productId: number;
+  vendorSku: string;
+  title: string;
+  bigcommerceProductId: number | null;
+  status: "changed" | "match" | "unavailable" | "failed" | "skipped" | "conflict";
+  catalogExtendedCost: number | null;
+  listingCost: number | null;
+  delta: number | null;
+  message: string | null;
+};
+export type KoleProductCostComparisonResult = {
+  checkedAt: string;
+  total: number;
+  compared: number;
+  changed: number;
+  matched: number;
+  unavailable: number;
+  failed: number;
+  skipped: number;
+  conflicts: number;
+  items: KoleProductCostComparisonItem[];
+};
 
 export function getKoleMappingBrand() {
   return dropshipRequest<{ brandName: string }>("/dropshipping/kole/mapping-brand");
@@ -325,6 +378,11 @@ export function getKoleProductSyncLatest(kind: KoleProductSyncKind) {
   return dropshipRequest<KoleProductSyncJobSummary | null>(
     `/dropshipping/product-sync/jobs/latest?kind=${encodeURIComponent(kind)}`,
   );
+}
+
+export function getKoleProductSyncImageHistory(productIds: number[]) {
+  const query = new URLSearchParams({ productIds: productIds.join(",") });
+  return dropshipRequest<Record<number, number>>(`/dropshipping/product-sync/image-history?${query.toString()}`);
 }
 
 export function getKoleProductSyncJob(jobId: number) {
@@ -346,10 +404,23 @@ export function startKoleProductSync(
   kind: KoleProductSyncKind,
   productIds: number[],
   fields?: KoleProductSyncField[],
+  forceImageReupload = false,
 ) {
   return dropshipRequest<KoleProductSyncJobSummary>("/dropshipping/product-sync/jobs", {
     method: "POST",
-    body: JSON.stringify({ kind, productIds, ...(fields ? { fields } : {}) }),
+    body: JSON.stringify({
+      kind,
+      productIds,
+      ...(fields ? { fields } : {}),
+      ...(forceImageReupload ? { forceImageReupload: true } : {}),
+    }),
+  });
+}
+
+export function compareKoleProductSyncCosts(productIds: number[]) {
+  return dropshipRequest<KoleProductCostComparisonResult>("/dropshipping/product-sync/cost-comparison", {
+    method: "POST",
+    body: JSON.stringify({ productIds }),
   });
 }
 

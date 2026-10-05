@@ -141,6 +141,7 @@ export const dropshipProducts = pgTable("dropship_products", {
   is_closeout: boolean("is_closeout").notNull().default(false),
   vendor_modified_at: timestamp("vendor_modified_at"),
   bigcommerce_product_id: integer("bigcommerce_product_id"),
+  bigcommerce_variant_id: integer("bigcommerce_variant_id"),
   status: text("status").notNull().default("available"), // available | queued | mapped | unavailable | error
   raw_data: jsonb("raw_data").notNull().default({}),
   created_at: timestamp("created_at").notNull().defaultNow(),
@@ -577,6 +578,160 @@ export const attendanceAuditLog = pgTable("attendance_audit_log", {
   attendanceCreatedIdx: index("attendance_audit_attendance_created_idx").on(t.attendance_id, t.created_at),
 }));
 
+// ─── Payroll and Leave (additive extension of Attendance) ─────────────────────
+
+export const attendancePayrollGroupSchedules = pgTable("attendance_payroll_group_schedules", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  role_id: integer("role_id").notNull().references(() => roles.id, { onDelete: "cascade" }),
+  cadence: text("cadence").notNull().default("biweekly_friday"), // biweekly_friday | semimonthly_15_30
+  biweekly_anchor_date: text("biweekly_anchor_date"),
+  semimonthly_first_payday: integer("semimonthly_first_payday").notNull().default(15),
+  semimonthly_second_payday: integer("semimonthly_second_payday").notNull().default(30),
+  timezone: text("timezone").notNull().default("UTC"),
+  updated_by: integer("updated_by").references(() => users.id),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  roleUnique: uniqueIndex("attendance_payroll_group_schedules_role_unique").on(t.role_id),
+}));
+
+export const employeePayProfiles = pgTable("employee_pay_profiles", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  hourly_rate: decimal("hourly_rate", { precision: 12, scale: 4 }).notNull(),
+  currency: text("currency").notNull().default("USD"),
+  overtime_multiplier: decimal("overtime_multiplier", { precision: 7, scale: 4 }).notNull().default("1.5000"),
+  holiday_overtime_multiplier: decimal("holiday_overtime_multiplier", { precision: 7, scale: 4 }).notNull().default("2.0000"),
+  updated_by: integer("updated_by").references(() => users.id),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  userUnique: uniqueIndex("employee_pay_profiles_user_unique").on(t.user_id),
+}));
+
+export const employeePayItems = pgTable("employee_pay_items", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  item_type: text("item_type").notNull(), // allowance | deduction
+  label: text("label").notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  is_active: boolean("is_active").notNull().default(true),
+  created_by: integer("created_by").references(() => users.id),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  userIdx: index("employee_pay_items_user_idx").on(t.user_id, t.is_active),
+}));
+
+export const payrollRuns = pgTable("payroll_runs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  role_id: integer("role_id").notNull().references(() => roles.id),
+  group_name_snapshot: text("group_name_snapshot").notNull(),
+  cadence_snapshot: text("cadence_snapshot").notNull(),
+  timezone_snapshot: text("timezone_snapshot").notNull(),
+  period_start: text("period_start").notNull(),
+  period_end: text("period_end").notNull(),
+  payday: text("payday").notNull(),
+  status: text("status").notNull().default("draft"), // draft | finalized
+  snapshot_updated_at: timestamp("snapshot_updated_at").notNull().defaultNow(),
+  created_by: integer("created_by").notNull().references(() => users.id),
+  finalized_by: integer("finalized_by").references(() => users.id),
+  finalized_at: timestamp("finalized_at"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  rolePeriodUnique: uniqueIndex("payroll_runs_role_period_unique").on(t.role_id, t.period_start, t.period_end),
+  statusPaydayIdx: index("payroll_runs_status_payday_idx").on(t.status, t.payday),
+}));
+
+export const attendanceOvertimeRequests = pgTable("attendance_overtime_requests", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  attendance_id: integer("attendance_id").notNull().references(() => attendanceSessions.id),
+  user_id: integer("user_id").notNull().references(() => users.id),
+  overtime_type: text("overtime_type").notNull(), // regular | holiday_rest
+  requested_hours: decimal("requested_hours", { precision: 8, scale: 2 }).notNull(),
+  approved_hours: decimal("approved_hours", { precision: 8, scale: 2 }),
+  employee_note: text("employee_note").notNull().default(""),
+  status: text("status").notNull().default("pending"), // pending | approved | rejected
+  reviewed_by: integer("reviewed_by").references(() => users.id),
+  reviewed_at: timestamp("reviewed_at"),
+  manager_note: text("manager_note"),
+  paid_in_run_id: integer("paid_in_run_id").references(() => payrollRuns.id),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  attendanceUnique: uniqueIndex("attendance_overtime_requests_attendance_unique").on(t.attendance_id),
+  userStatusIdx: index("attendance_overtime_requests_user_status_idx").on(t.user_id, t.status),
+}));
+
+export const attendanceLeaveRequests = pgTable("attendance_leave_requests", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  user_id: integer("user_id").notNull().references(() => users.id),
+  leave_type: text("leave_type").notNull(), // pto | sick | vacation | unpaid
+  start_date: text("start_date").notNull(),
+  end_date: text("end_date").notNull(),
+  daily_hours: decimal("daily_hours", { precision: 5, scale: 2 }).notNull().default("8.00"),
+  employee_note: text("employee_note").notNull().default(""),
+  status: text("status").notNull().default("pending"), // pending | approved | rejected | cancelled
+  reviewed_by: integer("reviewed_by").references(() => users.id),
+  reviewed_at: timestamp("reviewed_at"),
+  manager_note: text("manager_note"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  userStatusDateIdx: index("attendance_leave_requests_user_status_date_idx").on(t.user_id, t.status, t.start_date),
+}));
+
+export const payslips = pgTable("payslips", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  payroll_run_id: integer("payroll_run_id").notNull().references(() => payrollRuns.id),
+  user_id: integer("user_id").notNull().references(() => users.id),
+  employee_name_snapshot: text("employee_name_snapshot").notNull(),
+  employee_username_snapshot: text("employee_username_snapshot").notNull(),
+  currency: text("currency").notNull(),
+  regular_hours: decimal("regular_hours", { precision: 10, scale: 2 }).notNull().default("0"),
+  overtime_hours: decimal("overtime_hours", { precision: 10, scale: 2 }).notNull().default("0"),
+  paid_leave_hours: decimal("paid_leave_hours", { precision: 10, scale: 2 }).notNull().default("0"),
+  unpaid_leave_hours: decimal("unpaid_leave_hours", { precision: 10, scale: 2 }).notNull().default("0"),
+  gross_amount: decimal("gross_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  deductions_amount: decimal("deductions_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  net_amount: decimal("net_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  runUserUnique: uniqueIndex("payslips_run_user_unique").on(t.payroll_run_id, t.user_id),
+  userIdx: index("payslips_user_idx").on(t.user_id, t.created_at),
+}));
+
+export const payslipLineItems = pgTable("payslip_line_items", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  payslip_id: integer("payslip_id").notNull().references(() => payslips.id, { onDelete: "cascade" }),
+  line_type: text("line_type").notNull(), // regular | overtime | paid_leave | unpaid_leave | allowance | deduction
+  description: text("description").notNull(),
+  units: decimal("units", { precision: 10, scale: 2 }).notNull().default("0"),
+  rate: decimal("rate", { precision: 12, scale: 4 }),
+  amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+  source_type: text("source_type").notNull(),
+  source_id: integer("source_id").notNull(),
+  source_date: text("source_date").notNull(),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  sourceUnique: uniqueIndex("payslip_line_items_source_unique").on(t.source_type, t.source_id, t.source_date),
+  payslipIdx: index("payslip_line_items_payslip_idx").on(t.payslip_id),
+}));
+
+export const attendancePayrollAuditLog = pgTable("attendance_payroll_audit_log", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  actor_user_id: integer("actor_user_id").notNull().references(() => users.id),
+  entity_type: text("entity_type").notNull(),
+  entity_id: integer("entity_id").notNull(),
+  action: text("action").notNull(),
+  old_value: jsonb("old_value"),
+  new_value: jsonb("new_value"),
+  reason: text("reason"),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  entityIdx: index("attendance_payroll_audit_entity_idx").on(t.entity_type, t.entity_id, t.created_at),
+}));
+
 // ─── POS Enhancements (Price Protection / Store Credit) ───────────────────────
 
 export const posPriceOverrideAudit = pgTable("pos_price_override_audit", {
@@ -924,7 +1079,6 @@ export const insertAttendanceDailyNoteSchema = createInsertSchema(attendanceDail
 export const insertAttendanceCheckpointSchema = createInsertSchema(attendanceLocationCheckpoints).omit({ id: true, created_at: true });
 export const insertAttendanceExceptionSchema = createInsertSchema(attendanceExceptions).omit({ id: true });
 export const insertAttendanceAuditLogSchema = createInsertSchema(attendanceAuditLog).omit({ id: true, created_at: true });
-
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -1039,6 +1193,15 @@ export type InsertAttendanceException = z.infer<typeof insertAttendanceException
 export type AttendanceException = typeof attendanceExceptions.$inferSelect;
 export type InsertAttendanceAuditLog = z.infer<typeof insertAttendanceAuditLogSchema>;
 export type AttendanceAuditLog = typeof attendanceAuditLog.$inferSelect;
+export type AttendancePayrollGroupSchedule = typeof attendancePayrollGroupSchedules.$inferSelect;
+export type EmployeePayProfile = typeof employeePayProfiles.$inferSelect;
+export type EmployeePayItem = typeof employeePayItems.$inferSelect;
+export type PayrollRun = typeof payrollRuns.$inferSelect;
+export type AttendanceOvertimeRequest = typeof attendanceOvertimeRequests.$inferSelect;
+export type AttendanceLeaveRequest = typeof attendanceLeaveRequests.$inferSelect;
+export type Payslip = typeof payslips.$inferSelect;
+export type PayslipLineItem = typeof payslipLineItems.$inferSelect;
+export type AttendancePayrollAuditLog = typeof attendancePayrollAuditLog.$inferSelect;
 
 // ─── BigCommerce Order Line Items Mirror ──────────────────────────────────────
 

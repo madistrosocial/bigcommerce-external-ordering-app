@@ -10,7 +10,9 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "verify:attendance-timezone": "tsx script/verify-attendance-timezone.ts",
+    "verify:image-editor-reference-url": "tsx script/verify-image-editor-reference-url.ts",
     "verify:sales-report-pricing": "tsx script/verify-sales-report-pricing.ts",
+    "verify:kole-variant-sync": "tsx script/verify-kole-variant-sync.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
