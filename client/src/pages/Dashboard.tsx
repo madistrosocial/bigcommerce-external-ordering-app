@@ -180,7 +180,7 @@ function StatCard({
   return (
     <Card className="rounded-2xl border-slate-200 bg-white shadow-none">
       <div className="flex min-h-[106px] items-center gap-3 p-3 sm:min-h-[116px] sm:p-4">
-        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${iconBackground} ${iconClass}`}>
+        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${iconBackground} ${iconClass}`}>
           <Icon className="h-6 w-6" strokeWidth={1.8} />
         </div>
         <div className="min-w-0">
@@ -232,7 +232,7 @@ function AttentionItem({ label, detail, value, icon: Icon, tone, path }: Attenti
       className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors hover:brightness-[.98] ${colors.row}`}
       data-testid={`attention-${label.toLowerCase().replace(/\s+/g, "-")}`}
     >
-      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${colors.icon}`}>
+      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${colors.icon}`}>
         <Icon className="h-4 w-4" strokeWidth={1.8} />
       </span>
       <span className="min-w-0 flex-1">
@@ -251,9 +251,10 @@ interface QuickActionProps {
   path: string;
   color: string;
   iconColor: string;
+  iconBackground: string;
 }
 
-function QuickAction({ label, icon: Icon, path, color, iconColor }: QuickActionProps) {
+function QuickAction({ label, icon: Icon, path, color, iconColor, iconBackground }: QuickActionProps) {
   const [, setLocation] = useLocation();
   return (
     <button
@@ -262,7 +263,9 @@ function QuickAction({ label, icon: Icon, path, color, iconColor }: QuickActionP
       className={`flex min-h-[82px] flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 ${color} px-2 py-3 text-center transition-transform hover:-translate-y-0.5`}
       data-testid={`quick-action-${label.toLowerCase().replace(/\s+/g, "-")}`}
     >
-      <Icon className={`h-6 w-6 ${iconColor}`} strokeWidth={1.8} />
+      <span className={`flex h-10 w-10 items-center justify-center rounded-full ${iconBackground}`} aria-hidden="true">
+        <Icon className={`h-5 w-5 ${iconColor}`} strokeWidth={1.8} />
+      </span>
       <span className="text-[10px] font-semibold text-slate-800 sm:text-[11px]">{label}</span>
     </button>
   );
@@ -430,12 +433,12 @@ export default function DashboardPage() {
   ];
 
   const quickActions: QuickActionProps[] = [
-    { label: "Push Inventory", icon: Upload, path: "/inventory/push", color: "bg-blue-50/70", iconColor: "text-blue-600" },
-    { label: "Audit Stock", icon: ClipboardCheck, path: "/inventory/audit", color: "bg-amber-50/70", iconColor: "text-amber-600" },
-    { label: "Sales Report", icon: BarChart3, path: "/reports/sales", color: "bg-emerald-50/70", iconColor: "text-emerald-600" },
-    { label: "CRM", icon: UsersRound, path: "/crm/customers", color: "bg-purple-50/70", iconColor: "text-purple-600" },
-    { label: "Store Credit", icon: CreditCard, path: "/crm/store-credit", color: "bg-yellow-50/80", iconColor: "text-yellow-600" },
-    { label: "New Order", icon: Plus, path: "/pos", color: "bg-cyan-50/70", iconColor: "text-cyan-600" },
+    { label: "Push Inventory", icon: Upload, path: "/inventory/push", color: "bg-blue-50/70", iconColor: "text-blue-600", iconBackground: "bg-blue-100" },
+    { label: "Audit Stock", icon: ClipboardCheck, path: "/inventory/audit", color: "bg-amber-50/70", iconColor: "text-amber-600", iconBackground: "bg-amber-100" },
+    { label: "Sales Report", icon: BarChart3, path: "/reports/sales", color: "bg-emerald-50/70", iconColor: "text-emerald-600", iconBackground: "bg-emerald-100" },
+    { label: "CRM", icon: UsersRound, path: "/crm/customers", color: "bg-purple-50/70", iconColor: "text-purple-600", iconBackground: "bg-purple-100" },
+    { label: "Store Credit", icon: CreditCard, path: "/crm/store-credit", color: "bg-yellow-50/80", iconColor: "text-yellow-600", iconBackground: "bg-yellow-100" },
+    { label: "New Order", icon: Plus, path: "/pos", color: "bg-cyan-50/70", iconColor: "text-cyan-600", iconBackground: "bg-cyan-100" },
   ];
 
   const openRecentOrder = (order: Order) => {
@@ -477,14 +480,16 @@ export default function DashboardPage() {
           <StatCard title="Sales Revenue" value={isLoading ? "—" : compactMoney(revenue)} valueTitle={isLoading ? undefined : money(revenue)} icon={DollarSign} iconClass="text-emerald-600" iconBackground="bg-emerald-50" trend={<Trend current={revenue} previous={previousRevenue} />} testId="stat-sales-revenue" />
           <StatCard title="Avg Order Value" value={isLoading ? "—" : compactMoney(avgOrderValue)} valueTitle={isLoading ? undefined : money(avgOrderValue)} icon={TrendingUp} iconClass="text-purple-600" iconBackground="bg-purple-50" trend={<Trend current={avgOrderValue} previous={previousAvgOrderValue} />} testId="stat-avg-order-value" />
           <StatCard title="Pending Audits" value={auditKpis?.skusToAudit == null ? "—" : compactNumber(auditKpis.skusToAudit)} valueTitle={auditKpis?.skusToAudit == null ? undefined : auditKpis.skusToAudit.toLocaleString()} icon={ClipboardCheck} iconClass="text-amber-600" iconBackground="bg-amber-50" trend="Needs review" trendTone="neutral" testId="stat-pending-audits" />
-          <StatCard title="Inventory Pushes" value={isLoading ? "—" : compactNumber(totalPushes)} valueTitle={isLoading ? undefined : totalPushes.toLocaleString()} icon={Package} iconClass="text-blue-600" iconBackground="bg-blue-50" trend={<Trend current={totalPushes} previous={previousPushLogs.length} />} testId="stat-inventory-pushes" />
+          <StatCard title="Inventory Pushes" value={isLoading ? "—" : compactNumber(totalPushes)} valueTitle={isLoading ? undefined : totalPushes.toLocaleString()} icon={Package} iconClass="text-cyan-600" iconBackground="bg-cyan-50" trend={<Trend current={totalPushes} previous={previousPushLogs.length} />} testId="stat-inventory-pushes" />
           <StatCard title="Sync Issues" value={isLoading ? "—" : compactNumber(failed)} valueTitle={isLoading ? undefined : failed.toLocaleString()} icon={AlertCircle} iconClass="text-red-600" iconBackground="bg-red-50" trend={<Trend current={failed} previous={0} invert />} trendTone="negative" testId="stat-sync-issues" />
         </section>
 
         <section className="grid w-full min-w-0 gap-4 lg:grid-cols-[0.96fr_1.04fr]">
           <Card className="w-full min-w-0 rounded-2xl border-slate-200 bg-white p-3 shadow-none sm:p-4">
             <div className="mb-3 flex items-center gap-2 px-1">
-              <AlertCircle className="h-4 w-4 text-amber-500" />
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 text-amber-600" aria-hidden="true">
+                <AlertCircle className="h-4 w-4" strokeWidth={1.8} />
+              </span>
               <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Needs Attention</h3>
             </div>
             <div className="space-y-2">
@@ -494,7 +499,12 @@ export default function DashboardPage() {
 
           <Card className="w-full min-w-0 rounded-2xl border-slate-200 bg-white p-3 shadow-none sm:p-4">
             <div className="mb-2 flex items-center justify-between px-1">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Sales Overview</h3>
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-blue-600" aria-hidden="true">
+                  <BarChart3 className="h-4 w-4" strokeWidth={1.8} />
+                </span>
+                <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Sales Overview</h3>
+              </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm" className="h-8 gap-1 rounded-md border-slate-200 px-2.5 text-[10px] font-medium">
@@ -537,7 +547,12 @@ export default function DashboardPage() {
         <section className="grid gap-4 lg:grid-cols-2">
           <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-none">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Recent Orders</h3>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-600" aria-hidden="true">
+                  <ShoppingBag className="h-4 w-4" strokeWidth={1.8} />
+                </span>
+                <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Recent Orders</h3>
+              </div>
               <button type="button" onClick={() => setLocation("/orders/list")} className="flex items-center gap-1 text-[11px] font-medium text-blue-600" data-testid="link-recent-orders">
                 View Sales History <ArrowUpRight className="h-3.5 w-3.5" />
               </button>
@@ -561,7 +576,12 @@ export default function DashboardPage() {
 
           <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-none">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Inventory Activity</h3>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600" aria-hidden="true">
+                  <Package className="h-4 w-4" strokeWidth={1.8} />
+                </span>
+                <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Inventory Activity</h3>
+              </div>
               <button type="button" onClick={() => setLocation("/inventory/logs")} className="flex items-center gap-1 text-[11px] font-medium text-blue-600" data-testid="link-inventory-logs">
                 View Inventory Logs <ArrowUpRight className="h-3.5 w-3.5" />
               </button>
@@ -589,9 +609,11 @@ export default function DashboardPage() {
         </section>
 
         <Card className="rounded-2xl border-slate-200 bg-white p-3 shadow-none sm:p-4">
-          <div className="mb-3 flex items-center justify-between px-1">
+          <div className="mb-3 flex items-center gap-2 px-1">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-indigo-600" aria-hidden="true">
+              <FileBarChart className="h-4 w-4" strokeWidth={1.8} />
+            </span>
             <h3 className="text-xs font-bold uppercase tracking-wide text-slate-800">Quick Actions</h3>
-            <FileBarChart className="h-4 w-4 text-slate-300" />
           </div>
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
             {quickActions.map((action) => <QuickAction key={action.path} {...action} />)}
