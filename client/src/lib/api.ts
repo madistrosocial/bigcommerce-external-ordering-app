@@ -205,6 +205,17 @@ export interface DropshipDashboardBrand {
   yesterday: number;
   thisMonth: number;
   total: number;
+  ordersToday?: DropshipDashboardOrder[];
+}
+
+export interface DropshipDashboardOrder {
+  bigcommerce_order_id: number;
+  order_number: number;
+  customer_name: string | null;
+  customer_email: string | null;
+  status: string | null;
+  order_date: string | null;
+  order_total: string | null;
 }
 
 export interface DropshipDashboard {

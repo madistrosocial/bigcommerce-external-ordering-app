@@ -16,6 +16,16 @@ export type AttendanceBreakInterval = {
   duration_seconds: number | null;
 };
 
+export interface DropshipDashboardOrder {
+  bigcommerce_order_id: number;
+  order_number: number;
+  customer_name: string | null;
+  customer_email: string | null;
+  status: string | null;
+  order_date: Date | null;
+  order_total: string | null;
+}
+
 const MARKETING_US_STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
   CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
@@ -74,7 +84,7 @@ export interface IStorage {
   updateOrderNote(id: number, note: string): Promise<void>;
   updateOrderCustomerNote(id: number, customerNote: string): Promise<void>;
   getConsolidatedOrders(params: { page: number; limit: number; search?: string; createdBy?: number | null; syncStatus?: string; bcStatus?: string; dateFrom?: Date | null; dateTo?: Date | null; brandId?: number | null; brandProductIds?: number[]; salesChannel?: "salesapp" | "allorders"; }): Promise<{ orders: any[]; total: number; kpis: { total: number; revenue: number; successful: number; pending: number; failed: number; completed: number; awaitingFulfillment: number; cancelled: number; }; }>;
-  getDropshipBrandOrderStats(productIdsByBrandId: Record<number, number[]>, dateRanges: { todayStart: Date; tomorrowStart: Date; yesterdayStart: Date; monthStart: Date; }): Promise<Record<number, { today: number; yesterday: number; thisMonth: number; total: number }>>;
+  getDropshipBrandOrderStats(productIdsByBrandId: Record<number, number[]>, dateRanges: { todayStart: Date; tomorrowStart: Date; yesterdayStart: Date; monthStart: Date; }, includeTodayOrders?: boolean): Promise<Record<number, { today: number; yesterday: number; thisMonth: number; total: number; ordersToday?: DropshipDashboardOrder[] }>>;
   getOrderDetail(id: number): Promise<any | null>;
   updateOrderSyncError(id: number, error: string): Promise<void>;
   updateOrderForSubmission(id: number, updates: { bigcommerce_customer_id: number; billing_address: any; status: string }): Promise<void>;
@@ -980,7 +990,8 @@ export class DatabaseStorage implements IStorage {
   async getDropshipBrandOrderStats(
     productIdsByBrandId: Record<number, number[]>,
     dateRanges: { todayStart: Date; tomorrowStart: Date; yesterdayStart: Date; monthStart: Date },
-  ): Promise<Record<number, { today: number; yesterday: number; thisMonth: number; total: number }>> {
+    includeTodayOrders = false,
+  ): Promise<Record<number, { today: number; yesterday: number; thisMonth: number; total: number; ordersToday?: DropshipDashboardOrder[] }>> {
     const brandProductQueries = Object.entries(productIdsByBrandId)
       .filter(([, productIds]) => productIds.length > 0)
       .map(([brandId, productIds]) => sql`
@@ -1014,12 +1025,94 @@ export class DatabaseStorage implements IStorage {
       GROUP BY bp.brand_id
     `);
 
-    return Object.fromEntries((result.rows as any[]).map((row) => [Number(row.brandId), {
+    const brandStats = Object.fromEntries((result.rows as any[]).map((row) => [Number(row.brandId), {
       today: Number(row.today ?? 0),
       yesterday: Number(row.yesterday ?? 0),
       thisMonth: Number(row.thisMonth ?? 0),
       total: Number(row.total ?? 0),
     }]));
+
+    if (!includeTodayOrders) return brandStats;
+
+    const recentOrders = await db.execute(sql`
+      WITH brand_products AS (${brandProducts}),
+      brand_orders AS (
+        SELECT
+          bp.brand_id,
+          li.bigcommerce_order_id,
+          COALESCE(com.order_number, li.bigcommerce_order_id)::int AS order_number,
+          COALESCE(com.customer_name, o.customer_name, MAX(li.customer_name)) AS customer_name,
+          COALESCE(com.customer_email, o.customer_email, MAX(li.customer_email)) AS customer_email,
+          com.status,
+          COALESCE(com.order_date, o.date, MAX(li.order_date)) AS order_date,
+          COALESCE(com.order_total, o.total)::text AS order_total
+        FROM brand_products bp
+        INNER JOIN bc_order_line_items li
+          ON li.bigcommerce_product_id = bp.product_id
+        LEFT JOIN customer_orders_mirror com
+          ON com.bigcommerce_order_id = li.bigcommerce_order_id
+        LEFT JOIN orders o
+          ON o.bigcommerce_order_id = li.bigcommerce_order_id
+        WHERE li.order_date >= ${dateRanges.todayStart}
+          AND li.order_date < ${dateRanges.tomorrowStart}
+        GROUP BY
+          bp.brand_id, li.bigcommerce_order_id,
+          com.order_number, com.customer_name, com.customer_email,
+          com.status, com.order_date, com.order_total,
+          o.customer_name, o.customer_email, o.date, o.total
+      ),
+      ranked_orders AS (
+        SELECT
+          brand_orders.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY brand_id
+            ORDER BY order_date DESC NULLS LAST, bigcommerce_order_id DESC
+          ) AS order_rank
+        FROM brand_orders
+      )
+      SELECT
+        brand_id AS "brandId",
+        bigcommerce_order_id AS "bigcommerceOrderId",
+        order_number AS "orderNumber",
+        customer_name AS "customerName",
+        customer_email AS "customerEmail",
+        status,
+        order_date AS "orderDate",
+        order_total AS "orderTotal"
+      FROM ranked_orders
+      WHERE order_rank <= 10
+      ORDER BY brand_id, order_rank
+    `);
+
+    const statsWithOrders = brandStats as Record<number, {
+      today: number;
+      yesterday: number;
+      thisMonth: number;
+      total: number;
+      ordersToday: DropshipDashboardOrder[];
+    }>;
+    for (const row of recentOrders.rows as any[]) {
+      const brandId = Number(row.brandId);
+      const brand = statsWithOrders[brandId] ??= {
+        today: 0,
+        yesterday: 0,
+        thisMonth: 0,
+        total: 0,
+        ordersToday: [],
+      };
+      brand.ordersToday ??= [];
+      brand.ordersToday.push({
+        bigcommerce_order_id: Number(row.bigcommerceOrderId),
+        order_number: Number(row.orderNumber),
+        customer_name: row.customerName ?? null,
+        customer_email: row.customerEmail ?? null,
+        status: row.status ?? null,
+        order_date: row.orderDate ? new Date(row.orderDate) : null,
+        order_total: row.orderTotal == null ? null : String(row.orderTotal),
+      });
+    }
+
+    return statsWithOrders;
   }
 
   async getOrderDetail(id: number): Promise<any | null> {

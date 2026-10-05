@@ -31,6 +31,19 @@ function dateLabel(value: string, timezone: string) {
   }).format(date);
 }
 
+function formatOrderTotal(value: string | null) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value));
+}
+
+function orderStatusClass(status: string | null) {
+  const value = status?.toLowerCase() ?? "";
+  if (/cancel|declin|refund|disput/.test(value)) return "border-red-200 bg-red-50 text-red-700";
+  if (/complete|ship/.test(value)) return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (/await|pending|payment|incomplete/.test(value)) return "border-amber-200 bg-amber-50 text-amber-800";
+  return "border-slate-200 bg-slate-50 text-slate-600";
+}
+
 export default function DropshipDashboardPage() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
@@ -209,6 +222,77 @@ export default function DropshipDashboardPage() {
                         <span className="mt-0.5 block text-[10px] text-slate-400">{metricLabels[key].caption}</span>
                       </button>
                     ))}
+                  </div>
+
+                  <div className="mt-4 border-t border-slate-100 pt-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-xs font-semibold text-slate-800">Today’s orders</h3>
+                      {canViewOrders && (
+                        <span className="text-[10px] text-slate-400">
+                          Top {Math.min(10, brand.today)}{brand.today > 10 ? ` of ${brand.today}` : ""}
+                        </span>
+                      )}
+                    </div>
+                    {!canViewOrders ? (
+                      <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                        Customer order details require Orders → View permission.
+                      </p>
+                    ) : brand.ordersToday && brand.ordersToday.length > 0 ? (
+                      <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200">
+                        <table className="w-full min-w-[540px] text-left text-[10px]">
+                          <thead className="bg-slate-50 text-[9px] uppercase tracking-wide text-slate-500">
+                            <tr>
+                              <th className="px-2 py-2 font-semibold">Order #</th>
+                              <th className="px-2 py-2 font-semibold">Customer</th>
+                              <th className="px-2 py-2 font-semibold">Status</th>
+                              <th className="px-2 py-2 font-semibold">Date</th>
+                              <th className="px-2 py-2 text-right font-semibold">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {brand.ordersToday.map((order) => (
+                              <tr key={order.bigcommerce_order_id} className="align-top hover:bg-blue-50/40">
+                                <td className="whitespace-nowrap px-2 py-2">
+                                  <button
+                                    type="button"
+                                    className="font-semibold text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                                    onClick={() => setLocation(`/orders/bc/${order.bigcommerce_order_id}`)}
+                                    aria-label={`Open BigCommerce order ${order.order_number}`}
+                                  >
+                                    #{order.order_number}
+                                  </button>
+                                </td>
+                                <td className="max-w-[150px] px-2 py-2">
+                                  <span className="block truncate font-medium text-slate-800">{order.customer_name || order.customer_email || "Unknown customer"}</span>
+                                  {order.customer_name && (
+                                    <span className="mt-0.5 block truncate text-slate-400">{order.customer_email || "Email unavailable"}</span>
+                                  )}
+                                </td>
+                                <td className="px-2 py-2">
+                                  <span className={`inline-flex max-w-[115px] rounded border px-1.5 py-0.5 font-medium leading-tight ${orderStatusClass(order.status)}`}>
+                                    <span className="truncate">{order.status || "Unknown"}</span>
+                                  </span>
+                                </td>
+                                <td className="whitespace-nowrap px-2 py-2 text-slate-600" title={order.order_date ? fmt.dateTime(order.order_date) : undefined}>
+                                  {order.order_date ? fmt.dateTimeShort(order.order_date) : "—"}
+                                </td>
+                                <td className="whitespace-nowrap px-2 py-2 text-right font-semibold tabular-nums text-slate-800">
+                                  {formatOrderTotal(order.order_total)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : brand.today > 0 ? (
+                      <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        Order details for today are not available in the synced order records yet.
+                      </p>
+                    ) : (
+                      <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                        No orders today.
+                      </p>
+                    )}
                   </div>
                 </CardContent>
               </Card>

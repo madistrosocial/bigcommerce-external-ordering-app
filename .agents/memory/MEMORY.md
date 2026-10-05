@@ -34,6 +34,7 @@
 - [Kole Product Sync safety contract](kole-product-sync-safety.md) — preserve selected-field writes, inventory tracking guards, and append-only watermarked image sync.
 - [Kole feed draft pricing](kole-feed-draft-pricing.md) — selected drafts use an editable 20%-over-MOQ price suggestion and require a real BigCommerce category.
 - [Dropship brand dashboard counts](dropship-brand-dashboard-counts.md) — resolve BigCommerce brand products directly; count distinct synced line-item orders, not just locally pinned products.
+- [Dropship dashboard order privacy](dropship-dashboard-order-privacy.md) — keep customer and order details server-gated by Orders → View while leaving brand summary counts available.
 - [Dropshipping display labels](dropshipping-display-labels.md) — keep provider names/domains out of labels, errors, sync logs, and other staff-facing copy.
 - [ShipStation dropship automation](shipstation-dropship-automation.md) — product tags can flow to order tags, but shipment splitting needs separate product or routing configuration.
 - [GitHub push authentication](github-push-auth.md) — Git HTTPS push may reject the installed GitHub integration; use its authenticated Git data API for branch-only updates.

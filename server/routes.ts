@@ -7009,11 +7009,21 @@ export async function registerRoutes(
         ] as [number, number[]]));
         for (const [brandId, productIds] of batch) productIdsByBrandId[brandId] = productIds;
       }
-      const statsByBrandId = await storage.getDropshipBrandOrderStats(productIdsByBrandId, dateRanges);
-      const pinnedBrands = pins.map((brand) => ({
-        ...brand,
-        ...(statsByBrandId[brand.id] ?? { today: 0, yesterday: 0, thisMonth: 0, total: 0 }),
-      }));
+      const canViewOrderDetails = authUser.role === "admin"
+        || (await storage.getUserPermissionStrings(authUser.id)).includes("orders:view");
+      const statsByBrandId = await storage.getDropshipBrandOrderStats(
+        productIdsByBrandId,
+        dateRanges,
+        canViewOrderDetails,
+      );
+      const pinnedBrands = pins.map((brand) => {
+        const stats = statsByBrandId[brand.id] ?? { today: 0, yesterday: 0, thisMonth: 0, total: 0 };
+        return {
+          ...brand,
+          ...stats,
+          ...(canViewOrderDetails ? { ordersToday: stats.ordersToday ?? [] } : {}),
+        };
+      });
       const [lineItemCount, lastFullSync, lastIncrementalSync, autoSyncSetting] = await Promise.all([
         storage.getBcOrderLineItemsCount(),
         storage.getSetting("crm_last_line_items_sync"),
