@@ -191,7 +191,7 @@ export default function StoreCreditLedger() {
       const products = (r.products ?? []).map((p: any) => `${p.qty}x ${p.name}`).join("; ");
       const total = (parseFloat(r.amount ?? "0") + parseFloat(r.tax ?? "0")).toFixed(2);
       return [
-        new Date(r.created_at).toLocaleDateString(),
+        fmt.date(r.created_at),
         r.customer_name ?? "",
         r.bigcommerce_order_id ?? r.order_id ?? "",
         r.type,

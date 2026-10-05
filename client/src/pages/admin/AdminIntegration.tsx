@@ -7,11 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { useUpdateTimezone } from "@/contexts/TimezoneContext";
 import { Loader2, CheckCircle2, AlertCircle, Plug, ExternalLink, CalendarClock, ImageIcon, Trash2, Upload, Globe, Layers } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function AdminIntegrationPage() {
   const { toast } = useToast();
+  const updateAppTimezone = useUpdateTimezone();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -760,6 +762,7 @@ export default function AdminIntegrationPage() {
                       body: JSON.stringify({ timezone }),
                     });
                     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Could not save timezone");
+                    updateAppTimezone(timezone);
                     toast({ title: "Timezone saved", description: `All timestamps will now display in ${timezone}.` });
                   } catch (err: any) {
                     toast({ title: "Save failed", description: err.message, variant: "destructive" });

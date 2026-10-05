@@ -564,7 +564,7 @@ export default function OrdersList() {
           o.is_bc_mirror ? "BigCommerce" : "Sales App",
           o.status,
           o.bc_status || "",
-          o.date ? new Date(o.date).toLocaleDateString() : "",
+          o.date ? fmt.date(o.date) : "",
           Number(o.total).toFixed(2),
           items,
           o.created_by_name || "",
@@ -572,7 +572,7 @@ export default function OrdersList() {
       });
 
       const headers = ["Order #", "Customer", "Email", "Channel", "Status", "BC Status", "Date", "Total", "Items", "Created By"];
-      const dateStr = new Date().toISOString().slice(0, 10);
+      const dateStr = fmt.dateOnly();
       const filename = `sales-history-${dateStr}.${format}`;
 
       if (format === "csv") {

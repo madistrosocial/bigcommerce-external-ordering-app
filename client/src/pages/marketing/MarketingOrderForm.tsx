@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useTimeService } from "@/hooks/useTimeService";
 import { useLocation } from "wouter";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
@@ -403,7 +404,8 @@ function SelectedProductCard({ product, onRemove }: { product: OrderFormProduct;
 }
 
 function HistoryRow({ entry }: { entry: any }) {
+  const fmt = useTimeService();
   const sent = entry.status === "sent";
   const failed = entry.status === "failed";
-  return <div className="rounded-lg border p-3"><div className="flex items-start gap-3"><span className={`mt-0.5 rounded-full p-1.5 ${sent ? "bg-emerald-50 text-emerald-600" : failed ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-600"}`}>{sent ? <CheckCircle2 className="h-4 w-4" /> : failed ? <XCircle className="h-4 w-4" /> : <Loader2 className="h-4 w-4 animate-spin" />}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-800">{entry.customer_name}</p><p className="truncate text-xs text-slate-500">{entry.recipient_email} · {entry.product_count} product{entry.product_count === 1 ? "" : "s"} · {String(entry.file_format || "xlsx").toUpperCase()}</p>{failed && <p className="mt-1 text-xs text-red-600">{entry.failure_reason || "Send failed"}</p>}</div><span className={`text-xs font-semibold ${sent ? "text-emerald-600" : failed ? "text-red-600" : "text-amber-600"}`}>{sent ? "Sent" : failed ? "Failed" : "Pending"}</span></div><p className="mt-2 text-[11px] text-slate-400">{entry.sent_at ? new Date(entry.sent_at).toLocaleString() : new Date(entry.created_at).toLocaleString()} · {entry.created_by}</p></div>;
+  return <div className="rounded-lg border p-3"><div className="flex items-start gap-3"><span className={`mt-0.5 rounded-full p-1.5 ${sent ? "bg-emerald-50 text-emerald-600" : failed ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-600"}`}>{sent ? <CheckCircle2 className="h-4 w-4" /> : failed ? <XCircle className="h-4 w-4" /> : <Loader2 className="h-4 w-4 animate-spin" />}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-800">{entry.customer_name}</p><p className="truncate text-xs text-slate-500">{entry.recipient_email} · {entry.product_count} product{entry.product_count === 1 ? "" : "s"} · {String(entry.file_format || "xlsx").toUpperCase()}</p>{failed && <p className="mt-1 text-xs text-red-600">{entry.failure_reason || "Send failed"}</p>}</div><span className={`text-xs font-semibold ${sent ? "text-emerald-600" : failed ? "text-red-600" : "text-amber-600"}`}>{sent ? "Sent" : failed ? "Failed" : "Pending"}</span></div><p className="mt-2 text-[11px] text-slate-400">{entry.sent_at ? fmt.dateTime(entry.sent_at) : fmt.dateTime(entry.created_at)} · {entry.created_by}</p></div>;
 }

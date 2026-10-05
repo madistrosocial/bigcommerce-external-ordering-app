@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, FileText, Loader2, Mail, Package,
 import { useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { useTimeService } from "@/hooks/useTimeService";
 import { getMarketingDeliveryLog, getMarketingDeliveryLogs } from "@/lib/api";
 import { PageShell } from "./Marketing";
 
@@ -18,6 +19,7 @@ function readLogFilters(location: string) {
 }
 
 export default function MarketingLog({ detailId }: { detailId?: number }) {
+  const fmt = useTimeService();
   const [location, setLocation] = useLocation();
   const initial = readLogFilters(location);
   const [type, setType] = useState<DeliveryType>(initial.type);
@@ -77,7 +79,7 @@ export default function MarketingLog({ detailId }: { detailId?: number }) {
           <span className="flex items-center gap-1.5 text-xs font-medium text-slate-600">{row.delivery_type === "campaign" ? <Mail className="h-3.5 w-3.5 text-blue-500" /> : <FileText className="h-3.5 w-3.5 text-violet-500" />}{row.delivery_type === "campaign" ? "Campaign" : "Order Form"}</span>
           <span className="min-w-0"><span className="block truncate text-sm font-medium text-slate-800">{row.customer_name || row.recipient_email}</span><span className="block truncate text-xs text-slate-500">{row.customer_email || row.recipient_email}</span></span>
           <span className="min-w-0 truncate text-xs text-slate-600">{Array.isArray(row.product_titles) && row.product_titles.length ? row.product_titles.join(" · ") : "No product titles recorded"}</span>
-          <span className="text-xs text-slate-500">{row.sent_at ? new Date(row.sent_at).toLocaleString() : "—"}</span>
+          <span className="text-xs text-slate-500">{row.sent_at ? fmt.dateTime(row.sent_at) : "—"}</span>
           <span className="truncate text-xs text-slate-500">{row.initiated_by_name || "Unknown user"}</span>
         </button>)}</div> :
         <p className="p-12 text-center text-sm text-slate-400">No sent delivery logs match this filter.</p>}
@@ -95,13 +97,14 @@ export function MarketingLogRoute() {
 }
 
 function DeliveryLogDetail({ log }: { log: any }) {
+  const fmt = useTimeService();
   return <div className="grid gap-5 lg:grid-cols-[1fr_1.4fr]">
     <section className="rounded-xl border bg-white p-5 shadow-sm">
       <div className="flex items-center gap-3"><span className="rounded-lg bg-blue-50 p-3 text-blue-600">{log.delivery_type === "campaign" ? <Mail className="h-5 w-5" /> : <FileText className="h-5 w-5" />}</span><div><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Log #{log.id}</p><h2 className="text-lg font-semibold text-slate-900">{log.delivery_type === "campaign" ? "Campaign delivery" : "Order Form delivery"}</h2></div></div>
       <dl className="mt-6 space-y-4 text-sm">
         <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">Receiver</dt><dd className="mt-1 font-medium text-slate-800">{log.customer_name || log.recipient_email}</dd><dd className="text-xs text-slate-500">{log.customer_email || log.recipient_email}</dd></div>
         {log.campaign_name && <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">Campaign</dt><dd className="mt-1 text-slate-800">{log.campaign_name}</dd></div>}
-        <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">Date sent</dt><dd className="mt-1 text-slate-800">{log.sent_at ? new Date(log.sent_at).toLocaleString() : "—"}</dd></div>
+        <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">Date sent</dt><dd className="mt-1 text-slate-800">{log.sent_at ? fmt.dateTime(log.sent_at) : "—"}</dd></div>
         <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">Initiated by</dt><dd className="mt-1 flex items-center gap-1.5 text-slate-800"><User className="h-3.5 w-3.5 text-slate-400" />{log.initiated_by_name || "Unknown user"}</dd></div>
       </dl>
     </section>

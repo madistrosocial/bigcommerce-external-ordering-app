@@ -38,16 +38,6 @@ import {
   Upload,
   UsersRound,
 } from "lucide-react";
-import {
-  startOfDay,
-  startOfMonth,
-  startOfWeek,
-  startOfYear,
-  subDays,
-  subMonths,
-  subWeeks,
-  subYears,
-} from "date-fns";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,6 +47,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTimeService } from "@/hooks/useTimeService";
+import { dateOnlyInTimeZone, parseDateTimeLocal } from "@shared/timezone";
 
 type Period = "day" | "week" | "month" | "year" | "all";
 
@@ -68,23 +59,65 @@ const PERIOD_LABELS: Record<Period, string> = {
   all: "All Time",
 };
 
-function getPeriodStart(period: Period): Date | null {
-  const now = new Date();
+function shiftDateOnly(value: string, days: number): string {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days, 12)).toISOString().slice(0, 10);
+}
+
+function nextMonthStart(value: string): string {
+  const [year, month] = value.slice(0, 7).split("-").map(Number);
+  return new Date(Date.UTC(year, month, 1, 12)).toISOString().slice(0, 10);
+}
+
+function startOfWeekDate(value: string): string {
+  const weekday = new Date(`${value}T12:00:00.000Z`).getUTCDay();
+  return shiftDateOnly(value, -((weekday + 6) % 7));
+}
+
+function startDateForPeriod(period: Period, timezone: string, now = new Date()): string | null {
+  const today = dateOnlyInTimeZone(now, timezone);
   switch (period) {
-    case "day": return startOfDay(now);
-    case "week": return startOfWeek(now, { weekStartsOn: 1 });
-    case "month": return startOfMonth(now);
-    case "year": return startOfYear(now);
+    case "day": return today;
+    case "week": return startOfWeekDate(today);
+    case "month": return `${today.slice(0, 7)}-01`;
+    case "year": return `${today.slice(0, 4)}-01-01`;
     case "all": return null;
   }
+}
+
+function zonedMidnight(date: string, timezone: string): Date | null {
+  return parseDateTimeLocal(`${date}T00:00`, timezone);
+}
+
+function getPeriodStart(period: Period, timezone: string, now = new Date()): Date | null {
+  const date = startDateForPeriod(period, timezone, now);
+  return date ? zonedMidnight(date, timezone) : null;
+}
+
+function previousStartDate(period: Period, timezone: string, now = new Date()): string | null {
+  const currentStart = startDateForPeriod(period, timezone, now);
+  if (!currentStart) return null;
+  if (period === "day") return shiftDateOnly(currentStart, -1);
+  if (period === "week") return shiftDateOnly(currentStart, -7);
+  if (period === "month") {
+    const previousMonthDate = shiftDateOnly(currentStart, -1);
+    return `${previousMonthDate.slice(0, 7)}-01`;
+  }
+  return `${Number(currentStart.slice(0, 4)) - 1}-01-01`;
+}
+
+function getPreviousPeriodStart(period: Period, timezone: string, now = new Date()): Date | null {
+  const date = previousStartDate(period, timezone, now);
+  return date ? zonedMidnight(date, timezone) : null;
 }
 
 function filterByPeriod<T extends { date?: any; created_at?: any }>(
   items: T[],
   period: Period,
+  timezone: string,
   dateKey: "date" | "created_at" = "date",
 ): T[] {
-  const start = getPeriodStart(period);
+  const start = getPeriodStart(period, timezone);
   if (!start) return items;
   return items.filter((item) => {
     const value = item[dateKey];
@@ -92,24 +125,14 @@ function filterByPeriod<T extends { date?: any; created_at?: any }>(
   });
 }
 
-function getPreviousPeriodStart(period: Period): Date | null {
-  const now = new Date();
-  switch (period) {
-    case "day": return subDays(startOfDay(now), 1);
-    case "week": return subWeeks(startOfWeek(now, { weekStartsOn: 1 }), 1);
-    case "month": return subMonths(startOfMonth(now), 1);
-    case "year": return subYears(startOfYear(now), 1);
-    case "all": return null;
-  }
-}
-
 function filterByPreviousPeriod<T extends { date?: any; created_at?: any }>(
   items: T[],
   period: Period,
+  timezone: string,
   dateKey: "date" | "created_at" = "date",
 ): T[] {
-  const currentStart = getPeriodStart(period);
-  const previousStart = getPreviousPeriodStart(period);
+  const currentStart = getPeriodStart(period, timezone);
+  const previousStart = getPreviousPeriodStart(period, timezone);
   if (!currentStart || !previousStart) return [];
   return items.filter((item) => {
     const value = item[dateKey];
@@ -143,15 +166,6 @@ function compactNumber(value: number): string {
 
 function compactMoney(value: number): string {
   return Math.abs(value) < 1_000 ? money(value) : `$${compactNumber(value)}`;
-}
-
-function shortDate(value: any): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
 }
 
 interface StatCardProps {
@@ -322,10 +336,10 @@ export default function DashboardPage() {
   });
 
   const isLoading = ordersLoading || logsLoading;
-  const orders = filterByPeriod(allOrders as any[], period, "date") as Order[];
-  const pushLogs = filterByPeriod(allPushLogs as any[], period, "created_at");
-  const previousOrders = filterByPreviousPeriod(allOrders as any[], period, "date") as Order[];
-  const previousPushLogs = filterByPreviousPeriod(allPushLogs as any[], period, "created_at");
+  const orders = filterByPeriod(allOrders as any[], period, fmt.tz, "date") as Order[];
+  const pushLogs = filterByPeriod(allPushLogs as any[], period, fmt.tz, "created_at");
+  const previousOrders = filterByPreviousPeriod(allOrders as any[], period, fmt.tz, "date") as Order[];
+  const previousPushLogs = filterByPreviousPeriod(allPushLogs as any[], period, fmt.tz, "created_at");
 
   const syncedOrders = orders.filter((order) => order.status === "synced");
   const previousSyncedOrders = previousOrders.filter((order) => order.status === "synced");
@@ -358,43 +372,40 @@ export default function DashboardPage() {
     if (period === "all") {
       const byMonth = new Map<string, number>();
       validOrders.forEach((order) => {
-        const date = new Date(order.date!);
-        const key = `${date.getFullYear()}-${date.getMonth()}`;
+        const key = dateOnlyInTimeZone(new Date(order.date!), fmt.tz).slice(0, 7);
         byMonth.set(key, (byMonth.get(key) ?? 0) + parseFloat(String(order.total ?? "0")));
       });
       return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).slice(-12).map(([key, value]) => {
-        const [year, month] = key.split("-").map(Number);
-        return { label: new Date(year, month, 1).toLocaleDateString("en-US", { month: "short" }), value };
+        const date = new Date(`${key}-01T12:00:00.000Z`);
+        const label = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" }).format(date);
+        return { label, value };
       });
     }
 
-    const start = getPeriodStart(period) ?? startOfMonth(new Date());
-    const end = new Date();
+    const today = dateOnlyInTimeZone(new Date(), fmt.tz);
+    let cursorDate = startDateForPeriod(period, fmt.tz) ?? `${today.slice(0, 7)}-01`;
     const step = period === "year" ? "month" : "day";
     const points: { label: string; value: number }[] = [];
-    const cursor = new Date(start);
-    while (cursor <= end && points.length < 32) {
-      const pointStart = new Date(cursor);
-      const pointEnd = new Date(cursor);
-      if (step === "month") pointEnd.setMonth(pointEnd.getMonth() + 1);
-      else pointEnd.setDate(pointEnd.getDate() + 1);
+    while (cursorDate <= today && points.length < 32) {
+      const pointEndDate = step === "month" ? nextMonthStart(cursorDate) : shiftDateOnly(cursorDate, 1);
       const value = validOrders
         .filter((order) => {
-          const date = new Date(order.date!);
-          return date >= pointStart && date < pointEnd;
+          const orderDate = dateOnlyInTimeZone(new Date(order.date!), fmt.tz);
+          return orderDate >= cursorDate && orderDate < pointEndDate;
         })
         .reduce((sum, order) => sum + parseFloat(String(order.total ?? "0")), 0);
+      const date = new Date(`${cursorDate}T12:00:00.000Z`);
+      const label = step === "month"
+        ? new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" }).format(date)
+        : new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(date);
       points.push({
-        label: step === "month"
-          ? pointStart.toLocaleDateString("en-US", { month: "short" })
-          : pointStart.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        label,
         value,
       });
-      if (step === "month") cursor.setMonth(cursor.getMonth() + 1);
-      else cursor.setDate(cursor.getDate() + 1);
+      cursorDate = pointEndDate;
     }
     return points;
-  }, [period, syncedOrders]);
+  }, [period, syncedOrders, fmt.tz]);
 
   const chartTickInterval = chartData.length > 12 ? Math.ceil(chartData.length / 6) - 1 : 0;
   const attention = [
@@ -566,7 +577,7 @@ export default function DashboardPage() {
                 <button key={order.id} type="button" onClick={() => openRecentOrder(order)} className="grid w-full grid-cols-[1fr_auto] items-center gap-2 px-4 py-3 text-left hover:bg-slate-50 sm:grid-cols-[70px_1fr_88px_72px_72px]" data-testid={`dashboard-order-${order.id}`}>
                   <span className="min-w-0 truncate text-[11px] font-medium text-slate-700 sm:text-xs">#{order.bigcommerce_order_id ?? order.id}</span>
                   <span className="min-w-0 truncate text-right text-[11px] text-slate-700 sm:text-left sm:text-xs">{order.customer_name || "Unknown Customer"}</span>
-                  <span className="hidden text-[10px] text-slate-500 sm:block">{shortDate(order.date)}</span>
+                  <span className="hidden text-[10px] text-slate-500 sm:block">{fmt.dateShort(order.date)}</span>
                   <span className="col-span-2 text-right text-[11px] font-semibold text-slate-800 sm:col-span-1 sm:text-left">{order.total ? money(parseFloat(String(order.total))) : "—"}</span>
                   <span className="hidden justify-self-start rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-semibold text-emerald-700 sm:inline-block">{order.status === "pending_sync" ? "Pending Sync" : order.status === "failed" ? "Failed" : order.status === "draft" ? "Draft" : "Completed"}</span>
                 </button>

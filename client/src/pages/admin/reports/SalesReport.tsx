@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { getAuthHeaders } from "@/lib/api";
+import { useTimeService } from "@/hooks/useTimeService";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -320,18 +321,6 @@ function fmtCurrency(n: number | null | undefined): string {
   return Number(n).toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
-function fmtDate(d: string | null | undefined): string {
-  if (!d) return "—";
-  try { return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
-  catch { return String(d); }
-}
-
-function fmtDateTime(d: string | null | undefined): string {
-  if (!d) return "—";
-  try { return new Date(d).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
-  catch { return String(d); }
-}
-
 function toDisplayDate(iso: string): string {
   if (!iso) return "";
   const [y, m, day] = iso.split("-");
@@ -401,20 +390,12 @@ function BcStatusBadge({ status }: { status: string | null | undefined }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function SalesReport() {
+  const fmt = useTimeService();
   const searchRef = useRef<HTMLInputElement>(null);
 
   // ── Filter state (live editing) ──────────────────────────────────────────
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    return `${d.getFullYear()}-${month}-01`;
-  });
-  const [dateTo, setDateTo] = useState(() => {
-    const d = new Date();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${d.getFullYear()}-${month}-${day}`;
-  });
+  const [dateFrom, setDateFrom] = useState(() => `${fmt.dateOnly().slice(0, 7)}-01`);
+  const [dateTo, setDateTo] = useState(() => fmt.dateOnly());
   const [selectedBrandId, setSelectedBrandId] = useState("");
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [productSearch, setProductSearch] = useState("");
@@ -589,7 +570,7 @@ export default function SalesReport() {
         : ["Product", "Brand", "Variant", "SKU", "Order #", "Customer", "Qty", "Unit Price", "Date", "BC Status"];
       const csvRows = activeView === "summary"
         ? rows.map(r => [r.product_name, r.brand_name, r.variant_label ?? "", r.sku, r.qty_sold, r.current_stock])
-        : rows.map(r => [r.product_name, r.brand_name, r.variant_label ?? "", r.sku, r.display_order_number ?? r.order_number, r.customer_name, r.quantity, r.unit_price, fmtDate(String(r.order_date ?? "")), r.bc_status ?? ""]);
+        : rows.map(r => [r.product_name, r.brand_name, r.variant_label ?? "", r.sku, r.display_order_number ?? r.order_number, r.customer_name, r.quantity, r.unit_price, fmt.date(String(r.order_date ?? "")), r.bc_status ?? ""]);
       const csv = [hdrs, ...csvRows].map(row => row.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
 
       const blob = new Blob([csv], { type: "text/csv" });
@@ -922,7 +903,7 @@ export default function SalesReport() {
                           <td className="px-4 py-2.5 text-slate-700">{r.customer_name ?? "—"}</td>
                           <td className="px-4 py-2.5 text-right text-blue-600 font-medium">{fmtNum(r.quantity)}</td>
                           <td className="px-4 py-2.5 text-right text-slate-600">${Number(r.unit_price || 0).toFixed(2)}</td>
-                          <td className="px-4 py-2.5 text-slate-500 text-xs">{fmtDate(r.order_date)}</td>
+                          <td className="px-4 py-2.5 text-slate-500 text-xs">{fmt.date(r.order_date)}</td>
                           <td className="px-4 py-2.5"><BcStatusBadge status={r.bc_status} /></td>
                         </tr>
                       ))}
@@ -1019,7 +1000,7 @@ export default function SalesReport() {
                   <div key={ex.id} className="flex items-start justify-between gap-2" data-testid={`export-log-${ex.id}`}>
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-slate-700 truncate">{ex.report_name}{ex.view_name ? ` – ${ex.view_name}` : ""}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">{fmtDateTime(ex.created_at)}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{fmt.dateTime(ex.created_at)}</p>
                       <p className="text-xs text-slate-400">by {ex.user_name}</p>
                     </div>
                     <Badge variant="outline" className={`shrink-0 text-[10px] px-1.5 py-0.5 font-semibold uppercase ${ex.export_type === "excel" ? "bg-green-50 text-green-700 border-green-200" : "bg-blue-50 text-blue-700 border-blue-200"}`}>

@@ -1,5 +1,6 @@
 import { ChevronRight, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useTimeService } from "@/hooks/useTimeService";
 
 export function MarketingDeliveryLogPreview({
   rows,
@@ -14,6 +15,7 @@ export function MarketingDeliveryLogPreview({
   title?: string;
   onViewAll?: () => void;
 }) {
+  const fmt = useTimeService();
   return <section className="overflow-hidden rounded-xl border bg-white shadow-sm">
     <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
       <div><h2 className="font-semibold text-slate-900">{title}</h2><p className="text-xs text-slate-500">Latest recipient-level delivery records</p></div>
@@ -25,7 +27,7 @@ export function MarketingDeliveryLogPreview({
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-slate-800">{row.customer_name || row.customer_email || row.recipient_email}</p>
           <p className="truncate text-xs text-slate-500">{row.customer_email || row.recipient_email} · {Array.isArray(row.product_titles) && row.product_titles.length ? row.product_titles.join(" · ") : "No product titles recorded"}</p>
-          <p className="mt-1 text-[11px] text-slate-400">Log #{row.id} · {row.sent_at ? new Date(row.sent_at).toLocaleString() : "—"} · {row.initiated_by_name || "Unknown user"}</p>
+          <p className="mt-1 text-[11px] text-slate-400">Log #{row.id} · {row.sent_at ? fmt.dateTime(row.sent_at) : "—"} · {row.initiated_by_name || "Unknown user"}</p>
         </div>
       </div>)}</div> :
       <p className="p-8 text-center text-sm text-slate-400">No sent history recorded yet.</p>}

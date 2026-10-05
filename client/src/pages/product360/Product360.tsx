@@ -52,12 +52,14 @@ import {
   getAuthHeaders,
 } from "@/lib/api";
 
+import { useTimeService } from "@/hooks/useTimeService";
+import { dateOnlyInTimeZone } from "@shared/timezone";
+
 const COLORS = ["#2563eb", "#14b8a6", "#f59e0b", "#8b5cf6", "#ef4444", "#64748b"];
 
-function isoDaysAgo(days: number) {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date.toISOString().slice(0, 10);
+function isoDaysAgo(days: number, timezone: string) {
+  const [year, month, day] = dateOnlyInTimeZone(new Date(), timezone).split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day - days, 12)).toISOString().slice(0, 10);
 }
 
 function money(value: unknown) {
@@ -74,10 +76,9 @@ function number(value: unknown, digits = 0) {
     : "—";
 }
 
-function dateLabel(value: unknown) {
+function dateLabel(value: unknown, fmt: ReturnType<typeof useTimeService>) {
   if (!value) return "No recent sale";
-  const date = new Date(String(value));
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return fmt.date(String(value));
 }
 
 function displayVariantLabel(value: unknown) {
@@ -145,6 +146,8 @@ function DateRangeControls({
   onCategoryChange?: (value: string) => void;
   onExport?: () => void;
 }) {
+  const fmt = useTimeService();
+  const today = fmt.dateOnly();
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <select
@@ -155,10 +158,10 @@ function DateRangeControls({
           onChange(nextFrom, nextTo);
         }}
       >
-        <option value={`${isoDaysAgo(6)}|${new Date().toISOString().slice(0, 10)}`}>Last 7 days</option>
-        <option value={`${isoDaysAgo(29)}|${new Date().toISOString().slice(0, 10)}`}>Last 30 days</option>
-        <option value={`${isoDaysAgo(89)}|${new Date().toISOString().slice(0, 10)}`}>Last 90 days</option>
-        <option value={`${isoDaysAgo(364)}|${new Date().toISOString().slice(0, 10)}`}>Last 12 months</option>
+        <option value={`${isoDaysAgo(6, fmt.tz)}|${today}`}>Last 7 days</option>
+        <option value={`${isoDaysAgo(29, fmt.tz)}|${today}`}>Last 30 days</option>
+        <option value={`${isoDaysAgo(89, fmt.tz)}|${today}`}>Last 90 days</option>
+        <option value={`${isoDaysAgo(364, fmt.tz)}|${today}`}>Last 12 months</option>
         <option value={`${from}|${to}`}>Custom range</option>
       </select>
       <Input type="date" className="h-9 w-[135px] bg-white text-xs" value={from} onChange={(e) => onChange(e.target.value, to)} />
@@ -391,6 +394,7 @@ function OverviewContent({ data, focus }: { data: Product360Overview; focus?: st
 }
 
 function DashboardOverviewContent({ data, focus }: { data: Product360Overview; focus?: string }) {
+  const fmt = useTimeService();
   const [categoryMetric, setCategoryMetric] = useState<"units" | "revenue">("revenue");
   const [, setLocation] = useLocation();
   const metrics = data.metrics || {};
@@ -464,7 +468,7 @@ function DashboardOverviewContent({ data, focus }: { data: Product360Overview; f
 
       <div className="mt-3 grid gap-3 xl:grid-cols-[1.2fr_0.9fr_1.2fr]">
         <DashboardPanel title="Recent Product Activity" subtitle="Latest inventory events">
-          {data.recentActivity.length === 0 ? <div className="p-4 text-xs text-slate-400">No recent activity.</div> : <div className="divide-y divide-slate-100">{data.recentActivity.map((row, index) => <div key={`${String(row.event_date)}-${index}`} className="flex items-center gap-2 px-3 py-2"><span className="rounded-full bg-blue-50 p-1.5 text-blue-600"><Activity className="h-3 w-3" /></span><div className="min-w-0 flex-1"><p className="truncate text-[10px] font-semibold text-slate-700">{String(row.event)}</p><p className="truncate text-[9px] text-slate-400">{String(row.product_name)} · {String(row.detail)}</p></div><span className="whitespace-nowrap text-[9px] text-slate-400">{dateLabel(row.event_date)}</span></div>)}</div>}
+          {data.recentActivity.length === 0 ? <div className="p-4 text-xs text-slate-400">No recent activity.</div> : <div className="divide-y divide-slate-100">{data.recentActivity.map((row, index) => <div key={`${String(row.event_date)}-${index}`} className="flex items-center gap-2 px-3 py-2"><span className="rounded-full bg-blue-50 p-1.5 text-blue-600"><Activity className="h-3 w-3" /></span><div className="min-w-0 flex-1"><p className="truncate text-[10px] font-semibold text-slate-700">{String(row.event)}</p><p className="truncate text-[9px] text-slate-400">{String(row.product_name)} · {String(row.detail)}</p></div><span className="whitespace-nowrap text-[9px] text-slate-400">{dateLabel(row.event_date, fmt)}</span></div>)}</div>}
         </DashboardPanel>
         <DashboardPanel title="Replenishment Priority" subtitle="Products by action needed">
           <div className="space-y-2 px-3 py-3">{priorityData.map((row) => <div key={String(row.label)} className="flex items-center gap-2 text-[9px]"><span className="w-[68px] shrink-0 text-slate-500">{String(row.label)}</span><div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${(row.products / priorityMax) * 100}%`, backgroundColor: priorityColors[String(row.label)] || "#94a3b8" }} /></div><span className="w-8 text-right font-semibold text-slate-600">{number(row.products)}</span></div>)}</div>
@@ -476,9 +480,10 @@ function DashboardOverviewContent({ data, focus }: { data: Product360Overview; f
 }
 
 export function Product360OverviewPage() {
+  const fmt = useTimeService();
   const [location] = useLocation();
-  const [from, setFrom] = useState(isoDaysAgo(29));
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [from, setFrom] = useState(() => isoDaysAgo(29, fmt.tz));
+  const [to, setTo] = useState(() => fmt.dateOnly());
   const [brand, setBrand] = useState("");
   const [category, setCategory] = useState("");
   const focus = location.split("/")[2] || "overview";
@@ -510,8 +515,9 @@ function ProductTable({ rows }: { rows: Record<string, unknown>[] }) {
 }
 
 export function Product360ProductsPage() {
-  const [from, setFrom] = useState(isoDaysAgo(29));
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const fmt = useTimeService();
+  const [from, setFrom] = useState(() => isoDaysAgo(29, fmt.tz));
+  const [to, setTo] = useState(() => fmt.dateOnly());
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [sortBy, setSortBy] = useState("units_sold");
@@ -552,27 +558,29 @@ function DetailTabs({ active, onChange }: { active: string; onChange: (value: st
 }
 
 function DetailBody({ data, tab }: { data: Product360Detail; tab: string }) {
+  const fmt = useTimeService();
   const product = data.product || {};
   const trend = data.trend.map((row) => ({ ...row, revenue: Number(row.revenue || 0), units: Number(row.units || 0), gross_profit: Number(row.gross_profit || 0) }));
   const rows = data.variants || [];
-  if (tab === "customers") return <Card className="mt-5 overflow-hidden border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-4 py-3"><h3 className="text-sm font-semibold">Customers who bought this product</h3><p className="text-xs text-slate-400">Customer relationship analytics from the order-line mirror</p></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-4 py-3">Customer</th><th className="px-4 py-3 text-right">Units</th><th className="px-4 py-3 text-right">Revenue</th><th className="px-4 py-3 text-right">Orders</th><th className="px-4 py-3">Last purchase</th></tr></thead><tbody className="divide-y divide-slate-100">{data.customers.map((row, i) => <tr key={`${row.customer_id}-${i}`}><td className="px-4 py-3 font-medium">{String(row.customer || "Unknown customer")}</td><td className="px-4 py-3 text-right">{number(row.units_purchased)}</td><td className="px-4 py-3 text-right">{money(row.revenue)}</td><td className="px-4 py-3 text-right">{number(row.orders)}</td><td className="px-4 py-3 text-slate-500">{dateLabel(row.last_purchase)}</td></tr>)}</tbody></table></div></Card>;
-  if (tab === "history") return <Card className="mt-5 border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-4 py-3"><h3 className="text-sm font-semibold">Product activity</h3><p className="text-xs text-slate-400">Append-only inventory activity available from existing audit logs</p></div>{data.history.length ? <div className="divide-y divide-slate-100">{data.history.map((row, i) => <div key={i} className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium text-slate-800">{String(row.event)}</p><p className="text-xs text-slate-400">{String(row.source)} · {String(row.user_name || "System")}</p></div><div className="text-left sm:text-right"><p className="text-xs text-slate-500">{String(row.previous_value || "—")} → {String(row.new_value || "—")}</p><p className="text-[11px] text-slate-400">{dateLabel(row.event_date)}</p></div></div>)}</div> : <div className="p-6 text-sm text-slate-400">No product history is recorded for this product.</div>}</Card>;
+  if (tab === "customers") return <Card className="mt-5 overflow-hidden border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-4 py-3"><h3 className="text-sm font-semibold">Customers who bought this product</h3><p className="text-xs text-slate-400">Customer relationship analytics from the order-line mirror</p></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-4 py-3">Customer</th><th className="px-4 py-3 text-right">Units</th><th className="px-4 py-3 text-right">Revenue</th><th className="px-4 py-3 text-right">Orders</th><th className="px-4 py-3">Last purchase</th></tr></thead><tbody className="divide-y divide-slate-100">{data.customers.map((row, i) => <tr key={`${row.customer_id}-${i}`}><td className="px-4 py-3 font-medium">{String(row.customer || "Unknown customer")}</td><td className="px-4 py-3 text-right">{number(row.units_purchased)}</td><td className="px-4 py-3 text-right">{money(row.revenue)}</td><td className="px-4 py-3 text-right">{number(row.orders)}</td><td className="px-4 py-3 text-slate-500">{dateLabel(row.last_purchase, fmt)}</td></tr>)}</tbody></table></div></Card>;
+  if (tab === "history") return <Card className="mt-5 border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-4 py-3"><h3 className="text-sm font-semibold">Product activity</h3><p className="text-xs text-slate-400">Append-only inventory activity available from existing audit logs</p></div>{data.history.length ? <div className="divide-y divide-slate-100">{data.history.map((row, i) => <div key={i} className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium text-slate-800">{String(row.event)}</p><p className="text-xs text-slate-400">{String(row.source)} · {String(row.user_name || "System")}</p></div><div className="text-left sm:text-right"><p className="text-xs text-slate-500">{String(row.previous_value || "—")} → {String(row.new_value || "—")}</p><p className="text-[11px] text-slate-400">{dateLabel(row.event_date, fmt)}</p></div></div>)}</div> : <div className="p-6 text-sm text-slate-400">No product history is recorded for this product.</div>}</Card>;
   return <div className="mt-5 space-y-5"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><MetricCard label="Units sold" value={number(product.units_sold)} detail={`${number(product.orders)} orders`} icon={ShoppingCart} /><MetricCard label="Revenue" value={money(product.revenue)} detail={`ASP ${money(Number(product.units_sold) ? Number(product.revenue) / Number(product.units_sold) : 0)}`} icon={CircleDollarSign} tone="emerald" /><MetricCard label="Gross profit" value={product.gross_profit == null ? "No cost data" : money(product.gross_profit)} detail={product.gross_profit == null ? "Cost is not available" : `${Number(product.revenue) ? ((Number(product.gross_profit) / Number(product.revenue)) * 100).toFixed(1) : "0.0"}% margin`} icon={BarChart3} tone="violet" /><MetricCard label="Stock coverage" value={product.days_of_stock == null ? "No sales data" : `${number(product.days_of_stock, 1)} days`} detail={`${number(product.current_stock)} units on hand`} icon={PackageCheck} tone="amber" /></div>{tab === "overview" || tab === "sales" || tab === "profitability" ? <Card className="border-slate-200 bg-white p-4 shadow-sm"><h3 className="text-sm font-semibold text-slate-800">{tab === "profitability" ? "Revenue vs gross profit" : "Sales trend"}</h3><div className="mt-3 h-[280px]">{trend.length ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={trend}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" /><XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} /><YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} /><Tooltip formatter={(value: number, name: string) => [name === "units" ? number(value) : money(value), name === "gross_profit" ? "Gross profit" : name === "revenue" ? "Revenue" : "Units"]} /><Area type="monotone" dataKey="revenue" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} /><Area type="monotone" dataKey="gross_profit" stroke="#14b8a6" fill="none" strokeWidth={2} /><Area type="monotone" dataKey="units" stroke="#f59e0b" fill="none" strokeWidth={2} /></AreaChart></ResponsiveContainer> : <div className="flex h-full items-center justify-center text-sm text-slate-400">No sales data for this period.</div>}</div></Card> : null}{(tab === "variants" || tab === "inventory" || tab === "replenishment") && <Card className="overflow-hidden border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-4 py-3"><h3 className="text-sm font-semibold">{tab === "replenishment" ? "Variant replenishment" : "Variant intelligence"}</h3><p className="text-xs text-slate-400">Missing costs are shown as unavailable, not treated as zero.</p></div>{rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[950px] text-left text-sm"><thead className="bg-slate-50 text-[11px] uppercase text-slate-500"><tr><th className="px-4 py-3">Variant</th><th className="px-3 py-3">SKU</th><th className="px-3 py-3 text-right">Price</th><th className="px-3 py-3 text-right">Cost</th><th className="px-3 py-3 text-right">Stock</th><th className="px-3 py-3 text-right">Units</th><th className="px-3 py-3 text-right">Velocity</th><th className="px-3 py-3">Status</th></tr></thead><tbody className="divide-y divide-slate-100">{rows.map((row, i) => <tr key={`${row.variant_id}-${i}`}><td className="px-4 py-3 font-medium">{displayVariantLabel(row.label)}</td><td className="px-3 py-3 text-slate-500">{String(row.sku || "—")}</td><td className="px-3 py-3 text-right">{money(row.price)}</td><td className="px-3 py-3 text-right">{row.cost_price == null ? <span className="text-xs text-slate-400">No cost data</span> : money(row.cost_price)}</td><td className="px-3 py-3 text-right">{number(row.current_stock)}</td><td className="px-3 py-3 text-right">{number(row.units_sold)}</td><td className="px-3 py-3 text-right">{number(row.sales_velocity, 1)}/day</td><td className="px-3 py-3"><StatusBadge status={getStatus(row)} /></td></tr>)}</tbody></table></div> : <div className="p-6 text-sm text-slate-400">This product has no normalized variant records.</div>}</Card>}</div>;
 }
 
 export function Product360DetailPage() {
+  const fmt = useTimeService();
   const [, params] = useRoute("/product-360/products/:id");
   const [, setLocation] = useLocation();
   const id = Number(params?.id);
-  const [from, setFrom] = useState(isoDaysAgo(29));
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [from, setFrom] = useState(() => isoDaysAgo(29, fmt.tz));
+  const [to, setTo] = useState(() => fmt.dateOnly());
   const [tab, setTab] = useState("overview");
   const query = useQuery({ queryKey: ["product-360-detail", id, from, to], queryFn: () => getProduct360Detail(id, { dateFrom: from, dateTo: to }), enabled: Number.isFinite(id) && id > 0 });
   const product = query.data?.product || {};
   return (
     <PageFrame title={String(product.name || "Product workspace")} description="The central Product 360 workspace for product performance, variants, profitability, inventory, customers, and history." actions={<DateRangeControls from={from} to={to} onChange={(a, b) => { setFrom(a); setTo(b); }} />}>
       <button onClick={() => setLocation("/product-360/products")} className="mb-4 flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-blue-700"><ArrowLeft className="h-4 w-4" /> Back to products</button>
-      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : query.data ? <><Card className="border-slate-200 bg-white p-4 shadow-sm"><div className="flex flex-col gap-4 md:flex-row md:items-center"><div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-slate-100">{product.image ? <img src={String(product.image)} alt="" className="h-full w-full object-cover" /> : <PackageSearch className="m-6 h-8 w-8 text-slate-400" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-bold text-slate-900">{String(product.name)}</h2><StatusBadge status={getStatus(product)} /></div><p className="mt-1 text-sm text-slate-500">{String(product.sku || "No base SKU")} · BigCommerce {String(product.bigcommerce_id)} · {number(product.variants_count)} variants</p><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500"><span>Brand: {String(product.brand_name || "—")}</span><span>Stock: {number(product.current_stock)}</span><span>Last sold: {dateLabel(product.last_sold)}</span></div></div><Button variant="outline" size="sm" onClick={() => setLocation("/catalog")}><PackageSearch className="mr-2 h-4 w-4" /> View catalog</Button></div><div className="mt-5"><DetailTabs active={tab} onChange={setTab} /></div></Card><DetailBody data={query.data} tab={tab} /></> : <EmptyState message="Product not found." />}
+      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : query.data ? <><Card className="border-slate-200 bg-white p-4 shadow-sm"><div className="flex flex-col gap-4 md:flex-row md:items-center"><div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-slate-100">{product.image ? <img src={String(product.image)} alt="" className="h-full w-full object-cover" /> : <PackageSearch className="m-6 h-8 w-8 text-slate-400" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-bold text-slate-900">{String(product.name)}</h2><StatusBadge status={getStatus(product)} /></div><p className="mt-1 text-sm text-slate-500">{String(product.sku || "No base SKU")} · BigCommerce {String(product.bigcommerce_id)} · {number(product.variants_count)} variants</p><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500"><span>Brand: {String(product.brand_name || "—")}</span><span>Stock: {number(product.current_stock)}</span><span>Last sold: {dateLabel(product.last_sold, fmt)}</span></div></div><Button variant="outline" size="sm" onClick={() => setLocation("/catalog")}><PackageSearch className="mr-2 h-4 w-4" /> View catalog</Button></div><div className="mt-5"><DetailTabs active={tab} onChange={setTab} /></div></Card><DetailBody data={query.data} tab={tab} /></> : <EmptyState message="Product not found." />}
     </PageFrame>
   );
 }

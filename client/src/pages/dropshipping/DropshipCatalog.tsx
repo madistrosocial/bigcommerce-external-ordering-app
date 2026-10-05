@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useTimeService } from "@/hooks/useTimeService";
 import * as api from "@/lib/api";
 import { toPublicVendorMessage } from "@/lib/vendor-display";
 import { getKoleExtendedCost } from "@shared/kole-pricing";
@@ -77,18 +78,10 @@ function importSourceLabel(log?: api.DropshipSyncLog) {
   return log ? "Vendor catalog import" : "URL feed or uploaded CSV";
 }
 
-function formatImportDate(log?: api.DropshipSyncLog) {
+function formatImportDate(log: api.DropshipSyncLog | undefined, fmt: ReturnType<typeof useTimeService>) {
   const value = log?.completed_at || log?.started_at;
   if (!value) return "No successful import yet";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "Date unavailable";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+  return fmt.dateTime(value);
 }
 
 function suggestedRetailPrice(product: api.DropshipProduct) {
@@ -121,6 +114,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function DropshipCatalogPage() {
+  const fmt = useTimeService();
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
   const canManageDropshipping = hasPermission("dropshipping_catalog", "manage");
@@ -453,7 +447,7 @@ export default function DropshipCatalogPage() {
               className="mt-1 text-sm font-semibold leading-5 text-slate-800"
               title={(latestSuccessfulImport?.completed_at || latestSuccessfulImport?.started_at) ?? undefined}
             >
-              {isSyncLogsLoading ? "Loading…" : isSyncLogsError ? "Import history unavailable" : formatImportDate(latestSuccessfulImport)}
+              {isSyncLogsLoading ? "Loading…" : isSyncLogsError ? "Import history unavailable" : formatImportDate(latestSuccessfulImport, fmt)}
             </p>
             <p className="text-[10px] text-slate-400">
               {isSyncLogsError ? "Could not load import history" : importSourceLabel(latestSuccessfulImport)}

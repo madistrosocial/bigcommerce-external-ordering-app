@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
+import { dateOnlyInTimeZone } from "@shared/timezone";
 
 const PAGE_SIZE = 50;
 type SortField = "last_order_date" | "company" | "first_name" | "lifetime_orders" | "lifetime_revenue" | "next_action_date";
@@ -39,16 +40,26 @@ const PLEDGE_LABELS: Record<string, string> = {
   declined: "Declined",
 };
 
-function daysSince(date: string | null): number | null {
-  if (!date) return null;
-  return Math.floor((Date.now() - new Date(date).getTime()) / 86_400_000);
+function dateKey(value: string | Date | null | undefined, timezone: string): string {
+  if (!value) return "";
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime()) ? dateOnlyInTimeZone(date, timezone) : "";
+}
+function daysSince(date: string | null, timezone: string): number | null {
+  const past = dateKey(date, timezone);
+  if (!past) return null;
+  const today = dateKey(new Date(), timezone);
+  const pastMs = Date.parse(`${past}T12:00:00.000Z`);
+  const todayMs = Date.parse(`${today}T12:00:00.000Z`);
+  return Math.floor((todayMs - pastMs) / 86_400_000);
 }
 function fmtCurrency(value: string | number | null): string {
   if (value == null || value === "") return "$0.00";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value));
 }
-function inputDate(value: string | null | undefined): string {
-  return value ? new Date(value).toISOString().slice(0, 10) : "";
+function inputDate(value: string | null | undefined, timezone: string): string {
+  return dateKey(value, timezone);
 }
 function displayDate(value: string | null | undefined, fmt: ReturnType<typeof useTimeService>): string {
   return value ? fmt.date(value) : "No date";
@@ -68,6 +79,7 @@ function CaseEditorDialog({
   customer: Customer | null; stages: Stage[]; users: { id: number; name: string }[]; open: boolean;
   canEdit: boolean; onClose: () => void; onSaved: () => void;
 }) {
+  const fmt = useTimeService();
   const { toast } = useToast();
   const [form, setForm] = useState({
     stage_id: "", owner_user_id: "", pledge_status: "not_started", pledge_notes: "",
@@ -80,12 +92,12 @@ function CaseEditorDialog({
       owner_user_id: customer.reactivation_owner_id ? String(customer.reactivation_owner_id) : "",
       pledge_status: customer.pledge_status ?? "not_started",
       pledge_notes: customer.pledge_notes ?? "",
-      expected_order_date: inputDate(customer.expected_order_date),
+      expected_order_date: inputDate(customer.expected_order_date, fmt.tz),
       expected_value: customer.expected_value ?? "",
-      next_action_date: inputDate(customer.next_action_date),
+      next_action_date: inputDate(customer.next_action_date, fmt.tz),
       next_action_note: customer.next_action_note ?? "",
     });
-  }, [customer, stages]);
+  }, [customer, stages, fmt.tz]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -183,8 +195,8 @@ function CaseEditorDialog({
 
 function CustomerCard({ customer, stages, canEdit, onEdit, onOpen, onMoveStart }: { customer: Customer; stages: Stage[]; canEdit: boolean; onEdit: () => void; onOpen: () => void; onMoveStart: () => void }) {
   const fmt = useTimeService();
-  const days = daysSince(customer.last_order_date);
-  const overdue = customer.next_action_date && new Date(customer.next_action_date).getTime() < Date.now();
+  const days = daysSince(customer.last_order_date, fmt.tz);
+  const overdue = customer.next_action_date && dateKey(customer.next_action_date, fmt.tz) < fmt.dateOnly();
   const stageChange = async (value: string) => {
     const response = await fetch(`/api/crm/reactivation/${customer.id}`, {
       method: "PATCH", headers: { ...getAuthHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ stage_id: Number(value) }),
@@ -305,7 +317,7 @@ export default function CRMReactivation() {
       const csvRows = rows.map((c: Customer) => [
         c.company ?? "", customerName(c), c.email ?? "", c.phone ?? "", c.account_health ?? "", c.reactivation_stage_name ?? "", c.reactivation_owner_name ?? c.sales_rep_name ?? "", PLEDGE_LABELS[c.pledge_status] ?? c.pledge_status ?? "", c.expected_order_date ? fmt.date(c.expected_order_date) : "", c.expected_value ?? "", c.next_action_date ? fmt.date(c.next_action_date) : "", c.next_action_note ?? "", c.last_order_date ? fmt.date(c.last_order_date) : "", c.lifetime_orders ?? 0, c.lifetime_revenue ?? "0",
       ].map(value => `"${String(value).replace(/"/g, '""')}"`).join(","));
-      const blob = new Blob([[header.join(","), ...csvRows].join("\n")], { type: "text/csv" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `reactivation-${new Date().toISOString().split("T")[0]}.csv`; link.click(); URL.revokeObjectURL(url);
+      const blob = new Blob([[header.join(","), ...csvRows].join("\n")], { type: "text/csv" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `reactivation-${fmt.dateOnly()}.csv`; link.click(); URL.revokeObjectURL(url);
     } catch (error: any) { toast({ title: "Export failed", description: error.message, variant: "destructive" }); } finally { setExporting(false); }
   };
 
@@ -355,7 +367,7 @@ export default function CRMReactivation() {
           </div></div>
         ) : (
           <div className="h-full overflow-auto">
-            {customers.length === 0 ? <div className="flex flex-col items-center justify-center h-48 text-slate-400"><AlertTriangle className="h-10 w-10 mb-3 opacity-30" /><p className="text-sm font-medium">No customers found</p><p className="text-xs mt-1">Try adjusting your filters.</p></div> : <table className="w-full text-sm border-collapse min-w-[1180px]"><thead className="sticky top-0 bg-slate-50 border-b z-10"><tr>{sortTh("company", "Company")}{sortTh("first_name", "Customer")}<th className={thClass}>Stage</th><th className={thClass}>Pledge</th><th className={thClass}>Next Action</th><th className={thClass}>Owner</th>{sortTh("last_order_date", "Last Order")}{sortTh("lifetime_orders", "Orders")}{sortTh("lifetime_revenue", "Revenue")}<th className={thClass}>Health</th><th className={thClass}> </th></tr></thead><tbody>{customers.map(customer => { const days = daysSince(customer.last_order_date); const overdueDate = customer.next_action_date && new Date(customer.next_action_date).getTime() < Date.now(); return <tr key={customer.id} className="border-b hover:bg-blue-50 transition-colors"><td className="px-3 py-2.5 font-medium text-slate-800 max-w-[160px] truncate">{customer.company || "—"}</td><td className="px-3 py-2.5 text-slate-700">{customerName(customer)}</td><td className="px-3 py-2.5"><span className="inline-flex items-center gap-1.5 text-xs font-medium"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: customer.reactivation_stage_color }} />{customer.reactivation_stage_name}</span></td><td className="px-3 py-2.5"><Badge variant="secondary" className="text-[10px]">{PLEDGE_LABELS[customer.pledge_status] ?? "No pledge"}</Badge></td><td className={`px-3 py-2.5 text-xs max-w-[180px] truncate ${overdueDate ? "text-red-600 font-semibold" : "text-slate-600"}`}>{customer.next_action_date ? `${overdueDate ? "Overdue · " : ""}${fmt.date(customer.next_action_date)}` : "—"}</td><td className="px-3 py-2.5 text-xs">{customer.reactivation_owner_name || customer.sales_rep_name || <span className="text-slate-400">Unassigned</span>}</td><td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{customer.last_order_date ? `${fmt.relative(customer.last_order_date)} · ${days ?? 0}d` : "—"}</td><td className="px-3 py-2.5 text-right text-slate-700">{(customer.lifetime_orders ?? 0).toLocaleString()}</td><td className="px-3 py-2.5 text-right font-medium text-slate-800">{fmtCurrency(customer.lifetime_revenue)}</td><td className="px-3 py-2.5"><HealthBadge health={customer.account_health} /></td><td className="px-3 py-2.5"><div className="flex items-center gap-1"><Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setLocation(`/crm/customers/${customer.id}`)}>Open</Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditingCustomer(customer)} aria-label="Edit case"><Pencil className="h-3.5 w-3.5" /></Button></div></td></tr>; })}</tbody></table>}
+            {customers.length === 0 ? <div className="flex flex-col items-center justify-center h-48 text-slate-400"><AlertTriangle className="h-10 w-10 mb-3 opacity-30" /><p className="text-sm font-medium">No customers found</p><p className="text-xs mt-1">Try adjusting your filters.</p></div> : <table className="w-full text-sm border-collapse min-w-[1180px]"><thead className="sticky top-0 bg-slate-50 border-b z-10"><tr>{sortTh("company", "Company")}{sortTh("first_name", "Customer")}<th className={thClass}>Stage</th><th className={thClass}>Pledge</th><th className={thClass}>Next Action</th><th className={thClass}>Owner</th>{sortTh("last_order_date", "Last Order")}{sortTh("lifetime_orders", "Orders")}{sortTh("lifetime_revenue", "Revenue")}<th className={thClass}>Health</th><th className={thClass}> </th></tr></thead><tbody>{customers.map(customer => { const days = daysSince(customer.last_order_date, fmt.tz); const overdueDate = customer.next_action_date && dateKey(customer.next_action_date, fmt.tz) < fmt.dateOnly(); return <tr key={customer.id} className="border-b hover:bg-blue-50 transition-colors"><td className="px-3 py-2.5 font-medium text-slate-800 max-w-[160px] truncate">{customer.company || "—"}</td><td className="px-3 py-2.5 text-slate-700">{customerName(customer)}</td><td className="px-3 py-2.5"><span className="inline-flex items-center gap-1.5 text-xs font-medium"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: customer.reactivation_stage_color }} />{customer.reactivation_stage_name}</span></td><td className="px-3 py-2.5"><Badge variant="secondary" className="text-[10px]">{PLEDGE_LABELS[customer.pledge_status] ?? "No pledge"}</Badge></td><td className={`px-3 py-2.5 text-xs max-w-[180px] truncate ${overdueDate ? "text-red-600 font-semibold" : "text-slate-600"}`}>{customer.next_action_date ? `${overdueDate ? "Overdue · " : ""}${fmt.date(customer.next_action_date)}` : "—"}</td><td className="px-3 py-2.5 text-xs">{customer.reactivation_owner_name || customer.sales_rep_name || <span className="text-slate-400">Unassigned</span>}</td><td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{customer.last_order_date ? `${fmt.relative(customer.last_order_date)} · ${days ?? 0}d` : "—"}</td><td className="px-3 py-2.5 text-right text-slate-700">{(customer.lifetime_orders ?? 0).toLocaleString()}</td><td className="px-3 py-2.5 text-right font-medium text-slate-800">{fmtCurrency(customer.lifetime_revenue)}</td><td className="px-3 py-2.5"><HealthBadge health={customer.account_health} /></td><td className="px-3 py-2.5"><div className="flex items-center gap-1"><Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setLocation(`/crm/customers/${customer.id}`)}>Open</Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditingCustomer(customer)} aria-label="Edit case"><Pencil className="h-3.5 w-3.5" /></Button></div></td></tr>; })}</tbody></table>}
           </div>
         )}
       </div>

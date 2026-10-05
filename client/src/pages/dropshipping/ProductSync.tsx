@@ -4,6 +4,7 @@ import * as api from "@/lib/api";
 import { toPublicVendorMessage } from "@/lib/vendor-display";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToast } from "@/hooks/use-toast";
+import { useTimeService } from "@/hooks/useTimeService";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -76,14 +77,6 @@ const SYNC_FIELDS: Array<{ value: SyncField; label: string; note: string }> = [
   { value: "identity", label: "Product name, brand, UPC", note: "Catalog identity fields" },
 ];
 
-function formatDate(value?: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
-}
-
 function formatCost(value: number | null) {
   return value === null ? "—" : `$${value.toFixed(2)}`;
 }
@@ -149,6 +142,7 @@ function SummaryMetric({ label, value, tone = "text-slate-900" }: { label: strin
 }
 
 export default function ProductSyncPage() {
+  const fmt = useTimeService();
   const { hasPermission } = usePermissions();
   const canManage = hasPermission("dropshipping_product_sync", "manage");
   const { toast } = useToast();
@@ -555,7 +549,7 @@ export default function ProductSyncPage() {
                         <SummaryMetric label="Failed" value={job.failed} tone={job.failed ? "text-rose-700" : "text-slate-900"} />
                         <SummaryMetric label="Skipped" value={job.skipped} tone={job.skipped ? "text-orange-700" : "text-slate-900"} />
                       </div>
-                      <p className="mt-3 text-[11px] text-slate-500">Started {formatDate(job.startedAt)}</p>
+                      <p className="mt-3 text-[11px] text-slate-500">Started {fmt.dateTime(job.startedAt)}</p>
                       {job.error && <p className="mt-2 flex gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{toPublicVendorMessage(job.error)}</p>}
                     </>
                   ) : (
@@ -574,7 +568,7 @@ export default function ProductSyncPage() {
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">Read-only cost check</p>
                       <h3 className="mt-1 text-base font-semibold text-[#243b32]">Product Catalog extended cost vs. BigCommerce cost price</h3>
                       <p className="mt-1 text-xs text-slate-500">
-                        Checked {costComparisonResult.total.toLocaleString()} selected listing{costComparisonResult.total === 1 ? "" : "s"} · {formatDate(costComparisonResult.checkedAt)}. No listing fields were changed.
+                        Checked {costComparisonResult.total.toLocaleString()} selected listing{costComparisonResult.total === 1 ? "" : "s"} · {fmt.dateTime(costComparisonResult.checkedAt)}. No listing fields were changed.
                       </p>
                     </div>
                     <Badge variant="outline" className={costComparisonResult.changed > 0 ? "w-fit border-amber-200 bg-amber-50 text-amber-800" : "w-fit border-emerald-200 bg-emerald-50 text-emerald-800"}>
@@ -760,7 +754,7 @@ export default function ProductSyncPage() {
                         <SummaryMetric label="Photos added" value={job.photosAdded} />
                         <SummaryMetric label="Failed" value={job.failed} tone={job.failed ? "text-rose-700" : "text-slate-900"} />
                       </div>
-                      <p className="mt-3 text-[11px] text-slate-500">Started {formatDate(job.startedAt)}</p>
+                      <p className="mt-3 text-[11px] text-slate-500">Started {fmt.dateTime(job.startedAt)}</p>
                       {job.forceImageReupload && <p className="mt-2 text-[11px] leading-4 text-amber-800">Upload history was bypassed for this run. Check for duplicate photos if any previous images remained on the listing.</p>}
                       {job.error && <p className="mt-2 flex gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{toPublicVendorMessage(job.error)}</p>}
                     </>
@@ -921,7 +915,7 @@ export default function ProductSyncPage() {
             <p className="mt-2 flex items-center gap-1.5 text-xs text-rose-700"><AlertTriangle className="h-3.5 w-3.5" />The latest {kind === "details" ? "details" : "image"} run failed. Review product-level results above before retrying.</p>
           )}
           {job?.status === "completed" && (
-            <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />Completed {formatDate(job.completedAt)}.</p>
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />Completed {fmt.dateTime(job.completedAt)}.</p>
           )}
         </section>
       </div>

@@ -6,6 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { getAuthHeaders } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { useTimeService } from "@/hooks/useTimeService";
 
 interface CatalogOption {
   id: number;
@@ -145,6 +146,7 @@ function MultiCheckboxPicker({
 }
 
 export default function ExportsPage() {
+  const fmt = useTimeService();
   const { toast } = useToast();
   const [selectedBrandIds, setSelectedBrandIds] = useState<number[]>([]);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
@@ -199,7 +201,7 @@ export default function ExportsPage() {
       formatMoney(row.cost),
       formatMoney(row.price),
     ]);
-    const filename = `bigcommerce-product-export-${new Date().toISOString().slice(0, 10)}`;
+    const filename = `bigcommerce-product-export-${fmt.dateOnly()}`;
     let blob: Blob;
     if (format === "csv") {
       const csv = [headers, ...values].map((row) => row.map(csvValue).join(",")).join("\r\n");
@@ -284,7 +286,7 @@ export default function ExportsPage() {
               <h2 className="text-sm font-semibold text-slate-800">Export preview</h2>
               {requestKey !== 0 && <p className="text-xs text-slate-500">
                 {`${rows.length.toLocaleString()} variant row${rows.length === 1 ? "" : "s"} loaded`}
-                {productsQuery.data?.fetchedAt ? ` · Updated ${new Date(productsQuery.data.fetchedAt).toLocaleTimeString()}` : ""}
+                {productsQuery.data?.fetchedAt ? ` · Updated ${fmt.time(productsQuery.data.fetchedAt)}` : ""}
               </p>}
             </div>
             {rows.length > 0 && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">Ready to export</span>}

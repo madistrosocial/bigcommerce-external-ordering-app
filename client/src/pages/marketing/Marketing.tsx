@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useRoute } from "wouter";
+import { useTimeService } from "@/hooks/useTimeService";
+import { parseDateTimeLocal } from "@shared/timezone";
 import {
   Activity, ArrowLeft, BarChart3, CalendarClock, Check, ChevronRight, Clock3,
   ClipboardCheck, Download, ShieldAlert,
@@ -132,6 +134,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export function MarketingDashboard() {
+  const fmt = useTimeService();
   const { data, isLoading, refetch } = useQuery<any>({ queryKey: ["marketing-dashboard"], queryFn: getMarketingDashboard });
   const [, setLocation] = useLocation();
   const { hasPermission } = usePermissions();
@@ -146,8 +149,8 @@ export function MarketingDashboard() {
       <StatCard label="Open rate" value="Not available" caption="SMTP does not provide open tracking" icon={BarChart3} />
     </div>
      <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
-       <section className="rounded-xl border bg-white shadow-sm"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold text-slate-900">Recent campaigns</h2><p className="text-xs text-slate-500">Latest changes across your campaigns</p></div>{hasPermission("marketing", "view_campaigns") && <Button variant="ghost" size="sm" onClick={() => setLocation("/marketing/campaigns")}>View all <ChevronRight className="ml-1 h-4 w-4" /></Button>}</div><div className="divide-y">{(d.recentCampaigns || []).length ? d.recentCampaigns.map((c: any) => <button key={c.id} onClick={() => setLocation(`/marketing/campaigns/${c.id}`)} disabled={!hasPermission("marketing", "view_campaigns")} className="flex w-full items-center gap-3 px-5 py-4 text-left hover:bg-slate-50 disabled:cursor-default disabled:hover:bg-white"><span className="rounded-lg bg-blue-50 p-2 text-blue-600"><Mail className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-slate-800">{c.name}</span><span className="block text-xs text-slate-400">{c.creator_name || "Unknown creator"} · {c.updated_at ? new Date(c.updated_at).toLocaleDateString() : ""}</span></span><StatusBadge status={c.status} /></button>) : <EmptyState icon={Megaphone} text="No campaigns yet" action={hasPermission("marketing", "view_campaigns") && hasPermission("marketing", "create") ? "Create your first campaign" : undefined} onClick={hasPermission("marketing", "view_campaigns") && hasPermission("marketing", "create") ? () => setLocation("/marketing/campaigns/new") : undefined} />}</div></section>
-      <section className="rounded-xl border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="font-semibold text-slate-900">Activity</h2><p className="text-xs text-slate-500">A real audit trail of marketing changes</p></div><div className="divide-y">{(d.recentActivity || []).length ? d.recentActivity.map((a: any) => <div key={a.id} className="flex gap-3 px-5 py-4"><span className="mt-0.5 rounded-full bg-slate-100 p-1.5 text-slate-500"><Activity className="h-3.5 w-3.5" /></span><div className="min-w-0"><p className="text-sm text-slate-700"><strong>{a.user_name || "System"}</strong> {a.action.replaceAll("_", " ")} <strong>{a.campaign_name || "campaign"}</strong></p><p className="mt-1 text-xs text-slate-400">{a.created_at ? new Date(a.created_at).toLocaleString() : ""}</p></div></div>) : <EmptyState icon={Clock3} text="No activity recorded" />}</div></section>
+       <section className="rounded-xl border bg-white shadow-sm"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold text-slate-900">Recent campaigns</h2><p className="text-xs text-slate-500">Latest changes across your campaigns</p></div>{hasPermission("marketing", "view_campaigns") && <Button variant="ghost" size="sm" onClick={() => setLocation("/marketing/campaigns")}>View all <ChevronRight className="ml-1 h-4 w-4" /></Button>}</div><div className="divide-y">{(d.recentCampaigns || []).length ? d.recentCampaigns.map((c: any) => <button key={c.id} onClick={() => setLocation(`/marketing/campaigns/${c.id}`)} disabled={!hasPermission("marketing", "view_campaigns")} className="flex w-full items-center gap-3 px-5 py-4 text-left hover:bg-slate-50 disabled:cursor-default disabled:hover:bg-white"><span className="rounded-lg bg-blue-50 p-2 text-blue-600"><Mail className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-slate-800">{c.name}</span><span className="block text-xs text-slate-400">{c.creator_name || "Unknown creator"} · {c.updated_at ? fmt.date(c.updated_at) : ""}</span></span><StatusBadge status={c.status} /></button>) : <EmptyState icon={Megaphone} text="No campaigns yet" action={hasPermission("marketing", "view_campaigns") && hasPermission("marketing", "create") ? "Create your first campaign" : undefined} onClick={hasPermission("marketing", "view_campaigns") && hasPermission("marketing", "create") ? () => setLocation("/marketing/campaigns/new") : undefined} />}</div></section>
+      <section className="rounded-xl border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="font-semibold text-slate-900">Activity</h2><p className="text-xs text-slate-500">A real audit trail of marketing changes</p></div><div className="divide-y">{(d.recentActivity || []).length ? d.recentActivity.map((a: any) => <div key={a.id} className="flex gap-3 px-5 py-4"><span className="mt-0.5 rounded-full bg-slate-100 p-1.5 text-slate-500"><Activity className="h-3.5 w-3.5" /></span><div className="min-w-0"><p className="text-sm text-slate-700"><strong>{a.user_name || "System"}</strong> {a.action.replaceAll("_", " ")} <strong>{a.campaign_name || "campaign"}</strong></p><p className="mt-1 text-xs text-slate-400">{a.created_at ? fmt.dateTime(a.created_at) : ""}</p></div></div>) : <EmptyState icon={Clock3} text="No activity recorded" />}</div></section>
     </div>
       <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm text-blue-900"><div className="flex gap-3"><Target className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" /><div><p className="font-semibold">SMTP measurement boundary</p><p className="mt-1 text-blue-800/80">Sent and failed counts are recorded from SMTP responses. Delivery and opens are unavailable; product clicks are recorded through tracked campaign links.</p></div></div></div>
   </PageShell>;
@@ -437,6 +440,7 @@ function DynamicFilterExtensions({ filters, setFilter }: { filters: Record<strin
 }
 
 export function MarketingCampaigns() {
+  const fmt = useTimeService();
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
@@ -444,11 +448,12 @@ export function MarketingCampaigns() {
   const { data, isLoading } = useQuery<any>({ queryKey: ["marketing-campaigns", search, status], queryFn: () => getMarketingCampaigns({ search, status }) });
   return <PageShell title="Campaigns" subtitle="Create, review, and manage customer campaigns" action={hasPermission("marketing", "create") ? <Button onClick={() => setLocation("/marketing/campaigns/new")}><Plus className="mr-2 h-4 w-4" /> New campaign</Button> : undefined}>
     <div className="flex flex-col gap-3 rounded-xl border bg-white p-3 shadow-sm sm:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><Input className="pl-9" placeholder="Search campaigns…" value={search} onChange={e => setSearch(e.target.value)} /></div><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700" value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option>{Object.entries(STATUS_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></div>
-     <div className="overflow-hidden rounded-xl border bg-white shadow-sm"><div className="hidden grid-cols-[1fr_130px_150px_110px_36px] gap-4 border-b bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid"><span>Campaign</span><span>Audience</span><span>Updated</span><span>Status</span><span /></div>{isLoading ? <div className="py-16 text-center text-sm text-slate-400">Loading campaigns…</div> : data?.campaigns?.length ? data.campaigns.map((c: any) => <button key={c.id} onClick={() => setLocation(`/marketing/campaigns/${c.id}`)} className="grid w-full gap-2 border-b px-4 py-4 text-left last:border-0 hover:bg-slate-50 md:grid-cols-[1fr_130px_150px_110px_36px] md:items-center md:gap-4 md:px-5"><span className="min-w-0"><span className="flex items-center gap-2 truncate text-sm font-semibold text-slate-800"><Mail className="h-4 w-4 shrink-0 text-blue-500" />{c.name}</span><span className="mt-1 block truncate pl-6 text-xs text-slate-400">{c.subject_line || "No subject line"}</span></span><span className="text-xs text-slate-500 md:truncate">{c.audience_name || (c.audience_type === "all_eligible" ? "All eligible customers" : c.audience_type.replaceAll("_", " "))}</span><span className="text-xs text-slate-500">{c.updated_at ? new Date(c.updated_at).toLocaleDateString() : "—"}</span><span><StatusBadge status={c.status} /></span><ChevronRight className="hidden h-4 w-4 text-slate-300 md:block" /></button>) : <EmptyState icon={Megaphone} text={search ? "No campaigns match your search" : "No campaigns yet"} action={!search && hasPermission("marketing", "create") ? "Create your first campaign" : undefined} onClick={!search && hasPermission("marketing", "create") ? () => setLocation("/marketing/campaigns/new") : undefined} />}</div>
+     <div className="overflow-hidden rounded-xl border bg-white shadow-sm"><div className="hidden grid-cols-[1fr_130px_150px_110px_36px] gap-4 border-b bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid"><span>Campaign</span><span>Audience</span><span>Updated</span><span>Status</span><span /></div>{isLoading ? <div className="py-16 text-center text-sm text-slate-400">Loading campaigns…</div> : data?.campaigns?.length ? data.campaigns.map((c: any) => <button key={c.id} onClick={() => setLocation(`/marketing/campaigns/${c.id}`)} className="grid w-full gap-2 border-b px-4 py-4 text-left last:border-0 hover:bg-slate-50 md:grid-cols-[1fr_130px_150px_110px_36px] md:items-center md:gap-4 md:px-5"><span className="min-w-0"><span className="flex items-center gap-2 truncate text-sm font-semibold text-slate-800"><Mail className="h-4 w-4 shrink-0 text-blue-500" />{c.name}</span><span className="mt-1 block truncate pl-6 text-xs text-slate-400">{c.subject_line || "No subject line"}</span></span><span className="text-xs text-slate-500 md:truncate">{c.audience_name || (c.audience_type === "all_eligible" ? "All eligible customers" : c.audience_type.replaceAll("_", " "))}</span><span className="text-xs text-slate-500">{c.updated_at ? fmt.date(c.updated_at) : "—"}</span><span><StatusBadge status={c.status} /></span><ChevronRight className="hidden h-4 w-4 text-slate-300 md:block" /></button>) : <EmptyState icon={Megaphone} text={search ? "No campaigns match your search" : "No campaigns yet"} action={!search && hasPermission("marketing", "create") ? "Create your first campaign" : undefined} onClick={!search && hasPermission("marketing", "create") ? () => setLocation("/marketing/campaigns/new") : undefined} />}</div>
   </PageShell>;
 }
 
 function CampaignDetail({ id }: { id: number }) {
+  const fmt = useTimeService();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
@@ -481,7 +486,7 @@ function CampaignDetail({ id }: { id: number }) {
         <MarketingDeliveryLogPreview rows={deliveryLogs?.rows ?? []} total={deliveryLogs?.total ?? 0} loading={deliveryLogsLoading} title="Campaign sent history" onViewAll={hasPermission("marketing", "view_log") ? () => setLocation(`/marketing/log?type=campaign&campaignId=${id}`) : undefined} />
        <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-4 font-semibold text-slate-900">Analytics</h2><div className="grid grid-cols-2 gap-3">{[["Planned", campaign.recipient_count ?? 0], ["Sent", campaign.sent_count ?? 0], ["Failed", campaign.failed_count ?? 0], ["Suppressed", campaign.suppressed_count ?? 0], ["Delivered", "Not available"], ["Opened", "Not available"], ["Clicked", campaign.clicked_count ?? 0]].map(([label, value]) => <div key={String(label)} className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-xl font-bold text-slate-800">{value}</p></div>)}</div><p className="mt-4 text-xs text-slate-400">SMTP does not provide delivery or open tracking. Product links record clicks when recipients follow them.</p></section>
        <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-3 font-semibold text-slate-900">Recipients</h2><div className="space-y-2">{(recipientData?.rows || []).slice(0, 20).map((r: any) => <div key={r.id} className="flex items-center gap-2 rounded-lg border p-2.5 text-xs"><span className="min-w-0 flex-1 truncate">{r.customer?.company || [r.customer?.first_name, r.customer?.last_name].filter(Boolean).join(" ") || r.email}</span><span className="text-slate-400 truncate max-w-[160px]">{r.email}</span><StatusBadge status={r.status} /></div>)}{!recipientData?.rows?.length && <p className="text-sm text-slate-400">Recipients are prepared when the campaign starts.</p>}</div></section>
-      <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-3 font-semibold text-slate-900">Activity</h2><div className="space-y-3">{(campaign.activity || []).length ? campaign.activity.map((a: any) => <div key={a.id} className="flex gap-2 text-sm"><Activity className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" /><span className="text-slate-600">{a.action.replaceAll("_", " ")} <span className="text-xs text-slate-400">· {a.user_name || "System"} · {new Date(a.created_at).toLocaleString()}</span></span></div>) : <p className="text-sm text-slate-400">No activity yet.</p>}</div></section>
+      <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-3 font-semibold text-slate-900">Activity</h2><div className="space-y-3">{(campaign.activity || []).length ? campaign.activity.map((a: any) => <div key={a.id} className="flex gap-2 text-sm"><Activity className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" /><span className="text-slate-600">{a.action.replaceAll("_", " ")} <span className="text-xs text-slate-400">· {a.user_name || "System"} · {fmt.dateTime(a.created_at)}</span></span></div>) : <p className="text-sm text-slate-400">No activity yet.</p>}</div></section>
          {hasPermission("marketing", "send") && <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-3 text-sm font-semibold text-slate-900">Workflow</h2><div className="flex flex-wrap gap-2">{next && <Button size="sm" onClick={() => statusMutation.mutate(next)} disabled={statusMutation.isPending}>{next === "ready" ? "Mark ready" : "Pause campaign"}</Button>}{["ready", "paused", "scheduled"].includes(campaign.status) && <Button size="sm" variant="outline" onClick={() => setLocation(`/marketing/campaigns/${id}/edit`)}><CalendarClock className="mr-1.5 h-4 w-4" /> {campaign.status === "scheduled" ? "Reschedule" : "Schedule campaign"}</Button>}{["ready", "failed", "paused"].includes(campaign.status) && <Button size="sm" onClick={sendNow}><Send className="mr-1.5 h-4 w-4" /> Send now</Button>}{["scheduled", "queued", "sending"].includes(campaign.status) && <Button size="sm" variant="outline" onClick={async () => { try { await pauseMarketingCampaign(id); qc.invalidateQueries({ queryKey: ["marketing-campaign", id] }); } catch (e: any) { toast({ title: "Unable to pause", description: e.message, variant: "destructive" }); } }}>Pause</Button>}<Button size="sm" variant="outline" onClick={testSend}>Test email</Button>{hasPermission("marketing", "create") && <Button size="sm" variant="outline" onClick={async () => { const copy = await duplicateMarketingCampaign(id); toast({ title: "Campaign duplicated" }); setLocation(`/marketing/campaigns/${copy.id}/edit`); }}>Duplicate</Button>}{hasPermission("marketing", "delete") && campaign.status !== "sent" && <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => { if (window.confirm("Delete this campaign?")) deleteMutation.mutate(); }}><Trash2 className="mr-1 h-4 w-4" /> Delete</Button>}</div><p className="mt-3 text-xs text-slate-400">Sending runs on the server and respects current CRM preferences and suppressions.</p></section>}
         {!hasPermission("marketing", "send") && (hasPermission("marketing", "create") || hasPermission("marketing", "delete")) && <section className="rounded-xl border bg-white p-5 shadow-sm"><h2 className="mb-3 text-sm font-semibold text-slate-900">Campaign actions</h2><div className="flex flex-wrap gap-2">{hasPermission("marketing", "create") && <Button size="sm" variant="outline" onClick={async () => { const copy = await duplicateMarketingCampaign(id); toast({ title: "Campaign duplicated" }); setLocation(`/marketing/campaigns/${copy.id}/edit`); }}>Duplicate</Button>}{hasPermission("marketing", "delete") && campaign.status !== "sent" && <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => { if (window.confirm("Delete this campaign?")) deleteMutation.mutate(); }}><Trash2 className="mr-1 h-4 w-4" /> Delete</Button>}</div></section>}
      </div></div>
@@ -489,6 +494,7 @@ function CampaignDetail({ id }: { id: number }) {
 }
 
 function CampaignEditor({ id }: { id?: number }) {
+  const fmt = useTimeService();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -538,10 +544,12 @@ function CampaignEditor({ id }: { id?: number }) {
     queryFn: () => getMarketingProductList(Number(selectedProductListId)),
     enabled: Boolean(selectedProductListId),
   });
-  useEffect(() => { if (existing) { setForm({ ...existing, sender_email: existing.sender_email || "", scheduled_at: existing.scheduled_at ? new Date(existing.scheduled_at).toISOString().slice(0, 16) : "" }); setSelectedIds((existing.recipients || []).map((r: any) => r.id)); } }, [existing]);
+  useEffect(() => { if (existing) { setForm({ ...existing, sender_email: existing.sender_email || "", scheduled_at: fmt.dateTimeLocalInput(existing.scheduled_at) }); setSelectedIds((existing.recipients || []).map((r: any) => r.id)); } }, [existing, fmt.tz]);
   const saveMutation = useMutation({
     mutationFn: (status: string) => {
-      const payload = { ...form, status, scheduled_at: form.scheduled_at || null, customer_ids: form.audience_type === "selected_customers" ? selectedIds : undefined };
+      const scheduled = form.scheduled_at ? parseDateTimeLocal(form.scheduled_at, fmt.tz) : null;
+      if (form.scheduled_at && !scheduled) throw new Error("Choose a valid scheduled date and time.");
+      const payload = { ...form, status, scheduled_at: scheduled?.toISOString() ?? null, customer_ids: form.audience_type === "selected_customers" ? selectedIds : undefined };
       return editing ? updateMarketingCampaign(id!, payload) : createMarketingCampaign(payload);
     },
     onSuccess: (campaign: any) => { qc.invalidateQueries({ queryKey: ["marketing-campaigns"] }); qc.invalidateQueries({ queryKey: ["marketing-dashboard"] }); toast({ title: editing ? "Campaign updated" : "Campaign created" }); setLocation(`/marketing/campaigns/${campaign.id}`); },
@@ -550,12 +558,15 @@ function CampaignEditor({ id }: { id?: number }) {
   const scheduleMutation = useMutation({
     mutationFn: async () => {
       if (!form.scheduled_at) throw new Error("Choose a scheduled date first.");
+      const scheduled = parseDateTimeLocal(form.scheduled_at, fmt.tz);
+      if (!scheduled) throw new Error("Choose a valid scheduled date and time.");
+      const scheduledAt = scheduled.toISOString();
       if (editing) {
-        await updateMarketingCampaign(id!, { ...form, scheduled_at: form.scheduled_at, status: existing?.status === "draft" ? "ready" : existing?.status });
-        return scheduleMarketingCampaign(id!, form.scheduled_at);
+        await updateMarketingCampaign(id!, { ...form, scheduled_at: scheduledAt, status: existing?.status === "draft" ? "ready" : existing?.status });
+        return scheduleMarketingCampaign(id!, scheduledAt);
       }
       const created: any = await createMarketingCampaign({ ...form, status: "ready", scheduled_at: null, customer_ids: form.audience_type === "selected_customers" ? selectedIds : undefined });
-      return scheduleMarketingCampaign(created.id, form.scheduled_at);
+      return scheduleMarketingCampaign(created.id, scheduledAt);
     },
     onSuccess: (campaign: any) => { qc.invalidateQueries({ queryKey: ["marketing-campaigns"] }); qc.invalidateQueries({ queryKey: ["marketing-dashboard"] }); toast({ title: "Campaign scheduled" }); setLocation(`/marketing/campaigns/${campaign.id}`); },
     onError: (e: any) => toast({ title: "Unable to schedule campaign", description: e.message, variant: "destructive" }),
@@ -761,6 +772,7 @@ function normalizeAudienceName(value: unknown): string {
 }
 
 export function MarketingAudienceReadiness() {
+  const fmt = useTimeService();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
@@ -868,7 +880,7 @@ export function MarketingAudienceReadiness() {
       <div>
         <p className="font-semibold">Read-only audit</p>
         <p className="mt-1 text-blue-900/80">Refreshing this audit reads list and segment metadata and account consent totals. The separate export below downloads discrepancy rows on demand; neither action syncs audiences, changes subscriptions, or sends campaigns.</p>
-        <p className="mt-1 text-xs text-blue-800/70">Last checked {data?.checkedAt ? new Date(data.checkedAt).toLocaleString() : "—"}</p>
+        <p className="mt-1 text-xs text-blue-800/70">Last checked {data?.checkedAt ? fmt.dateTime(data.checkedAt) : "—"}</p>
       </div>
     </div>}
 

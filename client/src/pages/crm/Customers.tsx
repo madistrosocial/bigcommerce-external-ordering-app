@@ -429,7 +429,7 @@ export default function CRMCustomers() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `crm-customers-${new Date().toISOString().split("T")[0]}.${format}`;
+      a.download = `crm-customers-${fmt.dateOnly()}.${format}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Download, FileSpreadsheet, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { useTimeService } from "@/hooks/useTimeService";
 import { useStore } from "@/lib/store";
 import { getAuthHeaders } from "@/lib/api";
 import { ReportTable } from "./ReportTable";
@@ -82,6 +83,7 @@ function buildQueryParams(
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function ReportEngine({ config }: ReportEngineProps) {
+  const fmt = useTimeService();
   const { toast } = useToast();
   const { currentUser } = useStore();
 
@@ -162,7 +164,7 @@ export function ReportEngine({ config }: ReportEngineProps) {
       const csv = rowsToCSV(activeView.columns, exportRows);
       const slug = config.name.toLowerCase().replace(/\s+/g, "_");
       const viewSlug = activeView.label.toLowerCase().replace(/\s+/g, "_");
-      const ts = new Date().toISOString().slice(0, 10);
+      const ts = fmt.dateOnly();
 
       if (type === "csv") {
         downloadBlob(csv, `${slug}_${viewSlug}_${ts}.csv`, "text/csv;charset=utf-8;");

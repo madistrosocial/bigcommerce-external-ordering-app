@@ -9,8 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, Eye, EyeOff, KeyRound, Loader2, Plug, RefreshCw, Save, XCircle } from "lucide-react";
 import { toPublicVendorMessage, toPublicVendorName } from "@/lib/vendor-display";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useTimeService } from "@/hooks/useTimeService";
 
 export default function KoleImportsPage() {
+  const fmt = useTimeService();
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
   const canManageVendor = hasPermission("dropshipping_vendor", "manage");
@@ -126,7 +128,7 @@ export default function KoleImportsPage() {
             <div className="flex items-center justify-between gap-3 text-sm">
               <span className="text-slate-500">Last test</span>
               <span className={lastTestOk ? "text-green-600" : "text-red-600"}>
-                {lastTestOk ? "Passed" : "Failed"} · {new Date(lastTestedAt).toLocaleString()}
+                {lastTestOk ? "Passed" : "Failed"} · {fmt.dateTime(lastTestedAt)}
               </span>
             </div>
           )}

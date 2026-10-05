@@ -58,3 +58,4 @@
 - [Marketing typography scale](marketing-font-scale.md) — use 18/14/12/11px for page, section, content, and metadata; retain 14px form controls.
 - [Image model parameter compatibility](image-model-parameter-compatibility.md) — only send options accepted by the configured image model; reference edits omit `input_fidelity`.
 - [Image Editor full-canvas logo overlay](image-editor-logo-overlay.md) — preserve the transparent 1200×1200 PNG's built-in coordinates; match the generated canvas to it.
+- [Company timezone display](company-timezone-display.md) — use the configured IANA timezone for app timestamps and local-day boundaries; preserve date-only values and Payroll's separate timezone.

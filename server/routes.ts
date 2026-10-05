@@ -85,7 +85,7 @@ import { buildBigCommerceSkuIndex, normalizeKoleSku } from "./koleSkuMapping";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 import { MARKETING_ACTION_PERMS, MARKETING_LEGACY_PAGE_GRANTS } from "@shared/marketing-permissions";
 import { DROPSHIPPING_LEGACY_PERMISSION_GRANTS, DROPSHIPPING_PERMISSIONS } from "@shared/dropshipping-permissions";
-import { dateOnlyInTimeZone, parseDateTimeLocal } from "@shared/timezone";
+import { dateOnlyInTimeZone, isValidTimeZone, parseDateTimeLocal } from "@shared/timezone";
 import {
   ATTENDANCE_PERMISSION_DEFINITIONS,
   DEFAULT_ATTENDANCE_SETTINGS,
@@ -5613,6 +5613,9 @@ export async function registerRoutes(
       const { timezone } = req.body;
       if (!timezone || typeof timezone !== "string") {
         return res.status(400).json({ error: "timezone is required" });
+      }
+      if (!isValidTimeZone(timezone)) {
+        return res.status(400).json({ error: "timezone must be a valid IANA timezone." });
       }
       await storage.setSetting("company_timezone", timezone);
       res.json({ success: true, timezone });

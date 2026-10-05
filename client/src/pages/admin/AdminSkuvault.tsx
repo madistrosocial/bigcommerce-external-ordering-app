@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, CheckCircle2, XCircle, Plug, RefreshCw, Save, Eye, EyeOff } from "lucide-react";
 
 export default function AdminSkuvaultPage() {
+  const fmt = useTimeService();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -137,7 +139,7 @@ export default function AdminSkuvaultPage() {
                   <XCircle className="h-4 w-4 text-red-500" />
                 )}
                 <span className={lastTestOk ? "text-green-600" : "text-red-600"}>
-                  {lastTestOk ? "Passed" : "Failed"} · {new Date(lastTestedAt).toLocaleString()}
+                  {lastTestOk ? "Passed" : "Failed"} · {fmt.dateTime(lastTestedAt)}
                 </span>
               </div>
             </div>

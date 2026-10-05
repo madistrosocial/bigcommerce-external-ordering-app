@@ -699,6 +699,7 @@ function Logs() {
 }
 
 function HomeLocations() {
+  const fmt = useTimeService();
   const client = useQueryClient();
   const query = useQuery({
     queryKey: ["attendance", "home-locations"],
@@ -742,7 +743,7 @@ function HomeLocations() {
                     <p className="truncate text-sm font-semibold text-slate-800">{user.name}</p>
                     <p className="text-xs text-slate-400">@{user.username} · {user.is_enabled ? "Active" : "Disabled"}</p>
                     <p className="mt-1 break-all font-mono text-[11px] text-slate-500">{user.attendance_home_latitude}, {user.attendance_home_longitude}</p>
-                    {user.attendance_home_set_at && <p className="mt-1 text-[11px] text-slate-400">Saved {new Date(user.attendance_home_set_at).toLocaleString()}</p>}
+                    {user.attendance_home_set_at && <p className="mt-1 text-[11px] text-slate-400">Saved {fmt.dateTime(user.attendance_home_set_at)}</p>}
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
