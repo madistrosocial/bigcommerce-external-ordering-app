@@ -213,8 +213,7 @@ export interface DropshipDashboardOrder {
   order_number: number;
   customer_name: string | null;
   customer_email: string | null;
-  status: string | null;
-  order_date: string | null;
+  crm_customer_id: number | null;
   order_total: string | null;
 }
 
