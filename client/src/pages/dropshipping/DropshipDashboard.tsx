@@ -1,40 +1,16 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import * as api from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { BrandOrdersWidget, type BrandOrdersMetricKey } from "@/components/dashboard/BrandOrdersWidget";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTimeService } from "@/hooks/useTimeService";
-import { CalendarDays, ChevronRight, Loader2, PackageOpen, Pin, Plus, RefreshCw, Search, ShoppingBag, X } from "lucide-react";
-
-type MetricKey = "today" | "yesterday" | "thisMonth" | "total";
-
-const metricLabels: Record<MetricKey, { title: string; caption: string }> = {
-  today: { title: "Orders Today", caption: "Created today" },
-  yesterday: { title: "Orders Yesterday", caption: "Created yesterday" },
-  thisMonth: { title: "Orders This Month", caption: "Month to date" },
-  total: { title: "Total Orders", caption: "All time" },
-};
-
-function dateLabel(value: string, timezone: string) {
-  const date = new Date(`${value}T12:00:00.000Z`);
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
-}
-
-function formatOrderTotal(value: string | null) {
-  if (value == null || !Number.isFinite(Number(value))) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value));
-}
+import { Loader2, PackageOpen, Search } from "lucide-react";
 
 export default function DropshipDashboardPage() {
   const [, setLocation] = useLocation();
@@ -95,7 +71,7 @@ export default function DropshipDashboardPage() {
       : [...current, brandId]);
   };
 
-  const openSalesHistory = (brand: api.DropshipDashboardBrand, metric: MetricKey) => {
+  const openSalesHistory = (brand: api.DropshipDashboardBrand, metric: BrandOrdersMetricKey) => {
     if (!canViewOrders) {
       toast({
         title: "Orders access required",
