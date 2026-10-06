@@ -42,6 +42,7 @@ export interface BrandOrdersWidgetProps {
   manageButtonLabel?: string;
   manageButtonLoading?: boolean;
   removeDisabled?: boolean;
+  hideEmptyState?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
   infoText?: string;
@@ -92,6 +93,7 @@ export function BrandOrdersWidget({
   manageButtonLabel = "Manage brands",
   manageButtonLoading = false,
   removeDisabled = false,
+  hideEmptyState = false,
   emptyTitle = "No brands selected",
   emptyDescription = "Add brands to see their order metrics and today's orders.",
   infoText,
@@ -138,14 +140,16 @@ export function BrandOrdersWidget({
           {onRetry && <Button variant="outline" onClick={onRetry}><RefreshCw className="mr-2 h-4 w-4" />Try again</Button>}
         </CardContent></Card>
       ) : brands.length === 0 ? (
-        <Card className="border-dashed">
-          <CardContent className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600"><Pin className="h-6 w-6" /></div>
-            <h2 className="mt-4 text-base font-semibold text-slate-800">{emptyTitle}</h2>
-            <p className="mt-1 max-w-md text-sm text-slate-500">{emptyDescription}</p>
-            {onManageBrands && <Button className="mt-4" onClick={onManageBrands}><Plus className="mr-2 h-4 w-4" />Add brands</Button>}
-          </CardContent>
-        </Card>
+        hideEmptyState ? null : (
+          <Card className="border-dashed">
+            <CardContent className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600"><Pin className="h-6 w-6" /></div>
+              <h2 className="mt-4 text-base font-semibold text-slate-800">{emptyTitle}</h2>
+              <p className="mt-1 max-w-md text-sm text-slate-500">{emptyDescription}</p>
+              {onManageBrands && <Button className="mt-4" onClick={onManageBrands}><Plus className="mr-2 h-4 w-4" />Add brands</Button>}
+            </CardContent>
+          </Card>
+        )
       ) : (
         <>
           <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">

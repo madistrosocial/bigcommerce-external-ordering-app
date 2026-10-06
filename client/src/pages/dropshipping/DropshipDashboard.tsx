@@ -120,6 +120,7 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
         manageButtonLabel={embedded ? "Pin brands" : "Add brands to dashboard"}
         manageButtonLoading={brandsQuery.isLoading}
         removeDisabled={savePins.isPending}
+        hideEmptyState={embedded}
         emptyTitle="Choose brands to monitor"
         emptyDescription="Pin one or more BigCommerce brands to see their order counts and open matching orders in Sales History."
         infoText={embedded ? undefined : "Counts include distinct BigCommerce orders with synced order lines linked to products currently assigned to each brand."}
