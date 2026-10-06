@@ -115,21 +115,21 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
         canViewOrders={canViewOrders}
         loading={dashboardQuery.isLoading}
         error={dashboardQuery.isError ? `Unable to load the dropship dashboard: ${(dashboardQuery.error as Error).message}` : null}
-        today={dashboardQuery.data?.dates.today}
+        today={embedded ? undefined : dashboardQuery.data?.dates.today}
         timezone={dashboardQuery.data?.timezone}
         manageButtonLabel={embedded ? "Pin brands" : "Add brands to dashboard"}
         manageButtonLoading={brandsQuery.isLoading}
         removeDisabled={savePins.isPending}
         emptyTitle="Choose brands to monitor"
         emptyDescription="Pin one or more BigCommerce brands to see their order counts and open matching orders in Sales History."
-        infoText="Counts include distinct BigCommerce orders with synced order lines linked to products currently assigned to each brand."
+        infoText={embedded ? undefined : "Counts include distinct BigCommerce orders with synced order lines linked to products currently assigned to each brand."}
         brandSubtitle={(brand) => `BigCommerce brand · ID ${brand.id}`}
         onManageBrands={openManage}
         onRetry={() => dashboardQuery.refetch()}
         onRemoveBrand={removeBrand}
         onMetricClick={openSalesHistory}
         onOrderClick={(order) => setLocation(`/orders/bc/${order.bigcommerce_order_id}`)}
-        footer={dashboardQuery.data?.dataFreshness && (
+        footer={!embedded && dashboardQuery.data?.dataFreshness && (
           <div className={`rounded-xl border px-4 py-3 text-xs ${dashboardQuery.data.dataFreshness.autoSyncEnabled && dashboardQuery.data.dataFreshness.lineItemCount > 0 ? "border-emerald-100 bg-emerald-50/60 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
             {dashboardQuery.data.dataFreshness.lineItemCount === 0 ? (
               <p><strong>Order detail data has not been synced yet.</strong> Run a full “Sync Order Line Items” from Admin → CRM Settings before relying on these counts.</p>
