@@ -47,7 +47,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTimeService } from "@/hooks/useTimeService";
+import { usePermissions } from "@/hooks/usePermissions";
 import { dateOnlyInTimeZone, parseDateTimeLocal } from "@shared/timezone";
+import { DropshipDashboardPanel } from "@/pages/dropshipping/DropshipDashboard";
 
 type Period = "day" | "week" | "month" | "year" | "all";
 
@@ -299,6 +301,8 @@ function Trend({ current, previous, suffix = "vs last period", invert = false }:
 export default function DashboardPage() {
   const { currentUser } = useStore();
   const fmt = useTimeService();
+  const { hasPermission } = usePermissions();
+  const canViewDropshipDashboard = hasPermission("dropshipping_dashboard", "view");
   const [, setLocation] = useLocation();
   const [period, setPeriod] = useState<Period>("month");
 
@@ -554,6 +558,12 @@ export default function DashboardPage() {
             </button>
           </Card>
         </section>
+
+        {canViewDropshipDashboard && (
+          <section className="w-full min-w-0" data-testid="dashboard-dropship-brand-monitor">
+            <DropshipDashboardPanel embedded />
+          </section>
+        )}
 
         <section className="grid gap-4 lg:grid-cols-2">
           <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-none">

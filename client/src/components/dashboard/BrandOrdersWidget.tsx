@@ -47,6 +47,7 @@ export interface BrandOrdersWidgetProps {
   infoText?: string;
   footer?: ReactNode;
   brandSubtitle?: (brand: BrandOrdersWidgetBrand) => ReactNode;
+  titleLevel?: "h1" | "h2";
   onManageBrands?: () => void;
   onRetry?: () => void;
   onRemoveBrand?: (brandId: number) => void;
@@ -96,6 +97,7 @@ export function BrandOrdersWidget({
   infoText,
   footer,
   brandSubtitle,
+  titleLevel = "h1",
   onManageBrands,
   onRetry,
   onRemoveBrand,
@@ -104,6 +106,7 @@ export function BrandOrdersWidget({
 }: BrandOrdersWidgetProps) {
   const fmt = useTimeService();
   const dateTimezone = timezone || fmt.tz;
+  const Title = titleLevel;
 
   return (
     <div className={`space-y-5 ${className}`}>
@@ -112,7 +115,7 @@ export function BrandOrdersWidget({
           <div>
             <div className="flex items-center gap-2">
               {titleIcon}
-              <h1 className="text-xl font-bold text-slate-900">{title}</h1>
+              <Title className="text-xl font-bold text-slate-900">{title}</Title>
             </div>
             {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
           </div>

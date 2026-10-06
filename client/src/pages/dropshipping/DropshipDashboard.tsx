@@ -12,7 +12,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useTimeService } from "@/hooks/useTimeService";
 import { Loader2, PackageOpen, Search } from "lucide-react";
 
-export default function DropshipDashboardPage() {
+export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -106,17 +106,18 @@ export default function DropshipDashboardPage() {
   return (
     <>
       <BrandOrdersWidget
-        className="px-4 py-5 md:px-6"
-        title="Dropship Dashboard"
-        description="Monitor BigCommerce orders by the brands you pin here."
+        className={embedded ? "min-w-0" : "px-4 py-5 md:px-6"}
+        title={embedded ? "Dropship Brand Monitor" : "Dropship Dashboard"}
+        description={embedded ? "Pin BigCommerce brands to track their orders alongside your sales and inventory activity." : "Monitor BigCommerce orders by the brands you pin here."}
         titleIcon={<PackageOpen className="h-5 w-5 text-blue-600" />}
+        titleLevel={embedded ? "h2" : "h1"}
         brands={pinnedBrands}
         canViewOrders={canViewOrders}
         loading={dashboardQuery.isLoading}
         error={dashboardQuery.isError ? `Unable to load the dropship dashboard: ${(dashboardQuery.error as Error).message}` : null}
         today={dashboardQuery.data?.dates.today}
         timezone={dashboardQuery.data?.timezone}
-        manageButtonLabel="Add brands to dashboard"
+        manageButtonLabel={embedded ? "Pin brands" : "Add brands to dashboard"}
         manageButtonLoading={brandsQuery.isLoading}
         removeDisabled={savePins.isPending}
         emptyTitle="Choose brands to monitor"
@@ -186,4 +187,8 @@ export default function DropshipDashboardPage() {
       </Dialog>
     </>
   );
+}
+
+export default function DropshipDashboardPage() {
+  return <DropshipDashboardPanel />;
 }
