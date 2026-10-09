@@ -518,7 +518,6 @@ export function syncKoleCatalog() {
 }
 
 export async function uploadKoleCsv(file: File) {
-  const csv = await file.text();
   return dropshipRequest<{
     ok: boolean;
     productsProcessed: number;
@@ -529,7 +528,7 @@ export async function uploadKoleCsv(file: File) {
   }>("/dropshipping/kole/upload-csv", {
     method: "POST",
     headers: { "Content-Type": "text/csv; charset=utf-8" },
-    body: csv,
+    body: file,
   });
 }
 

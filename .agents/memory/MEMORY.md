@@ -34,6 +34,7 @@
 - [Dropshipping phase boundaries](dropshipping-phase-boundaries.md) — feed sync stays local; only a selected-item action can create hidden, disabled BigCommerce drafts.
 - [Kole Product Sync safety contract](kole-product-sync-safety.md) — preserve selected-field writes, inventory tracking guards, and append-only watermarked image sync.
 - [Kole feed draft pricing](kole-feed-draft-pricing.md) — selected drafts use an editable 20%-over-MOQ price suggestion and require a real BigCommerce category.
+- [Kole CSV import safety](kole-csv-import-safety.md) — stream batches and track seen SKUs in a transaction-scoped table; never retain a whole feed in Node memory.
 - [Dropship brand dashboard counts](dropship-brand-dashboard-counts.md) — resolve BigCommerce brand products directly; count distinct synced line-item orders, not just locally pinned products.
 - [Dropship dashboard order privacy](dropship-dashboard-order-privacy.md) — keep customer and order details server-gated by Orders → View while leaving brand summary counts available.
 - [Dropshipping display labels](dropshipping-display-labels.md) — keep provider names/domains out of labels, errors, sync logs, and other staff-facing copy.

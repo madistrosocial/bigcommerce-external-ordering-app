@@ -71,7 +71,13 @@ import {
   verifyConstantContactUserPrivileges,
 } from "./constant-contact";
 import { DEFAULT_VENDOR_DISPLAY_NAME, KOLE_VENDOR, KoleImportsAdapter, toDropshipProductInsert, type KoleCredentials } from "./vendors/kole-imports";
-import { KOLE_CSV_FEED_URL, MAX_KOLE_FEED_BYTES, parseKoleFeedCsv } from "./vendors/kole-feed";
+import {
+  KOLE_CSV_FEED_URL,
+  MAX_KOLE_FEED_BYTES,
+  KoleCsvTooLargeError,
+  KoleCsvValidationError,
+  streamKoleFeedCsv,
+} from "./vendors/kole-feed";
 import {
   KoleProductSyncError,
   KoleProductSyncManager,
@@ -1338,34 +1344,50 @@ export async function registerRoutes(
       }
       const contentLength = Number(feedResponse.headers.get("content-length") || 0);
       if (contentLength > MAX_KOLE_FEED_BYTES) {
-        throw new Error("The vendor feed is larger than the supported 50 MB limit.");
+        await feedResponse.body?.cancel().catch(() => {});
+        throw new KoleCsvTooLargeError();
       }
       syncStage = "validating CSV feed";
       if (/text\/html/i.test(feedResponse.headers.get("content-type") || "")) {
         throw new Error("The vendor returned an HTML error page instead of a CSV feed. Try again later.");
       }
-      const csv = await feedResponse.text();
-      if (Buffer.byteLength(csv, "utf8") > MAX_KOLE_FEED_BYTES) {
-        throw new Error("The vendor feed is larger than the supported 50 MB limit.");
+      if (!feedResponse.body) {
+        throw new Error("The vendor returned an empty response instead of a CSV feed.");
       }
 
-      const products = parseKoleFeedCsv(csv);
-      syncStage = "saving catalog products";
-      const result = await storage.upsertDropshipProducts(
-        products.map((product) => toDropshipProductInsert(vendor.id, product)),
-      );
-      const seenSkus = products.map((product) => product.sku);
-      syncStage = "updating catalog availability";
-      await storage.markDropshipProductsUnavailable(vendor.id, seenSkus);
+      const importResult = await storage.withKoleCsvImport(vendor.id, async (upsertBatch) => {
+        let productsCreated = 0;
+        let productsUpdated = 0;
+        const parsed = await streamKoleFeedCsv(
+          feedResponse.body as unknown as AsyncIterable<Uint8Array>,
+          async (batch) => {
+            syncStage = "saving catalog products";
+            const result = await upsertBatch(
+              batch.map((product) => toDropshipProductInsert(vendor.id, product)),
+            );
+            productsCreated += result.created;
+            productsUpdated += result.updated;
+          },
+        );
+        syncStage = "updating catalog availability";
+        return {
+          ...parsed,
+          productsCreated,
+          productsUpdated,
+        };
+      });
+      const products = importResult.productsProcessed;
+      const created = importResult.productsCreated;
+      const updated = importResult.productsUpdated;
       const completedAt = Date.now();
       syncStage = "finalizing sync log";
       const finished = await storage.finishDropshipSyncLog(log.id, {
         status: "completed",
         completed_at: new Date(),
         duration_ms: completedAt - startedAt,
-        products_processed: products.length,
-        products_created: result.created,
-        products_updated: result.updated,
+        products_processed: products,
+        products_created: created,
+        products_updated: updated,
         error_count: 0,
         error_summary: null,
         detail: { source: "csv_feed", sourceUrl: KOLE_CSV_FEED_URL },
@@ -1373,9 +1395,9 @@ export async function registerRoutes(
       res.json({
         ok: true,
         log: finished,
-        productsProcessed: products.length,
-        productsCreated: result.created,
-        productsUpdated: result.updated,
+        productsProcessed: products,
+        productsCreated: created,
+        productsUpdated: updated,
         errorCount: 0,
       });
     } catch (error: any) {
@@ -1396,69 +1418,66 @@ export async function registerRoutes(
           error_summary: `${syncStage}: ${errorMessage}`,
         }).catch(() => {});
       }
-      const publicError = syncStage === "saving catalog products"
-        ? "The feed was read, but saving products to the Vendor Catalog failed. Some rows may have been saved; retrying is safe."
-        : syncStage === "updating catalog availability"
-          ? "Products were saved, but catalog availability could not be updated. Retry the sync to finish."
-          : errorMessage;
+      const isTooLarge = error instanceof KoleCsvTooLargeError;
+      const isInvalidCsv = error instanceof KoleCsvValidationError;
+      const publicError = isTooLarge
+        ? `${errorMessage} No catalog changes from this feed were committed.`
+        : isInvalidCsv
+          ? `${errorMessage} The feed import was rolled back; no catalog changes were committed.`
+          : syncStage === "saving catalog products"
+            ? "Saving products to the Vendor Catalog failed. The import was rolled back, so no catalog changes from this feed were committed."
+            : syncStage === "updating catalog availability"
+              ? "Updating catalog availability failed. The import was rolled back, so no catalog changes from this feed were committed."
+              : errorMessage;
       res.status(502).json({ error: publicError, stage: syncStage });
     }
   });
 
-  const parseKoleCsvUpload = express.text({
-    type: ["text/csv", "text/plain"],
-    limit: `${MAX_KOLE_FEED_BYTES}b`,
-  });
   app.post(
     "/api/dropshipping/kole/upload-csv",
     requirePermission("dropshipping_vendor", "sync"),
-    (req, res, next) => {
-      parseKoleCsvUpload(req, res, (error: any) => {
-        if (error) {
-          const tooLarge = error.status === 413 || error.statusCode === 413;
-          return res.status(tooLarge ? 413 : 400).json({
-            error: tooLarge
-              ? "The uploaded CSV is larger than the supported 50 MB limit."
-              : "The uploaded CSV could not be read. Choose a plain CSV file and try again.",
-          });
-        }
-        next();
-      });
-    },
     async (req, res) => {
       const startedAt = Date.now();
       let log: any;
       let syncStage = "initializing uploaded CSV import";
+      let productsProcessed = 0;
+      let productsCreated = 0;
+      let productsUpdated = 0;
       try {
-        const csv = req.body;
-        if (typeof csv !== "string" || !csv.trim()) {
-          return res.status(400).json({ error: "Choose a non-empty CSV file to import." });
-        }
-        if (Buffer.byteLength(csv, "utf8") > MAX_KOLE_FEED_BYTES) {
+        const contentLength = Number(req.headers["content-length"] || 0);
+        if (Number.isFinite(contentLength) && contentLength > MAX_KOLE_FEED_BYTES) {
+          req.resume();
           return res.status(413).json({ error: "The uploaded CSV is larger than the supported 50 MB limit." });
         }
 
         const vendor = await getKoleVendor();
         log = await storage.createDropshipSyncLog({ vendor_id: vendor.id });
         syncStage = "validating uploaded CSV";
-        if (/^\s*</.test(csv) && /<html[\s>]/i.test(csv.slice(0, 2048))) {
-          throw new Error("The uploaded file is an HTML page, not a CSV feed.");
-        }
-        const products = parseKoleFeedCsv(csv);
-        syncStage = "saving uploaded catalog products";
-        const result = await storage.upsertDropshipProducts(
-          products.map((product) => toDropshipProductInsert(vendor.id, product)),
-        );
-        syncStage = "updating catalog availability";
-        await storage.markDropshipProductsUnavailable(vendor.id, products.map((product) => product.sku));
+        const importResult = await storage.withKoleCsvImport(vendor.id, async (upsertBatch) => {
+          let importedCreated = 0;
+          let importedUpdated = 0;
+          const parsed = await streamKoleFeedCsv(req, async (batch) => {
+            syncStage = "saving uploaded catalog products";
+            const result = await upsertBatch(
+              batch.map((product) => toDropshipProductInsert(vendor.id, product)),
+            );
+            importedCreated += result.created;
+            importedUpdated += result.updated;
+          });
+          productsProcessed = parsed.productsProcessed;
+          productsCreated = importedCreated;
+          productsUpdated = importedUpdated;
+          syncStage = "updating catalog availability";
+          return parsed;
+        });
         syncStage = "finalizing upload log";
         const finished = await storage.finishDropshipSyncLog(log.id, {
           status: "completed",
           completed_at: new Date(),
           duration_ms: Date.now() - startedAt,
-          products_processed: products.length,
-          products_created: result.created,
-          products_updated: result.updated,
+          products_processed: importResult.productsProcessed,
+          products_created: productsCreated,
+          products_updated: productsUpdated,
           error_count: 0,
           error_summary: null,
           detail: { source: "uploaded_csv" },
@@ -1466,14 +1485,21 @@ export async function registerRoutes(
         res.json({
           ok: true,
           log: finished,
-          productsProcessed: products.length,
-          productsCreated: result.created,
-          productsUpdated: result.updated,
+          productsProcessed: importResult.productsProcessed,
+          productsCreated,
+          productsUpdated,
           errorCount: 0,
         });
       } catch (error: any) {
         const rawErrorMessage = String(error?.message || "Unexpected uploaded CSV error.").slice(0, 400);
         const errorMessage = sanitizeVendorFacingMessage(rawErrorMessage);
+        const isTooLarge = error instanceof KoleCsvTooLargeError;
+        const isInvalidCsv = error instanceof KoleCsvValidationError;
+        if (syncStage === "saving uploaded catalog products" || syncStage === "updating catalog availability") {
+          productsProcessed = 0;
+          productsCreated = 0;
+          productsUpdated = 0;
+        }
         console.error("[Kole CSV upload] failed", {
           stage: syncStage,
           name: error?.name || "Error",
@@ -1485,17 +1511,23 @@ export async function registerRoutes(
             status: "failed",
             completed_at: new Date(),
             duration_ms: Date.now() - startedAt,
+            products_processed: productsProcessed,
+            products_created: productsCreated,
+            products_updated: productsUpdated,
             error_count: 1,
             error_summary: `${syncStage}: ${errorMessage}`,
           }).catch(() => {});
         }
-        const isInvalidCsv = syncStage === "validating uploaded CSV";
-        const publicError = syncStage === "saving uploaded catalog products"
-          ? "The CSV is valid, but saving it to the Vendor Catalog failed. Some rows may have been saved; uploading the same file again is safe."
-          : syncStage === "updating catalog availability"
-            ? "Products were saved, but catalog availability could not be updated. Upload the file again to finish."
-            : errorMessage;
-        res.status(isInvalidCsv ? 400 : 500).json({ error: publicError, stage: syncStage });
+        const publicError = isTooLarge
+          ? `${errorMessage} No catalog changes from this upload were committed.`
+          : isInvalidCsv
+            ? `${errorMessage} The upload was rolled back; no catalog changes were committed.`
+            : syncStage === "saving uploaded catalog products"
+              ? "Saving the Vendor Catalog failed. The upload was rolled back, so no catalog changes from this CSV were committed."
+              : syncStage === "updating catalog availability"
+                ? "Updating catalog availability failed. The upload was rolled back, so no catalog changes from this CSV were committed."
+                : errorMessage;
+        res.status(isTooLarge ? 413 : isInvalidCsv ? 400 : 500).json({ error: publicError, stage: syncStage });
       }
     },
   );

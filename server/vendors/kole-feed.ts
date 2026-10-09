@@ -96,7 +96,7 @@ export class KoleCsvValidationError extends Error {
 
 export class KoleCsvTooLargeError extends Error {
   constructor() {
-    super("The uploaded CSV is larger than the supported 50 MB limit.");
+    super("The Kole CSV is larger than the supported 50 MB limit.");
     this.name = "KoleCsvTooLargeError";
   }
 }
@@ -107,6 +107,10 @@ type KoleFeedHeaders = {
 };
 
 function parseKoleFeedHeaders(values: string[]): KoleFeedHeaders {
+  const preview = values.join(",").slice(0, 2048);
+  if (/^\s*</.test(preview) && /<html[\s>]/i.test(preview)) {
+    throw new KoleCsvValidationError("The uploaded file is an HTML page, not a CSV feed.");
+  }
   const columns = values.map((header, index) =>
     (index === 0 ? header.replace(/^\uFEFF/, "") : header).trim(),
   );
@@ -185,7 +189,7 @@ export async function streamKoleFeedCsv(
   source: AsyncIterable<Uint8Array>,
   onBatch: (products: KoleProduct[]) => Promise<void>,
   options: { batchSize?: number; maxBytes?: number } = {},
-): Promise<{ productsProcessed: number; seenSkus: string[] }> {
+): Promise<{ productsProcessed: number }> {
   const batchSize = options.batchSize ?? 250;
   const maxBytes = options.maxBytes ?? MAX_KOLE_FEED_BYTES;
   if (!Number.isInteger(batchSize) || batchSize < 1) {
@@ -194,7 +198,6 @@ export async function streamKoleFeedCsv(
 
   const decoder = new StringDecoder("utf8");
   const products: KoleProduct[] = [];
-  const seenSkus = new Set<string>();
   let headers: KoleFeedHeaders | null = null;
   let row: string[] = [];
   let fieldParts: string[] = [];
@@ -231,7 +234,6 @@ export async function streamKoleFeedCsv(
 
     const product = parseKoleFeedProductRow(values, headers, rowsRead);
     products.push(product);
-    seenSkus.add(product.sku);
     productsProcessed++;
     if (products.length >= batchSize) {
       const batch = products.splice(0, products.length);
@@ -319,5 +321,5 @@ export async function streamKoleFeedCsv(
   }
   if (products.length > 0) await onBatch(products.splice(0, products.length));
 
-  return { productsProcessed, seenSkus: Array.from(seenSkus) };
+  return { productsProcessed };
 }

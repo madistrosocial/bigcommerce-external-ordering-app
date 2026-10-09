@@ -108,6 +108,12 @@ export interface IStorage {
   getDropshipProduct(id: number): Promise<DropshipProduct | undefined>;
   upsertDropshipProducts(entries: InsertDropshipProduct[]): Promise<{ created: number; updated: number }>;
   markDropshipProductsUnavailable(vendorId: number, seenSkus: string[]): Promise<void>;
+  withKoleCsvImport<T>(
+    vendorId: number,
+    importBatches: (
+      upsertBatch: (entries: InsertDropshipProduct[]) => Promise<{ created: number; updated: number }>,
+    ) => Promise<T>,
+  ): Promise<T>;
   updateDropshipProductStatus(id: number, status: string): Promise<DropshipProduct | undefined>;
   mapDropshipProductToBigCommerce(id: number, bigcommerceProductId: number, bigcommerceVariantId?: number | null): Promise<DropshipProduct | undefined>;
   unmapDropshipProductFromBigCommerce(id: number, expectedBigcommerceProductId: number): Promise<boolean>;
@@ -1340,12 +1346,103 @@ export class DatabaseStorage implements IStorage {
     return { created, updated };
   }
 
+  async withKoleCsvImport<T>(
+    vendorId: number,
+    importBatches: (
+      upsertBatch: (entries: InsertDropshipProduct[]) => Promise<{ created: number; updated: number }>,
+    ) => Promise<T>,
+  ): Promise<T> {
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`
+        CREATE TEMP TABLE kole_csv_seen_skus (
+          vendor_sku text PRIMARY KEY
+        ) ON COMMIT DROP
+      `);
+
+      const upsertBatch = async (entries: InsertDropshipProduct[]) => {
+        const bySku = new Map<string, InsertDropshipProduct>();
+        for (const entry of entries) {
+          if (entry.vendor_id !== vendorId) {
+            throw new Error("Kole CSV import batch contains a product for a different vendor.");
+          }
+          bySku.set(entry.vendor_sku, entry);
+        }
+        const batch = Array.from(bySku.values());
+        if (batch.length === 0) return { created: 0, updated: 0 };
+
+        const existingRows = await tx.select({ vendor_sku: dropshipProducts.vendor_sku })
+          .from(dropshipProducts)
+          .where(and(
+            eq(dropshipProducts.vendor_id, vendorId),
+            inArray(dropshipProducts.vendor_sku, batch.map((entry) => entry.vendor_sku)),
+          ));
+        const existingSkus = new Set(existingRows.map((row) => row.vendor_sku));
+
+        await tx.insert(dropshipProducts).values(batch).onConflictDoUpdate({
+          target: [dropshipProducts.vendor_id, dropshipProducts.vendor_sku],
+          set: {
+            vendor_product_id: sql`excluded.vendor_product_id`,
+            title: sql`excluded.title`,
+            description: sql`excluded.description`,
+            brand: sql`excluded.brand`,
+            upc: sql`excluded.upc`,
+            inventory: sql`excluded.inventory`,
+            cost: sql`excluded.cost`,
+            tier_data: sql`excluded.tier_data`,
+            image_data: sql`excluded.image_data`,
+            vendor_category: sql`excluded.vendor_category`,
+            vendor_subcategory: sql`excluded.vendor_subcategory`,
+            is_closeout: sql`excluded.is_closeout`,
+            vendor_modified_at: sql`excluded.vendor_modified_at`,
+            raw_data: sql`excluded.raw_data`,
+            updated_at: new Date(),
+            status: sql`CASE WHEN ${dropshipProducts.status} IN ('queued', 'mapped') THEN ${dropshipProducts.status} ELSE 'available' END`,
+          },
+        });
+
+        const seenSkuValues = sql.join(
+          batch.map((entry) => sql`(${entry.vendor_sku})`),
+          sql`,`,
+        );
+        await tx.execute(sql`
+          INSERT INTO pg_temp.kole_csv_seen_skus (vendor_sku)
+          VALUES ${seenSkuValues}
+          ON CONFLICT (vendor_sku) DO NOTHING
+        `);
+
+        let created = 0;
+        let updated = 0;
+        for (const entry of batch) {
+          if (existingSkus.has(entry.vendor_sku)) updated++;
+          else created++;
+        }
+        return { created, updated };
+      };
+
+      const result = await importBatches(upsertBatch);
+      await tx.update(dropshipProducts)
+        .set({ status: "unavailable", inventory: 0, updated_at: new Date() })
+        .where(and(
+          eq(dropshipProducts.vendor_id, vendorId),
+          sql`NOT EXISTS (
+            SELECT 1
+            FROM pg_temp.kole_csv_seen_skus seen
+            WHERE seen.vendor_sku = ${dropshipProducts.vendor_sku}
+          )`,
+        ));
+      return result;
+    });
+  }
+
   async markDropshipProductsUnavailable(vendorId: number, seenSkus: string[]): Promise<void> {
-    const conditions = [eq(dropshipProducts.vendor_id, vendorId)];
-    if (seenSkus.length > 0) conditions.push(notInArray(dropshipProducts.vendor_sku, seenSkus));
+    const unseenSkus = seenSkus.length > 0
+      ? sql`NOT (${dropshipProducts.vendor_sku} = ANY(${seenSkus}::text[]))`
+      : undefined;
     await db.update(dropshipProducts)
       .set({ status: "unavailable", inventory: 0, updated_at: new Date() })
-      .where(and(...conditions));
+      .where(unseenSkus
+        ? and(eq(dropshipProducts.vendor_id, vendorId), unseenSkus)
+        : eq(dropshipProducts.vendor_id, vendorId));
   }
 
   async updateDropshipProductStatus(id: number, status: string): Promise<DropshipProduct | undefined> {
