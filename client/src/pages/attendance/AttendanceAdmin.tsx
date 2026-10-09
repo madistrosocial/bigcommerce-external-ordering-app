@@ -661,7 +661,7 @@ function Logs() {
                    const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
                    const memberTotalSeconds = memberRecords.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
                    const displayHours = noAttendance ? "—" : selectedMember ? hours(memberTotalSeconds) : hours(summary?.totalSeconds);
-                   return <Fragment key={date}><tr className={`border-b border-slate-100 last:border-0 ${statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
+                    return [<tr key={`attendance-row-${date}`} className={`border-b border-slate-100 last:border-0 ${statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
                     <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold text-slate-800">{shortDate(date)}</span><span className="ml-2 text-[10px] text-slate-400">{date}</span></td>
                     <td className={`px-4 py-3 font-medium ${statusKey === "weekend" ? "text-slate-400" : "text-slate-600"}`}>{weekday(date)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span>{holiday && <span className="ml-2 text-[10px] text-amber-700">{holiday}</span>}</td>
@@ -671,9 +671,8 @@ function Logs() {
                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</td>
                       <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? <><span>{record.start_method === "warehouse" ? "Warehouse" : record.start_method === "offsite" ? "Off-site" : "Route start"} · {record.status}</span>{record.daily_note && <span className="mt-1 block truncate text-[11px] text-blue-700" title={record.daily_note}>Note: {record.daily_note}</span>}</> : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "" : "Not expected") : (names.length ? <><span>{names.slice(0, 3).join(", ")}{names.length > 3 ? ` +${names.length - 3}` : ""}</span>{notes.length > 0 && <span className="mt-1 block truncate text-[11px] text-blue-700" title={notes.join(" | ")}>Notes available: {notes.length}</span>}</> : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "" : "Not expected")}</td>
                      <td className="px-4 py-3 text-right">{record && <Button variant="ghost" size="sm" className="h-7 text-[11px] text-red-600 hover:text-red-700" aria-expanded={isExpanded} aria-controls={detailsId} onClick={() => setSelectedId(isExpanded ? null : Number(record.id))}>{isExpanded ? `Close ${memberRecords.length > 1 ? "logs" : "log"}` : memberRecords.length > 1 ? `Open ${memberRecords.length} logs` : "Open log"}{isExpanded ? <X className="ml-1 h-3 w-3" /> : <ChevronRight className="ml-1 h-3 w-3" />}</Button>}</td>
-                   </tr>
-                   {isExpanded && <tr className="border-b border-slate-100 bg-slate-50/60"><td colSpan={9} className="p-3"><div id={detailsId} className="space-y-3">{expandedRecords.map((expandedRecord: any) => <LogDetail key={expandedRecord.id} id={Number(expandedRecord.id)} onClose={() => setSelectedId(null)} />)}</div></td></tr>}
-                 </Fragment>;
+                    </tr>,
+                    isExpanded && <tr key={`attendance-details-${date}`} className="border-b border-slate-100 bg-slate-50/60"><td colSpan={9} className="p-3"><div id={detailsId} className="space-y-3">{expandedRecords.map((expandedRecord: any) => <LogDetail key={expandedRecord.id} id={Number(expandedRecord.id)} onClose={() => setSelectedId(null)} />)}</div></td></tr>];
                 })}
               </tbody>
             </table>
@@ -805,9 +804,33 @@ function Reports() {
   const [period, setPeriod] = useState("pay_period");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [customRangeInitialized, setCustomRangeInitialized] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [expandedReportDates, setExpandedReportDates] = useState<Set<string>>(() => new Set());
   const query = useQuery({ queryKey: ["attendance", "reports", period, from, to], queryFn: () => apiJson(`/api/attendance/admin/reports?period=${period}${from ? `&from=${from}` : ""}${to ? `&to=${to}` : ""}`), refetchInterval: 60_000 });
+  const handlePeriodChange = (nextPeriod: string) => {
+    if (nextPeriod === "custom") {
+      if (query.data?.from && query.data?.to) {
+        setFrom(current => current || query.data.from);
+        setTo(current => current || query.data.to);
+        setCustomRangeInitialized(true);
+      } else {
+        setCustomRangeInitialized(false);
+      }
+    } else {
+      setFrom("");
+      setTo("");
+      setCustomRangeInitialized(false);
+    }
+    setPeriod(nextPeriod);
+  };
+  useEffect(() => {
+    if (period === "custom" && !customRangeInitialized && query.data?.from && query.data?.to) {
+      setFrom(query.data.from);
+      setTo(query.data.to);
+      setCustomRangeInitialized(true);
+    }
+  }, [period, customRangeInitialized, query.data?.from, query.data?.to]);
   const employees = query.data?.rows ?? [];
   const records: any[] = query.data?.records ?? [];
   const selectedIndex = Math.max(0, employees.findIndex((employee: any) => String(employee.user_id) === selectedEmployeeId));
@@ -876,7 +899,7 @@ function Reports() {
   return <AdminShell activeTab="reports">
     <Card className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div><Label className="text-[11px] text-slate-500">Report period</Label><div className="mt-2"><PeriodButtons value={period} onChange={setPeriod} /></div></div>
+         <div><Label className="text-[11px] text-slate-500">Report period</Label><div className="mt-2"><PeriodButtons value={period} onChange={handlePeriodChange} /></div></div>
         <div className="flex items-center gap-2">
           <Button type="button" variant="outline" size="icon" aria-label="Previous employee" className="h-9 w-9" onClick={() => moveEmployee(-1)} disabled={!employees.length || selectedIndex <= 0}><ChevronLeft className="h-4 w-4" /></Button>
           <Select value={employee ? String(employee.user_id) : ""} onValueChange={setSelectedEmployeeId}>
@@ -887,7 +910,7 @@ function Reports() {
         </div>
         <Button variant="outline" size="sm" className="text-xs" onClick={exportCsv} disabled={!employeeRecords.length}><Download className="mr-2 h-3.5 w-3.5" />Export CSV</Button>
       </div>
-      {period === "custom" && <div className="mt-4 grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="mt-1 h-9 text-xs" /></div></div>}
+      {period === "custom" && <div className="mt-4 border-t border-slate-100 pt-4"><p className="text-[11px] font-semibold text-slate-600">Custom date range</p><div className="mt-2 grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="mt-1 h-9 text-xs" /></div></div></div>}
     </CardContent></Card>
     <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">{[["Employees", query.data?.summary?.employees ?? 0], ["Records", query.data?.summary?.records ?? 0], ["Paid hours", hours(query.data?.summary?.paidSeconds)], ["Overtime", hours(query.data?.summary?.overtimeSeconds)], ["Needs review", query.data?.summary?.needsReview ?? 0]].map(([label, value]) => <Card key={label} className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4"><p className="text-lg font-bold text-slate-800">{value}</p><p className="mt-1 text-[11px] text-slate-400">{label}</p></CardContent></Card>)}</div>
     <Card className="mt-4 overflow-hidden rounded-xl border-slate-200 shadow-sm"><CardHeader className="border-b border-slate-100 pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-sm">{employee ? `${employee.employee_name} · attendance details` : "Attendance details"} <span className="font-normal text-slate-400">{query.data?.from} → {query.data?.to}</span></CardTitle></div></CardHeader><CardContent className="p-0">
@@ -909,13 +932,14 @@ function Reports() {
               </tr></thead>
               <tbody>{employeeRecords.map((record: any) => {
                 const isReportRow = reportRowIdByDate.get(record.work_date) === record.id;
+                const isWeekend = [0, 6].includes(dateFromOnly(record.work_date).getUTCDay());
                 const fields = isReportRow ? attendanceReportFields(record) : [];
                 const reportKey = `${employee?.user_id ?? "employee"}:${record.work_date}`;
                 const isExpanded = expandedReportDates.has(reportKey);
                 const preview = fields.map(field => `${field.label}: ${field.value}`).join("\n");
                 return <Fragment key={record.id}>
-                  <tr className="border-b border-slate-100 align-top">
-                    <td className="break-words px-2 py-2 font-medium text-slate-700">{record.work_date}<span className="mt-0.5 block text-[9px] text-slate-400">Session {record.session_number ?? 1}</span></td>
+                  <tr className={`border-b border-slate-100 align-top ${isWeekend ? "bg-slate-100/80" : "bg-white"}`}>
+                    <td className={`break-words px-2 py-2 font-medium ${isWeekend ? "text-slate-500" : "text-slate-700"}`}>{record.work_date}<span className="mt-0.5 block text-[9px] text-slate-400">{isWeekend ? "Weekend · " : ""}Session {record.session_number ?? 1}</span></td>
                     <td className="break-words px-2 py-2 text-slate-600">{record.daily_report ? (record.daily_report.workday_type === "other" ? "Other" : "Regular Workday") : "—"}</td>
                     <td className="break-words px-2 py-2 text-slate-700">{reportDateTime(record.time_in, record.work_date, fmt)}</td>
                     <td className="break-words px-2 py-2 text-slate-700">{record.breaks?.length ? formatBreakTimes(record, "break_started_at") : "—"}</td>
@@ -931,7 +955,7 @@ function Reports() {
                       </button> : <span className="text-slate-300">—</span>}
                     </td>
                   </tr>
-                  {isExpanded && fields.length > 0 && <tr className="border-b border-slate-200 bg-slate-50/70">
+                  {isExpanded && fields.length > 0 && <tr className={`border-b border-slate-200 ${isWeekend ? "bg-slate-100/80" : "bg-slate-50/70"}`}>
                     <td colSpan={10} className="px-3 py-3">
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                         {fields.map(field => <div key={field.label} className="min-w-0">
@@ -949,12 +973,13 @@ function Reports() {
           <div className="space-y-3 p-3 md:hidden">
             {employeeRecords.map((record: any) => {
               const isReportRow = reportRowIdByDate.get(record.work_date) === record.id;
+              const isWeekend = [0, 6].includes(dateFromOnly(record.work_date).getUTCDay());
               const fields = isReportRow ? attendanceReportFields(record) : [];
               const reportKey = `${employee?.user_id ?? "employee"}:${record.work_date}`;
               const isExpanded = expandedReportDates.has(reportKey);
               const preview = fields.map(field => `${field.label}: ${field.value}`).join("\n");
-              return <div key={record.id} className="rounded-lg border border-slate-200 bg-white p-3">
-              <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-slate-800">{record.work_date}</p><p className="text-[11px] text-slate-400">Session {record.session_number ?? 1} · {record.daily_report ? (record.daily_report.workday_type === "other" ? "Other" : "Regular Workday") : "No daily report"}</p></div><div className="shrink-0 text-right text-xs font-semibold"><span className="text-emerald-700">Paid {hours(record.paid_seconds)}</span><span className="mt-0.5 block text-amber-700">OT {hours(record.overtime_seconds)}</span></div></div>
+              return <div key={record.id} className={`rounded-lg border p-3 ${isWeekend ? "border-slate-200 bg-slate-100/80" : "border-slate-200 bg-white"}`}>
+              <div className="flex items-start justify-between gap-3"><div><p className={`text-sm font-semibold ${isWeekend ? "text-slate-600" : "text-slate-800"}`}>{record.work_date}</p><p className="text-[11px] text-slate-400">{isWeekend ? "Weekend · " : ""}Session {record.session_number ?? 1} · {record.daily_report ? (record.daily_report.workday_type === "other" ? "Other" : "Regular Workday") : "No daily report"}</p></div><div className="shrink-0 text-right text-xs font-semibold"><span className="text-emerald-700">Paid {hours(record.paid_seconds)}</span><span className="mt-0.5 block text-amber-700">OT {hours(record.overtime_seconds)}</span></div></div>
               <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
                 <div><span className="block text-slate-400">Time In</span><span className="font-medium text-slate-700">{reportDateTime(record.time_in, record.work_date, fmt)}</span></div>
                 <div><span className="block text-slate-400">Time Out</span><span className="font-medium text-slate-700">{reportDateTime(record.time_out, record.work_date, fmt)}</span></div>
