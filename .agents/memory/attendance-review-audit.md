@@ -7,7 +7,13 @@ Attendance completion state and the review flag are separate concerns. Attendanc
 
 **Why:** The user specified that logged time is accepted automatically unless someone flags it for review; the separate second-session approval remains required.
 
-**How to apply:** Default new and legacy attendance to approved, allow payroll unless a completed session is flagged for review, and keep corrections auditable and tagged for review. Clearing the flag returns the record to the automatic-approved state; do not restore record locking.
+**How to apply:** Default new and legacy attendance to approved, allow payroll unless a completed session is explicitly flagged for review, and keep corrections auditable without adding a review flag. Preserve an existing `needs_review` flag during correction; clearing that deliberate flag remains a separate action requiring review permission. Do not restore record locking.
+
+Time corrections must not create a new review flag on an otherwise approved record.
+
+**Why:** The user clarified that correcting missing or inaccurate punch times should not itself make the corrected session require another review.
+
+**How to apply:** Preserve the existing review status when saving corrected times. Keep reasoned old/new time history, and leave any pre-existing explicit review flag for the separately authorized review action to clear.
 
 For the daily attendance ledger, keep date rows compact and place “Needs review,” “Correct times,” and second-session approval controls directly in each row. Do not expand a ledger row to show the individual attendance log.
 

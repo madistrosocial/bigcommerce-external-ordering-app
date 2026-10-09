@@ -11929,12 +11929,13 @@ export async function registerRoutes(
         ? Math.max(0, Math.floor((nextTimeOut.getTime() - nextTimeIn.getTime()) / 1000))
         : 0;
       const nextTotal = Math.max(0, elapsedSeconds - Math.max(0, Math.floor(Number(attendance.break_seconds ?? 0))));
+      const nextReviewStatus = attendance.review_status === "needs_review" ? "needs_review" : "approved";
       const updated = await storage.updateAttendance(id, {
         time_in: nextTimeIn ?? null,
         time_out: nextTimeOut ?? null,
         total_seconds: nextTotal,
         status: nextTimeOut ? "completed" : "incomplete",
-        review_status: "needs_review",
+        review_status: nextReviewStatus,
         approved_by: null,
         approved_at: null,
         locked_at: null,
@@ -11952,10 +11953,12 @@ export async function registerRoutes(
           changed_field: "time_out", old_value: attendance.time_out, new_value: nextTimeOut, reason,
         });
       }
-      await storage.createAttendanceAuditLog({
-        attendance_id: id, actor_user_id: user.id, action: "attendance_corrected",
-        changed_field: "review_status", old_value: attendance.review_status, new_value: "needs_review", reason,
-      });
+      if (attendance.review_status !== nextReviewStatus) {
+        await storage.createAttendanceAuditLog({
+          attendance_id: id, actor_user_id: user.id, action: "attendance_corrected",
+          changed_field: "review_status", old_value: attendance.review_status, new_value: nextReviewStatus, reason,
+        });
+      }
       res.json(updated);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
