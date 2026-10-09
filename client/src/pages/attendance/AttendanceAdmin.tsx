@@ -375,9 +375,9 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   const { hasPermission } = usePermissions();
   const query = useQuery({ queryKey: ["attendance", "log", id], queryFn: () => apiJson(`/api/attendance/admin/logs/${id}`) });
   const client = useQueryClient();
-  const canReview = hasPermission("attendance", "approve");
-  const canManage = hasPermission("attendance", "manage");
-  const canAudit = hasPermission("attendance", "audit");
+  const canReview = Boolean(query.data?.can_view_all) && hasPermission("attendance", "approve");
+  const canManage = Boolean(query.data?.can_view_all) && hasPermission("attendance", "manage");
+  const canAudit = Boolean(query.data?.can_view_all) && hasPermission("attendance", "audit");
   const [editing, setEditing] = useState(false);
   const [reason, setReason] = useState("");
   const [timeIn, setTimeIn] = useState("");
@@ -491,7 +491,7 @@ function Logs() {
   const [from, setFrom] = useState(initialMonthRange.from);
   const [to, setTo] = useState(initialMonthRange.to);
   const [userId, setUserId] = useState("all");
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(() => {
     const value = attendanceSearchParams(location).get("record");
     return value ? Number(value) : null;
@@ -531,6 +531,15 @@ function Logs() {
   }, [rows]);
   const expectedTeamMembers = selectedMember ? 1 : teamMembers.length;
   const selectedUserId = canViewAll ? userId : String(currentUser?.id ?? "");
+  const getExpandedRecordsForDate = (dateRecords: any[]) => {
+    if (selectedId == null || !dateRecords.some((row: any) => Number(row.id) === selectedId)) return [];
+    const matchingRecords = selectedMember
+      ? dateRecords.filter((row: any) => String(row.user_id) === selectedUserId)
+      : dateRecords.filter((row: any) => Number(row.id) === selectedId);
+    return matchingRecords.sort((a: any, b: any) => new Date(a.time_in ?? 0).getTime() - new Date(b.time_in ?? 0).getTime());
+  };
+  const selectedRecordIsInLedger = selectedId != null && rows.some((row: any) => Number(row.id) === selectedId);
+  const showStandaloneSelectedLog = selectedId != null && !query.isLoading && !selectedRecordIsInLedger;
   const formatDailyTime = (records: any[], field: "time_in" | "time_out") => {
       const values = records
       .map(row => row[field])
@@ -558,6 +567,7 @@ function Logs() {
   const clearFilters = () => {
     const currentMonth = currentMonthKey();
     const range = monthRange(currentMonth);
+    setSelectedId(null);
     setMonth(currentMonth);
     setFrom(range.from);
     setTo(range.to);
@@ -601,12 +611,12 @@ function Logs() {
     {showFilters && <Card className="mt-4 rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4">
       <div className="flex items-center gap-2 text-xs font-semibold text-slate-600"><Filter className="h-4 w-4 text-red-600" />Filter the ledger</div>
        <div className={`mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 ${canViewAll ? "2xl:grid-cols-6" : ""}`}>
-         {canViewAll && <div className="min-w-0"><Label className="text-[11px] text-slate-500">Team member</Label><Select value={userId} onValueChange={setUserId}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue placeholder="All team members" /></SelectTrigger><SelectContent><SelectItem value="all">All team members</SelectItem>{teamMembers.map((user: any) => <SelectItem key={user.id} value={String(user.id)}>{user.name || user.username}</SelectItem>)}</SelectContent></Select></div>}
-        <div className="min-w-0"><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
-        <div className="min-w-0"><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
-        <div className="min-w-0"><Label className="text-[11px] text-slate-500">Log status</Label><Select value={status} onValueChange={setStatus}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="active">Working</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="exception">Exception</SelectItem></SelectContent></Select></div>
-        <div className="min-w-0"><Label className="text-[11px] text-slate-500">Start method</Label><Select value={startMethod} onValueChange={setStartMethod}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All methods</SelectItem><SelectItem value="warehouse">Warehouse</SelectItem><SelectItem value="driving">Route start</SelectItem><SelectItem value="offsite">Off-site</SelectItem></SelectContent></Select></div>
-         <div className="min-w-0"><Label className="text-[11px] text-slate-500">Review status</Label><Select value={reviewStatus} onValueChange={setReviewStatus}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All review states</SelectItem><SelectItem value="not_reviewed">Not reviewed</SelectItem><SelectItem value="needs_review">Needs review</SelectItem><SelectItem value="approved">Approved</SelectItem><SelectItem value="locked">Locked</SelectItem><SelectItem value="missing_time_out">Missing time out</SelectItem></SelectContent></Select></div>
+          {canViewAll && <div className="min-w-0"><Label className="text-[11px] text-slate-500">Team member</Label><Select value={userId} onValueChange={value => { setUserId(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue placeholder="All team members" /></SelectTrigger><SelectContent><SelectItem value="all">All team members</SelectItem>{teamMembers.map((user: any) => <SelectItem key={user.id} value={String(user.id)}>{user.name || user.username}</SelectItem>)}</SelectContent></Select></div>}
+        <div className="min-w-0"><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => { setFrom(e.target.value); setSelectedId(null); }} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
+        <div className="min-w-0"><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => { setTo(e.target.value); setSelectedId(null); }} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
+        <div className="min-w-0"><Label className="text-[11px] text-slate-500">Log status</Label><Select value={status} onValueChange={value => { setStatus(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="active">Working</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="exception">Exception</SelectItem></SelectContent></Select></div>
+        <div className="min-w-0"><Label className="text-[11px] text-slate-500">Start method</Label><Select value={startMethod} onValueChange={value => { setStartMethod(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All methods</SelectItem><SelectItem value="warehouse">Warehouse</SelectItem><SelectItem value="driving">Route start</SelectItem><SelectItem value="offsite">Off-site</SelectItem></SelectContent></Select></div>
+          <div className="min-w-0"><Label className="text-[11px] text-slate-500">Review status</Label><Select value={reviewStatus} onValueChange={value => { setReviewStatus(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All review states</SelectItem><SelectItem value="not_reviewed">Not reviewed</SelectItem><SelectItem value="needs_review">Needs review</SelectItem><SelectItem value="approved">Approved</SelectItem><SelectItem value="locked">Locked</SelectItem><SelectItem value="missing_time_out">Missing time out</SelectItem></SelectContent></Select></div>
         <div className="flex min-w-0 items-end"><Button variant="outline" className="h-9 w-full min-w-0 text-xs" onClick={clearFilters}><X className="mr-1.5 h-3.5 w-3.5 shrink-0" />Reset</Button></div>
       </div>
     </CardContent></Card>}
@@ -623,7 +633,8 @@ function Logs() {
       <span className="font-semibold text-slate-700">{selectedMember ? selectedMember.name : "All team members"}</span>
       <span>{from && to ? `${shortDate(from)} – ${shortDate(to)}` : "Choose a valid date range"}</span>
     </div>
-    {selectedId ? <div className="mt-4"><LogDetail id={selectedId} onClose={() => setSelectedId(null)} /></div> : <Card className="mt-4 overflow-hidden rounded-xl border-slate-200 shadow-sm">
+    {showStandaloneSelectedLog && selectedId != null && <div className="mt-4"><LogDetail id={selectedId} onClose={() => setSelectedId(null)} /></div>}
+    <Card className="mt-4 overflow-hidden rounded-xl border-slate-200 shadow-sm">
        <CardHeader className="border-b border-slate-100 bg-white pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-sm">Daily attendance</CardTitle><span className="text-xs text-slate-400">{rows.length} logs</span></div></CardHeader>
       <CardContent className="p-0">
          {query.isLoading || usersQuery.isLoading ? <div className="p-12 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /><p className="mt-2">Loading attendance ledger…</p></div> : query.isError || usersQuery.isError ? <div className="p-10 text-center text-sm text-red-600">Attendance logs could not be loaded. Try refreshing the page.</div> : !dates.length ? <div className="p-10 text-center text-sm text-slate-400">Choose a valid date range to view the ledger.</div> : (
@@ -634,10 +645,16 @@ function Logs() {
               <tbody>
                 {dates.map(date => {
                   const summary = recordsByDate.get(date);
-                  const record = selectedMember ? summary?.records.find((row: any) => String(row.user_id) === selectedUserId) : undefined;
+                  const dateRecords = summary?.records ?? [];
+                  const memberRecords = selectedMember
+                    ? dateRecords.filter((row: any) => String(row.user_id) === selectedUserId)
+                    : [];
+                  const record = memberRecords[0];
+                  const expandedRecords = getExpandedRecordsForDate(dateRecords);
+                  const isExpanded = expandedRecords.length > 0;
+                  const detailsId = `attendance-log-details-${date}`;
                   const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, selectedMember ? selectedUserId : "");
                   const holiday = holidayMap.get(date);
-                  const dateRecords = summary?.records ?? [];
                   const names = dateRecords.map((row: any) => row.employee_name || row.employee_username).filter(Boolean);
                    const notes = dateRecords.map((row: any) => row.daily_note).filter(Boolean);
                    const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
@@ -704,7 +721,7 @@ function Logs() {
           </Button>
         </div>
       </CardContent>
-    </Card>}
+    </Card>
   </AdminShell>;
 }
 
