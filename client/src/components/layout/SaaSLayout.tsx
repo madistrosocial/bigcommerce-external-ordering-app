@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Monitor, ShoppingBag, Package, BookOpen,
   ShoppingCart, Settings, ChevronLeft, ChevronRight, ChevronDown,
   ChevronUp, LogOut, Truck, Wifi, WifiOff, Menu, X,
-  User, Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart, Mail, Megaphone, KeyRound, Link2, Clock3, PackageOpen, Search, Loader2, Activity, Banknote,
+  User, Users, Layers, Pin, Plug, UsersRound, Wrench, Receipt, Ship, ContactRound, FileBarChart, Mail, Megaphone, KeyRound, Link2, Clock3, PackageOpen, Search, Loader2, Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -245,6 +245,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(canViewAllAttendance && hasPermission("attendance", "view_reports") ? [{ label: "Reports", path: "/attendance/reports" }] : []),
     ...(hasPermission("attendance", "view_home_locations") ? [{ label: "Home Locations", path: "/attendance/locations" }] : []),
     ...(hasPermission("attendance", "view") ? [{ label: "Payroll", path: "/attendance/payroll" }] : []),
+    ...(hasPermission("payroll", "view") || hasPermission("payroll", "approve_overtime") ? [{ label: "Payroll Management", path: "/payroll" }] : []),
     ...(hasPermission("attendance", "view") ? [{ label: "Leave", path: "/attendance/leave" }] : []),
   ];
 
@@ -294,7 +295,6 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(dropshippingChildren.length > 0 ? [{ id: "dropshipping", label: "Dropshipping", icon: PackageOpen, children: dropshippingChildren }] : []),
     ...(toolsChildren.length > 0 ? [{ id: "tools", label: "Tools", icon: Wrench, children: toolsChildren }] : []),
     ...(attendanceChildren.length > 0 ? [{ id: "attendance", label: "Attendance", icon: Clock3, children: attendanceChildren }] : []),
-    ...(hasPermission("payroll", "view") || hasPermission("payroll", "approve_overtime") ? [{ id: "payroll", label: "Payroll", icon: Banknote, children: [{ label: "Payroll Management", path: "/payroll" }] }] : []),
     ...(reportingChildren.length > 0 ? [{ id: "reporting", label: "Reporting", icon: FileBarChart, children: reportingChildren }] : []),
   ];
 
