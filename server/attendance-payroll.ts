@@ -146,9 +146,27 @@ async function buildDraftPayslips(tx: any, run: any) {
     session.review_status === "needs_review",
   );
   if (sessionsNeedingReview.length) {
+    const employeeById = new Map<number, any>(groupMembers.map((employee: any) => [employee.id, employee]));
+    const attendanceReviewSessions = sessionsNeedingReview.map((session: any) => {
+      const employee = employeeById.get(session.user_id);
+      return {
+        id: session.id,
+        user_id: session.user_id,
+        employee_name: employee?.name ?? null,
+        employee_username: employee?.username ?? null,
+        work_date: session.work_date,
+        session_number: session.session_number,
+        status: session.status,
+      };
+    }).sort((a: any, b: any) =>
+      String(a.work_date).localeCompare(String(b.work_date))
+      || String(a.employee_name ?? a.employee_username ?? "").localeCompare(String(b.employee_name ?? b.employee_username ?? ""))
+      || Number(a.session_number ?? 1) - Number(b.session_number ?? 1),
+    );
     throw new PayrollRequestError(
       409,
       `${sessionsNeedingReview.length} completed attendance session${sessionsNeedingReview.length === 1 ? " needs" : "s need"} review before building payroll.`,
+      { code: "attendance_needs_review", attendanceReviewSessions },
     );
   }
   const completedSessions = completedSessionCandidates;
@@ -965,7 +983,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
       });
       res.status(201).json({ run: created, details: await fetchRunDetails(created.id) });
     } catch (error: any) {
-      if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message });
+      if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message, ...(error.payload ?? {}) });
       if (error?.code === "23505") return res.status(409).json({ error: "A payroll run already exists for this period." });
       res.status(500).json({ error: error?.message ?? "Could not create the payroll run." });
     }
@@ -1001,7 +1019,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
       });
       res.json({ run: result, details: await fetchRunDetails(id) });
     } catch (error: any) {
-      if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message });
+      if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message, ...(error.payload ?? {}) });
       if (error?.code === "23505") return res.status(409).json({ error: "Some attendance, leave, or pay items are already included in another run." });
       res.status(500).json({ error: error?.message ?? "Could not rebuild the draft payroll run." });
     }

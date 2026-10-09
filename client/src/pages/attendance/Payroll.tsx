@@ -18,10 +18,21 @@ type OpenAttendanceSession = {
   status: "active" | "on_break";
 };
 
+type AttendanceReviewSession = {
+  id: number;
+  user_id: number;
+  employee_name: string | null;
+  employee_username: string | null;
+  work_date: string;
+  session_number: number | null;
+  status: string;
+};
+
 type PayrollApiError = Error & {
   status?: number;
   code?: string;
   openAttendanceSessions?: OpenAttendanceSession[];
+  attendanceReviewSessions?: AttendanceReviewSession[];
 };
 
 function apiJson(path: string, init?: RequestInit) {
@@ -32,6 +43,7 @@ function apiJson(path: string, init?: RequestInit) {
       error.status = response.status;
       error.code = body.code;
       error.openAttendanceSessions = body.openAttendanceSessions;
+      error.attendanceReviewSessions = body.attendanceReviewSessions;
       throw error;
     }
     return body;
@@ -40,6 +52,47 @@ function apiJson(path: string, init?: RequestInit) {
 
 function jsonInit(method: string, body: unknown): RequestInit {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+}
+
+function attendanceReviewUrl(session: AttendanceReviewSession) {
+  const params = new URLSearchParams({
+    record: String(session.id),
+    userId: String(session.user_id),
+    status: "completed",
+    reviewStatus: "needs_review",
+    focusDate: session.work_date,
+  });
+  return `/attendance/logs?${params.toString()}`;
+}
+
+function AttendanceReviewBlockerList({
+  sessions,
+  canReviewAttendance,
+}: {
+  sessions: AttendanceReviewSession[];
+  canReviewAttendance: boolean;
+}) {
+  if (!sessions.length) return null;
+  return <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4">
+    <div className="flex items-start gap-2">
+      <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+      <div>
+        <p className="font-semibold text-amber-950">Completed attendance needs review</p>
+        <p className="mt-1 text-sm text-amber-900">Review each highlighted date in Attendance Logs and clear its review flag after verification.</p>
+      </div>
+    </div>
+    <ul className="mt-3 space-y-2">
+      {sessions.map(session => <li key={session.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-white px-3 py-2">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">{session.employee_name || session.employee_username || "Employee"} · {dateLabel(session.work_date)}</p>
+          <p className="mt-0.5 text-xs text-slate-600">Completed · Session {session.session_number ?? 1} · Needs review</p>
+        </div>
+        {canReviewAttendance
+          ? <a href={attendanceReviewUrl(session)} className="text-sm font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900">Review this date</a>
+          : <p className="text-xs text-slate-500">Ask an Attendance reviewer with permission to clear review flags.</p>}
+      </li>)}
+    </ul>
+  </div>;
 }
 
 function formatMoney(amount: unknown, currency = "USD") {
@@ -275,6 +328,10 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
   const canViewPayroll = mode === "management" && hasPermission("payroll", "view");
   const canManage = mode === "management" && hasPermission("payroll", "manage");
   const canReviewOvertime = mode === "management" && hasPermission("payroll", "approve_overtime");
+  const canReviewAttendance = mode === "management"
+    && hasPermission("attendance", "view_logs")
+    && hasPermission("attendance", "view_all")
+    && hasPermission("attendance", "approve");
   const canCorrectAttendance = mode === "management"
     && hasPermission("attendance", "view_logs")
     && hasPermission("attendance", "view_all")
@@ -371,6 +428,14 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
   const finalizeError = finalizeRun.error as PayrollApiError | null;
   const openAttendanceSessions = finalizeError?.code === "active_attendance_sessions"
     ? finalizeError.openAttendanceSessions ?? []
+    : [];
+  const createError = createRun.error as PayrollApiError | null;
+  const createReviewSessions = createError?.code === "attendance_needs_review"
+    ? createError.attendanceReviewSessions ?? []
+    : [];
+  const rebuildError = rebuildRun.error as PayrollApiError | null;
+  const rebuildReviewSessions = rebuildError?.code === "attendance_needs_review"
+    ? rebuildError.attendanceReviewSessions ?? []
     : [];
 
   return (
@@ -474,8 +539,9 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
               <div><Label>Payday</Label><Input className="mt-1.5" type="date" required value={payday} onChange={event => setPayday(event.target.value)} /></div>
               <div className="md:col-span-4 flex flex-wrap items-center gap-3">
                 <Button type="submit" disabled={createRun.isPending}>{createRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}Build draft payroll</Button>
-                {createRun.error && <span role="alert" className="text-sm text-rose-600">{createRun.error.message}</span>}
+                {createRun.error && !createReviewSessions.length && <span role="alert" className="text-sm text-rose-600">{createRun.error.message}</span>}
               </div>
+              {createReviewSessions.length > 0 && <div className="md:col-span-4"><AttendanceReviewBlockerList sessions={createReviewSessions} canReviewAttendance={canReviewAttendance} /></div>}
             </form>
           </CardContent>
         </Card>}
@@ -503,7 +569,8 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {(runDetails.error || rebuildRun.error || (finalizeRun.error && !openAttendanceSessions.length)) && <p role="alert" className="text-sm text-rose-600">{runDetails.error?.message || rebuildRun.error?.message || finalizeRun.error?.message}</p>}
+            {(runDetails.error || (rebuildRun.error && !rebuildReviewSessions.length) || (finalizeRun.error && !openAttendanceSessions.length)) && <p role="alert" className="text-sm text-rose-600">{runDetails.error?.message || rebuildRun.error?.message || finalizeRun.error?.message}</p>}
+            {rebuildReviewSessions.length > 0 && <AttendanceReviewBlockerList sessions={rebuildReviewSessions} canReviewAttendance={canReviewAttendance} />}
             {openAttendanceSessions.length > 0 && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4">
               <div className="flex items-start gap-2"><Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" /><div>
                 <p className="font-semibold text-amber-950">Open attendance shifts block payroll finalization</p>

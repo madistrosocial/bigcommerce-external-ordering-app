@@ -33,6 +33,12 @@ function attendanceSearchParams(location: string) {
   return new URLSearchParams();
 }
 
+function validAttendanceDate(value: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "";
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value ? value : "";
+}
+
 function googleMapsUrl(latitude: unknown, longitude: unknown) {
   const lat = Number(latitude);
   const lng = Number(longitude);
@@ -513,27 +519,46 @@ function Logs() {
   const canReviewAttendance = canViewAll && hasPermission("attendance", "approve");
   const canManageAttendance = canViewAll && hasPermission("attendance", "manage");
   const canAuditAttendance = canViewAll && hasPermission("attendance", "audit");
-  const [status, setStatus] = useState("all");
+  const [status, setStatus] = useState(() => {
+    const requestedStatus = attendanceSearchParams(location).get("status");
+    return ["all", "active", "completed", "exception"].includes(requestedStatus ?? "") ? requestedStatus! : "all";
+  });
   const [startMethod, setStartMethod] = useState("all");
   const [reviewStatus, setReviewStatus] = useState(() => {
     const requestedStatus = attendanceSearchParams(location).get("reviewStatus");
     return requestedStatus === "needs_review" || requestedStatus === "missing_time_out" ? requestedStatus : "all";
   });
-  const [month, setMonth] = useState(currentMonthKey);
+  const [month, setMonth] = useState(() => {
+    const focusDate = validAttendanceDate(attendanceSearchParams(location).get("focusDate"));
+    return focusDate ? focusDate.slice(0, 7) : currentMonthKey();
+  });
   const initialMonthRange = useMemo(() => monthRange(currentMonthKey()), []);
   const [from, setFrom] = useState(initialMonthRange.from);
   const [to, setTo] = useState(initialMonthRange.to);
   const signedInUserId = String(currentUser?.id ?? "");
-  const [userId, setUserId] = useState("");
+  const [userId, setUserId] = useState(() => {
+    const requestedUserId = attendanceSearchParams(location).get("userId") ?? "";
+    return /^\d+$/.test(requestedUserId) && Number(requestedUserId) > 0 ? requestedUserId : "";
+  });
+  const [focusDate, setFocusDate] = useState(() => validAttendanceDate(attendanceSearchParams(location).get("focusDate")));
   const [showFilters, setShowFilters] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(() => {
     const value = attendanceSearchParams(location).get("record");
-    return value ? Number(value) : null;
+    return value && /^\d+$/.test(value) && Number(value) > 0 ? Number(value) : null;
   });
   useEffect(() => {
     const params = attendanceSearchParams(location);
     const value = params.get("record");
-    setSelectedId(value ? Number(value) : null);
+    setSelectedId(value && /^\d+$/.test(value) && Number(value) > 0 ? Number(value) : null);
+    const requestedStatus = params.get("status");
+    setStatus(["all", "active", "completed", "exception"].includes(requestedStatus ?? "") ? requestedStatus! : "all");
+    const requestedReviewStatus = params.get("reviewStatus");
+    setReviewStatus(requestedReviewStatus === "needs_review" || requestedReviewStatus === "missing_time_out" ? requestedReviewStatus : "all");
+    const requestedUserId = params.get("userId") ?? "";
+    setUserId(/^\d+$/.test(requestedUserId) && Number(requestedUserId) > 0 ? requestedUserId : "");
+    const requestedFocusDate = validAttendanceDate(params.get("focusDate"));
+    setFocusDate(requestedFocusDate);
+    if (requestedFocusDate) setMonth(requestedFocusDate.slice(0, 7));
   }, [location]);
   useEffect(() => {
     const range = monthRange(month);
@@ -616,6 +641,7 @@ function Logs() {
     const currentMonth = currentMonthKey();
     const range = monthRange(currentMonth);
     setSelectedId(null);
+    setFocusDate("");
     setMonth(currentMonth);
     setFrom(range.from);
     setTo(range.to);
@@ -660,12 +686,12 @@ function Logs() {
     {showFilters && <Card className="mt-4 rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4">
       <div className="flex items-center gap-2 text-xs font-semibold text-slate-600"><Filter className="h-4 w-4 text-red-600" />Filter the ledger</div>
        <div className={`mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 ${canViewAll ? "2xl:grid-cols-6" : ""}`}>
-          {canViewAll && <div className="min-w-0"><Label className="text-[11px] text-slate-500">Team member</Label><Select value={scopedUserId} onValueChange={value => { setUserId(value); setSelectedId(null); }} disabled={usersQuery.isLoading || !teamMembers.length}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue placeholder="Choose team member" /></SelectTrigger><SelectContent>{teamMembers.map((user: any) => <SelectItem key={user.id} value={String(user.id)}>{user.name || user.username}</SelectItem>)}</SelectContent></Select></div>}
-        <div className="min-w-0"><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => { setFrom(e.target.value); setSelectedId(null); }} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
-        <div className="min-w-0"><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => { setTo(e.target.value); setSelectedId(null); }} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
-        <div className="min-w-0"><Label className="text-[11px] text-slate-500">Log status</Label><Select value={status} onValueChange={value => { setStatus(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="active">Working</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="exception">Exception</SelectItem></SelectContent></Select></div>
-        <div className="min-w-0"><Label className="text-[11px] text-slate-500">Start method</Label><Select value={startMethod} onValueChange={value => { setStartMethod(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All methods</SelectItem><SelectItem value="warehouse">Warehouse</SelectItem><SelectItem value="driving">Route start</SelectItem><SelectItem value="offsite">Off-site</SelectItem></SelectContent></Select></div>
-          <div className="min-w-0"><Label className="text-[11px] text-slate-500">Review status</Label><Select value={reviewStatus} onValueChange={value => { setReviewStatus(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All review states</SelectItem><SelectItem value="needs_review">Needs review</SelectItem><SelectItem value="missing_time_out">Missing time out</SelectItem></SelectContent></Select></div>
+           {canViewAll && <div className="min-w-0"><Label className="text-[11px] text-slate-500">Team member</Label><Select value={scopedUserId} onValueChange={value => { setUserId(value); setSelectedId(null); setFocusDate(""); }} disabled={usersQuery.isLoading || !teamMembers.length}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue placeholder="Choose team member" /></SelectTrigger><SelectContent>{teamMembers.map((user: any) => <SelectItem key={user.id} value={String(user.id)}>{user.name || user.username}</SelectItem>)}</SelectContent></Select></div>}
+         <div className="min-w-0"><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => { setFrom(e.target.value); setSelectedId(null); setFocusDate(""); }} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
+         <div className="min-w-0"><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => { setTo(e.target.value); setSelectedId(null); setFocusDate(""); }} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
+         <div className="min-w-0"><Label className="text-[11px] text-slate-500">Log status</Label><Select value={status} onValueChange={value => { setStatus(value); setSelectedId(null); setFocusDate(""); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="active">Working</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="exception">Exception</SelectItem></SelectContent></Select></div>
+         <div className="min-w-0"><Label className="text-[11px] text-slate-500">Start method</Label><Select value={startMethod} onValueChange={value => { setStartMethod(value); setSelectedId(null); setFocusDate(""); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All methods</SelectItem><SelectItem value="warehouse">Warehouse</SelectItem><SelectItem value="driving">Route start</SelectItem><SelectItem value="offsite">Off-site</SelectItem></SelectContent></Select></div>
+           <div className="min-w-0"><Label className="text-[11px] text-slate-500">Review status</Label><Select value={reviewStatus} onValueChange={value => { setReviewStatus(value); setSelectedId(null); setFocusDate(""); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All review states</SelectItem><SelectItem value="needs_review">Needs review</SelectItem><SelectItem value="missing_time_out">Missing time out</SelectItem></SelectContent></Select></div>
         <div className="flex min-w-0 items-end"><Button variant="outline" className="h-9 w-full min-w-0 text-xs" onClick={clearFilters}><X className="mr-1.5 h-3.5 w-3.5 shrink-0" />Reset</Button></div>
       </div>
     </CardContent></Card>}
@@ -682,6 +708,9 @@ function Logs() {
       <span className="font-semibold text-slate-700">{selectedMember?.name || selectedMember?.username || "My attendance"}</span>
       <span>{from && to ? `${shortDate(from)} – ${shortDate(to)}` : "Choose a valid date range"}</span>
     </div>
+    {reviewStatus === "needs_review" && <div role="status" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+      Completed sessions marked <strong>Needs review</strong> are highlighted below. Open a flagged record and clear its review flag after verification.
+    </div>}
     {showStandaloneSelectedLog && selectedId != null && <div className="mt-4"><LogDetail id={selectedId} onClose={() => setSelectedId(null)} /></div>}
     <Card className="mt-4 overflow-hidden rounded-xl border-slate-200 shadow-sm">
        <CardHeader className="border-b border-slate-100 bg-white pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-sm">Daily attendance</CardTitle><span className="text-xs text-slate-400">{rows.length} logs</span></div></CardHeader>
@@ -699,6 +728,7 @@ function Logs() {
                     ? dateRecords.filter((row: any) => String(row.user_id) === selectedUserId)
                     : [];
                   const record = memberRecords[0];
+                  const needsReviewDate = memberRecords.some((row: any) => row.review_status === "needs_review");
                   const actions = rowActionItems(dateRecords);
                   const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, selectedMember ? selectedUserId : "");
                   const holiday = holidayMap.get(date);
@@ -707,8 +737,8 @@ function Logs() {
                    const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
                    const memberTotalSeconds = memberRecords.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
                    const displayHours = noAttendance ? "—" : selectedMember ? hours(memberTotalSeconds) : hours(summary?.totalSeconds);
-                     return <tr key={`attendance-row-${date}`} className={`border-b border-slate-100 last:border-0 ${statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
-                    <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold text-slate-800">{shortDate(date)}</span><span className="ml-2 text-[10px] text-slate-400">{date}</span></td>
+                      return <tr key={`attendance-row-${date}`} className={`border-b border-slate-100 last:border-0 ${focusDate === date && needsReviewDate ? "outline outline-2 outline-inset outline-orange-400" : ""} ${needsReviewDate ? "bg-orange-50" : statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
+                     <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold text-slate-800">{shortDate(date)}</span><span className="ml-2 text-[10px] text-slate-400">{date}</span>{needsReviewDate && <span className="ml-2 inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[9px] font-semibold text-orange-800">Needs review</span>}</td>
                     <td className={`px-4 py-3 font-medium ${statusKey === "weekend" ? "text-slate-400" : "text-slate-600"}`}>{weekday(date)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span>{holiday && <span className="ml-2 text-[10px] text-amber-700">{holiday}</span>}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_in") : formatDailyTime(dateRecords, "time_in")}</td>
@@ -730,14 +760,15 @@ function Logs() {
                   ? dateRecords.filter((row: any) => String(row.user_id) === selectedUserId)
                   : [];
                 const record = memberRecords[0];
+                const needsReviewDate = memberRecords.some((row: any) => row.review_status === "needs_review");
                  const actions = rowActionItems(dateRecords);
                 const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, selectedMember ? selectedUserId : "");
                const holiday = holidayMap.get(date);
                 const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
                 const memberTotalSeconds = memberRecords.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
                 const displayHours = noAttendance ? "—" : selectedMember ? hours(memberTotalSeconds) : hours(summary?.totalSeconds);
-               return <div key={date} className="rounded-xl border border-slate-100 bg-white p-3">
-                 <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{shortDate(date)} <span className="font-normal text-slate-400">{weekday(date)}</span></p><p className="mt-1 text-[11px] text-slate-400">{date}{holiday ? ` · ${holiday}` : ""}</p></div><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span></div>
+                return <div key={date} className={`rounded-xl border p-3 ${focusDate === date && needsReviewDate ? "border-orange-400 bg-orange-50 ring-2 ring-orange-200" : needsReviewDate ? "border-orange-200 bg-orange-50/70" : "border-slate-100 bg-white"}`}>
+                  <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{shortDate(date)} <span className="font-normal text-slate-400">{weekday(date)}</span></p><p className="mt-1 text-[11px] text-slate-400">{date}{holiday ? ` · ${holiday}` : ""}</p>{needsReviewDate && <span className="mt-2 inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-800">Needs review</span>}</div><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span></div>
                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                        <div><span className="block text-slate-500">Time in</span><span className="font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_in") : formatDailyTime(summary?.records ?? [], "time_in")}</span></div>
                        <div><span className="block text-slate-500">Time out</span><span className="font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_out") : formatDailyTime(summary?.records ?? [], "time_out")}</span></div>
@@ -755,20 +786,20 @@ function Logs() {
             variant="outline"
             size="sm"
             className="h-8 gap-1 text-xs"
-            onClick={() => { setSelectedId(null); setMonth(value => shiftMonth(value, -1)); }}
+            onClick={() => { setSelectedId(null); setFocusDate(""); setMonth(value => shiftMonth(value, -1)); }}
             aria-label="View previous month"
           >
             <ChevronLeft className="h-3.5 w-3.5" />Previous month
           </Button>
           <div className="text-center">
             <p className="text-xs font-semibold text-slate-700">{monthLabel(month)}</p>
-            {month !== currentMonthKey() && <Button variant="link" size="sm" className="h-5 p-0 text-[11px] text-red-600" onClick={() => { setSelectedId(null); setMonth(currentMonthKey()); }}>Return to current month</Button>}
+            {month !== currentMonthKey() && <Button variant="link" size="sm" className="h-5 p-0 text-[11px] text-red-600" onClick={() => { setSelectedId(null); setFocusDate(""); setMonth(currentMonthKey()); }}>Return to current month</Button>}
           </div>
           <Button
             variant="outline"
             size="sm"
             className="h-8 gap-1 text-xs"
-            onClick={() => { setSelectedId(null); setMonth(value => shiftMonth(value, 1)); }}
+            onClick={() => { setSelectedId(null); setFocusDate(""); setMonth(value => shiftMonth(value, 1)); }}
             aria-label="View next month"
           >
             Next month<ChevronRight className="h-3.5 w-3.5" />
