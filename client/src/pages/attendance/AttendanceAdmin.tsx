@@ -676,7 +676,7 @@ function Logs() {
            <>
           <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[1120px] text-left text-xs">
-                <thead><tr className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Day</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Time In</th><th className="px-4 py-3 font-semibold">Time Out</th><th className="px-4 py-3 font-semibold">Breaks</th><th className="px-4 py-3 font-semibold">Hours</th><th className="px-4 py-3 font-semibold">Team / note</th><th className="px-4 py-3 text-right font-semibold">Details</th></tr></thead>
+                <thead><tr className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Day</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Actions</th><th className="px-4 py-3 font-semibold">Time In</th><th className="px-4 py-3 font-semibold">Time Out</th><th className="px-4 py-3 font-semibold">Breaks</th><th className="px-4 py-3 font-semibold">Hours</th><th className="px-4 py-3 font-semibold">Team / note</th></tr></thead>
               <tbody>
                 {dates.map(date => {
                   const summary = recordsByDate.get(date);
@@ -685,9 +685,7 @@ function Logs() {
                     ? dateRecords.filter((row: any) => String(row.user_id) === selectedUserId)
                     : [];
                   const record = memberRecords[0];
-                  const expandedRecords = getExpandedRecordsForDate(dateRecords);
-                  const isExpanded = expandedRecords.length > 0;
-                  const detailsId = `attendance-log-details-${date}`;
+                  const actions = rowActionItems(dateRecords);
                   const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, selectedMember ? selectedUserId : "");
                   const holiday = holidayMap.get(date);
                   const names = dateRecords.map((row: any) => row.employee_name || row.employee_username).filter(Boolean);
@@ -695,18 +693,17 @@ function Logs() {
                    const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
                    const memberTotalSeconds = memberRecords.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
                    const displayHours = noAttendance ? "—" : selectedMember ? hours(memberTotalSeconds) : hours(summary?.totalSeconds);
-                    return [<tr key={`attendance-row-${date}`} className={`border-b border-slate-100 last:border-0 ${statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
+                     return <tr key={`attendance-row-${date}`} className={`border-b border-slate-100 last:border-0 ${statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
                     <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold text-slate-800">{shortDate(date)}</span><span className="ml-2 text-[10px] text-slate-400">{date}</span></td>
                     <td className={`px-4 py-3 font-medium ${statusKey === "weekend" ? "text-slate-400" : "text-slate-600"}`}>{weekday(date)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span>{holiday && <span className="ml-2 text-[10px] text-amber-700">{holiday}</span>}</td>
+                     <td className="min-w-[250px] px-2 py-2 align-top">{canReviewAttendance || canManageAttendance || canAuditAttendance ? <div className="space-y-2">{actions.map(({ attendance, label }: any) => <AttendanceLogActions key={attendance.id} attendance={attendance} canViewAll={canViewAll} label={label} />)}</div> : "—"}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_in") : formatDailyTime(dateRecords, "time_in")}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_out") : formatDailyTime(dateRecords, "time_out")}</td>
                      <td className="max-w-[320px] px-4 py-3 text-[11px] text-slate-500">{selectedMember ? formatDailyBreaks(memberRecords) : formatDailyBreaks(dateRecords)}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</td>
                       <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? <><span>{record.start_method === "warehouse" ? "Warehouse" : record.start_method === "offsite" ? "Off-site" : "Route start"} · {record.status}</span>{record.daily_note && <span className="mt-1 block truncate text-[11px] text-blue-700" title={record.daily_note}>Note: {record.daily_note}</span>}</> : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "" : "Not expected") : (names.length ? <><span>{names.slice(0, 3).join(", ")}{names.length > 3 ? ` +${names.length - 3}` : ""}</span>{notes.length > 0 && <span className="mt-1 block truncate text-[11px] text-blue-700" title={notes.join(" | ")}>Notes available: {notes.length}</span>}</> : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "" : "Not expected")}</td>
-                     <td className="px-4 py-3 text-right">{record && <Button variant="ghost" size="sm" className="h-7 text-[11px] text-red-600 hover:text-red-700" aria-expanded={isExpanded} aria-controls={detailsId} onClick={() => setSelectedId(isExpanded ? null : Number(record.id))}>{isExpanded ? `Close ${memberRecords.length > 1 ? "logs" : "log"}` : memberRecords.length > 1 ? `Open ${memberRecords.length} logs` : "Open log"}{isExpanded ? <X className="ml-1 h-3 w-3" /> : <ChevronRight className="ml-1 h-3 w-3" />}</Button>}</td>
-                    </tr>,
-                    isExpanded && <tr key={`attendance-details-${date}`} className="border-b border-slate-100 bg-slate-50/60"><td colSpan={9} className="p-3"><div id={detailsId} className="space-y-3">{expandedRecords.map((expandedRecord: any) => <LogDetail key={expandedRecord.id} id={Number(expandedRecord.id)} onClose={() => setSelectedId(null)} />)}</div></td></tr>];
+                     </tr>;
                 })}
               </tbody>
             </table>
@@ -719,9 +716,7 @@ function Logs() {
                   ? dateRecords.filter((row: any) => String(row.user_id) === selectedUserId)
                   : [];
                 const record = memberRecords[0];
-                const expandedRecords = getExpandedRecordsForDate(dateRecords);
-                const isExpanded = expandedRecords.length > 0;
-                const detailsId = `attendance-log-mobile-details-${date}`;
+                 const actions = rowActionItems(dateRecords);
                 const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, selectedMember ? selectedUserId : "");
                const holiday = holidayMap.get(date);
                 const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
@@ -735,8 +730,7 @@ function Logs() {
                      <div><span className="block text-slate-500">Hours</span><span className="font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</span></div>
                    </div>
                      {(selectedMember ? memberRecords.some((row: any) => row.breaks?.length) : summary?.records?.some((row: any) => row.breaks?.length)) ? <p className="mt-2 text-[11px] text-slate-500"><span className="font-medium text-slate-600">Breaks: </span>{selectedMember ? formatDailyBreaks(memberRecords) : formatDailyBreaks(summary?.records ?? [])}</p> : null}
-                   {record && <Button variant="outline" size="sm" className="mt-3 h-8 w-full text-xs text-red-600" aria-expanded={isExpanded} aria-controls={detailsId} onClick={() => setSelectedId(isExpanded ? null : Number(record.id))}>{isExpanded ? `Close ${memberRecords.length > 1 ? "logs" : "log"}` : memberRecords.length > 1 ? `Open ${memberRecords.length} logs` : "Open log"}{isExpanded ? <X className="ml-1 h-3 w-3" /> : <ChevronRight className="ml-1 h-3 w-3" />}</Button>}
-                   {isExpanded && <div id={detailsId} className="mt-3 space-y-3">{expandedRecords.map((expandedRecord: any) => <LogDetail key={expandedRecord.id} id={Number(expandedRecord.id)} onClose={() => setSelectedId(null)} />)}</div>}
+                    {actions.length > 0 && (canReviewAttendance || canManageAttendance || canAuditAttendance) && <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">{actions.map(({ attendance, label }: any) => <AttendanceLogActions key={attendance.id} attendance={attendance} canViewAll={canViewAll} label={label} />)}</div>}
                </div>;
              })}
            </div>
