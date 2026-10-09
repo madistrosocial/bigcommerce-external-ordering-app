@@ -11972,6 +11972,8 @@ export async function registerRoutes(
         paid_seconds: payByAttendance.get(row.id)?.paidSeconds ?? 0,
         overtime_seconds: payByAttendance.get(row.id)?.overtimeSeconds ?? 0,
       }));
+      const paidSeconds = reportRecords.reduce((total, row) => total + Number(row.paid_seconds ?? 0), 0);
+      const overtimeSeconds = reportRecords.reduce((total, row) => total + Number(row.overtime_seconds ?? 0), 0);
       const byEmployee = new Map<number, any>();
       const byDate = new Map<string, any>();
       const startDate = new Date(`${from}T00:00:00Z`);
@@ -12035,12 +12037,14 @@ export async function registerRoutes(
           employees: rows.length,
           records: result.total,
           totalSeconds: rows.reduce((sum, row) => sum + row.total_seconds, 0),
+          paidSeconds,
+          overtimeSeconds,
           needsReview: rows.reduce((sum, row) => sum + row.review, 0),
           missingTimeOut: rows.reduce((sum, row) => sum + row.missing, 0),
         },
         rows,
         days,
-        records: result.rows,
+        records: reportRecords,
         total: result.total,
       });
     } catch (e: any) {
