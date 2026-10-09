@@ -563,8 +563,8 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div><CardTitle className="text-base">Run details</CardTitle>{runDetails.data?.run && <p className="mt-1 text-sm text-slate-500">{runDetails.data.run.group_name_snapshot} · {dateLabel(runDetails.data.run.period_start)} – {dateLabel(runDetails.data.run.period_end)}</p>}</div>
               {canManage && runDetails.data?.run?.status === "draft" && <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" disabled={rebuildRun.isPending} onClick={() => rebuildRun.mutate(selectedRunId)}>{rebuildRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rebuild draft</Button>
-                <Button size="sm" disabled={finalizeRun.isPending} onClick={() => finalizeRun.mutate(selectedRunId)}>{finalizeRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Finalize and lock</Button>
+                <Button size="sm" variant="outline" disabled={rebuildRun.isPending || finalizeRun.isPending} onClick={() => { finalizeRun.reset(); rebuildRun.mutate(selectedRunId); }}>{rebuildRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rebuild draft</Button>
+                <Button size="sm" disabled={finalizeRun.isPending || rebuildRun.isPending} onClick={() => finalizeRun.mutate(selectedRunId)}>{finalizeRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Finalize and lock</Button>
               </div>}
             </div>
           </CardHeader>

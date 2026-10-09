@@ -1085,20 +1085,6 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
         }).from(payslipLineItems)
           .innerJoin(payslips, eq(payslips.id, payslipLineItems.payslip_id))
           .where(eq(payslips.payroll_run_id, id));
-        const regularSessionIds = new Set(
-          runLines.filter((line: any) => line.source_type === "attendance_regular").map((line: any) => line.source_id),
-        );
-        const currentCompletedSessions = groupUserIds.length
-          ? await tx.select({ id: attendanceSessions.id }).from(attendanceSessions).where(and(
-            inArray(attendanceSessions.user_id, groupUserIds),
-            gte(attendanceSessions.work_date, run.period_start),
-            lte(attendanceSessions.work_date, run.period_end),
-            eq(attendanceSessions.status, "completed"),
-            isNotNull(attendanceSessions.time_out),
-            gt(attendanceSessions.total_seconds, 0),
-          ))
-          : [];
-        const hasUnincludedSession = currentCompletedSessions.some((session: any) => !regularSessionIds.has(session.id));
         const [changedSession] = groupUserIds.length
           ? await tx.select({ id: attendanceSessions.id }).from(attendanceSessions).where(and(
             inArray(attendanceSessions.user_id, groupUserIds),
@@ -1141,7 +1127,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
             ))
             .limit(1)
           : [];
-        if (changedSession || hasUnincludedSession || changedProfile || changedPayItem || changedLeave || changedOvertime) {
+        if (changedSession || changedProfile || changedPayItem || changedLeave || changedOvertime) {
           throw new PayrollRequestError(409, "Payroll inputs changed after this draft was built. Rebuild the draft before finalizing.");
         }
         const overtimeIds = runLines
