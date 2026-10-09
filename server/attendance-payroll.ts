@@ -372,9 +372,11 @@ async function buildDraftPayslips(tx: any, run: any) {
 async function fetchRunDetails(runId: number) {
   const [run] = await db.select().from(payrollRuns).where(eq(payrollRuns.id, runId)).limit(1);
   if (!run) return null;
-  const slips = await db.select().from(payslips)
+  const slipRows = await db.select({ slip: payslips, employee_email: users.username }).from(payslips)
+    .leftJoin(users, eq(users.id, payslips.user_id))
     .where(eq(payslips.payroll_run_id, runId))
     .orderBy(asc(payslips.employee_name_snapshot));
+  const slips = slipRows.map(({ slip, employee_email }) => ({ ...slip, employee_email }));
   const slipIds = slips.map((slip) => slip.id);
   const lines = slipIds.length
     ? await db.select().from(payslipLineItems)
@@ -995,7 +997,13 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
     try {
       const details = await fetchRunDetails(id);
       if (!details) return res.status(404).json({ error: "Payroll run not found." });
-      res.json(details);
+      const requester = requestUser(req);
+      const canManage = requester.role === "admin"
+        || (await storage.getUserPermissionStrings(requester.id)).includes("payroll:manage");
+      const response = canManage
+        ? details
+        : { ...details, payslips: details.payslips.map(({ employee_email: _email, ...slip }) => slip) };
+      res.json(response);
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? "Could not load the payroll run." });
     }

@@ -4,6 +4,8 @@ import { storage } from "./storage";
 import {
   insertProductSchema,
   insertOrderSchema,
+  payslips,
+  payrollRuns,
   type InsertProduct,
   type InsertOrder,
   type InsertPriceHistoryCache,
@@ -22,7 +24,7 @@ import SftpClient from "ssh2-sftp-client";
 import { Readable } from "stream";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { db } from "../db";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { addSkuVaultInventory, removeSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, getSkuVaultTransactionReasons, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
 import { getMarketingSenderSettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
 import { getProduct360Overview, getProduct360Products, getProduct360Detail } from "./product360";
@@ -8146,6 +8148,59 @@ export async function registerRoutes(
       }],
     });
   }
+
+  app.post("/api/attendance/payroll/admin/payslips/:id/email", requirePermission("payroll", "manage"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid payslip." });
+
+    const payload = z.object({
+      to: z.string().trim().email().max(320),
+      pdf_base64: z.string().min(1).max(8_500_000),
+    }).safeParse(req.body);
+    if (!payload.success) return res.status(400).json({ error: "Enter a valid recipient email and attach a PDF payslip." });
+
+    try {
+      const [record] = await db.select({
+        employeeName: payslips.employee_name_snapshot,
+        runStatus: payrollRuns.status,
+        periodStart: payrollRuns.period_start,
+        periodEnd: payrollRuns.period_end,
+      }).from(payslips)
+        .innerJoin(payrollRuns, eq(payrollRuns.id, payslips.payroll_run_id))
+        .where(eq(payslips.id, id))
+        .limit(1);
+      if (!record) return res.status(404).json({ error: "Payslip not found." });
+      if (record.runStatus !== "finalized") return res.status(409).json({ error: "Only finalized payslips can be emailed." });
+
+      const providedPdf = payload.data.pdf_base64.trim();
+      const dataUriMatch = /^data:application\/pdf(?:;[^,]*)?;base64,([a-z0-9+/]+={0,2})$/i.exec(providedPdf);
+      const rawBase64Match = /^[a-z0-9+/]+={0,2}$/i.exec(providedPdf);
+      const base64Data = dataUriMatch?.[1] ?? rawBase64Match?.[0];
+      if (!base64Data) return res.status(400).json({ error: "The attachment must be a valid PDF." });
+      const pdfBuffer = Buffer.from(base64Data, "base64");
+      if (pdfBuffer.length === 0 || pdfBuffer.length > 6_500_000 || pdfBuffer.subarray(0, 5).toString("ascii") !== "%PDF-") {
+        return res.status(400).json({ error: "The attachment must be a valid PDF under 6.5 MB." });
+      }
+
+      const safeEmployeeName = record.employeeName
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .toLowerCase() || "employee";
+      const periodLabel = `${record.periodStart} to ${record.periodEnd}`;
+      await sendInvoicePdfAttachment({
+        to: payload.data.to,
+        subject: `Your payslip for ${periodLabel}`,
+        pdfBuffer,
+        filename: `payslip-${safeEmployeeName}-${record.periodStart}-${record.periodEnd}.pdf`,
+        textBody: `Attached is your finalized payslip for ${periodLabel}. Please contact payroll if you have questions.`,
+      });
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message ?? "Could not email this payslip." });
+    }
+  });
 
   app.post("/api/invoice/send-email", requireAuth, async (req, res) => {
     try {

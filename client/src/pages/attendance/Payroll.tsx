@@ -1,12 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Banknote, CalendarDays, Check, ChevronDown, CircleDollarSign, Clock3, FileText, Loader2, Printer, RefreshCw, Settings2, UserRound, X } from "lucide-react";
+import { Banknote, CalendarDays, Check, ChevronDown, CircleDollarSign, Clock3, Download, FileText, Loader2, Mail, RefreshCw, Send, Settings2, Truck, UserRound, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import PayslipDocument, { type PayslipDocumentData } from "@/components/payroll/PayslipDocument";
 import { getAuthHeaders } from "@/lib/api";
+import { generatePdfBase64FromElement } from "@/lib/payslip-renderer";
 import { usePermissions } from "@/hooks/usePermissions";
 
 type OpenAttendanceSession = {
@@ -124,45 +127,161 @@ function EmptyState({ children }: { children: React.ReactNode }) {
   return <div className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">{children}</div>;
 }
 
-function PayStatement({ slip }: { slip: any }) {
+type PayslipForView = PayslipDocumentData & {
+  id: number;
+  employee_email?: string | null;
+};
+
+function PayStatement({
+  slip,
+  canEmail = false,
+  businessLogo,
+  company,
+}: {
+  slip: PayslipForView;
+  canEmail?: boolean;
+  businessLogo?: string | null;
+  company?: Record<string, string | null | undefined>;
+}) {
+  const documentRef = useRef<HTMLDivElement>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailTo, setEmailTo] = useState("");
+  const [emailNotice, setEmailNotice] = useState("");
+  const isFinalized = slip.run?.status === "finalized";
+  const branding = {
+    businessLogo: businessLogo
+      ? <img src={businessLogo} alt="Company logo" />
+      : <Truck aria-hidden="true" className="h-12 w-12 text-white" />,
+    company_name: company?.company_name,
+    company_address: company?.company_address,
+    company_phone: company?.company_phone,
+    company_email: company?.company_email,
+  };
+
+  const emailPayslip = useMutation({
+    mutationFn: async (recipient: string) => {
+      const pdf_base64 = await generatePdfBase64FromElement(documentRef.current);
+      return apiJson(`/api/attendance/payroll/admin/payslips/${slip.id}/email`, jsonInit("POST", {
+        to: recipient,
+        pdf_base64,
+      }));
+    },
+    onSuccess: () => {
+      setEmailOpen(false);
+      setEmailNotice(`Payslip emailed to ${emailTo.trim()}.`);
+    },
+  });
+
+  async function downloadPayslip() {
+    setDownloadError("");
+    setIsDownloading(true);
+    try {
+      const dataUri = await generatePdfBase64FromElement(documentRef.current);
+      const encoded = dataUri.slice(dataUri.indexOf(",") + 1);
+      const binary = window.atob(encoded);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+      const file = new Blob([bytes], { type: "application/pdf" });
+      const objectUrl = URL.createObjectURL(file);
+      const safeName = slip.employee_name_snapshot
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .toLowerCase() || "employee";
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `payslip-${safeName}-${slip.run.period_start}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : "Could not download this payslip.");
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
   return (
-    <Card className="border-slate-200 shadow-sm print:break-inside-avoid">
-      <CardHeader className="pb-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="text-base">{slip.employee_name_snapshot}</CardTitle>
-            <p className="mt-1 text-xs text-slate-500">{dateLabel(slip.run?.period_start)} – {dateLabel(slip.run?.period_end)} · Pay date {dateLabel(slip.run?.payday)}</p>
+    <>
+      <Card className="border-slate-200 shadow-sm print:break-inside-avoid">
+        <CardHeader className="pb-3 print:hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-sm">Employee payslip</CardTitle>
+              <p className="mt-1 text-xs text-slate-500">{slip.employee_name_snapshot} · {dateLabel(slip.run.period_start)} – {dateLabel(slip.run.period_end)}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" disabled={isDownloading} onClick={downloadPayslip} data-testid={`download-payslip-${slip.id}`}>
+                {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                Download PDF
+              </Button>
+              {canEmail && isFinalized && <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  emailPayslip.reset();
+                  setEmailNotice("");
+                  setEmailTo(slip.employee_email ?? "");
+                  setEmailOpen(true);
+                }}
+                data-testid={`email-payslip-${slip.id}`}
+              >
+                <Mail className="mr-2 h-4 w-4" />Email payslip
+              </Button>}
+            </div>
           </div>
-          <Button type="button" size="sm" variant="outline" className="print:hidden" onClick={() => window.print()}><Printer className="mr-2 h-4 w-4" />Print</Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid gap-2 sm:grid-cols-3">
-          <SummaryMetric label="Gross before deductions" value={formatMoney(slip.gross_amount, slip.currency)} />
-          <SummaryMetric label="Deductions" value={formatMoney(slip.deductions_amount, slip.currency)} />
-          <SummaryMetric label="Net pay" value={formatMoney(slip.net_amount, slip.currency)} strong />
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-600">
-          <span className="rounded-full bg-slate-100 px-2.5 py-1">{slip.regular_hours} regular hrs</span>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1">{slip.overtime_hours} overtime hrs</span>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1">{slip.paid_leave_hours} paid leave hrs</span>
-          {Number(slip.unpaid_leave_hours) > 0 && <span className="rounded-full bg-slate-100 px-2.5 py-1">{slip.unpaid_leave_hours} unpaid leave hrs</span>}
-        </div>
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[460px] text-left text-sm">
-            <thead><tr className="border-b border-slate-200 text-xs text-slate-500"><th className="py-2 pr-3 font-medium">Description</th><th className="py-2 pr-3 text-right font-medium">Units</th><th className="py-2 pr-3 text-right font-medium">Rate</th><th className="py-2 text-right font-medium">Amount</th></tr></thead>
-            <tbody>{(slip.lines ?? []).map((line: any) => (
-              <tr key={line.id} className="border-b border-slate-100 last:border-0">
-                <td className="py-2 pr-3 text-slate-700">{line.description}</td>
-                <td className="py-2 pr-3 text-right tabular-nums text-slate-600">{line.units}</td>
-                <td className="py-2 pr-3 text-right tabular-nums text-slate-600">{line.rate == null ? "—" : formatMoney(line.rate, slip.currency)}</td>
-                <td className={`py-2 text-right tabular-nums ${Number(line.amount) < 0 ? "text-rose-600" : "text-slate-900"}`}>{formatMoney(line.amount, slip.currency)}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
-      </CardContent>
-    </Card>
+          {(downloadError || emailNotice) && <p role={downloadError ? "alert" : "status"} className={`mt-2 text-xs ${downloadError ? "text-rose-600" : "text-emerald-700"}`}>{downloadError || emailNotice}</p>}
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div ref={documentRef} className="min-w-0">
+            <PayslipDocument payslip={slip} branding={branding} />
+          </div>
+        </CardContent>
+      </Card>
+      <Dialog open={emailOpen} onOpenChange={setEmailOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Email finalized payslip</DialogTitle>
+            <DialogDescription>Review the recipient before sending. The PDF will be attached using the SMTP settings in Invoice Settings.</DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              emailPayslip.mutate(emailTo.trim());
+            }}
+          >
+            <div className="space-y-2">
+              <Label htmlFor={`payslip-email-${slip.id}`}>Recipient email</Label>
+              <Input
+                id={`payslip-email-${slip.id}`}
+                type="email"
+                required
+                maxLength={320}
+                value={emailTo}
+                onChange={(event) => setEmailTo(event.target.value)}
+                placeholder="employee@example.com"
+                autoComplete="email"
+                data-testid={`payslip-recipient-${slip.id}`}
+              />
+            </div>
+            {emailPayslip.error && <p role="alert" className="text-sm text-rose-600">{emailPayslip.error.message}</p>}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEmailOpen(false)} disabled={emailPayslip.isPending}>Cancel</Button>
+              <Button type="submit" disabled={emailPayslip.isPending || !emailTo.trim()}>
+                {emailPayslip.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                Send payslip
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -347,6 +466,16 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
   const eligible = useQuery({ queryKey: ["attendance-overtime-eligible"], queryFn: () => apiJson("/api/attendance/payroll/overtime/eligible"), enabled: isEmployeePage });
   const claims = useQuery({ queryKey: ["attendance-overtime-mine"], queryFn: () => apiJson("/api/attendance/payroll/overtime/mine"), enabled: isEmployeePage });
   const config = useQuery({ queryKey: ["attendance-payroll-config"], queryFn: () => apiJson("/api/attendance/payroll/admin/config"), enabled: canViewPayroll });
+  const businessLogo = useQuery({
+    queryKey: ["public-business-logo"],
+    queryFn: () => apiJson("/api/public/business-logo"),
+    enabled: isEmployeePage || canViewPayroll,
+  });
+  const invoiceRenderSettings = useQuery({
+    queryKey: ["invoice-render-settings"],
+    queryFn: () => apiJson("/api/invoice/render-settings"),
+    enabled: isEmployeePage || canViewPayroll,
+  });
   const employees = useQuery({
     queryKey: ["attendance-payroll-employees", roleId],
     queryFn: () => apiJson(`/api/attendance/payroll/admin/employees?roleId=${encodeURIComponent(roleId)}`),
@@ -503,7 +632,12 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
         <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-slate-500" /><h2 className="font-semibold text-slate-900">Your finalized payslips</h2></div>
         {me.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
         {!me.isLoading && !ownPayslips.length && <EmptyState>Finalized payslips will appear here.</EmptyState>}
-        <div className="grid gap-3 lg:grid-cols-2">{ownPayslips.map((slip: any) => <PayStatement key={slip.id} slip={slip} />)}</div>
+        <div className="grid gap-3 lg:grid-cols-2">{ownPayslips.map((slip: any) => <PayStatement
+          key={slip.id}
+          slip={slip}
+          businessLogo={businessLogo.data?.value}
+          company={invoiceRenderSettings.data}
+        />)}</div>
       </section>}
 
       {mode === "management" && canViewPayroll && <div className="space-y-5 border-t border-slate-200 pt-5">
@@ -590,7 +724,13 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
             </div>}
             {runDetails.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
             {!runDetails.isLoading && !runSlips.length && <EmptyState>This run has no payslips.</EmptyState>}
-            <div className="grid gap-3 lg:grid-cols-2">{runSlips.map((slip: any) => <PayStatement key={slip.id} slip={{ ...slip, run: runDetails.data.run }} />)}</div>
+            <div className="grid gap-3 lg:grid-cols-2">{runSlips.map((slip: any) => <PayStatement
+              key={slip.id}
+              slip={{ ...slip, run: runDetails.data.run }}
+              canEmail={canManage}
+              businessLogo={businessLogo.data?.value}
+              company={invoiceRenderSettings.data}
+            />)}</div>
           </CardContent>
         </Card>}
       </div>}
