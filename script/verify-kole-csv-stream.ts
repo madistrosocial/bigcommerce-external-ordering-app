@@ -42,7 +42,7 @@ async function* byteChunks(value: string, size: number): AsyncGenerator<Buffer> 
 const csv = [
   headers.join(","),
   row([
-    "SKU-1", "Widget, compact", 'He said "Go"', "4",
+    "SKU-1", "Widget, compact &amp; durable", 'He said "Go"', "4",
     "https://images.example/one.jpg", "12.50", "Café Brand", "00123",
     "Home", "Kitchen", "yes", "1.5", "2026-10-08", "ID-1", "", "",
   ]),
@@ -64,7 +64,7 @@ const result = await streamKoleFeedCsv(
 );
 
 assert.equal(result.productsProcessed, 2);
-assert.equal(imported[0].title, "Widget, compact");
+assert.equal(imported[0].title, "Widget, compact & durable");
 assert.equal(imported[0].description, 'He said "Go"');
 assert.equal(imported[0].raw.inventoryProvided, true);
 assert.equal(imported[1].description, "First line\nsecond line");

@@ -6,16 +6,18 @@ import { useTimeService } from "@/hooks/useTimeService";
 import * as api from "@/lib/api";
 import { toPublicVendorMessage } from "@/lib/vendor-display";
 import { getKoleExtendedCost } from "@shared/kole-pricing";
+import * as HoverCardPrimitive from "@radix-ui/react-hover-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChevronLeft, ChevronRight, Eye, Filter, Link2, Loader2, Package, Plus, RefreshCw, Search, Upload, X } from "lucide-react";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 5;
 const MAX_CSV_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 function formatCost(value: string | null | undefined) {
@@ -24,14 +26,25 @@ function formatCost(value: string | null | undefined) {
   return Number.isFinite(number) ? `$${number.toFixed(2)}` : value;
 }
 
-function imageUrl(data: unknown[]) {
+function imageSources(data: unknown[]) {
   const first = data?.[0];
-  if (typeof first === "string") return first;
+  if (typeof first === "string") return { thumbnail: first, large: first };
   if (first && typeof first === "object") {
     const record = first as Record<string, unknown>;
-    return String(record.url || record.src || record.href || "");
+    const pick = (...keys: string[]) =>
+      keys.map((key) => String(record[key] ?? "").trim()).find(Boolean) ?? "";
+    const thumbnail = pick(
+      "url_thumbnail", "url_tiny", "thumbnail_url", "thumbnail",
+      "url_standard", "standard_url", "url", "src", "href",
+    );
+    const large = pick(
+      "url_large", "image_large", "large_url", "large",
+      "url_zoom", "zoom_url", "zoom", "url_original", "original_url",
+      "url_standard", "standard_url", "url", "src", "href",
+    );
+    return { thumbnail: thumbnail || large, large: large || thumbnail };
   }
-  return "";
+  return { thumbnail: "", large: "" };
 }
 
 function inventoryLabel(product: api.DropshipProduct) {
@@ -497,10 +510,38 @@ export default function DropshipCatalogPage() {
               </tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {rows.map((product) => {
-                  const image = imageUrl(product.image_data);
-                  return <tr key={product.id} className="hover:bg-slate-50/80 align-top">
+                  const image = imageSources(product.image_data);
+                  return <tr key={product.id} className="hover:bg-slate-50/80">
                     <td className="px-3 py-3"><input type="checkbox" checked={selected.has(product.id)} disabled={Boolean(product.bigcommerce_product_id)} onChange={() => toggleProductSelected(product)} aria-label={`Select ${product.title}`} /></td>
-                    <td className="px-3 py-3 min-w-[240px]"><div className="flex gap-3">{image ? <img src={image} alt="" className="h-12 w-12 rounded border border-slate-200 object-contain bg-white" /> : <div className="h-12 w-12 rounded border border-slate-200 bg-slate-50 flex items-center justify-center"><Package className="h-5 w-5 text-slate-300" /></div>}<div className="min-w-0"><p className="font-medium text-slate-800 line-clamp-2">{product.title}</p><p className="text-xs text-slate-500 mt-1">{product.brand || "Unbranded"}{product.vendor_category ? ` · ${product.vendor_category}` : ""}</p>{product.is_closeout && <Badge className="mt-1 bg-orange-100 text-orange-700 border-0 text-[10px]">Closeout</Badge>}</div></div></td>
+                    <td className="relative px-3 py-1 min-w-[240px]">
+                      <div className="relative min-h-[56px] pl-[60px] py-1.5 flex flex-col justify-center">
+                        <div className="absolute inset-y-1 left-0 w-12">
+                          {image.thumbnail ? (
+                            <HoverCard openDelay={180} closeDelay={100}>
+                              <HoverCardTrigger asChild>
+                                <button type="button" aria-label={`Preview image for ${product.title}`} className="block h-full w-full cursor-zoom-in rounded border border-slate-200 bg-white">
+                                  <img src={image.thumbnail} alt="" loading="lazy" className="h-full w-full rounded object-contain" />
+                                </button>
+                              </HoverCardTrigger>
+                              <HoverCardPrimitive.Portal>
+                                <HoverCardContent side="right" align="center" sideOffset={10} className="w-[320px] max-w-[90vw] p-2">
+                                  <img src={image.large} alt={`Larger preview of ${product.title}`} loading="eager" className="block w-full max-h-[70vh] object-contain" />
+                                </HoverCardContent>
+                              </HoverCardPrimitive.Portal>
+                            </HoverCard>
+                          ) : (
+                            <div className="h-full w-full rounded border border-slate-200 bg-slate-50 flex items-center justify-center">
+                              <Package className="h-5 w-5 text-slate-300" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-medium text-slate-800 line-clamp-2">{product.title}</p>
+                          <p className="text-xs text-slate-500 mt-1">{product.brand || "Unbranded"}{product.vendor_category ? ` · ${product.vendor_category}` : ""}</p>
+                          {product.is_closeout && <Badge className="mt-1 bg-orange-100 text-orange-700 border-0 text-[10px]">Closeout</Badge>}
+                        </div>
+                      </div>
+                    </td>
                     <td className="px-3 py-3 whitespace-nowrap"><p className="font-mono text-xs text-slate-700">{product.vendor_sku}</p><p className="text-xs text-slate-400 mt-1">{product.upc || "No UPC"}</p></td>
                     <td className="px-3 py-3 font-medium whitespace-nowrap">{formatCost(extendedSupplierCost(product)?.toFixed(2) ?? null)}</td>
                     <td className="px-3 py-3 text-xs text-slate-600 whitespace-nowrap">{packLabel(product)}</td>
@@ -523,7 +564,7 @@ export default function DropshipCatalogPage() {
         <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
           {detail && <><DialogHeader><DialogTitle className="flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" />{detail.title}</DialogTitle><DialogDescription>Vendor product details for SKU {detail.vendor_sku}. Creating a BigCommerce draft requires an entered retail price.</DialogDescription></DialogHeader><div className="space-y-5">
             <div className="flex flex-wrap gap-2"><StatusBadge status={detail.status} />{detail.is_closeout && <Badge className="bg-orange-100 text-orange-700 border-0">Closeout</Badge>}{detail.bigcommerce_product_id ? <><Badge className="bg-blue-100 text-blue-700 border-0">Mapped to BC #{detail.bigcommerce_product_id}</Badge>{detail.bigcommerce_variant_id != null && <Badge className="bg-indigo-100 text-indigo-700 border-0">Variant ID #{detail.bigcommerce_variant_id}</Badge>}</> : <Badge className="bg-slate-100 text-slate-600 border-0">Not mapped</Badge>}</div>
-            {detail.image_data?.length > 0 && <div className="flex gap-2 overflow-x-auto">{detail.image_data.slice(0, 8).map((_, index) => { const src = imageUrl([detail.image_data[index]]); return src ? <img key={index} src={src} alt="" className="h-24 w-24 object-contain border rounded bg-white" /> : null; })}</div>}
+            {detail.image_data?.length > 0 && <div className="flex gap-2 overflow-x-auto">{detail.image_data.slice(0, 8).map((_, index) => { const src = imageSources([detail.image_data[index]]).large; return src ? <img key={index} src={src} alt="" className="h-24 w-24 object-contain border rounded bg-white" /> : null; })}</div>}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm"><div><p className="text-xs text-slate-500">SKU</p><p className="font-mono">{detail.vendor_sku}</p></div><div><p className="text-xs text-slate-500">UPC</p><p>{detail.upc || "—"}</p></div><div><p className="text-xs text-slate-500">Brand</p><p>{detail.brand || "—"}</p></div><div><p className="text-xs text-slate-500">Extended cost (MOQ included)</p><p>{formatCost(extendedSupplierCost(detail)?.toFixed(2) ?? null)}</p></div><div><p className="text-xs text-slate-500">Inventory</p><p>{inventoryLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Pack / minimum</p><p>{packLabel(detail)}</p></div><div><p className="text-xs text-slate-500">Category</p><p>{detail.vendor_category || "—"}</p></div><div><p className="text-xs text-slate-500">Subcategory</p><p>{detail.vendor_subcategory || "—"}</p></div><div><p className="text-xs text-slate-500">Weight</p><p>{String((detail.raw_data as any)?.item_weight || (detail.raw_data as any)?.weight || "—")}</p></div></div>
             {detail.description && <div><p className="text-xs font-medium text-slate-500 mb-1">Description</p><p className="text-sm text-slate-700 whitespace-pre-wrap">{detail.description}</p></div>}
             <div className="flex flex-wrap gap-2">{canManageDropshipping && !detail.bigcommerce_product_id && <Button onClick={() => openDraftDialog([detail])}><Plus className="h-4 w-4 mr-1.5" />Create BigCommerce Draft</Button>}{canManageDropshipping && <Button variant="outline" onClick={() => updateStatus.mutate({ id: detail.id, nextStatus: "queued" })} disabled={detail.status === "queued" || Boolean(detail.bigcommerce_product_id)}><Plus className="h-4 w-4 mr-1.5" />Add to Import Queue</Button>}<Button variant="ghost" onClick={() => setDetail(null)}>Close</Button></div>

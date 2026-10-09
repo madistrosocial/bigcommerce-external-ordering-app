@@ -158,7 +158,7 @@ function parseKoleFeedProductRow(
   return {
     sku,
     vendorProductId: String(record["Internal ID"] ?? "").trim() || null,
-    title: String(record.title ?? "").trim() || sku,
+    title: decodeHtmlEntities(String(record.title ?? "")).trim() || sku,
     description: decodeHtmlEntities(String(record.description ?? "")),
     brand: String(record.brand ?? "").trim() || null,
     upc: String(record.upc ?? "").trim() || null,
