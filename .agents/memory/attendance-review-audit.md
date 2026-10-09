@@ -3,17 +3,17 @@ name: Attendance review and audit
 description: Manager review lifecycle and correction-history rules for attendance records.
 ---
 
-Attendance completion state and manager review state are separate concerns. A record can be active, completed, incomplete, or exception while independently being not reviewed, needing review, approved, or locked.
+Attendance completion state and the review flag are separate concerns. Attendance is approved by default; only sessions explicitly tagged `needs_review` require review. Normal attendance does not need approval or locking.
 
-**Why:** Payroll and audit workflows must not reinterpret employee clock-in state as managerial approval, and corrections must preserve accountability rather than overwrite history.
+**Why:** The user specified that logged time is accepted automatically unless someone flags it for review; the separate second-session approval remains required.
 
-**How to apply:** Require a reason for manager-requested review and time corrections. Record actor, action, changed field, old value, new value, and timestamp for every review or correction. Locked records are immutable except for an authorized administrator reopening them into needs-review.
+**How to apply:** Default new and legacy attendance to approved, allow payroll unless a completed session is flagged for review, and keep corrections auditable and tagged for review. Clearing the flag returns the record to the automatic-approved state; do not restore record locking.
 
-For the daily attendance ledger, keep date rows compact and place review/approval and “Correct times” controls directly in each row. Do not expand a ledger row to show the individual attendance log.
+For the daily attendance ledger, keep date rows compact and place “Needs review,” “Correct times,” and second-session approval controls directly in each row. Do not expand a ledger row to show the individual attendance log.
 
 **Why:** The user explicitly prefers direct per-row actions over expanding rows into full log details.
 
-**How to apply:** Reuse the existing permission-aware actions in desktop and mobile ledger rows; place them in the rightmost Actions column as icon-only buttons with accessible names/tooltips, and keep full record details separate from the row interaction.
+**How to apply:** Reuse permission-aware actions in desktop and mobile rows; put the review-flag toggle, time correction, and second-session approval in the rightmost Actions column as icon-only buttons with accessible names/tooltips.
 
 Keep the Team member selector for authorized managers, default it to the signed-in user, and omit the aggregate “All team members” option. The ledger should always show one selected person at a time.
 

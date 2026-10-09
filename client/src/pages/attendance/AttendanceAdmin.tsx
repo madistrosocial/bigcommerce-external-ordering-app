@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import {
   AlertTriangle, BarChart3, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3,
-  Download, ExternalLink, FileClock, Filter, History, Loader2, LockKeyhole, MapPin, Pencil, Settings2, Trash2, Users, X,
+  Download, ExternalLink, FileClock, Filter, History, Loader2, MapPin, Pencil, Settings2, Trash2, Users, X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -117,10 +117,8 @@ function statusBadge(status: string) {
     completed: "border-0 bg-emerald-100 text-emerald-700",
     incomplete: "border-0 bg-orange-100 text-orange-700",
     exception: "border-0 bg-red-100 text-red-700",
-    not_reviewed: "border-0 bg-slate-100 text-slate-600",
     needs_review: "border-0 bg-orange-100 text-orange-700",
     approved: "border-0 bg-emerald-100 text-emerald-700",
-    locked: "border-0 bg-blue-100 text-blue-700",
     open: "border-0 bg-red-100 text-red-700",
     resolved: "border-0 bg-slate-100 text-slate-600",
     captured: "border-0 bg-emerald-100 text-emerald-700",
@@ -365,7 +363,7 @@ function Overview() {
     </Card>}
     <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_260px]">
       <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader className="pb-3"><CardTitle className="text-sm">Today's Attendance</CardTitle></CardHeader><CardContent><div className="grid gap-2 md:grid-cols-2">{query.isLoading ? <div className="p-8 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></div> : data?.rows?.length ? data.rows.map((row: any) => <EmployeeRow key={row.id} row={row} fmt={fmt} onClick={() => window.location.href = `/attendance/logs?record=${row.id}`} />) : <p className="p-8 text-center text-sm text-slate-400">No attendance records for this period.</p>}</div></CardContent></Card>
-      <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader className="pb-3"><CardTitle className="text-sm">Payroll Readiness</CardTitle></CardHeader><CardContent><p className="text-3xl font-bold text-emerald-600">{data?.payrollReadiness?.percent ?? 100}%</p><p className="mt-1 text-xs text-slate-500">Ready for attendance review</p><div className="mt-4 space-y-2 text-xs"><div className="flex justify-between"><span className="text-slate-500">Approved / locked</span><span className="font-semibold text-emerald-700">{data?.payrollReadiness?.ready ?? 0}</span></div><div className="flex justify-between"><span className="text-slate-500">Needs review</span><span className="font-semibold text-orange-700">{data?.kpis?.needsReview ?? 0}</span></div><div className="flex justify-between"><span className="text-slate-500">Missing time out</span><span className="font-semibold text-red-700">{data?.kpis?.missingTimeOut ?? 0}</span></div></div></CardContent></Card>
+      <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader className="pb-3"><CardTitle className="text-sm">Payroll Readiness</CardTitle></CardHeader><CardContent><p className="text-3xl font-bold text-emerald-600">{data?.payrollReadiness?.percent ?? 100}%</p><p className="mt-1 text-xs text-slate-500">Ready for payroll</p><div className="mt-4 space-y-2 text-xs"><div className="flex justify-between"><span className="text-slate-500">Ready sessions</span><span className="font-semibold text-emerald-700">{data?.payrollReadiness?.ready ?? 0}</span></div><div className="flex justify-between"><span className="text-slate-500">Needs review</span><span className="font-semibold text-orange-700">{data?.kpis?.needsReview ?? 0}</span></div><div className="flex justify-between"><span className="text-slate-500">Missing time out</span><span className="font-semibold text-red-700">{data?.kpis?.missingTimeOut ?? 0}</span></div></div></CardContent></Card>
     </div>
   </AdminShell>;
 }
@@ -387,6 +385,7 @@ function AttendanceLogActions({ attendance, canViewAll, label }: { attendance: a
     attendance.work_date,
     `session ${attendance.session_number ?? 1}`,
   ].filter(Boolean).join(" ");
+  const needsReview = attendance.review_status === "needs_review";
   const refreshAttendance = () => {
     client.invalidateQueries({ queryKey: ["attendance", "log", id] });
     client.invalidateQueries({ queryKey: ["attendance", "logs"] });
@@ -434,11 +433,9 @@ function AttendanceLogActions({ attendance, canViewAll, label }: { attendance: a
   return <div className="min-w-0 space-y-2">
     {label && <p className="text-[10px] font-medium text-slate-500">{label}</p>}
     <div className="flex flex-wrap gap-1.5">
-      {canReview && attendance.review_status !== "needs_review" && attendance.review_status !== "locked" && <Button size="icon" variant="outline" title="Needs review" aria-label={`Mark ${actionTarget} as needing review`} className="h-8 w-8 shrink-0 text-orange-700" onClick={() => changeReview("needs_review").catch((error: any) => window.alert(error.message))}><AlertTriangle className="h-3.5 w-3.5" /></Button>}
-      {canReview && attendance.review_status !== "approved" && attendance.review_status !== "locked" && <Button size="icon" title="Approve" aria-label={`Approve ${actionTarget}`} className="h-8 w-8 shrink-0 bg-emerald-600 hover:bg-emerald-700" onClick={() => changeReview("approved").catch((error: any) => window.alert(error.message))}><Check className="h-3.5 w-3.5" /></Button>}
-      {canReview && attendance.review_status === "approved" && <Button size="icon" title="Lock record" aria-label={`Lock ${actionTarget}`} className="h-8 w-8 shrink-0 bg-blue-700 hover:bg-blue-800" onClick={() => changeReview("locked").catch((error: any) => window.alert(error.message))}><LockKeyhole className="h-3.5 w-3.5" /></Button>}
+      {canReview && <Button size="icon" variant="outline" title={needsReview ? "Clear review flag" : "Needs review"} aria-label={needsReview ? `Clear the needs-review flag for ${actionTarget}` : `Mark ${actionTarget} as needing review`} className={`h-8 w-8 shrink-0 ${needsReview ? "text-slate-600" : "text-orange-700"}`} onClick={() => changeReview(needsReview ? "approved" : "needs_review").catch((error: any) => window.alert(error.message))}>{needsReview ? <X className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}</Button>}
       {canAudit && attendance.session_number === 1 && !attendance.second_session_approved && attendance.status !== "active" && <Button size="icon" variant="outline" title="Approve second session" aria-label={`Approve a second session for ${actionTarget}`} className="h-8 w-8 shrink-0 border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => approveSecondSession().catch((error: any) => window.alert(error.message))}><Clock3 className="h-3.5 w-3.5" /></Button>}
-      {canManage && attendance.review_status !== "locked" && <Button size="icon" variant="outline" title={editing ? "Cancel correction" : "Correct times"} aria-label={editing ? `Cancel time correction for ${actionTarget}` : `Correct times for ${actionTarget}`} className="h-8 w-8 shrink-0" onClick={() => {
+      {canManage && <Button size="icon" variant="outline" title={editing ? "Cancel correction" : "Correct times"} aria-label={editing ? `Cancel time correction for ${actionTarget}` : `Correct times for ${actionTarget}`} className="h-8 w-8 shrink-0" onClick={() => {
         if (!editing) {
           setTimeIn(formatDateTimeLocal(attendance.time_in, fmt.tz));
           setTimeOut(formatDateTimeLocal(attendance.time_out, fmt.tz));
@@ -466,7 +463,7 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   const data = query.data;
   if (!data) return null;
   const { attendance, dailyNote, employee, audit = [] } = data;
-  return <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader className="flex flex-row items-start justify-between gap-3 pb-3"><div><CardTitle className="text-sm">{employee?.name ?? "Employee"} · {attendance.work_date}</CardTitle><div className="mt-2 flex flex-wrap items-center gap-2">{statusBadge(attendance.status)}{statusBadge(attendance.review_status ?? "not_reviewed")}</div></div><Button variant="ghost" size="sm" onClick={onClose}>Close</Button></CardHeader><CardContent className="space-y-5">
+  return <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader className="flex flex-row items-start justify-between gap-3 pb-3"><div><CardTitle className="text-sm">{employee?.name ?? "Employee"} · {attendance.work_date}</CardTitle><div className="mt-2 flex flex-wrap items-center gap-2">{statusBadge(attendance.status)}{statusBadge(attendance.review_status ?? "approved")}</div></div><Button variant="ghost" size="sm" onClick={onClose}>Close</Button></CardHeader><CardContent className="space-y-5">
      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Time In", attendance.time_in ? fmt.dateTime(attendance.time_in) : "—"], ["Time Out", attendance.time_out ? fmt.dateTime(attendance.time_out) : "—"], ["Total Hours", hours(attendance.total_seconds)], ["Start Method", attendance.start_method === "warehouse" ? "Warehouse" : attendance.start_method === "offsite" ? "Off-site" : "Driving"]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] text-slate-400">{label}</p><p className="mt-1 text-xs font-semibold capitalize text-slate-700">{value}</p></div>)}</div>
       {attendance.breaks?.length > 0 && <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Break intervals</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{attendance.breaks.map((breakItem: any, index: number) => <div key={`${breakItem.break_started_at}-${index}`} className="rounded-lg bg-white p-2 text-xs"><p className="font-medium text-slate-700">Break {index + 1}</p><p className="mt-1 text-slate-500">Start · {fmt.dateTime(breakItem.break_started_at)}</p><p className="text-slate-500">End · {breakItem.break_ended_at ? fmt.dateTime(breakItem.break_ended_at) : "In progress"}</p></div>)}</div></div>}
       {dailyNote && <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-blue-800">Daily attendance note</p><p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{dailyNote}</p></div>}
@@ -518,7 +515,10 @@ function Logs() {
   const canAuditAttendance = canViewAll && hasPermission("attendance", "audit");
   const [status, setStatus] = useState("all");
   const [startMethod, setStartMethod] = useState("all");
-  const [reviewStatus, setReviewStatus] = useState(() => attendanceSearchParams(location).get("reviewStatus") ?? "all");
+  const [reviewStatus, setReviewStatus] = useState(() => {
+    const requestedStatus = attendanceSearchParams(location).get("reviewStatus");
+    return requestedStatus === "needs_review" || requestedStatus === "missing_time_out" ? requestedStatus : "all";
+  });
   const [month, setMonth] = useState(currentMonthKey);
   const initialMonthRange = useMemo(() => monthRange(currentMonthKey()), []);
   const [from, setFrom] = useState(initialMonthRange.from);
@@ -665,7 +665,7 @@ function Logs() {
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => { setTo(e.target.value); setSelectedId(null); }} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">Log status</Label><Select value={status} onValueChange={value => { setStatus(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="active">Working</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="exception">Exception</SelectItem></SelectContent></Select></div>
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">Start method</Label><Select value={startMethod} onValueChange={value => { setStartMethod(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All methods</SelectItem><SelectItem value="warehouse">Warehouse</SelectItem><SelectItem value="driving">Route start</SelectItem><SelectItem value="offsite">Off-site</SelectItem></SelectContent></Select></div>
-          <div className="min-w-0"><Label className="text-[11px] text-slate-500">Review status</Label><Select value={reviewStatus} onValueChange={value => { setReviewStatus(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All review states</SelectItem><SelectItem value="not_reviewed">Not reviewed</SelectItem><SelectItem value="needs_review">Needs review</SelectItem><SelectItem value="approved">Approved</SelectItem><SelectItem value="locked">Locked</SelectItem><SelectItem value="missing_time_out">Missing time out</SelectItem></SelectContent></Select></div>
+          <div className="min-w-0"><Label className="text-[11px] text-slate-500">Review status</Label><Select value={reviewStatus} onValueChange={value => { setReviewStatus(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All review states</SelectItem><SelectItem value="needs_review">Needs review</SelectItem><SelectItem value="missing_time_out">Missing time out</SelectItem></SelectContent></Select></div>
         <div className="flex min-w-0 items-end"><Button variant="outline" className="h-9 w-full min-w-0 text-xs" onClick={clearFilters}><X className="mr-1.5 h-3.5 w-3.5 shrink-0" />Reset</Button></div>
       </div>
     </CardContent></Card>}

@@ -781,9 +781,15 @@ export async function registerRoutes(
           ADD COLUMN IF NOT EXISTS session_number integer NOT NULL DEFAULT 1,
           ADD COLUMN IF NOT EXISTS break_started_at timestamp,
           ADD COLUMN IF NOT EXISTS break_seconds integer NOT NULL DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS review_status text NOT NULL DEFAULT 'approved',
           ADD COLUMN IF NOT EXISTS second_session_approved boolean NOT NULL DEFAULT false,
           ADD COLUMN IF NOT EXISTS second_session_approved_by integer REFERENCES users(id),
           ADD COLUMN IF NOT EXISTS second_session_approved_at timestamp;
+        ALTER TABLE attendance_sessions ALTER COLUMN review_status SET DEFAULT 'approved';
+        UPDATE attendance_sessions
+          SET review_status = 'approved'
+          WHERE review_status IS DISTINCT FROM 'needs_review'
+            AND review_status IS DISTINCT FROM 'approved';
         CREATE INDEX IF NOT EXISTS attendance_sessions_user_date_session_idx
           ON attendance_sessions (user_id, work_date, session_number);
       END IF;
@@ -11456,6 +11462,7 @@ export async function registerRoutes(
              ? "outside_home_verified"
              : settings?.warehouseVerificationEnabled ? "warehouse_verified" : "warehouse_verification_disabled",
         driving_verified: false,
+         review_status: "approved",
       });
       await storage.createAttendanceCheckpoint({
         attendance_id: attendance.id,
@@ -11774,8 +11781,11 @@ export async function registerRoutes(
           attendance_id: row.id,
         })),
       ].slice(0, 10);
-      const readinessTotal = recordResult.rows.length;
-      const readinessReady = recordResult.rows.filter(row => row.review_status === "approved" || row.review_status === "locked").length;
+      const payrollEligibleRows = recordResult.rows.filter(row =>
+        row.status === "completed" && row.time_out && Number(row.total_seconds) > 0,
+      );
+      const readinessTotal = payrollEligibleRows.length;
+      const readinessReady = payrollEligibleRows.filter(row => row.review_status !== "needs_review").length;
       res.json({
         period: { from, to, label: period },
         payPeriod: currentPayPeriod,
@@ -11855,28 +11865,27 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Full attendance access is required." });
       }
       const nextStatus = String(req.body?.review_status ?? "");
-      if (!["not_reviewed", "needs_review", "approved", "locked"].includes(nextStatus)) {
+      if (!["needs_review", "approved"].includes(nextStatus)) {
         return res.status(400).json({ error: "Invalid review status." });
       }
-      if (attendance.review_status === "locked" && nextStatus !== "locked" && !(user.role === "admin" && nextStatus === "needs_review")) {
-        return res.status(409).json({ error: "Locked attendance records must be reopened by an authorized administrator." });
+      if (nextStatus === "approved" && attendance.review_status !== "needs_review") {
+        return res.status(409).json({ error: "Only an attendance record flagged for review can have its review flag cleared." });
       }
       const reason = String(req.body?.reason ?? "").trim().slice(0, 2000);
       if (nextStatus === "needs_review" && !reason) {
         return res.status(400).json({ error: "A reason is required when marking a record for review." });
       }
-      const now = new Date();
       const updated = await storage.updateAttendanceReview(id, {
         review_status: nextStatus,
-        approved_by: nextStatus === "approved" || nextStatus === "locked" ? user.id : null,
-        approved_at: nextStatus === "approved" || nextStatus === "locked" ? now : null,
-        locked_at: nextStatus === "locked" ? now : null,
+        approved_by: null,
+        approved_at: null,
+        locked_at: null,
       });
       if (!updated) return res.status(404).json({ error: "Attendance record not found." });
       await storage.createAttendanceAuditLog({
         attendance_id: id,
         actor_user_id: user.id,
-        action: "review_status_changed",
+        action: nextStatus === "needs_review" ? "attendance_marked_needs_review" : "attendance_review_flag_cleared",
         changed_field: "review_status",
         old_value: attendance.review_status,
         new_value: nextStatus,
@@ -11897,7 +11906,6 @@ export async function registerRoutes(
       if (!(await canViewAllAttendance(user))) {
         return res.status(403).json({ error: "Full attendance access is required." });
       }
-      if (attendance.review_status === "locked") return res.status(409).json({ error: "Locked attendance records cannot be edited." });
       const reason = String(req.body?.reason ?? "").trim().slice(0, 2000);
       if (!reason) return res.status(400).json({ error: "A reason is required for attendance corrections." });
       const companyTimezone = await getCompanyTimezone(storage);
@@ -11927,6 +11935,9 @@ export async function registerRoutes(
         total_seconds: nextTotal,
         status: nextTimeOut ? "completed" : "incomplete",
         review_status: "needs_review",
+        approved_by: null,
+        approved_at: null,
+        locked_at: null,
       });
       if (!updated) return res.status(404).json({ error: "Attendance record not found." });
       if (String(attendance.time_in) !== String(nextTimeIn)) {

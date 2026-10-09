@@ -140,18 +140,16 @@ async function buildDraftPayslips(tx: any, run: any) {
   const completedSessionCandidates = sessions.filter((session: any) =>
     session.status === "completed" && session.time_out && Number(session.total_seconds) > 0,
   );
-  const unapprovedSessions = completedSessionCandidates.filter((session: any) =>
-    session.review_status !== "approved" && session.review_status !== "locked",
+  const sessionsNeedingReview = completedSessionCandidates.filter((session: any) =>
+    session.review_status === "needs_review",
   );
-  if (unapprovedSessions.length) {
+  if (sessionsNeedingReview.length) {
     throw new PayrollRequestError(
       409,
-      `Review and approve all completed attendance sessions before building payroll. ${unapprovedSessions.length} session${unapprovedSessions.length === 1 ? " is" : "s are"} not approved.`,
+      `${sessionsNeedingReview.length} completed attendance session${sessionsNeedingReview.length === 1 ? " needs" : "s need"} review before building payroll.`,
     );
   }
-  const completedSessions = completedSessionCandidates.filter((session: any) =>
-    session.review_status === "approved" || session.review_status === "locked",
-  );
+  const completedSessions = completedSessionCandidates;
   const payBreakdownByAttendance = await getAttendancePayBreakdowns(completedSessions);
   const sessionIds = completedSessions.map((session: any) => session.id);
   const overtimeRequests = sessionIds.length

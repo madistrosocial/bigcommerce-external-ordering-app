@@ -507,7 +507,7 @@ export const attendanceSessions = pgTable("attendance_sessions", {
   time_out_verification: text("time_out_verification"),
   driving_verified: boolean("driving_verified").notNull().default(false),
   driving_verified_at: timestamp("driving_verified_at"),
-  review_status: text("review_status").notNull().default("not_reviewed"), // not_reviewed | needs_review | approved | locked
+  review_status: text("review_status").notNull().default("approved"), // approved by default | needs_review
   approved_by: integer("approved_by").references(() => users.id),
   approved_at: timestamp("approved_at"),
   locked_at: timestamp("locked_at"),
