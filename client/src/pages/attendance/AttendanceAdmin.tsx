@@ -777,7 +777,7 @@ function Reports() {
   const [to, setTo] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [expandedReportDates, setExpandedReportDates] = useState<Set<string>>(() => new Set());
-  const query = useQuery({ queryKey: ["attendance", "reports", period, from, to], queryFn: () => apiJson(`/api/attendance/admin/reports?period=${period}${from ? `&from=${from}` : ""}${to ? `&to=${to}` : ""}`) });
+  const query = useQuery({ queryKey: ["attendance", "reports", period, from, to], queryFn: () => apiJson(`/api/attendance/admin/reports?period=${period}${from ? `&from=${from}` : ""}${to ? `&to=${to}` : ""}`), refetchInterval: 60_000 });
   const employees = query.data?.rows ?? [];
   const records: any[] = query.data?.records ?? [];
   const selectedIndex = Math.max(0, employees.findIndex((employee: any) => String(employee.user_id) === selectedEmployeeId));
@@ -791,6 +791,8 @@ function Reports() {
     if (!reportRowIdByDate.has(record.work_date)) reportRowIdByDate.set(record.work_date, record.id);
   }
   const totalBreakSeconds = employeeRecords.reduce((total, record) => total + breakDurationSeconds(record, now), 0);
+  const totalPaidSeconds = employeeRecords.reduce((total, record) => total + Number(record.paid_seconds ?? 0), 0);
+  const totalOvertimeSeconds = employeeRecords.reduce((total, record) => total + Number(record.overtime_seconds ?? 0), 0);
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(interval);
@@ -803,7 +805,7 @@ function Reports() {
         : field === "break_ended_at" ? "In progress" : "—").join(" | ");
     const csvRows = [
       ["Employee", employee.employee_name],
-      ["Date", "Session", "Workday Type", "Time In", "Break Start", "Break End", "Time Out", "Total Worked", "Review Status", "Work Completed", "Customer Interactions", "Challenges", "Follow-up", "Additional Note"],
+      ["Date", "Session", "Workday Type", "Time In", "Break Start", "Break End", "Time Out", "Paid Hrs", "Overtime", "Review Status", "Work Completed", "Customer Interactions", "Challenges", "Follow-up", "Additional Note"],
       ...employeeRecords.map((record: any) => [
         record.work_date,
         record.session_number ?? "",
@@ -812,7 +814,8 @@ function Reports() {
         formatBreakTimes(record, "break_started_at"),
         formatBreakTimes(record, "break_ended_at"),
         reportDateTime(record.time_out, record.work_date, fmt),
-        hours(record.total_seconds),
+        hours(record.paid_seconds),
+        hours(record.overtime_seconds),
         record.review_status,
         record.daily_report?.work_completed ?? "",
         record.daily_report?.customer_interactions ?? "",
@@ -820,8 +823,8 @@ function Reports() {
         record.daily_report?.follow_up ?? "",
         record.daily_report?.note ?? record.daily_note ?? "",
       ]),
-      ["Total worked hours", "", "", "", "", "", "", hours(employee.total_seconds)],
-      ["Total break time", "", "", "", "", "", "", compactDuration(totalBreakSeconds)],
+      ["Total paid hours", "", "", "", "", "", "", hours(totalPaidSeconds), hours(totalOvertimeSeconds)],
+      ["Total break time", "", "", "", "", "", "", "", "", compactDuration(totalBreakSeconds)],
     ];
     const csv = csvRows.map((row: unknown[]) => row.map(value => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = `attendance-report-${String(employee.employee_name).replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${query.data?.from ?? "period"}.csv`; link.click(); URL.revokeObjectURL(link.href);
@@ -856,7 +859,7 @@ function Reports() {
       </div>
       {period === "custom" && <div className="mt-4 grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="mt-1 h-9 text-xs" /></div></div>}
     </CardContent></Card>
-    <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">{[["Employees", query.data?.summary?.employees ?? 0], ["Records", query.data?.summary?.records ?? 0], ["Total hours", hours(query.data?.summary?.totalSeconds)], ["Needs review", query.data?.summary?.needsReview ?? 0]].map(([label, value]) => <Card key={label} className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4"><p className="text-lg font-bold text-slate-800">{value}</p><p className="mt-1 text-[11px] text-slate-400">{label}</p></CardContent></Card>)}</div>
+    <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">{[["Employees", query.data?.summary?.employees ?? 0], ["Records", query.data?.summary?.records ?? 0], ["Paid hours", hours(query.data?.summary?.paidSeconds)], ["Overtime", hours(query.data?.summary?.overtimeSeconds)], ["Needs review", query.data?.summary?.needsReview ?? 0]].map(([label, value]) => <Card key={label} className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4"><p className="text-lg font-bold text-slate-800">{value}</p><p className="mt-1 text-[11px] text-slate-400">{label}</p></CardContent></Card>)}</div>
     <Card className="mt-4 overflow-hidden rounded-xl border-slate-200 shadow-sm"><CardHeader className="border-b border-slate-100 pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-sm">{employee ? `${employee.employee_name} · attendance details` : "Attendance details"} <span className="font-normal text-slate-400">{query.data?.from} → {query.data?.to}</span></CardTitle></div></CardHeader><CardContent className="p-0">
       {query.isLoading ? <div className="p-10 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /><p className="mt-2">Loading attendance report…</p></div>
         : query.isError ? <div className="p-10 text-center text-sm text-red-600">Attendance report could not be loaded. Try refreshing the page.</div>
@@ -865,14 +868,14 @@ function Reports() {
           <div className="hidden overflow-x-auto md:block">
             <table className="w-full table-fixed border-collapse text-left text-[11px]">
               <colgroup>
-                <col style={{ width: "11%" }} /><col style={{ width: "9%" }} />
-                <col style={{ width: "8%" }} /><col style={{ width: "9%" }} />
-                <col style={{ width: "9%" }} /><col style={{ width: "8%" }} />
+                <col style={{ width: "10%" }} /><col style={{ width: "7%" }} />
                 <col style={{ width: "7%" }} /><col style={{ width: "8%" }} />
-                <col style={{ width: "31%" }} />
+                <col style={{ width: "8%" }} /><col style={{ width: "7%" }} />
+                <col style={{ width: "7%" }} /><col style={{ width: "7%" }} />
+                <col style={{ width: "8%" }} /><col style={{ width: "31%" }} />
               </colgroup>
               <thead><tr className="border-b border-slate-200 bg-slate-50 text-[9px] uppercase tracking-wide text-slate-400">
-                <th className="px-2 py-2 text-left font-semibold">Date / Session</th><th className="px-2 py-2 text-left font-semibold">Workday</th><th className="px-2 py-2 text-left font-semibold">Time In</th><th className="px-2 py-2 text-left font-semibold">Break Start</th><th className="px-2 py-2 text-left font-semibold">Break End</th><th className="px-2 py-2 text-left font-semibold">Time Out</th><th className="px-2 py-2 text-left font-semibold">Worked</th><th className="px-2 py-2 text-left font-semibold">Review</th><th className="px-2 py-2 text-left font-semibold">Daily Report / Notes</th>
+                <th className="px-2 py-2 text-left font-semibold">Date / Session</th><th className="px-2 py-2 text-left font-semibold">Workday</th><th className="px-2 py-2 text-left font-semibold">Time In</th><th className="px-2 py-2 text-left font-semibold">Break Start</th><th className="px-2 py-2 text-left font-semibold">Break End</th><th className="px-2 py-2 text-left font-semibold">Time Out</th><th className="px-2 py-2 text-left font-semibold">PAID HRS</th><th className="px-2 py-2 text-left font-semibold">OVERTIME</th><th className="px-2 py-2 text-left font-semibold">Review</th><th className="px-2 py-2 text-left font-semibold">Daily Report / Notes</th>
               </tr></thead>
               <tbody>{employeeRecords.map((record: any) => {
                 const isReportRow = reportRowIdByDate.get(record.work_date) === record.id;
@@ -888,7 +891,8 @@ function Reports() {
                     <td className="break-words px-2 py-2 text-slate-700">{record.breaks?.length ? formatBreakTimes(record, "break_started_at") : "—"}</td>
                     <td className="break-words px-2 py-2 text-slate-700">{record.breaks?.length ? formatBreakTimes(record, "break_ended_at") : "—"}</td>
                     <td className="break-words px-2 py-2 text-slate-700">{reportDateTime(record.time_out, record.work_date, fmt)}</td>
-                    <td className="break-words px-2 py-2 font-semibold text-emerald-700">{hours(record.total_seconds)}</td>
+                    <td className="break-words px-2 py-2 font-semibold text-emerald-700">{hours(record.paid_seconds)}</td>
+                    <td className="break-words px-2 py-2 font-semibold text-amber-700">{hours(record.overtime_seconds)}</td>
                     <td className="break-words px-2 py-2 capitalize text-slate-600">{String(record.review_status ?? "").replace(/_/g, " ")}</td>
                     <td className="px-2 py-2">
                       {fields.length > 0 ? <button type="button" aria-expanded={isExpanded} onClick={() => toggleReport(reportKey)} className="w-full text-left">
@@ -898,7 +902,7 @@ function Reports() {
                     </td>
                   </tr>
                   {isExpanded && fields.length > 0 && <tr className="border-b border-slate-200 bg-slate-50/70">
-                    <td colSpan={9} className="px-3 py-3">
+                    <td colSpan={10} className="px-3 py-3">
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                         {fields.map(field => <div key={field.label} className="min-w-0">
                           <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">{field.label}</p>
@@ -909,7 +913,7 @@ function Reports() {
                   </tr>}
                 </Fragment>;
               })}</tbody>
-              <tfoot><tr className="border-t-2 border-slate-300 bg-slate-50 font-bold"><td className="px-2 py-2" colSpan={6}>Employee total</td><td className="px-2 py-2 text-emerald-700">{hours(employee.total_seconds)}</td><td className="px-2 py-2 text-red-600">Break {compactDuration(totalBreakSeconds)}</td><td className="px-2 py-2" /></tr></tfoot>
+              <tfoot><tr className="border-t-2 border-slate-300 bg-slate-50 font-bold"><td className="px-2 py-2" colSpan={6}>Employee total</td><td className="px-2 py-2 text-emerald-700">{hours(totalPaidSeconds)}</td><td className="px-2 py-2 text-amber-700">{hours(totalOvertimeSeconds)}</td><td className="px-2 py-2 text-red-600">Break {compactDuration(totalBreakSeconds)}</td><td className="px-2 py-2" /></tr></tfoot>
             </table>
           </div>
           <div className="space-y-3 p-3 md:hidden">
@@ -920,7 +924,7 @@ function Reports() {
               const isExpanded = expandedReportDates.has(reportKey);
               const preview = fields.map(field => `${field.label}: ${field.value}`).join("\n");
               return <div key={record.id} className="rounded-lg border border-slate-200 bg-white p-3">
-              <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-slate-800">{record.work_date}</p><p className="text-[11px] text-slate-400">Session {record.session_number ?? 1} · {record.daily_report ? (record.daily_report.workday_type === "other" ? "Other" : "Regular Workday") : "No daily report"}</p></div><span className="text-xs font-semibold text-emerald-700">{hours(record.total_seconds)}</span></div>
+              <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-slate-800">{record.work_date}</p><p className="text-[11px] text-slate-400">Session {record.session_number ?? 1} · {record.daily_report ? (record.daily_report.workday_type === "other" ? "Other" : "Regular Workday") : "No daily report"}</p></div><div className="shrink-0 text-right text-xs font-semibold"><span className="text-emerald-700">Paid {hours(record.paid_seconds)}</span><span className="mt-0.5 block text-amber-700">OT {hours(record.overtime_seconds)}</span></div></div>
               <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
                 <div><span className="block text-slate-400">Time In</span><span className="font-medium text-slate-700">{reportDateTime(record.time_in, record.work_date, fmt)}</span></div>
                 <div><span className="block text-slate-400">Time Out</span><span className="font-medium text-slate-700">{reportDateTime(record.time_out, record.work_date, fmt)}</span></div>
@@ -940,7 +944,7 @@ function Reports() {
               </div>}
             </div>;
             })}
-            <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3 text-xs font-semibold"><span>Employee total</span><span className="text-emerald-700">{hours(employee.total_seconds)} · Break {compactDuration(totalBreakSeconds)}</span></div>
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3 text-xs font-semibold"><span>Employee total</span><span className="text-right text-emerald-700">{hours(totalPaidSeconds)} paid · <span className="text-amber-700">{hours(totalOvertimeSeconds)} OT</span> · Break {compactDuration(totalBreakSeconds)}</span></div>
           </div>
         </>}
     </CardContent></Card>

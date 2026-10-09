@@ -2,6 +2,9 @@ import type { Express, Request, RequestHandler } from "express";
 import { and, asc, desc, eq, gte, gt, inArray, isNotNull, isNull, lte, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { getCompanyTimezone } from "./attendance";
+import { calculateAttendanceDayPay } from "./attendance-pay-calculation";
+import { storage } from "./storage";
 import {
   attendanceLeaveRequests,
   attendanceOvertimeRequests,
@@ -18,7 +21,6 @@ import {
 } from "@shared/schema";
 
 type PermissionMiddleware = (module: string, action: string) => RequestHandler;
-const SHIFT_CAP_SECONDS = 8 * 60 * 60;
 
 class PayrollRequestError extends Error {
   status: number;
@@ -48,6 +50,19 @@ function asMoney(value: number): string {
 
 function hours(value: number): number {
   return Math.round((value / 3600) * 100) / 100;
+}
+
+async function getAttendancePayBreakdowns(sessions: any[], now = new Date()) {
+  if (!sessions.length) return new Map();
+  const [timeZone, breaksByAttendance] = await Promise.all([
+    getCompanyTimezone(storage),
+    storage.getAttendanceBreakIntervals(sessions.map(session => session.id)),
+  ]);
+  return calculateAttendanceDayPay(
+    sessions.map(session => ({ ...session, breaks: breaksByAttendance[session.id] ?? [] })),
+    timeZone,
+    now,
+  );
 }
 
 function weekdaysInRange(from: string, to: string): string[] {
@@ -137,6 +152,7 @@ async function buildDraftPayslips(tx: any, run: any) {
   const completedSessions = completedSessionCandidates.filter((session: any) =>
     session.review_status === "approved" || session.review_status === "locked",
   );
+  const payBreakdownByAttendance = await getAttendancePayBreakdowns(completedSessions);
   const sessionIds = completedSessions.map((session: any) => session.id);
   const overtimeRequests = sessionIds.length
     ? await tx.select().from(attendanceOvertimeRequests).where(and(
@@ -205,30 +221,34 @@ async function buildDraftPayslips(tx: any, run: any) {
     let deductions = 0;
 
     for (const session of sessionsByUser.get(employee.id) ?? []) {
-      const workedSeconds = Math.max(0, Number(session.total_seconds) || 0);
-      const regularSeconds = Math.min(workedSeconds, SHIFT_CAP_SECONDS);
-      if (regularSeconds <= 0) continue;
-      const regular = hours(regularSeconds);
-      const amount = roundMoney(regular * hourlyRate);
-      regularHours += regular;
-      gross += amount;
-      lines.push({
-        line_type: "regular",
-        description: `Regular hours · ${session.work_date}`,
-        units: regular.toFixed(2),
-        rate: Number(hourlyRate).toFixed(4),
-        amount: asMoney(amount),
-        source_type: "attendance_regular",
-        source_id: session.id,
-        source_date: session.work_date,
-      });
+      const payBreakdown = payBreakdownByAttendance.get(session.id) ?? {
+        paidSeconds: 0,
+        overtimeSeconds: 0,
+      };
+      const regularSeconds = payBreakdown.paidSeconds;
+      if (regularSeconds > 0) {
+        const regular = hours(regularSeconds);
+        const amount = roundMoney(regular * hourlyRate);
+        regularHours += regular;
+        gross += amount;
+        lines.push({
+          line_type: "regular",
+          description: `Regular hours · ${session.work_date}`,
+          units: regular.toFixed(2),
+          rate: Number(hourlyRate).toFixed(4),
+          amount: asMoney(amount),
+          source_type: "attendance_regular",
+          source_id: session.id,
+          source_date: session.work_date,
+        });
+      }
 
       const request = overtimeByAttendance.get(session.id);
       if (request) {
-        const eligibleOvertimeHours = hours(Math.max(0, workedSeconds - SHIFT_CAP_SECONDS));
+        const eligibleOvertimeHours = hours(payBreakdown.overtimeSeconds);
         const approvedHours = Number(request.approved_hours ?? 0);
         if (approvedHours > eligibleOvertimeHours + 0.01) {
-          throw new PayrollRequestError(409, `Approved overtime for ${employee.name} on ${session.work_date} exceeds the session's recorded overtime. Review the claim before building payroll.`);
+          throw new PayrollRequestError(409, `Approved overtime for ${employee.name} on ${session.work_date} exceeds the schedule-eligible overtime. Review the claim before building payroll.`);
         }
         if (approvedHours > 0) {
           const multiplier = Number(
@@ -404,21 +424,25 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
       const completed = await db.select().from(attendanceSessions).where(and(
         eq(attendanceSessions.user_id, userId),
         eq(attendanceSessions.status, "completed"),
-        gt(attendanceSessions.total_seconds, SHIFT_CAP_SECONDS),
         isNotNull(attendanceSessions.time_out),
       )).orderBy(desc(attendanceSessions.work_date), desc(attendanceSessions.time_in));
       if (!completed.length) return res.json({ rows: [] });
+      const payByAttendance = await getAttendancePayBreakdowns(completed);
       const claims = await db.select().from(attendanceOvertimeRequests)
         .where(inArray(attendanceOvertimeRequests.attendance_id, completed.map((row) => row.id)));
       const claimedIds = new Set(claims.map((claim) => claim.attendance_id));
       res.json({
-        rows: completed.filter((session) => !claimedIds.has(session.id)).map((session) => ({
+        rows: completed.filter((session) =>
+          !claimedIds.has(session.id)
+          && (payByAttendance.get(session.id)?.overtimeSeconds ?? 0) > 0,
+        ).map((session) => ({
           id: session.id,
           work_date: session.work_date,
           time_in: session.time_in,
           time_out: session.time_out,
-          worked_seconds: session.total_seconds,
-          eligible_overtime_hours: hours(Math.max(0, session.total_seconds - SHIFT_CAP_SECONDS)),
+          worked_seconds: payByAttendance.get(session.id)?.workedSeconds ?? 0,
+          paid_seconds: payByAttendance.get(session.id)?.paidSeconds ?? 0,
+          eligible_overtime_hours: hours(payByAttendance.get(session.id)?.overtimeSeconds ?? 0),
         })),
       });
     } catch (error: any) {
@@ -462,7 +486,13 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
         eq(attendanceSessions.status, "completed"),
       )).limit(1);
       if (!session || !session.time_out) return res.status(404).json({ error: "Completed attendance shift not found." });
-      const eligibleHours = hours(Math.max(0, session.total_seconds - SHIFT_CAP_SECONDS));
+      const daySessions = await db.select().from(attendanceSessions).where(and(
+        eq(attendanceSessions.user_id, userId),
+        eq(attendanceSessions.work_date, session.work_date),
+        eq(attendanceSessions.status, "completed"),
+        isNotNull(attendanceSessions.time_out),
+      ));
+      const eligibleHours = hours((await getAttendancePayBreakdowns(daySessions)).get(session.id)?.overtimeSeconds ?? 0);
       if (eligibleHours <= 0 || parsed.data.requested_hours > eligibleHours + 0.01) {
         return res.status(400).json({ error: `This shift has ${eligibleHours.toFixed(2)} eligible overtime hours.` });
       }
@@ -509,7 +539,22 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
           ne(attendanceOvertimeRequests.user_id, requestUser(req).id),
         ))
         .orderBy(asc(attendanceOvertimeRequests.created_at));
-      res.json({ rows });
+      if (!rows.length) return res.json({ rows: [] });
+      const usersForClaims = [...new Set(rows.map(row => row.request.user_id))];
+      const datesForClaims = [...new Set(rows.map(row => row.work_date))];
+      const daySessions = await db.select().from(attendanceSessions).where(and(
+        inArray(attendanceSessions.user_id, usersForClaims),
+        inArray(attendanceSessions.work_date, datesForClaims),
+        eq(attendanceSessions.status, "completed"),
+        isNotNull(attendanceSessions.time_out),
+      ));
+      const payByAttendance = await getAttendancePayBreakdowns(daySessions);
+      res.json({
+        rows: rows.map(row => ({
+          ...row,
+          eligible_overtime_hours: hours(payByAttendance.get(row.request.attendance_id)?.overtimeSeconds ?? 0),
+        })),
+      });
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? "Could not load pending overtime claims." });
     }
@@ -535,7 +580,13 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
       if (parsed.data.status === "approved") {
         const [session] = await db.select().from(attendanceSessions).where(eq(attendanceSessions.id, claim.attendance_id)).limit(1);
         if (!session) return res.status(404).json({ error: "The linked attendance shift no longer exists." });
-        const eligible = hours(Math.max(0, session.total_seconds - SHIFT_CAP_SECONDS));
+        const daySessions = await db.select().from(attendanceSessions).where(and(
+          eq(attendanceSessions.user_id, session.user_id),
+          eq(attendanceSessions.work_date, session.work_date),
+          eq(attendanceSessions.status, "completed"),
+          isNotNull(attendanceSessions.time_out),
+        ));
+        const eligible = hours((await getAttendancePayBreakdowns(daySessions)).get(session.id)?.overtimeSeconds ?? 0);
         approvedHours = parsed.data.approved_hours ?? Number(claim.requested_hours);
         if (approvedHours > eligible + 0.01 || approvedHours > Number(claim.requested_hours) + 0.01) {
           return res.status(400).json({ error: `Approved hours cannot exceed the request or ${eligible.toFixed(2)} recorded overtime hours.` });

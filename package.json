@@ -9,6 +9,7 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "verify:attendance-pay": "tsx script/verify-attendance-pay-calculation.ts",
     "verify:attendance-timezone": "tsx script/verify-attendance-timezone.ts",
     "verify:image-editor-reference-url": "tsx script/verify-image-editor-reference-url.ts",
     "verify:sales-report-pricing": "tsx script/verify-sales-report-pricing.ts",

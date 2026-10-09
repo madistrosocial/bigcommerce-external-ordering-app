@@ -226,8 +226,8 @@ function OvertimeClaimCard({ shift, onClaim, isPending }: { shift: any; onClaim:
   return (
     <form className="rounded-lg border border-slate-200 p-3" onSubmit={event => { event.preventDefault(); onClaim({ attendance_id: shift.id, overtime_type: overtimeType, requested_hours: Number(requestedHours), employee_note: note }); }}>
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div><p className="font-semibold text-slate-900">{dateLabel(shift.work_date)}</p><p className="mt-1 text-sm text-slate-500">{shift.eligible_overtime_hours} eligible hours after the first 8 net work hours.</p></div>
-        <Badge variant="outline">{Math.floor(Number(shift.worked_seconds) / 3600)}h {String(Math.floor((Number(shift.worked_seconds) % 3600) / 60)).padStart(2, "0")}m worked</Badge>
+        <div><p className="font-semibold text-slate-900">{dateLabel(shift.work_date)}</p><p className="mt-1 text-sm text-slate-500">{shift.eligible_overtime_hours} eligible hours after 8 counted work hours and the scheduled end (6:00 PM, shifted for a late start).</p></div>
+        <Badge variant="outline">{Math.floor(Number(shift.worked_seconds) / 3600)}h {String(Math.floor((Number(shift.worked_seconds) % 3600) / 60)).padStart(2, "0")}m counted</Badge>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-3">
         <select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={overtimeType} onChange={event => setOvertimeType(event.target.value)}><option value="regular">Regular overtime</option><option value="holiday_rest">Holiday / rest-day overtime</option></select>
@@ -354,7 +354,7 @@ export default function AttendancePayrollPage() {
               ? <div className="grid grid-cols-2 gap-3">
                 <SummaryMetric label="Hourly rate" value={`${formatMoney(me.data.profile.hourly_rate, me.data.profile.currency)} / hr`} />
                 <SummaryMetric label="Currency" value={me.data.profile.currency} />
-                <p className="col-span-2 text-xs leading-5 text-slate-500">Regular hours are based on each completed Attendance session’s net worked time, capped at 8 hours per session. Recorded breaks are not paid hours.</p>
+                <p className="col-span-2 text-xs leading-5 text-slate-500">Regular hours are calculated per workday from 9:00 AM, excluding recorded breaks and early punches, and capped at 8 hours per day. Overtime starts only after 8 counted work hours and the scheduled end (6:00 PM, shifted for a late start); approved overtime is paid through payroll.</p>
               </div>
               : <EmptyState>Your hourly pay profile has not been set up. Ask a payroll manager to add it.</EmptyState>}
           </CardContent>
@@ -388,7 +388,7 @@ export default function AttendancePayrollPage() {
           {(pendingOvertime.data?.rows ?? []).map((row: any) => {
             const request = row.request;
             return <div key={request.id} className="flex flex-col gap-3 rounded-lg border border-slate-200 p-3 md:flex-row md:items-center md:justify-between">
-              <div><p className="font-semibold text-slate-900">{row.employee_name || row.employee_username} · {dateLabel(row.work_date)}</p><p className="mt-1 text-sm text-slate-600">{request.requested_hours}h requested of {Math.max(0, (Number(row.total_seconds) - 28800) / 3600).toFixed(2)}h recorded · {request.overtime_type === "holiday_rest" ? "Holiday/rest day" : "Regular"}</p>{request.employee_note && <p className="mt-1 text-xs text-slate-500">{request.employee_note}</p>}</div>
+              <div><p className="font-semibold text-slate-900">{row.employee_name || row.employee_username} · {dateLabel(row.work_date)}</p><p className="mt-1 text-sm text-slate-600">{request.requested_hours}h requested of {Number(row.eligible_overtime_hours ?? 0).toFixed(2)}h schedule-eligible overtime · {request.overtime_type === "holiday_rest" ? "Holiday/rest day" : "Regular"}</p>{request.employee_note && <p className="mt-1 text-xs text-slate-500">{request.employee_note}</p>}</div>
               <div className="flex shrink-0 gap-2"><Button size="sm" disabled={decideOvertime.isPending} onClick={() => reviewClaim(request, "approved")}><Check className="mr-1 h-4 w-4" />Approve / adjust</Button><Button size="sm" variant="outline" disabled={decideOvertime.isPending} onClick={() => reviewClaim(request, "rejected")}><X className="mr-1 h-4 w-4" />Reject</Button></div>
             </div>;
           })}

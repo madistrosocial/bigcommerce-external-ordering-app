@@ -3,8 +3,8 @@ name: Attendance accounting baseline
 description: Business rules used by the attendance ledger when calculating expected work and lost time.
 ---
 
-The attendance ledger treats Monday–Friday as expected workdays, excludes observed US holidays and weekends, and compares recorded time against an 8-hour weekday expectation. It does not claim to calculate clock-in lateness because no employee schedule or start-time rule is configured.
+The attendance ledger treats Monday–Friday as expected workdays, excludes observed US holidays and weekends, and compares recorded time against an 8-hour weekday expectation. Payroll separately applies the fixed company 9:00 AM–6:00 PM shift rule; the ledger itself still does not report clock-in lateness.
 
-**Why:** The attendance schema stores sessions and total seconds but does not store schedules, expected start times, or a late threshold. Showing a made-up late rule would misstate payroll data.
+**Why:** The ledger's attendance exceptions and the payroll schedule calculation are separate outputs; a payroll start boundary should not silently change the ledger's historical expected-hours metric.
 
-**How to apply:** If accounting needs true late-hours reporting, add configurable schedules/expected daily hours first, then update the ledger calculations and labels together.
+**How to apply:** Keep schedule-based paid-hour and overtime calculations in Payroll and the Attendance Reports pay columns; if the ledger later needs lateness reporting, update its expected-hours model and labels independently.

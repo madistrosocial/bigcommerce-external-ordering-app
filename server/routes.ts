@@ -97,6 +97,7 @@ import {
   parseAccuracy,
   parseCoordinate,
 } from "./attendance";
+import { calculateAttendanceDayPay } from "./attendance-pay-calculation";
 import { registerAttendancePayrollRoutes } from "./attendance-payroll";
 import { lookupActivityLogLocation, normalizeClientIp } from "./activity-log-location";
 
@@ -11899,6 +11900,13 @@ export async function registerRoutes(
         to = to || period.end;
       }
       const result = await storage.getAttendanceRecords({ from, to, limit: 5000, offset: 0 });
+      const companyTimezone = await getCompanyTimezone(storage);
+      const payByAttendance = calculateAttendanceDayPay(result.rows, companyTimezone);
+      const reportRecords = result.rows.map(row => ({
+        ...row,
+        paid_seconds: payByAttendance.get(row.id)?.paidSeconds ?? 0,
+        overtime_seconds: payByAttendance.get(row.id)?.overtimeSeconds ?? 0,
+      }));
       const byEmployee = new Map<number, any>();
       const byDate = new Map<string, any>();
       const startDate = new Date(`${from}T00:00:00Z`);
