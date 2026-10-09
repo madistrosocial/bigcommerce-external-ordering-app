@@ -382,6 +382,11 @@ function AttendanceLogActions({ attendance, canViewAll, label }: { attendance: a
   const [timeIn, setTimeIn] = useState("");
   const [timeOut, setTimeOut] = useState("");
   const id = Number(attendance.id);
+  const actionTarget = [
+    attendance.employee_name || attendance.employee_username || "employee",
+    attendance.work_date,
+    `session ${attendance.session_number ?? 1}`,
+  ].filter(Boolean).join(" ");
   const refreshAttendance = () => {
     client.invalidateQueries({ queryKey: ["attendance", "log", id] });
     client.invalidateQueries({ queryKey: ["attendance", "logs"] });
@@ -429,18 +434,18 @@ function AttendanceLogActions({ attendance, canViewAll, label }: { attendance: a
   return <div className="min-w-0 space-y-2">
     {label && <p className="text-[10px] font-medium text-slate-500">{label}</p>}
     <div className="flex flex-wrap gap-1.5">
-      {canReview && attendance.review_status !== "needs_review" && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-7 px-2 text-[10px] text-orange-700" onClick={() => changeReview("needs_review").catch((error: any) => window.alert(error.message))}><AlertTriangle className="mr-1 h-3 w-3" />Needs review</Button>}
-      {canReview && attendance.review_status !== "approved" && attendance.review_status !== "locked" && <Button size="sm" className="h-7 bg-emerald-600 px-2 text-[10px] hover:bg-emerald-700" onClick={() => changeReview("approved").catch((error: any) => window.alert(error.message))}><Check className="mr-1 h-3 w-3" />Approve</Button>}
-      {canReview && attendance.review_status === "approved" && <Button size="sm" className="h-7 bg-blue-700 px-2 text-[10px] hover:bg-blue-800" onClick={() => changeReview("locked").catch((error: any) => window.alert(error.message))}><LockKeyhole className="mr-1 h-3 w-3" />Lock record</Button>}
-      {canAudit && attendance.session_number === 1 && !attendance.second_session_approved && attendance.status !== "active" && <Button size="sm" variant="outline" className="h-7 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50" onClick={() => approveSecondSession().catch((error: any) => window.alert(error.message))}><Clock3 className="mr-1 h-3 w-3" />Approve second session</Button>}
-      {canManage && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => {
+      {canReview && attendance.review_status !== "needs_review" && attendance.review_status !== "locked" && <Button size="icon" variant="outline" title="Needs review" aria-label={`Mark ${actionTarget} as needing review`} className="h-8 w-8 shrink-0 text-orange-700" onClick={() => changeReview("needs_review").catch((error: any) => window.alert(error.message))}><AlertTriangle className="h-3.5 w-3.5" /></Button>}
+      {canReview && attendance.review_status !== "approved" && attendance.review_status !== "locked" && <Button size="icon" title="Approve" aria-label={`Approve ${actionTarget}`} className="h-8 w-8 shrink-0 bg-emerald-600 hover:bg-emerald-700" onClick={() => changeReview("approved").catch((error: any) => window.alert(error.message))}><Check className="h-3.5 w-3.5" /></Button>}
+      {canReview && attendance.review_status === "approved" && <Button size="icon" title="Lock record" aria-label={`Lock ${actionTarget}`} className="h-8 w-8 shrink-0 bg-blue-700 hover:bg-blue-800" onClick={() => changeReview("locked").catch((error: any) => window.alert(error.message))}><LockKeyhole className="h-3.5 w-3.5" /></Button>}
+      {canAudit && attendance.session_number === 1 && !attendance.second_session_approved && attendance.status !== "active" && <Button size="icon" variant="outline" title="Approve second session" aria-label={`Approve a second session for ${actionTarget}`} className="h-8 w-8 shrink-0 border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => approveSecondSession().catch((error: any) => window.alert(error.message))}><Clock3 className="h-3.5 w-3.5" /></Button>}
+      {canManage && attendance.review_status !== "locked" && <Button size="icon" variant="outline" title={editing ? "Cancel correction" : "Correct times"} aria-label={editing ? `Cancel time correction for ${actionTarget}` : `Correct times for ${actionTarget}`} className="h-8 w-8 shrink-0" onClick={() => {
         if (!editing) {
           setTimeIn(formatDateTimeLocal(attendance.time_in, fmt.tz));
           setTimeOut(formatDateTimeLocal(attendance.time_out, fmt.tz));
           setReason("");
         }
         setEditing(value => !value);
-      }}><Pencil className="mr-1 h-3 w-3" />{editing ? "Cancel correction" : "Correct times"}</Button>}
+      }}>{editing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}</Button>}
     </div>
     {editing && canManage && <div className="rounded-lg border border-red-100 bg-red-50/50 p-3">
       <div className="grid gap-2 sm:grid-cols-2">
@@ -449,7 +454,7 @@ function AttendanceLogActions({ attendance, canViewAll, label }: { attendance: a
       </div>
       <Label className="mt-2 block text-[10px]">Reason required</Label>
       <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Forgot to clock out" className="mt-1 h-8 text-[11px]" />
-      <div className="mt-2 flex justify-end"><Button size="sm" className="h-7 bg-red-600 text-[10px] hover:bg-red-700" disabled={!reason.trim()} onClick={() => submitCorrection().catch((error: any) => window.alert(error.message))}>Save correction</Button></div>
+      <div className="mt-2 flex justify-end"><Button size="icon" title="Save correction" aria-label={`Save time correction for ${actionTarget}`} className="h-8 w-8 bg-red-600 hover:bg-red-700" disabled={!reason.trim()} onClick={() => submitCorrection().catch((error: any) => window.alert(error.message))}><Check className="h-3.5 w-3.5" /></Button></div>
     </div>}
   </div>;
 }
@@ -676,7 +681,7 @@ function Logs() {
            <>
           <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[1120px] text-left text-xs">
-                <thead><tr className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Day</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Actions</th><th className="px-4 py-3 font-semibold">Time In</th><th className="px-4 py-3 font-semibold">Time Out</th><th className="px-4 py-3 font-semibold">Breaks</th><th className="px-4 py-3 font-semibold">Hours</th><th className="px-4 py-3 font-semibold">Team / note</th></tr></thead>
+                <thead><tr className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Day</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Time In</th><th className="px-4 py-3 font-semibold">Time Out</th><th className="px-4 py-3 font-semibold">Breaks</th><th className="px-4 py-3 font-semibold">Hours</th><th className="px-4 py-3 font-semibold">Team / note</th><th className="px-4 py-3 text-right font-semibold">Actions</th></tr></thead>
               <tbody>
                 {dates.map(date => {
                   const summary = recordsByDate.get(date);
@@ -697,12 +702,12 @@ function Logs() {
                     <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold text-slate-800">{shortDate(date)}</span><span className="ml-2 text-[10px] text-slate-400">{date}</span></td>
                     <td className={`px-4 py-3 font-medium ${statusKey === "weekend" ? "text-slate-400" : "text-slate-600"}`}>{weekday(date)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span>{holiday && <span className="ml-2 text-[10px] text-amber-700">{holiday}</span>}</td>
-                     <td className="min-w-[250px] px-2 py-2 align-top">{canReviewAttendance || canManageAttendance || canAuditAttendance ? <div className="space-y-2">{actions.map(({ attendance, label }: any) => <AttendanceLogActions key={attendance.id} attendance={attendance} canViewAll={canViewAll} label={label} />)}</div> : "—"}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_in") : formatDailyTime(dateRecords, "time_in")}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_out") : formatDailyTime(dateRecords, "time_out")}</td>
                      <td className="max-w-[320px] px-4 py-3 text-[11px] text-slate-500">{selectedMember ? formatDailyBreaks(memberRecords) : formatDailyBreaks(dateRecords)}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</td>
-                      <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? <><span>{record.start_method === "warehouse" ? "Warehouse" : record.start_method === "offsite" ? "Off-site" : "Route start"} · {record.status}</span>{record.daily_note && <span className="mt-1 block truncate text-[11px] text-blue-700" title={record.daily_note}>Note: {record.daily_note}</span>}</> : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "" : "Not expected") : (names.length ? <><span>{names.slice(0, 3).join(", ")}{names.length > 3 ? ` +${names.length - 3}` : ""}</span>{notes.length > 0 && <span className="mt-1 block truncate text-[11px] text-blue-700" title={notes.join(" | ")}>Notes available: {notes.length}</span>}</> : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "" : "Not expected")}</td>
+                       <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? <><span>{record.start_method === "warehouse" ? "Warehouse" : record.start_method === "offsite" ? "Off-site" : "Route start"} · {record.status}</span>{record.daily_note && <span className="mt-1 block truncate text-[11px] text-blue-700" title={record.daily_note}>Note: {record.daily_note}</span>}</> : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "" : "Not expected") : (names.length ? <><span>{names.slice(0, 3).join(", ")}{names.length > 3 ? ` +${names.length - 3}` : ""}</span>{notes.length > 0 && <span className="mt-1 block truncate text-[11px] text-blue-700" title={notes.join(" | ")}>Notes available: {notes.length}</span>}</> : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "" : "Not expected")}</td>
+                     <td className="min-w-[190px] px-2 py-2 align-top text-right">{canReviewAttendance || canManageAttendance || canAuditAttendance ? <div className="flex flex-col items-end gap-2">{actions.map(({ attendance, label }: any) => <AttendanceLogActions key={attendance.id} attendance={attendance} canViewAll={canViewAll} label={label} />)}</div> : "—"}</td>
                      </tr>;
                 })}
               </tbody>

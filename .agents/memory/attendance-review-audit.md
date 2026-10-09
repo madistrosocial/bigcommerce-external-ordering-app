@@ -13,4 +13,4 @@ For the daily attendance ledger, keep date rows compact and place review/approva
 
 **Why:** The user explicitly prefers direct per-row actions over expanding rows into full log details.
 
-**How to apply:** Reuse the existing permission-aware actions in desktop and mobile ledger rows; keep full record details separate from the row interaction.
+**How to apply:** Reuse the existing permission-aware actions in desktop and mobile ledger rows; place them in the rightmost Actions column as icon-only buttons with accessible names/tooltips, and keep full record details separate from the row interaction.
