@@ -13,13 +13,11 @@ export const ATTENDANCE_PERMISSION_DEFINITIONS = [
   { module: "attendance", action: "view_logs", description: "Attendance: view detailed attendance logs" },
   { module: "attendance", action: "view_reports", description: "Attendance: view attendance reports" },
   { module: "attendance", action: "view_home_locations", description: "Attendance: view saved employee home locations" },
-  { module: "attendance", action: "manage_settings", description: "Attendance: manage warehouse and payroll settings" },
+  { module: "attendance", action: "manage_settings", description: "Attendance: manage locations, checkpoints, and reporting pay periods" },
   { module: "attendance", action: "manage", description: "Attendance: manage attendance records" },
   { module: "attendance", action: "approve", description: "Attendance: approve and lock attendance records" },
   { module: "attendance", action: "audit", description: "Attendance: approve one additional work session for an employee" },
-  { module: "attendance", action: "approve_overtime", description: "Attendance: review employee overtime claims" },
   { module: "attendance", action: "approve_leave", description: "Attendance: review employee leave requests" },
-  { module: "attendance", action: "manage_payroll", description: "Attendance: manage employee pay profiles and payroll runs" },
 ] as const;
 
 export type AttendanceSettings = {

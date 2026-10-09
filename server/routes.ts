@@ -85,6 +85,7 @@ import { buildBigCommerceSkuIndex, normalizeKoleSku } from "./koleSkuMapping";
 import { normalizeMarketingProductDisplayOptions } from "@shared/marketing-products";
 import { MARKETING_ACTION_PERMS, MARKETING_LEGACY_PAGE_GRANTS } from "@shared/marketing-permissions";
 import { DROPSHIPPING_LEGACY_PERMISSION_GRANTS, DROPSHIPPING_PERMISSIONS } from "@shared/dropshipping-permissions";
+import { PAYROLL_PERMISSION_DEFINITIONS } from "@shared/payroll-permissions";
 import { dateOnlyInTimeZone, isValidTimeZone, parseDateTimeLocal } from "@shared/timezone";
 import {
   ATTENDANCE_PERMISSION_DEFINITIONS,
@@ -10098,6 +10099,70 @@ export async function registerRoutes(
         }
       }
     } catch (_) { /* non-fatal — permissions may already exist */ }
+  })();
+
+  // ── Payroll permissions and legacy-grant migration ───────────────────────────
+  await (async () => {
+    const existing = await storage.getAllPermissions();
+    const existingSet = new Set(existing.map((p: any) => `${p.module}:${p.action}`));
+    for (const permission of PAYROLL_PERMISSION_DEFINITIONS) {
+      if (!existingSet.has(`${permission.module}:${permission.action}`)) {
+        await storage.createPermission(permission);
+      }
+    }
+
+    const grantMappings = [
+      { sourceAction: "manage_payroll", targetActions: ["view", "manage"] },
+      { sourceAction: "approve_overtime", targetActions: ["approve_overtime"] },
+    ];
+    await db.transaction(async (tx) => {
+      for (const { sourceAction, targetActions } of grantMappings) {
+        for (const targetAction of targetActions) {
+          await tx.execute(sql`
+            INSERT INTO role_permissions (role_id, permission_id)
+            SELECT DISTINCT assigned.role_id, target.id
+            FROM role_permissions AS assigned
+            JOIN permissions AS source ON source.id = assigned.permission_id
+            JOIN permissions AS target
+              ON target.module = 'payroll' AND target.action = ${targetAction}
+            WHERE source.module = 'attendance' AND source.action = ${sourceAction}
+              AND NOT EXISTS (
+                SELECT 1 FROM role_permissions AS existing_assignment
+                WHERE existing_assignment.role_id = assigned.role_id
+                  AND existing_assignment.permission_id = target.id
+              )
+          `);
+          await tx.execute(sql`
+            INSERT INTO user_permissions (user_id, permission_id)
+            SELECT DISTINCT assigned.user_id, target.id
+            FROM user_permissions AS assigned
+            JOIN permissions AS source ON source.id = assigned.permission_id
+            JOIN permissions AS target
+              ON target.module = 'payroll' AND target.action = ${targetAction}
+            WHERE source.module = 'attendance' AND source.action = ${sourceAction}
+              AND NOT EXISTS (
+                SELECT 1 FROM user_permissions AS existing_assignment
+                WHERE existing_assignment.user_id = assigned.user_id
+                  AND existing_assignment.permission_id = target.id
+              )
+          `);
+        }
+      }
+      await tx.execute(sql`
+        DELETE FROM role_permissions AS assigned
+        USING permissions AS source
+        WHERE source.id = assigned.permission_id
+          AND source.module = 'attendance'
+          AND source.action IN ('manage_payroll', 'approve_overtime')
+      `);
+      await tx.execute(sql`
+        DELETE FROM user_permissions AS assigned
+        USING permissions AS source
+        WHERE source.id = assigned.permission_id
+          AND source.module = 'attendance'
+          AND source.action IN ('manage_payroll', 'approve_overtime')
+      `);
+    });
   })();
 
   // ── CRM visibility scope helper ───────────────────────────────────────────────

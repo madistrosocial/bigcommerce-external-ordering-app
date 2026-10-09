@@ -113,7 +113,7 @@ export const ATTENDANCE_ACTION_PERMS = [
   { module: "attendance", action: "view_logs", label: "View Attendance Logs", description: "Can view attendance logs; without View All Employees, only their own records are shown." },
   { module: "attendance", action: "view_reports", label: "View Reports", description: "Can view team pay-period attendance reports. Requires View All Employees." },
   { module: "attendance", action: "view_home_locations", label: "View Home Locations", description: "Can view saved employee home locations and open them in Google Maps." },
-  { module: "attendance", action: "manage_settings", label: "Manage Settings", description: "Can configure warehouse, checkpoints, and pay periods." },
+  { module: "attendance", action: "manage_settings", label: "Manage Settings", description: "Can configure Attendance locations, checkpoints, and reporting pay periods." },
   { module: "attendance", action: "manage", label: "Manage Attendance", description: "Can perform administrative attendance actions." },
   { module: "attendance", action: "audit", label: "Attendance Audit", description: "Can approve one additional work session for an employee on a date." },
   { module: "attendance", action: "approve_leave", label: "Review Leave Requests", description: "Can approve or reject employee leave requests. Requires View All Employees." },
@@ -828,6 +828,15 @@ export default function AdminUsersPage() {
   useEffect(() => {
     if (permsLoading) return;
     const missing = MARKETING_ACTION_PERMS.filter(p => !permMap.has(`${p.module}:${p.action}`));
+    if (!missing.length) return;
+    Promise.all(
+      missing.map(p => createPermission({ module: p.module, action: p.action, description: p.description }).catch(() => {})),
+    ).then(() => queryClient.invalidateQueries({ queryKey: ["permissions"] }));
+  }, [permsLoading, permissions.length]);
+
+  useEffect(() => {
+    if (permsLoading) return;
+    const missing = PAYROLL_ACTION_PERMS.filter(p => !permMap.has(`${p.module}:${p.action}`));
     if (!missing.length) return;
     Promise.all(
       missing.map(p => createPermission({ module: p.module, action: p.action, description: p.description }).catch(() => {})),

@@ -374,8 +374,9 @@ async function fetchRunDetails(runId: number) {
 
 export function registerAttendancePayrollRoutes(app: Express, requirePermission: PermissionMiddleware) {
   const canUseAttendance = requirePermission("attendance", "view");
-  const canManagePayroll = requirePermission("attendance", "manage_payroll");
-  const canApproveOvertime = requirePermission("attendance", "approve_overtime");
+  const canViewPayroll = requirePermission("payroll", "view");
+  const canManagePayroll = requirePermission("payroll", "manage");
+  const canApproveOvertime = requirePermission("payroll", "approve_overtime");
   const canApproveLeave = requirePermission("attendance", "approve_leave");
   const canViewAll = requirePermission("attendance", "view_all");
 
@@ -521,7 +522,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
     }
   });
 
-  app.get("/api/attendance/payroll/overtime/pending", canApproveOvertime, canViewAll, async (req, res) => {
+  app.get("/api/attendance/payroll/overtime/pending", canApproveOvertime, async (req, res) => {
     try {
       const rows = await db.select({
         request: attendanceOvertimeRequests,
@@ -560,7 +561,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
     }
   });
 
-  app.patch("/api/attendance/payroll/overtime/:id", canApproveOvertime, canViewAll, async (req, res) => {
+  app.patch("/api/attendance/payroll/overtime/:id", canApproveOvertime, async (req, res) => {
     const schema = z.object({
       status: z.enum(["approved", "rejected"]),
       approved_hours: z.coerce.number().min(0.01).max(24).optional(),
@@ -713,7 +714,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
     }
   });
 
-  app.get("/api/attendance/payroll/admin/config", canManagePayroll, async (_req, res) => {
+  app.get("/api/attendance/payroll/admin/config", canViewPayroll, async (_req, res) => {
     try {
       const groups = await db.select({
         id: roles.id,
@@ -775,7 +776,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
     }
   });
 
-  app.get("/api/attendance/payroll/admin/employees", canManagePayroll, async (req, res) => {
+  app.get("/api/attendance/payroll/admin/employees", canViewPayroll, async (req, res) => {
     const roleId = Number(req.query.roleId);
     if (!Number.isInteger(roleId) || roleId <= 0) return res.status(400).json({ error: "Choose a valid user group." });
     try {
@@ -904,7 +905,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
     }
   });
 
-  app.get("/api/attendance/payroll/admin/runs", canManagePayroll, async (_req, res) => {
+  app.get("/api/attendance/payroll/admin/runs", canViewPayroll, async (_req, res) => {
     try {
       const rows = await db.select().from(payrollRuns).orderBy(desc(payrollRuns.period_start), desc(payrollRuns.created_at));
       res.json({ rows });
@@ -970,7 +971,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
     }
   });
 
-  app.get("/api/attendance/payroll/admin/runs/:id", canManagePayroll, async (req, res) => {
+  app.get("/api/attendance/payroll/admin/runs/:id", canViewPayroll, async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid payroll run." });
     try {

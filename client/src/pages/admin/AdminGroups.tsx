@@ -617,6 +617,7 @@ export default function AdminGroups() {
       ...INVENTORY_AUDIT_ACTION_PERMS,
       ...MARKETING_ACTION_PERMS,
       ...ATTENDANCE_ACTION_PERMS,
+      ...PAYROLL_ACTION_PERMS,
       ...DROPSHIPPING_PERMISSIONS,
     ];
     const missing = actionPerms.filter(p => !permMap.has(`${p.module}:${p.action}`));

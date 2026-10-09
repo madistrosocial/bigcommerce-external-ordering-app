@@ -23,7 +23,7 @@
 - [Marketing Order Form architecture](marketing-order-form.md) — CRM identity stays authoritative; XLSX imports must ignore merged group-header cells and blank quantities.
 - [Zoho marketing delivery boundary](zoho-marketing-delivery.md) — ZeptoMail is transactional-only; compliant campaign delivery requires Zoho Campaigns/Email API access.
 - [Attendance accounting baseline](attendance-accounting-baseline.md) — ledger excludes weekends and observed US holidays; short hours use an 8-hour weekday expectation until schedules are configurable.
-- [Payroll and leave boundaries](payroll-leave-boundaries.md) — reuse Attendance users, sessions, and role groups; calculate from net completed shifts and never convert employee currencies.
+- [Payroll and leave boundaries](payroll-leave-boundaries.md) — Attendance owns self-service/time capture; separate Payroll owns pay settings, runs, and overtime review.
 - [Attendance breaks and daily notes](attendance-breaks-notes.md) — breaks pause the same session; daily notes are stored once per employee/work date.
 - [Stale session recovery](stale-session-recovery.md) — invalid saved auth must fail safely and expose a cache-clearing force-logout path.
 - [Attendance review and audit](attendance-review-audit.md) — completion state stays separate from manager approval; corrections preserve reasoned old/new history.

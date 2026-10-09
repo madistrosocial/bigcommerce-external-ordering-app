@@ -96,7 +96,7 @@ function SummaryMetric({ label, value, strong = false }: { label: string; value:
   return <div className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</p><p className={`mt-1 tabular-nums ${strong ? "text-lg font-bold text-slate-900" : "font-semibold text-slate-700"}`}>{value}</p></div>;
 }
 
-function ScheduleEditor({ group, onSaved }: { group: any; onSaved: () => void }) {
+function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSaved: () => void; readOnly?: boolean }) {
   const current = group.schedule;
   const [cadence, setCadence] = useState(current?.cadence ?? "biweekly_friday");
   const [anchor, setAnchor] = useState(current?.biweekly_anchor_date ?? "");
@@ -127,20 +127,20 @@ function ScheduleEditor({ group, onSaved }: { group: any; onSaved: () => void })
         <Badge variant="outline">{group.description || "Existing user group"}</Badge>
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div><Label>Pay cadence</Label><select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={cadence} onChange={event => setCadence(event.target.value)}><option value="biweekly_friday">Every 2 weeks on Friday</option><option value="semimonthly_15_30">Twice monthly (configured dates)</option></select></div>
+        <div><Label>Pay cadence</Label><select disabled={readOnly} className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm disabled:bg-slate-50 disabled:text-slate-500" value={cadence} onChange={event => setCadence(event.target.value)}><option value="biweekly_friday">Every 2 weeks on Friday</option><option value="semimonthly_15_30">Twice monthly (configured dates)</option></select></div>
         {cadence === "biweekly_friday"
-          ? <div><Label>First payday / 14-day anchor</Label><Input className="mt-1.5" type="date" value={anchor} onChange={event => setAnchor(event.target.value)} /></div>
-          : <div className="grid grid-cols-2 gap-2"><div><Label>First payday</Label><Input className="mt-1.5" type="number" min="1" max="31" value={firstDay} onChange={event => setFirstDay(event.target.value)} /></div><div><Label>Second payday</Label><Input className="mt-1.5" type="number" min="1" max="31" value={secondDay} onChange={event => setSecondDay(event.target.value)} /></div></div>}
-        <div><Label>Payroll timezone</Label><Input className="mt-1.5" value={timezone} onChange={event => setTimezone(event.target.value)} placeholder="America/New_York" /></div>
-        <div className="flex items-end"><Button type="button" variant="outline" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Settings2 className="mr-2 h-4 w-4" />}Save schedule</Button></div>
+          ? <div><Label>First payday / 14-day anchor</Label><Input disabled={readOnly} className="mt-1.5" type="date" value={anchor} onChange={event => setAnchor(event.target.value)} /></div>
+          : <div className="grid grid-cols-2 gap-2"><div><Label>First payday</Label><Input disabled={readOnly} className="mt-1.5" type="number" min="1" max="31" value={firstDay} onChange={event => setFirstDay(event.target.value)} /></div><div><Label>Second payday</Label><Input disabled={readOnly} className="mt-1.5" type="number" min="1" max="31" value={secondDay} onChange={event => setSecondDay(event.target.value)} /></div></div>}
+        <div><Label>Payroll timezone</Label><Input disabled={readOnly} className="mt-1.5" value={timezone} onChange={event => setTimezone(event.target.value)} placeholder="America/New_York" /></div>
+        {!readOnly && <div className="flex items-end"><Button type="button" variant="outline" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Settings2 className="mr-2 h-4 w-4" />}Save schedule</Button></div>}
       </div>
       {cadence === "semimonthly_15_30" && <p className="mt-2 text-xs text-slate-500">Enter the actual pay date for each run. For February or a short month, choose the payday explicitly when creating the run.</p>}
-      {save.error && <p role="alert" className="mt-2 text-sm text-rose-600">{save.error.message}</p>}
+      {!readOnly && save.error && <p role="alert" className="mt-2 text-sm text-rose-600">{save.error.message}</p>}
     </div>
   );
 }
 
-function EmployeePayEditor({ employee, onRefresh }: { employee: any; onRefresh: () => void }) {
+function EmployeePayEditor({ employee, onRefresh, readOnly = false }: { employee: any; onRefresh: () => void; readOnly?: boolean }) {
   const profile = employee.profile;
   const [hourlyRate, setHourlyRate] = useState(profile?.hourly_rate ?? "");
   const [currency, setCurrency] = useState(profile?.currency ?? "USD");
@@ -189,31 +189,31 @@ function EmployeePayEditor({ employee, onRefresh }: { employee: any; onRefresh: 
         {profile ? <Badge className="border-0 bg-emerald-100 text-emerald-700">Pay profile set</Badge> : <Badge className="border-0 bg-amber-100 text-amber-800">Needs rate</Badge>}
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <div><Label>Hourly rate</Label><Input className="mt-1" type="number" min="0.01" step="0.01" value={hourlyRate} onChange={event => setHourlyRate(event.target.value)} /></div>
-        <div><Label>Currency (ISO)</Label><Input className="mt-1 uppercase" maxLength={3} value={currency} onChange={event => setCurrency(event.target.value.toUpperCase())} /></div>
-        <div><Label>Overtime multiplier</Label><Input className="mt-1" type="number" min="0.1" max="10" step="0.05" value={overtimeMultiplier} onChange={event => setOvertimeMultiplier(event.target.value)} /></div>
-        <div><Label>Holiday/rest multiplier</Label><Input className="mt-1" type="number" min="0.1" max="10" step="0.05" value={holidayMultiplier} onChange={event => setHolidayMultiplier(event.target.value)} /></div>
+        <div><Label>Hourly rate</Label><Input disabled={readOnly} className="mt-1" type="number" min="0.01" step="0.01" value={hourlyRate} onChange={event => setHourlyRate(event.target.value)} /></div>
+        <div><Label>Currency (ISO)</Label><Input disabled={readOnly} className="mt-1 uppercase" maxLength={3} value={currency} onChange={event => setCurrency(event.target.value.toUpperCase())} /></div>
+        <div><Label>Overtime multiplier</Label><Input disabled={readOnly} className="mt-1" type="number" min="0.1" max="10" step="0.05" value={overtimeMultiplier} onChange={event => setOvertimeMultiplier(event.target.value)} /></div>
+        <div><Label>Holiday/rest multiplier</Label><Input disabled={readOnly} className="mt-1" type="number" min="0.1" max="10" step="0.05" value={holidayMultiplier} onChange={event => setHolidayMultiplier(event.target.value)} /></div>
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      {!readOnly && <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button size="sm" disabled={saveProfile.isPending} onClick={() => saveProfile.mutate()}>{saveProfile.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Check className="mr-1.5 h-4 w-4" />}Save pay profile</Button>
         {saveProfile.error && <span role="alert" className="text-xs text-rose-600">{saveProfile.error.message}</span>}
-      </div>
+      </div>}
       <div className="mt-4 rounded-lg bg-slate-50 p-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Recurring pay items · applied once per run</p>
         <div className="mt-2 flex flex-wrap gap-2">
           {(employee.payItems ?? []).map((item: any) => <div key={item.id} className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${item.is_active ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-100 text-slate-400"}`}>
             <span className="capitalize">{item.item_type}</span><span>{item.label}</span><span className="font-semibold tabular-nums">{formatMoney(item.amount, currency)}</span>
-            <button type="button" className="font-medium text-indigo-600 hover:underline" disabled={updateItem.isPending} onClick={() => updateItem.mutate({ id: item.id, is_active: !item.is_active })}>{item.is_active ? "Pause" : "Resume"}</button>
+            {!readOnly && <button type="button" className="font-medium text-indigo-600 hover:underline" disabled={updateItem.isPending} onClick={() => updateItem.mutate({ id: item.id, is_active: !item.is_active })}>{item.is_active ? "Pause" : "Resume"}</button>}
           </div>)}
           {!employee.payItems?.length && <span className="text-xs text-slate-400">None</span>}
         </div>
-        <form className="mt-3 grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_140px_auto]" onSubmit={event => { event.preventDefault(); addItem.mutate(); }}>
+        {!readOnly && <form className="mt-3 grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_140px_auto]" onSubmit={event => { event.preventDefault(); addItem.mutate(); }}>
           <select className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm" value={itemType} onChange={event => setItemType(event.target.value)}><option value="allowance">Allowance</option><option value="deduction">Deduction</option></select>
           <Input aria-label="Pay item label" placeholder="Item name" maxLength={100} required value={itemLabel} onChange={event => setItemLabel(event.target.value)} />
           <Input aria-label="Pay item amount" placeholder="Amount" type="number" min="0.01" step="0.01" required value={itemAmount} onChange={event => setItemAmount(event.target.value)} />
           <Button size="sm" type="submit" variant="outline" disabled={!profile || addItem.isPending}>{addItem.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add item"}</Button>
-        </form>
-        {addItem.error && <p role="alert" className="mt-2 text-xs text-rose-600">{addItem.error.message}</p>}
+        </form>}
+        {!readOnly && addItem.error && <p role="alert" className="mt-2 text-xs text-rose-600">{addItem.error.message}</p>}
       </div>
     </div>
   );
@@ -240,10 +240,20 @@ function OvertimeClaimCard({ shift, onClaim, isPending }: { shift: any; onClaim:
 }
 
 export default function AttendancePayrollPage() {
+  return <PayrollPage mode="employee" />;
+}
+
+export function PayrollManagementPage() {
+  return <PayrollPage mode="management" />;
+}
+
+function PayrollPage({ mode }: { mode: "employee" | "management" }) {
   const queryClient = useQueryClient();
   const { hasPermission } = usePermissions();
-  const canManage = hasPermission("attendance", "manage_payroll");
-  const canReviewOvertime = hasPermission("attendance", "approve_overtime") && hasPermission("attendance", "view_all");
+  const isEmployeePage = mode === "employee";
+  const canViewPayroll = mode === "management" && hasPermission("payroll", "view");
+  const canManage = mode === "management" && hasPermission("payroll", "manage");
+  const canReviewOvertime = mode === "management" && hasPermission("payroll", "approve_overtime");
   const [roleId, setRoleId] = useState("");
   const [runRoleId, setRunRoleId] = useState("");
   const [periodStart, setPeriodStart] = useState("");
@@ -251,20 +261,20 @@ export default function AttendancePayrollPage() {
   const [payday, setPayday] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [reviewError, setReviewError] = useState("");
-  const me = useQuery({ queryKey: ["attendance-payroll-me"], queryFn: () => apiJson("/api/attendance/payroll/me") });
-  const eligible = useQuery({ queryKey: ["attendance-overtime-eligible"], queryFn: () => apiJson("/api/attendance/payroll/overtime/eligible") });
-  const claims = useQuery({ queryKey: ["attendance-overtime-mine"], queryFn: () => apiJson("/api/attendance/payroll/overtime/mine") });
-  const config = useQuery({ queryKey: ["attendance-payroll-config"], queryFn: () => apiJson("/api/attendance/payroll/admin/config"), enabled: canManage });
+  const me = useQuery({ queryKey: ["attendance-payroll-me"], queryFn: () => apiJson("/api/attendance/payroll/me"), enabled: isEmployeePage });
+  const eligible = useQuery({ queryKey: ["attendance-overtime-eligible"], queryFn: () => apiJson("/api/attendance/payroll/overtime/eligible"), enabled: isEmployeePage });
+  const claims = useQuery({ queryKey: ["attendance-overtime-mine"], queryFn: () => apiJson("/api/attendance/payroll/overtime/mine"), enabled: isEmployeePage });
+  const config = useQuery({ queryKey: ["attendance-payroll-config"], queryFn: () => apiJson("/api/attendance/payroll/admin/config"), enabled: canViewPayroll });
   const employees = useQuery({
     queryKey: ["attendance-payroll-employees", roleId],
     queryFn: () => apiJson(`/api/attendance/payroll/admin/employees?roleId=${encodeURIComponent(roleId)}`),
-    enabled: canManage && !!roleId,
+    enabled: canViewPayroll && !!roleId,
   });
-  const runs = useQuery({ queryKey: ["attendance-payroll-runs"], queryFn: () => apiJson("/api/attendance/payroll/admin/runs"), enabled: canManage });
+  const runs = useQuery({ queryKey: ["attendance-payroll-runs"], queryFn: () => apiJson("/api/attendance/payroll/admin/runs"), enabled: canViewPayroll });
   const runDetails = useQuery({
     queryKey: ["attendance-payroll-run", selectedRunId],
     queryFn: () => apiJson(`/api/attendance/payroll/admin/runs/${selectedRunId}`),
-    enabled: canManage && selectedRunId != null,
+    enabled: canViewPayroll && selectedRunId != null,
   });
   const pendingOvertime = useQuery({
     queryKey: ["attendance-overtime-pending"],
@@ -339,14 +349,14 @@ export default function AttendancePayrollPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-700"><Banknote className="h-5 w-5" /></div>
-          <div><h1 className="text-xl font-bold text-slate-900">Payroll</h1><p className="text-sm text-slate-500">Pay profiles, overtime, payroll runs, and payslips linked to Attendance.</p></div>
+          <div><h1 className="text-xl font-bold text-slate-900">{isEmployeePage ? "My Pay & Overtime" : "Payroll Management"}</h1><p className="text-sm text-slate-500">{isEmployeePage ? "View your pay information and submit overtime claims." : canManage ? "Manage employee pay, schedules, payroll runs, and overtime reviews." : canViewPayroll ? "View employee pay, schedules, payroll runs, and overtime reviews." : "Review employee overtime claims."}</p></div>
         </div>
         <Button type="button" variant="outline" size="sm" className="print:hidden" onClick={refresh}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
       </div>
 
-      {(me.error || eligible.error || claims.error) && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{me.error?.message || eligible.error?.message || claims.error?.message}</p>}
+      {isEmployeePage && (me.error || eligible.error || claims.error) && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{me.error?.message || eligible.error?.message || claims.error?.message}</p>}
 
-      <section className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+      {isEmployeePage && <section className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
         <Card className="border-slate-200 shadow-sm">
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><UserRound className="h-4 w-4 text-emerald-700" />Your pay profile</CardTitle></CardHeader>
           <CardContent>
@@ -376,7 +386,7 @@ export default function AttendancePayrollPage() {
             </div></div>}
           </CardContent>
         </Card>
-      </section>
+      </section>}
 
       {canReviewOvertime && <Card className="border-slate-200 shadow-sm">
         <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Clock3 className="h-4 w-4 text-amber-600" />Overtime review queue</CardTitle></CardHeader>
@@ -395,21 +405,21 @@ export default function AttendancePayrollPage() {
         </CardContent>
       </Card>}
 
-      <section className="space-y-3">
+      {isEmployeePage && <section className="space-y-3">
         <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-slate-500" /><h2 className="font-semibold text-slate-900">Your finalized payslips</h2></div>
         {me.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
         {!me.isLoading && !ownPayslips.length && <EmptyState>Finalized payslips will appear here.</EmptyState>}
         <div className="grid gap-3 lg:grid-cols-2">{ownPayslips.map((slip: any) => <PayStatement key={slip.id} slip={slip} />)}</div>
-      </section>
+      </section>}
 
-      {canManage && <div className="space-y-5 border-t border-slate-200 pt-5">
+      {mode === "management" && canViewPayroll && <div className="space-y-5 border-t border-slate-200 pt-5">
         <div className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-slate-600" /><h2 className="text-lg font-bold text-slate-900">Payroll management</h2></div>
         {config.error && <p role="alert" className="text-sm text-rose-600">{config.error.message}</p>}
         <Card className="border-slate-200 shadow-sm">
           <CardHeader><CardTitle className="text-base">Existing user-group schedules</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {config.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
-            {(config.data?.groups ?? []).map((group: any) => <ScheduleEditor key={group.id} group={group} onSaved={refresh} />)}
+            {(config.data?.groups ?? []).map((group: any) => <ScheduleEditor key={group.id} group={group} onSaved={refresh} readOnly={!canManage} />)}
           </CardContent>
         </Card>
 
@@ -420,11 +430,11 @@ export default function AttendancePayrollPage() {
             {employees.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
             {employees.error && <p role="alert" className="text-sm text-rose-600">{employees.error.message}</p>}
             {roleId && !employees.isLoading && !employees.data?.employees?.length && <EmptyState>No employees are assigned to this group.</EmptyState>}
-            <div className="space-y-3">{(employees.data?.employees ?? []).map((employee: any) => <EmployeePayEditor key={employee.id} employee={employee} onRefresh={refresh} />)}</div>
+            <div className="space-y-3">{(employees.data?.employees ?? []).map((employee: any) => <EmployeePayEditor key={employee.id} employee={employee} onRefresh={refresh} readOnly={!canManage} />)}</div>
           </CardContent>
         </Card>
 
-        <Card className="border-slate-200 shadow-sm">
+        {canManage && <Card className="border-slate-200 shadow-sm">
           <CardHeader><CardTitle className="text-base">Create a payroll run</CardTitle></CardHeader>
           <CardContent>
             <form className="grid gap-3 md:grid-cols-4" onSubmit={event => { event.preventDefault(); createRun.mutate(); }}>
@@ -439,7 +449,7 @@ export default function AttendancePayrollPage() {
               </div>
             </form>
           </CardContent>
-        </Card>
+        </Card>}
 
         <Card className="border-slate-200 shadow-sm">
           <CardHeader><CardTitle className="text-base">Payroll run history</CardTitle></CardHeader>
@@ -457,7 +467,7 @@ export default function AttendancePayrollPage() {
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div><CardTitle className="text-base">Run details</CardTitle>{runDetails.data?.run && <p className="mt-1 text-sm text-slate-500">{runDetails.data.run.group_name_snapshot} · {dateLabel(runDetails.data.run.period_start)} – {dateLabel(runDetails.data.run.period_end)}</p>}</div>
-              {runDetails.data?.run?.status === "draft" && <div className="flex flex-wrap gap-2">
+              {canManage && runDetails.data?.run?.status === "draft" && <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" disabled={rebuildRun.isPending} onClick={() => rebuildRun.mutate(selectedRunId)}>{rebuildRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rebuild draft</Button>
                 <Button size="sm" disabled={finalizeRun.isPending} onClick={() => finalizeRun.mutate(selectedRunId)}>{finalizeRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Finalize and lock</Button>
               </div>}
@@ -471,7 +481,7 @@ export default function AttendancePayrollPage() {
           </CardContent>
         </Card>}
       </div>}
-      {canManage && !config.isLoading && config.data?.groups?.length === 0 && <p className="text-sm text-slate-500">Create or assign the existing user groups in Admin before setting payroll schedules.</p>}
+      {mode === "management" && canViewPayroll && !config.isLoading && config.data?.groups?.length === 0 && <p className="text-sm text-slate-500">Create or assign the existing user groups in Admin before setting payroll schedules.</p>}
     </div>
   );
 }
