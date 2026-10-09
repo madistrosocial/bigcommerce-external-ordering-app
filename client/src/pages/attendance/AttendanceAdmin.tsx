@@ -523,7 +523,8 @@ function Logs() {
   const initialMonthRange = useMemo(() => monthRange(currentMonthKey()), []);
   const [from, setFrom] = useState(initialMonthRange.from);
   const [to, setTo] = useState(initialMonthRange.to);
-  const [userId, setUserId] = useState("all");
+  const signedInUserId = String(currentUser?.id ?? "");
+  const [userId, setUserId] = useState("");
   const [showFilters, setShowFilters] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(() => {
     const value = attendanceSearchParams(location).get("record");
@@ -539,15 +540,23 @@ function Logs() {
     setFrom(range.from);
     setTo(range.to);
   }, [month]);
-  const scopedUserId = canViewAll ? userId : String(currentUser?.id ?? "");
+  useEffect(() => {
+    if (!userId && signedInUserId) setUserId(signedInUserId);
+  }, [signedInUserId, userId]);
+  const scopedUserId = canViewAll ? userId || signedInUserId : signedInUserId;
   const usersQuery = useQuery({ queryKey: ["attendance", "team-members"], queryFn: () => apiJson("/api/users"), enabled: canViewAll && !permissionsLoading });
   const params = new URLSearchParams({ status, startMethod, reviewStatus, limit: "500" });
   if (from) params.set("from", from);
   if (to) params.set("to", to);
-  if (scopedUserId && scopedUserId !== "all") params.set("userId", scopedUserId);
+  if (scopedUserId) params.set("userId", scopedUserId);
   const query = useQuery({ queryKey: ["attendance", "logs", status, startMethod, reviewStatus, from, to, scopedUserId, canViewAll], queryFn: () => apiJson(`/api/attendance/admin/logs?${params}`), enabled: Boolean(from && to && from <= to && !permissionsLoading && scopedUserId) });
-  const teamMembers = canViewAll ? (usersQuery.data ?? []).filter((user: any) => user.is_enabled) : [];
-  const selectedMember = canViewAll ? teamMembers.find((user: any) => String(user.id) === userId) : currentUser;
+  const queriedTeamMembers = canViewAll ? (usersQuery.data ?? []).filter((user: any) => user.is_enabled) : [];
+  const teamMembers = currentUser && canViewAll && !queriedTeamMembers.some((user: any) => String(user.id) === signedInUserId)
+    ? [currentUser, ...queriedTeamMembers]
+    : queriedTeamMembers;
+  const selectedMember = canViewAll
+    ? teamMembers.find((user: any) => String(user.id) === scopedUserId) ?? (scopedUserId === signedInUserId ? currentUser : undefined)
+    : currentUser;
   const dates = useMemo(() => from && to && from <= to ? datesBetween(from, to) : [], [from, to]);
   const holidayMap = useMemo(() => from && to && from <= to ? getUsHolidayMap(from, to) : new Map<string, string>(), [from, to]);
   const rows = query.data?.rows ?? [];
@@ -562,8 +571,8 @@ function Logs() {
     }
     return map;
   }, [rows]);
-  const expectedTeamMembers = selectedMember ? 1 : teamMembers.length;
-  const selectedUserId = canViewAll ? userId : String(currentUser?.id ?? "");
+  const expectedUserCount = scopedUserId ? 1 : 0;
+  const selectedUserId = scopedUserId;
   const rowActionItems = (dateRecords: any[]) => {
     const actionRecords = selectedMember
       ? dateRecords.filter((row: any) => String(row.user_id) === selectedUserId)
@@ -598,10 +607,10 @@ function Logs() {
   const elapsedBusinessDates = businessDates.filter(date => date < today);
   const elapsedWorkedRows = workedRows.filter((row: any) => row.work_date < today);
   const totalSeconds = workedRows.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
-  const expectedSeconds = elapsedBusinessDates.length * expectedTeamMembers * EXPECTED_DAILY_SECONDS;
+  const expectedSeconds = elapsedBusinessDates.length * expectedUserCount * EXPECTED_DAILY_SECONDS;
   const daysWorked = new Set(workedRows.map((row: any) => `${row.user_id}:${row.work_date}`)).size;
   const elapsedDaysWorked = new Set(elapsedWorkedRows.map((row: any) => `${row.user_id}:${row.work_date}`)).size;
-  const absentDays = Math.max(0, elapsedBusinessDates.length * expectedTeamMembers - elapsedDaysWorked);
+  const absentDays = Math.max(0, elapsedBusinessDates.length * expectedUserCount - elapsedDaysWorked);
   const lostSeconds = Math.max(0, expectedSeconds - totalSeconds);
   const clearFilters = () => {
     const currentMonth = currentMonthKey();
@@ -610,13 +619,13 @@ function Logs() {
     setMonth(currentMonth);
     setFrom(range.from);
     setTo(range.to);
-    setUserId("all");
+    setUserId(signedInUserId);
     setStatus("all");
     setStartMethod("all");
     setReviewStatus("all");
   };
   const monthDefaultRange = monthRange(month);
-  const hasFilter = userId !== "all"
+  const hasFilter = (canViewAll && scopedUserId !== signedInUserId)
     || status !== "all"
     || startMethod !== "all"
     || reviewStatus !== "all"
@@ -651,7 +660,7 @@ function Logs() {
     {showFilters && <Card className="mt-4 rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4">
       <div className="flex items-center gap-2 text-xs font-semibold text-slate-600"><Filter className="h-4 w-4 text-red-600" />Filter the ledger</div>
        <div className={`mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 ${canViewAll ? "2xl:grid-cols-6" : ""}`}>
-          {canViewAll && <div className="min-w-0"><Label className="text-[11px] text-slate-500">Team member</Label><Select value={userId} onValueChange={value => { setUserId(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue placeholder="All team members" /></SelectTrigger><SelectContent><SelectItem value="all">All team members</SelectItem>{teamMembers.map((user: any) => <SelectItem key={user.id} value={String(user.id)}>{user.name || user.username}</SelectItem>)}</SelectContent></Select></div>}
+          {canViewAll && <div className="min-w-0"><Label className="text-[11px] text-slate-500">Team member</Label><Select value={scopedUserId} onValueChange={value => { setUserId(value); setSelectedId(null); }} disabled={usersQuery.isLoading || !teamMembers.length}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue placeholder="Choose team member" /></SelectTrigger><SelectContent>{teamMembers.map((user: any) => <SelectItem key={user.id} value={String(user.id)}>{user.name || user.username}</SelectItem>)}</SelectContent></Select></div>}
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => { setFrom(e.target.value); setSelectedId(null); }} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => { setTo(e.target.value); setSelectedId(null); }} className="mt-1 h-9 w-full min-w-0 text-xs" /></div>
         <div className="min-w-0"><Label className="text-[11px] text-slate-500">Log status</Label><Select value={status} onValueChange={value => { setStatus(value); setSelectedId(null); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="active">Working</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="exception">Exception</SelectItem></SelectContent></Select></div>
@@ -664,24 +673,24 @@ function Logs() {
       {[
         ["Hours worked", hours(totalSeconds), null, "text-blue-600"],
         ["Hours lost / short", hours(lostSeconds), null, "text-red-600"],
-        ["Days worked", String(daysWorked), selectedMember ? "Days with a log" : "Team member-days", "text-emerald-600"],
-        ["Absent days", String(absentDays), selectedMember ? "Weekdays with no log" : "Across selected team", "text-amber-600"],
-        ["Business days", String(businessDates.length), `${expectedTeamMembers || 0} team member${expectedTeamMembers === 1 ? "" : "s"} selected`, "text-slate-600"],
+        ["Days worked", String(daysWorked), "Days with a log", "text-emerald-600"],
+        ["Absent days", String(absentDays), "Weekdays with no log", "text-amber-600"],
+        ["Business days", String(businessDates.length), "Weekdays in selected range", "text-slate-600"],
       ].map(([label, value, hint, color]) => <Card key={label} className="min-w-[166px] shrink-0 rounded-xl border-slate-200 shadow-sm lg:min-w-0"><CardContent className="p-4"><p className={`text-xl font-bold ${color}`}>{value}</p><p className="mt-1 text-xs font-semibold text-slate-700">{label}</p>{hint && <p className="mt-1 text-[10px] leading-4 text-slate-400">{hint}</p>}</CardContent></Card>)}
     </div>
     <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[11px] text-slate-500">
-      <span className="font-semibold text-slate-700">{selectedMember ? selectedMember.name : "All team members"}</span>
+      <span className="font-semibold text-slate-700">{selectedMember?.name || selectedMember?.username || "My attendance"}</span>
       <span>{from && to ? `${shortDate(from)} – ${shortDate(to)}` : "Choose a valid date range"}</span>
     </div>
     {showStandaloneSelectedLog && selectedId != null && <div className="mt-4"><LogDetail id={selectedId} onClose={() => setSelectedId(null)} /></div>}
     <Card className="mt-4 overflow-hidden rounded-xl border-slate-200 shadow-sm">
        <CardHeader className="border-b border-slate-100 bg-white pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-sm">Daily attendance</CardTitle><span className="text-xs text-slate-400">{rows.length} logs</span></div></CardHeader>
       <CardContent className="p-0">
-         {query.isLoading || usersQuery.isLoading ? <div className="p-12 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /><p className="mt-2">Loading attendance ledger…</p></div> : query.isError || usersQuery.isError ? <div className="p-10 text-center text-sm text-red-600">Attendance logs could not be loaded. Try refreshing the page.</div> : !dates.length ? <div className="p-10 text-center text-sm text-slate-400">Choose a valid date range to view the ledger.</div> : (
+          {query.isLoading || usersQuery.isLoading ? <div className="p-12 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /><p className="mt-2">Loading attendance ledger…</p></div> : query.isError || usersQuery.isError ? <div className="p-10 text-center text-sm text-red-600">Attendance logs could not be loaded. Try refreshing the page.</div> : !dates.length ? <div className="p-10 text-center text-sm text-slate-400">Choose a valid date range to view the ledger.</div> : (
            <>
           <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[1120px] text-left text-xs">
-                <thead><tr className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Day</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Time In</th><th className="px-4 py-3 font-semibold">Time Out</th><th className="px-4 py-3 font-semibold">Breaks</th><th className="px-4 py-3 font-semibold">Hours</th><th className="px-4 py-3 font-semibold">Team / note</th><th className="px-4 py-3 text-right font-semibold">Actions</th></tr></thead>
+                <thead><tr className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Day</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Time In</th><th className="px-4 py-3 font-semibold">Time Out</th><th className="px-4 py-3 font-semibold">Breaks</th><th className="px-4 py-3 font-semibold">Hours</th><th className="px-4 py-3 font-semibold">Start method / note</th><th className="px-4 py-3 text-right font-semibold">Actions</th></tr></thead>
               <tbody>
                 {dates.map(date => {
                   const summary = recordsByDate.get(date);

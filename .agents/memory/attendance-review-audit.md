@@ -14,3 +14,9 @@ For the daily attendance ledger, keep date rows compact and place review/approva
 **Why:** The user explicitly prefers direct per-row actions over expanding rows into full log details.
 
 **How to apply:** Reuse the existing permission-aware actions in desktop and mobile ledger rows; place them in the rightmost Actions column as icon-only buttons with accessible names/tooltips, and keep full record details separate from the row interaction.
+
+Keep the Team member selector for authorized managers, default it to the signed-in user, and omit the aggregate “All team members” option. The ledger should always show one selected person at a time.
+
+**Why:** The user clarified that only the aggregate view should be removed; individual team-member selection remains useful.
+
+**How to apply:** Scope the logs request and summaries to the selected user ID, initializing and resetting that selection to the signed-in user.
