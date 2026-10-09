@@ -14,6 +14,7 @@ import {
   INVENTORY_AUDIT_ACTION_PERMS,
   MARKETING_ACTION_PERMS,
   ATTENDANCE_ACTION_PERMS,
+  PAYROLL_ACTION_PERMS,
   DROPSHIPPING_PERMISSION_GROUPS,
   DROPSHIPPING_PERMISSIONS,
 } from "./AdminUsers";
@@ -489,6 +490,44 @@ function GroupDetail({
               );
             })}
           </div>
+        </div>
+
+        {/* Payroll-specific permissions */}
+        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-slate-50 flex items-center gap-2">
+            <Lock className="h-3.5 w-3.5 text-slate-500" />
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Payroll Permissions</span>
+          </div>
+          <div className="divide-y">
+            {PAYROLL_ACTION_PERMS.map(p => {
+              const perm = permMap.get(`${p.module}:${p.action}`);
+              const busyId = `payroll-${p.action}`;
+              const isBusy = busyPerm === busyId;
+              const enabled = perm ? group.permissions.some(gp => gp.id === perm.id) : false;
+              return (
+                <div key={p.action} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex-1 min-w-0 pr-4">
+                    <p className="text-sm text-slate-700">{p.label}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">{p.description}</p>
+                  </div>
+                  {perm === undefined ? (
+                    <span className="text-[10px] text-slate-400 italic shrink-0">N/A</span>
+                  ) : isBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" />
+                  ) : (
+                    <Switch
+                      checked={enabled}
+                      onCheckedChange={v => handleToggleActionPerm(p.module, p.action, busyId, v)}
+                      data-testid={`toggle-group-payroll-${p.action}-${group.id}`}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="px-4 py-2 text-[11px] text-slate-400 border-t bg-slate-50">
+            Grant Payroll module access separately to open Payroll Management; manager access requires both module access and Manage Payroll.
+          </p>
         </div>
 
         {/* Members */}

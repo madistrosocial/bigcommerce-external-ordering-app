@@ -66,7 +66,7 @@ import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, Marketi
 import { MarketingAnalytics, MarketingTemplates, MarketingAutomations } from "@/pages/marketing/MarketingPhase2";
 import AttendancePage from "@/pages/attendance/Attendance";
 import AttendanceAdminPage, { AttendanceSettingsPage } from "@/pages/attendance/AttendanceAdmin";
-import AttendancePayrollPage from "@/pages/attendance/Payroll";
+import AttendancePayrollPage, { PayrollManagementPage } from "@/pages/attendance/Payroll";
 import AttendanceLeavePage from "@/pages/attendance/Leave";
 import KoleImportsPage from "@/pages/dropshipping/KoleImports";
 import DropshipDashboardPage from "@/pages/dropshipping/DropshipDashboard";
@@ -128,6 +128,17 @@ function PermissionRoute({
     .every(permission => hasPermission(permission.module, permission.action));
   if (!canAccess) return <Redirect to="/dashboard" />;
   return <Component />;
+}
+
+function PayrollModuleRoute() {
+  const { currentUser } = useStore();
+  const { hasPermission, isLoading } = usePermissions();
+  if (!currentUser || !currentUser.is_enabled) return <Redirect to="/" />;
+  if (isLoading) return null;
+  if (!hasPermission("payroll", "view") && !hasPermission("payroll", "approve_overtime")) {
+    return <Redirect to="/dashboard" />;
+  }
+  return <PayrollManagementPage />;
 }
 
 function MarketingLandingRoute() {
@@ -268,6 +279,9 @@ function Router() {
       </Route>
       <Route path="/attendance/payroll">
         {() => <PermissionRoute component={AttendancePayrollPage} module="attendance" action="view" />}
+      </Route>
+      <Route path="/payroll">
+        {() => <PayrollModuleRoute />}
       </Route>
       <Route path="/attendance/leave">
         {() => <PermissionRoute component={AttendanceLeavePage} module="attendance" action="view" />}

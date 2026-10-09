@@ -18,8 +18,10 @@ import { cn } from "@/lib/utils";
 import CreateUserDialog from "@/components/admin/CreateUserDialog";
 import { MARKETING_ACTION_PERMS } from "@shared/marketing-permissions";
 import { DROPSHIPPING_PERMISSION_GROUPS, DROPSHIPPING_PERMISSIONS } from "@shared/dropshipping-permissions";
+import { PAYROLL_ACTION_PERMS } from "@shared/payroll-permissions";
 export { MARKETING_ACTION_PERMS };
 export { DROPSHIPPING_PERMISSION_GROUPS, DROPSHIPPING_PERMISSIONS };
+export { PAYROLL_ACTION_PERMS };
 
 function googleMapsUrl(latitude: unknown, longitude: unknown) {
   const lat = Number(latitude);
@@ -39,6 +41,7 @@ export const LANDING_OPTIONS = [
   { label: "Products",              route: "/products",         permission: "catalog" },
   { label: "Orders",                route: "/orders",           permission: "orders_my" },
   { label: "POS",                   route: "/pos",              permission: "pos" },
+  { label: "Payroll Management",    route: "/payroll",          permission: "payroll" },
   { label: "Settings",              route: "/settings",         permission: "admin" },
 ];
 
@@ -69,6 +72,7 @@ export const MODULES = [
   { key: "tools_bc_link_logs", label: "Tools › Product Link Logs" },
   { key: "promo_sku_tracker",  label: "Tools › Promo SKU Tracker" },
   { key: "attendance",         label: "Attendance Module" },
+  { key: "payroll",            label: "Payroll Management" },
   { key: "crm_customers",      label: "CRM › Customers" },
   { key: "crm_reactivation",   label: "CRM › Reactivation Opportunities" },
   { key: "crm_notes",          label: "CRM › Customer Notes" },
@@ -112,9 +116,7 @@ export const ATTENDANCE_ACTION_PERMS = [
   { module: "attendance", action: "manage_settings", label: "Manage Settings", description: "Can configure warehouse, checkpoints, and pay periods." },
   { module: "attendance", action: "manage", label: "Manage Attendance", description: "Can perform administrative attendance actions." },
   { module: "attendance", action: "audit", label: "Attendance Audit", description: "Can approve one additional work session for an employee on a date." },
-  { module: "attendance", action: "approve_overtime", label: "Review Overtime Claims", description: "Can approve, adjust, or reject employee overtime claims. Requires View All Employees." },
   { module: "attendance", action: "approve_leave", label: "Review Leave Requests", description: "Can approve or reject employee leave requests. Requires View All Employees." },
-  { module: "attendance", action: "manage_payroll", label: "Manage Payroll", description: "Can manage employee hourly rates, payroll schedules, recurring pay items, runs, and payslips." },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -709,6 +711,38 @@ function UserDetail({
                   </div>
                   {permId === null ? <span className="text-[10px] text-slate-400 italic shrink-0">N/A</span> : isBusy ? <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" /> : (
                     <Switch checked={effectiveEnabled} disabled={fromGroup} onCheckedChange={v => onToggleModule(user.id, `attendance-${p.action}`, v, permId)} data-testid={`toggle-attendance-${p.action}-${user.id}`} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Payroll-specific permissions */}
+        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Lock className="h-3.5 w-3.5 text-slate-500" />
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Payroll Permissions</span>
+            </div>
+            {groupId !== "none" && <span className="text-[10px] text-blue-600 flex items-center gap-1"><UsersRound className="h-3 w-3" /> (G) = from group</span>}
+          </div>
+          <div className="divide-y">
+            {PAYROLL_ACTION_PERMS.map(p => {
+              const perm = permMap.get(`${p.module}:${p.action}`);
+              const permId = perm?.id ?? null;
+              const isBusy = busyKey === `${user.id}-payroll-${p.action}`;
+              const directEnabled = perm ? userHasPerm(user, perm.id) : false;
+              const fromGroup = !directEnabled && perm ? groupPerms.has(perm.id) : false;
+              const effectiveEnabled = directEnabled || fromGroup;
+              return (
+                <div key={p.action} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex-1 min-w-0 pr-4">
+                    <p className="text-sm text-slate-700">{p.label}{fromGroup && <span className="ml-2 text-[10px] text-blue-500 font-medium">(G)</span>}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">{p.description}</p>
+                  </div>
+                  {permId === null ? <span className="text-[10px] text-slate-400 italic shrink-0">N/A</span> : isBusy ? <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" /> : (
+                    <Switch checked={effectiveEnabled} disabled={fromGroup} onCheckedChange={v => onToggleModule(user.id, `payroll-${p.action}`, v, permId)} data-testid={`toggle-payroll-${p.action}-${user.id}`} />
                   )}
                 </div>
               );
