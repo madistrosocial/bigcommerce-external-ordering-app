@@ -24,9 +24,11 @@ type PermissionMiddleware = (module: string, action: string) => RequestHandler;
 
 class PayrollRequestError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  payload?: Record<string, unknown>;
+  constructor(status: number, message: string, payload?: Record<string, unknown>) {
     super(message);
     this.status = status;
+    this.payload = payload;
   }
 }
 
@@ -1034,16 +1036,30 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
           : [];
         const pending = pendingRows[0];
         if (pending) throw new PayrollRequestError(409, "Resolve or reject pending overtime claims in this period before finalizing.");
-        const openSession = groupUserIds.length
-          ? await tx.select({ id: attendanceSessions.id }).from(attendanceSessions).where(and(
+        const openSessions = groupUserIds.length
+          ? await tx.select({
+            id: attendanceSessions.id,
+            employee_name: users.name,
+            employee_username: users.username,
+            work_date: attendanceSessions.work_date,
+            session_number: attendanceSessions.session_number,
+            status: attendanceSessions.status,
+          }).from(attendanceSessions)
+            .innerJoin(users, eq(users.id, attendanceSessions.user_id))
+            .where(and(
             inArray(attendanceSessions.user_id, groupUserIds),
             gte(attendanceSessions.work_date, run.period_start),
             lte(attendanceSessions.work_date, run.period_end),
             inArray(attendanceSessions.status, ["active", "on_break"]),
-          )).limit(1)
+          ))
+            .orderBy(asc(attendanceSessions.work_date), asc(users.name), asc(attendanceSessions.session_number))
           : [];
-        if (openSession.length) {
-          throw new PayrollRequestError(409, "Complete or resolve active attendance sessions in this period before finalizing.");
+        if (openSessions.length) {
+          throw new PayrollRequestError(
+            409,
+            "Complete or resolve active attendance sessions in this period before finalizing.",
+            { code: "active_attendance_sessions", openAttendanceSessions: openSessions },
+          );
         }
         const runLines = await tx.select({
           source_id: payslipLineItems.source_id,
@@ -1129,7 +1145,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
       });
       res.json({ run: result, details: await fetchRunDetails(id) });
     } catch (error: any) {
-      if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message });
+      if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message, ...(error.payload ?? {}) });
       res.status(500).json({ error: error?.message ?? "Could not finalize the payroll run." });
     }
   });

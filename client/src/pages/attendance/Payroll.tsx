@@ -9,10 +9,31 @@ import { Label } from "@/components/ui/label";
 import { getAuthHeaders } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 
+type OpenAttendanceSession = {
+  id: number;
+  employee_name: string | null;
+  employee_username: string | null;
+  work_date: string;
+  session_number: number | null;
+  status: "active" | "on_break";
+};
+
+type PayrollApiError = Error & {
+  status?: number;
+  code?: string;
+  openAttendanceSessions?: OpenAttendanceSession[];
+};
+
 function apiJson(path: string, init?: RequestInit) {
   return fetch(path, { ...init, headers: { ...getAuthHeaders(), ...(init?.headers ?? {}) } }).then(async response => {
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error ?? "Payroll request failed");
+    if (!response.ok) {
+      const error = new Error(body.error ?? "Payroll request failed") as PayrollApiError;
+      error.status = response.status;
+      error.code = body.code;
+      error.openAttendanceSessions = body.openAttendanceSessions;
+      throw error;
+    }
     return body;
   });
 }
@@ -254,6 +275,10 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
   const canViewPayroll = mode === "management" && hasPermission("payroll", "view");
   const canManage = mode === "management" && hasPermission("payroll", "manage");
   const canReviewOvertime = mode === "management" && hasPermission("payroll", "approve_overtime");
+  const canCorrectAttendance = mode === "management"
+    && hasPermission("attendance", "view_logs")
+    && hasPermission("attendance", "view_all")
+    && hasPermission("attendance", "manage");
   const [roleId, setRoleId] = useState("");
   const [runRoleId, setRunRoleId] = useState("");
   const [periodStart, setPeriodStart] = useState("");
@@ -343,6 +368,10 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
 
   const ownPayslips = me.data?.payslips ?? [];
   const runSlips = runDetails.data?.payslips ?? [];
+  const finalizeError = finalizeRun.error as PayrollApiError | null;
+  const openAttendanceSessions = finalizeError?.code === "active_attendance_sessions"
+    ? finalizeError.openAttendanceSessions ?? []
+    : [];
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-5 md:px-6">
@@ -474,7 +503,24 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {(runDetails.error || rebuildRun.error || finalizeRun.error) && <p role="alert" className="text-sm text-rose-600">{runDetails.error?.message || rebuildRun.error?.message || finalizeRun.error?.message}</p>}
+            {(runDetails.error || rebuildRun.error || (finalizeRun.error && !openAttendanceSessions.length)) && <p role="alert" className="text-sm text-rose-600">{runDetails.error?.message || rebuildRun.error?.message || finalizeRun.error?.message}</p>}
+            {openAttendanceSessions.length > 0 && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4">
+              <div className="flex items-start gap-2"><Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" /><div>
+                <p className="font-semibold text-amber-950">Open attendance shifts block payroll finalization</p>
+                <p className="mt-1 text-sm text-amber-900">Verify each shift with the employee, then enter the confirmed attendance times before finalizing.</p>
+              </div></div>
+              <ul className="mt-3 space-y-2">
+                {openAttendanceSessions.map(session => <li key={session.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-white px-3 py-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{session.employee_name || session.employee_username || "Employee"} · {dateLabel(session.work_date)}</p>
+                    <p className="mt-0.5 text-xs text-slate-600">Session {session.session_number ?? 1} · {session.status === "on_break" ? "On break" : "Still clocked in"}</p>
+                  </div>
+                  {canCorrectAttendance
+                    ? <a href={`/attendance/logs?record=${session.id}`} className="text-sm font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900">Open attendance record</a>
+                    : <p className="text-xs text-slate-500">Ask an Attendance manager with log access to correct this shift.</p>}
+                </li>)}
+              </ul>
+            </div>}
             {runDetails.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
             {!runDetails.isLoading && !runSlips.length && <EmptyState>This run has no payslips.</EmptyState>}
             <div className="grid gap-3 lg:grid-cols-2">{runSlips.map((slip: any) => <PayStatement key={slip.id} slip={{ ...slip, run: runDetails.data.run }} />)}</div>
