@@ -122,8 +122,20 @@ async function buildDraftPayslips(tx: any, run: any) {
     )),
   ]);
 
-  const completedSessions = sessions.filter((session: any) =>
+  const completedSessionCandidates = sessions.filter((session: any) =>
     session.status === "completed" && session.time_out && Number(session.total_seconds) > 0,
+  );
+  const unapprovedSessions = completedSessionCandidates.filter((session: any) =>
+    session.review_status !== "approved" && session.review_status !== "locked",
+  );
+  if (unapprovedSessions.length) {
+    throw new PayrollRequestError(
+      409,
+      `Review and approve all completed attendance sessions before building payroll. ${unapprovedSessions.length} session${unapprovedSessions.length === 1 ? " is" : "s are"} not approved.`,
+    );
+  }
+  const completedSessions = completedSessionCandidates.filter((session: any) =>
+    session.review_status === "approved" || session.review_status === "locked",
   );
   const sessionIds = completedSessions.map((session: any) => session.id);
   const overtimeRequests = sessionIds.length

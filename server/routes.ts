@@ -793,10 +793,21 @@ export async function registerRoutes(
       user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       work_date text NOT NULL,
       note text NOT NULL DEFAULT '',
+      workday_type text NOT NULL DEFAULT 'regular_workday',
+      work_completed text NOT NULL DEFAULT '',
+      customer_interactions text NOT NULL DEFAULT '',
+      challenges text NOT NULL DEFAULT '',
+      follow_up text NOT NULL DEFAULT '',
       created_at timestamp NOT NULL DEFAULT now(),
       updated_at timestamp NOT NULL DEFAULT now(),
       CONSTRAINT attendance_daily_notes_user_date_unique UNIQUE (user_id, work_date)
     );
+    ALTER TABLE attendance_daily_notes
+      ADD COLUMN IF NOT EXISTS workday_type text NOT NULL DEFAULT 'regular_workday',
+      ADD COLUMN IF NOT EXISTS work_completed text NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS customer_interactions text NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS challenges text NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS follow_up text NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS attendance_daily_notes_user_date_idx
       ON attendance_daily_notes (user_id, work_date);
   `));
@@ -11182,13 +11193,15 @@ export async function registerRoutes(
       const firstSession = todaySessions.find(session => session.session_number === 1) ?? todaySessions[0];
       const secondSessionApproved = Boolean(firstSession?.second_session_approved);
       const history = await storage.getAttendanceHistoryForUser(user.id, 30);
+      const dailyReport = await storage.getAttendanceDailyReport(user.id, workDate);
       res.json({
         active,
         history,
         todaySessions,
         todayTotalSeconds,
         todayAsOf: now.toISOString(),
-          dailyNote: await storage.getAttendanceDailyNote(user.id, workDate),
+        dailyNote: dailyReport?.note ?? "",
+        dailyReport,
         secondSessionApproved,
         canStartSecondSession: todaySessions.length === 1 && !active && secondSessionApproved,
       });
@@ -11395,12 +11408,28 @@ export async function registerRoutes(
   });
 
   app.put("/api/attendance/today/note", requirePermission("attendance", "clock"), async (req, res) => {
+    const parsed = z.object({
+      note: z.string().trim().max(4000).optional(),
+      workday_type: z.enum(["regular_workday", "other"]).optional(),
+      work_completed: z.string().trim().max(2000).optional(),
+      customer_interactions: z.string().trim().max(2000).optional(),
+      challenges: z.string().trim().max(2000).optional(),
+      follow_up: z.string().trim().max(2000).optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the daily report." });
     try {
       const user = (req as any).authUser;
       const workDate = dateOnlyInTimeZone(new Date(), await getCompanyTimezone(storage));
-      const note = String(req.body?.note ?? "").trim().slice(0, 4000);
-      const saved = await storage.saveAttendanceDailyNote(user.id, workDate, note);
-      res.json({ note: saved.note, workDate: saved.work_date, updatedAt: saved.updated_at });
+      const existing = await storage.getAttendanceDailyReport(user.id, workDate);
+      const saved = await storage.saveAttendanceDailyNote(user.id, workDate, {
+        note: parsed.data.note ?? existing?.note ?? "",
+        workday_type: parsed.data.workday_type ?? existing?.workday_type ?? "regular_workday",
+        work_completed: parsed.data.work_completed ?? existing?.work_completed ?? "",
+        customer_interactions: parsed.data.customer_interactions ?? existing?.customer_interactions ?? "",
+        challenges: parsed.data.challenges ?? existing?.challenges ?? "",
+        follow_up: parsed.data.follow_up ?? existing?.follow_up ?? "",
+      });
+      res.json({ ...saved, workDate: saved.work_date, updatedAt: saved.updated_at });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -11938,6 +11967,7 @@ export async function registerRoutes(
         },
         rows,
         days,
+        records: result.rows,
         total: result.total,
       });
     } catch (e: any) {

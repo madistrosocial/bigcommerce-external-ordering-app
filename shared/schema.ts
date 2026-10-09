@@ -526,6 +526,11 @@ export const attendanceDailyNotes = pgTable("attendance_daily_notes", {
   user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   work_date: text("work_date").notNull(),
   note: text("note").notNull().default(""),
+  workday_type: text("workday_type").notNull().default("regular_workday"),
+  work_completed: text("work_completed").notNull().default(""),
+  customer_interactions: text("customer_interactions").notNull().default(""),
+  challenges: text("challenges").notNull().default(""),
+  follow_up: text("follow_up").notNull().default(""),
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({

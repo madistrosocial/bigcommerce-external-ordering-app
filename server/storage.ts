@@ -281,8 +281,9 @@ export interface IStorage {
 
   // Attendance
   getAttendanceHomeLocation(userId: number): Promise<{ latitude: string | null; longitude: string | null; setAt: Date | null }>;
+  getAttendanceDailyReport(userId: number, workDate: string): Promise<AttendanceDailyNote | undefined>;
   getAttendanceDailyNote(userId: number, workDate: string): Promise<string>;
-  saveAttendanceDailyNote(userId: number, workDate: string, note: string): Promise<AttendanceDailyNote>;
+  saveAttendanceDailyNote(userId: number, workDate: string, report: Pick<AttendanceDailyNote, "note" | "workday_type" | "work_completed" | "customer_interactions" | "challenges" | "follow_up">): Promise<AttendanceDailyNote>;
   getAttendanceById(id: number): Promise<AttendanceSession | undefined>;
   getActiveAttendanceForUser(userId: number): Promise<AttendanceSession | undefined>;
   getAttendanceSessionsForDate(userId: number, workDate: string): Promise<Array<AttendanceSession & { breaks?: AttendanceBreakInterval[] }>>;
@@ -3114,20 +3115,28 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getAttendanceDailyNote(userId: number, workDate: string): Promise<string> {
-    const [row] = await db.select({ note: attendanceDailyNotes.note })
-      .from(attendanceDailyNotes)
+  async getAttendanceDailyReport(userId: number, workDate: string): Promise<AttendanceDailyNote | undefined> {
+    const [row] = await db.select().from(attendanceDailyNotes)
       .where(and(eq(attendanceDailyNotes.user_id, userId), eq(attendanceDailyNotes.work_date, workDate)))
       .limit(1);
+    return row;
+  }
+
+  async getAttendanceDailyNote(userId: number, workDate: string): Promise<string> {
+    const row = await this.getAttendanceDailyReport(userId, workDate);
     return row?.note ?? "";
   }
 
-  async saveAttendanceDailyNote(userId: number, workDate: string, note: string): Promise<AttendanceDailyNote> {
+  async saveAttendanceDailyNote(
+    userId: number,
+    workDate: string,
+    report: Pick<AttendanceDailyNote, "note" | "workday_type" | "work_completed" | "customer_interactions" | "challenges" | "follow_up">,
+  ): Promise<AttendanceDailyNote> {
     const rows = await db.insert(attendanceDailyNotes)
-      .values({ user_id: userId, work_date: workDate, note })
+      .values({ user_id: userId, work_date: workDate, ...report })
       .onConflictDoUpdate({
         target: [attendanceDailyNotes.user_id, attendanceDailyNotes.work_date],
-        set: { note, updated_at: new Date() },
+        set: { ...report, updated_at: new Date() },
       })
       .returning();
     return rows[0];
@@ -3154,10 +3163,15 @@ export class DatabaseStorage implements IStorage {
     return rows.map(row => ({ ...row, breaks: breaks[row.id] ?? [] }));
   }
 
-  async getAttendanceHistoryForUser(userId: number, limit = 30): Promise<Array<AttendanceSession & { daily_note?: string; breaks?: AttendanceBreakInterval[] }>> {
+  async getAttendanceHistoryForUser(userId: number, limit = 30): Promise<Array<AttendanceSession & { daily_note?: string; daily_report?: Pick<AttendanceDailyNote, "note" | "workday_type" | "work_completed" | "customer_interactions" | "challenges" | "follow_up">; breaks?: AttendanceBreakInterval[] }>> {
     const rows = await db.select({
       attendance: attendanceSessions,
       daily_note: attendanceDailyNotes.note,
+      daily_workday_type: attendanceDailyNotes.workday_type,
+      daily_work_completed: attendanceDailyNotes.work_completed,
+      daily_customer_interactions: attendanceDailyNotes.customer_interactions,
+      daily_challenges: attendanceDailyNotes.challenges,
+      daily_follow_up: attendanceDailyNotes.follow_up,
     }).from(attendanceSessions)
       .leftJoin(attendanceDailyNotes, and(
         eq(attendanceDailyNotes.user_id, attendanceSessions.user_id),
@@ -3167,7 +3181,19 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(attendanceSessions.time_in), desc(attendanceSessions.created_at))
       .limit(Math.min(Math.max(limit, 1), 100));
     const breaks = await this.getAttendanceBreakIntervals(rows.map(row => row.attendance.id));
-    return rows.map(row => ({ ...row.attendance, daily_note: row.daily_note ?? "", breaks: breaks[row.attendance.id] ?? [] }));
+    return rows.map(row => ({
+      ...row.attendance,
+      daily_note: row.daily_note ?? "",
+      daily_report: row.daily_workday_type == null ? undefined : {
+        note: row.daily_note ?? "",
+        workday_type: row.daily_workday_type,
+        work_completed: row.daily_work_completed ?? "",
+        customer_interactions: row.daily_customer_interactions ?? "",
+        challenges: row.daily_challenges ?? "",
+        follow_up: row.daily_follow_up ?? "",
+      },
+      breaks: breaks[row.attendance.id] ?? [],
+    }));
   }
 
   async createAttendance(data: InsertAttendanceSession): Promise<AttendanceSession> {
@@ -3231,6 +3257,11 @@ export class DatabaseStorage implements IStorage {
         employee_name: users.name,
         employee_username: users.username,
         daily_note: attendanceDailyNotes.note,
+        daily_workday_type: attendanceDailyNotes.workday_type,
+        daily_work_completed: attendanceDailyNotes.work_completed,
+        daily_customer_interactions: attendanceDailyNotes.customer_interactions,
+        daily_challenges: attendanceDailyNotes.challenges,
+        daily_follow_up: attendanceDailyNotes.follow_up,
       })
         .from(attendanceSessions)
         .leftJoin(users, eq(users.id, attendanceSessions.user_id))
@@ -3249,6 +3280,14 @@ export class DatabaseStorage implements IStorage {
         employee_name: row.employee_name,
         employee_username: row.employee_username,
         daily_note: row.daily_note ?? "",
+        daily_report: row.daily_workday_type == null ? null : {
+          workday_type: row.daily_workday_type,
+          work_completed: row.daily_work_completed ?? "",
+          customer_interactions: row.daily_customer_interactions ?? "",
+          challenges: row.daily_challenges ?? "",
+          follow_up: row.daily_follow_up ?? "",
+          note: row.daily_note ?? "",
+        },
       }));
     const breaks = await this.getAttendanceBreakIntervals(attendanceRows.map(row => row.id));
     return {

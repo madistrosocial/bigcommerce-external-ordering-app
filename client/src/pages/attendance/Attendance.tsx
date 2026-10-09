@@ -46,6 +46,15 @@ function formatDuration(totalSeconds: number | null | undefined) {
   return `${Math.floor(seconds / 3600)}h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}m`;
 }
 
+const emptyDailyReport = {
+  workday_type: "regular_workday",
+  work_completed: "",
+  customer_interactions: "",
+  challenges: "",
+  follow_up: "",
+  note: "",
+};
+
 type BreakInterval = {
   break_started_at: string;
   break_ended_at: string | null;
@@ -192,6 +201,7 @@ function HistoryList({ rows, fmt }: { rows: any[]; fmt: ReturnType<typeof useTim
           0,
         );
         const dailyNote = sessions.find(session => session.daily_note)?.daily_note;
+        const dailyReport = sessions.find(session => session.daily_report)?.daily_report;
 
         return (
           <div key={date} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -238,6 +248,19 @@ function HistoryList({ rows, fmt }: { rows: any[]; fmt: ReturnType<typeof useTim
               </>
             )}
             {dailyNote && <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 text-xs text-slate-600"><p className="font-semibold text-blue-800">Daily note</p><p className="mt-1 whitespace-pre-wrap">{dailyNote}</p></div>}
+            {dailyReport && (dailyReport.workday_type === "other" || dailyReport.work_completed || dailyReport.customer_interactions || dailyReport.challenges || dailyReport.follow_up) && (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                <p className="font-semibold text-slate-800">{dailyReport.workday_type === "other" ? "Other workday" : "Regular workday"} report</p>
+                {[
+                  ["Work completed", dailyReport.work_completed],
+                  ["Customer interactions", dailyReport.customer_interactions],
+                  ["Challenges or blockers", dailyReport.challenges],
+                  ["Follow-up", dailyReport.follow_up],
+                ].filter(([, value]) => value).map(([label, value]) => (
+                  <p key={label} className="mt-2 whitespace-pre-wrap"><span className="font-medium text-slate-700">{label}: </span>{value}</p>
+                ))}
+              </div>
+            )}
           </div>
         );
       })}
@@ -259,8 +282,8 @@ export default function AttendancePage() {
   const [showHistory, setShowHistory] = useState(false);
   const [error, setError] = useState("");
   const [settingHome, setSettingHome] = useState(false);
-  const [dailyNoteDraft, setDailyNoteDraft] = useState("");
-  const [dailyNoteDirty, setDailyNoteDirty] = useState(false);
+  const [dailyReportDraft, setDailyReportDraft] = useState(emptyDailyReport);
+  const [dailyReportDirty, setDailyReportDirty] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const { data, isLoading } = useQuery({
@@ -279,8 +302,14 @@ export default function AttendancePage() {
     : todayTotalSeconds;
 
   useEffect(() => {
-    if (data?.dailyNote !== undefined && !dailyNoteDirty) setDailyNoteDraft(data.dailyNote ?? "");
-  }, [data?.dailyNote, dailyNoteDirty]);
+    if (data?.dailyNote !== undefined && !dailyReportDirty) {
+      setDailyReportDraft({
+        ...emptyDailyReport,
+        ...(data.dailyReport ?? {}),
+        note: data.dailyReport?.note ?? data.dailyNote ?? "",
+      });
+    }
+  }, [data?.dailyNote, data?.dailyReport, dailyReportDirty]);
 
   const todosQuery = useQuery({
     queryKey: ["attendance", "todos", currentUser?.id],
@@ -438,11 +467,19 @@ export default function AttendancePage() {
     mutationFn: () => apiJson("/api/attendance/today/note", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ note: dailyNoteDraft }),
+      body: JSON.stringify(dailyReportDraft),
     }),
     onSuccess: (saved: any) => {
-      setDailyNoteDraft(saved.note ?? "");
-      setDailyNoteDirty(false);
+      setDailyReportDraft({
+        ...emptyDailyReport,
+        workday_type: saved.workday_type ?? "regular_workday",
+        work_completed: saved.work_completed ?? "",
+        customer_interactions: saved.customer_interactions ?? "",
+        challenges: saved.challenges ?? "",
+        follow_up: saved.follow_up ?? "",
+        note: saved.note ?? "",
+      });
+      setDailyReportDirty(false);
       queryClient.invalidateQueries({ queryKey: ["attendance", "today"] });
     },
     onError: (e: any) => setError(e.message),
@@ -607,21 +644,38 @@ export default function AttendancePage() {
         )}
          <Card className="mt-4 rounded-2xl border-slate-200 shadow-sm">
            <CardContent className="p-4">
-             <div className="flex items-center justify-between gap-3">
-                <div><h2 className="text-sm font-semibold text-slate-800">Daily attendance note</h2></div>
-               <Button size="sm" className="h-8 bg-red-600 text-xs hover:bg-red-700" onClick={() => noteMutation.mutate()} disabled={noteMutation.isPending || !dailyNoteDirty}>
-                 {noteMutation.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
-                 Save note
-               </Button>
-             </div>
-             <Textarea
-               value={dailyNoteDraft}
-               onChange={event => { setDailyNoteDraft(event.target.value); setDailyNoteDirty(true); }}
-               maxLength={4000}
-               rows={3}
-               className="mt-3 text-sm"
-               placeholder="Add a note about today’s work, travel, or attendance."
-             />
+              <div className="flex items-center justify-between gap-3">
+                <div><h2 className="text-sm font-semibold text-slate-800">Daily work report</h2><p className="mt-1 text-xs text-slate-500">Saved for today in the company timezone.</p></div>
+                <Button size="sm" className="h-8 shrink-0 bg-red-600 text-xs hover:bg-red-700" onClick={() => noteMutation.mutate()} disabled={noteMutation.isPending || !dailyReportDirty}>
+                  {noteMutation.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
+                  Save report
+                </Button>
+              </div>
+              {noteMutation.error && <p role="alert" className="mt-3 text-xs text-red-600">{noteMutation.error.message}</p>}
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label htmlFor="attendance-workday-type" className="text-xs font-medium text-slate-600">Workday type</label>
+                  <select id="attendance-workday-type" value={dailyReportDraft.workday_type} onChange={event => { setDailyReportDraft(current => ({ ...current, workday_type: event.target.value })); setDailyReportDirty(true); }} className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm">
+                    <option value="regular_workday">Regular Workday</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                {[
+                  ["work_completed", "What work did you complete today?", "Summarize the main work completed."],
+                  ["customer_interactions", "What customer interactions or visits did you have?", "Add customer visits, calls, or important outcomes."],
+                  ["challenges", "What challenges or blockers came up?", "Note issues that need attention."],
+                  ["follow_up", "What follow-up is needed?", "List next steps or items for the next workday."],
+                ].map(([key, label, placeholder]) => (
+                  <div key={key} className="min-w-0">
+                    <label htmlFor={`attendance-${key}`} className="text-xs font-medium text-slate-600">{label}</label>
+                    <Textarea id={`attendance-${key}`} value={dailyReportDraft[key as keyof typeof dailyReportDraft]} onChange={event => { setDailyReportDraft(current => ({ ...current, [key]: event.target.value })); setDailyReportDirty(true); }} maxLength={2000} rows={3} className="mt-1 text-sm" placeholder={placeholder} />
+                  </div>
+                ))}
+                <div className="sm:col-span-2">
+                  <label htmlFor="attendance-daily-note" className="text-xs font-medium text-slate-600">Additional attendance note</label>
+                  <Textarea id="attendance-daily-note" value={dailyReportDraft.note} onChange={event => { setDailyReportDraft(current => ({ ...current, note: event.target.value })); setDailyReportDirty(true); }} maxLength={4000} rows={2} className="mt-1 text-sm" placeholder="Add any extra context about today’s work, travel, or attendance." />
+                </div>
+              </div>
            </CardContent>
          </Card>
         {flow === "ending" && <EndDayDialog onCancel={() => setFlow("start")} onConfirm={() => endMutation.mutate()} saving={endMutation.isPending} />}

@@ -765,61 +765,143 @@ function Reports() {
   const [period, setPeriod] = useState("pay_period");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const query = useQuery({ queryKey: ["attendance", "reports", period, from, to], queryFn: () => apiJson(`/api/attendance/admin/reports?period=${period}${from ? `&from=${from}` : ""}${to ? `&to=${to}` : ""}`) });
   const employees = query.data?.rows ?? [];
-  const days = query.data?.days ?? [];
+  const records: any[] = query.data?.records ?? [];
+  const selectedIndex = Math.max(0, employees.findIndex((employee: any) => String(employee.user_id) === selectedEmployeeId));
+  const employee = employees[selectedIndex];
+  const employeeRecords = employee
+    ? records.filter(record => String(record.user_id) === String(employee.user_id))
+      .sort((a, b) => String(b.work_date).localeCompare(String(a.work_date)) || new Date(a.time_in ?? 0).getTime() - new Date(b.time_in ?? 0).getTime())
+    : [];
+  const totalBreakSeconds = employeeRecords.reduce((total, record) => total + breakDurationSeconds(record, now), 0);
+  const dailyReports = Array.from(new Map(
+    employeeRecords
+      .filter(record => record.daily_report && (
+        record.daily_report.work_completed
+        || record.daily_report.customer_interactions
+        || record.daily_report.challenges
+        || record.daily_report.follow_up
+        || record.daily_report.note
+      ))
+      .map(record => [record.work_date, record]),
+  ).values());
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(interval);
   }, []);
-  const breakTotalsByEmployee = useMemo(() => {
-    const totals: Record<string, number> = {};
-    for (const day of days) {
-      for (const [userId, cell] of Object.entries(day.cells ?? {})) {
-        totals[userId] = (totals[userId] ?? 0) + breakDurationSeconds(cell, now);
-      }
-    }
-    return totals;
-  }, [days, now]);
   const exportCsv = () => {
+    if (!employee) return;
+    const formatBreakTimes = (record: any, field: "break_started_at" | "break_ended_at") =>
+      (record.breaks ?? []).map((breakItem: any) => breakItem[field]
+        ? reportDateTime(breakItem[field], record.work_date, fmt)
+        : field === "break_ended_at" ? "In progress" : "—").join(" | ");
     const csvRows = [
-      ["Day", ...employees.map((employee: any) => employee.employee_name)],
-      ...days.map((day: any) => [
-        `${day.date} (${day.day})`,
-        ...employees.map((employee: any) => {
-          const cell = day.cells?.[String(employee.user_id)];
-          if (!cell) return "";
-          const timeIn = reportDateTime(cell.time_in, day.date, fmt);
-          const timeOut = reportDateTime(cell.time_out, day.date, fmt);
-          const breaks = (cell.breaks ?? []).map((breakItem: any) => `${reportDateTime(breakItem.break_started_at, day.date, fmt)} → ${breakItem.break_ended_at ? reportDateTime(breakItem.break_ended_at, day.date, fmt) : "In progress"}`).join("; ");
-          return `${timeIn} - ${timeOut} (${hours(cell.total_seconds)}; Break ${compactDuration(breakDurationSeconds(cell, now))})${breaks ? `; Breaks: ${breaks}` : ""}`;
-        }),
+      ["Employee", employee.employee_name],
+      ["Date", "Session", "Workday Type", "Time In", "Break Start", "Break End", "Time Out", "Total Worked", "Review Status", "Work Completed", "Customer Interactions", "Challenges", "Follow-up", "Additional Note"],
+      ...employeeRecords.map((record: any) => [
+        record.work_date,
+        record.session_number ?? "",
+        record.daily_report ? (record.daily_report.workday_type === "other" ? "Other" : "Regular Workday") : "",
+        reportDateTime(record.time_in, record.work_date, fmt),
+        formatBreakTimes(record, "break_started_at"),
+        formatBreakTimes(record, "break_ended_at"),
+        reportDateTime(record.time_out, record.work_date, fmt),
+        hours(record.total_seconds),
+        record.review_status,
+        record.daily_report?.work_completed ?? "",
+        record.daily_report?.customer_interactions ?? "",
+        record.daily_report?.challenges ?? "",
+        record.daily_report?.follow_up ?? "",
+        record.daily_report?.note ?? record.daily_note ?? "",
       ]),
-      ["Total worked hours", ...employees.map((employee: any) => hours(employee.total_seconds))],
-      ["Total break time", ...employees.map((employee: any) => compactDuration(breakTotalsByEmployee[String(employee.user_id)] ?? 0))],
+      ["Total worked hours", "", "", "", "", "", "", hours(employee.total_seconds)],
+      ["Total break time", "", "", "", "", "", "", compactDuration(totalBreakSeconds)],
     ];
     const csv = csvRows.map((row: unknown[]) => row.map(value => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = `attendance-report-${query.data?.from ?? "period"}.csv`; link.click(); URL.revokeObjectURL(link.href);
+    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = `attendance-report-${String(employee.employee_name).replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${query.data?.from ?? "period"}.csv`; link.click(); URL.revokeObjectURL(link.href);
+  };
+  const formatBreakTimes = (record: any, field: "break_started_at" | "break_ended_at") =>
+    (record.breaks ?? []).map((breakItem: any, index: number) => (
+      <span key={`${breakItem.break_started_at}-${field}-${index}`} className="block">{breakItem[field] ? reportDateTime(breakItem[field], record.work_date, fmt) : field === "break_ended_at" ? "In progress" : "—"}</span>
+    ));
+  const moveEmployee = (direction: -1 | 1) => {
+    const nextIndex = selectedIndex + direction;
+    if (nextIndex >= 0 && nextIndex < employees.length) setSelectedEmployeeId(String(employees[nextIndex].user_id));
   };
   return <AdminShell activeTab="reports">
-    <Card className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><Label className="text-[11px] text-slate-500">Report period</Label><div className="mt-2"><PeriodButtons value={period} onChange={setPeriod} /></div></div><Button variant="outline" size="sm" className="text-xs" onClick={exportCsv} disabled={!query.data?.rows?.length}><Download className="mr-2 h-3.5 w-3.5" />Export CSV</Button></div>{period === "custom" && <div className="mt-4 grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="mt-1 h-9 text-xs" /></div></div>}</CardContent></Card>
+    <Card className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div><Label className="text-[11px] text-slate-500">Report period</Label><div className="mt-2"><PeriodButtons value={period} onChange={setPeriod} /></div></div>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" size="icon" aria-label="Previous employee" className="h-9 w-9" onClick={() => moveEmployee(-1)} disabled={!employees.length || selectedIndex <= 0}><ChevronLeft className="h-4 w-4" /></Button>
+          <Select value={employee ? String(employee.user_id) : ""} onValueChange={setSelectedEmployeeId}>
+            <SelectTrigger aria-label="Select employee" className="h-9 w-[220px] max-w-[58vw] text-xs"><SelectValue placeholder="Select employee" /></SelectTrigger>
+            <SelectContent>{employees.map((option: any) => <SelectItem key={option.user_id} value={String(option.user_id)}>{option.employee_name}</SelectItem>)}</SelectContent>
+          </Select>
+          <Button type="button" variant="outline" size="icon" aria-label="Next employee" className="h-9 w-9" onClick={() => moveEmployee(1)} disabled={!employees.length || selectedIndex >= employees.length - 1}><ChevronRight className="h-4 w-4" /></Button>
+        </div>
+        <Button variant="outline" size="sm" className="text-xs" onClick={exportCsv} disabled={!employeeRecords.length}><Download className="mr-2 h-3.5 w-3.5" />Export CSV</Button>
+      </div>
+      {period === "custom" && <div className="mt-4 grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px] text-slate-500">From date</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px] text-slate-500">To date</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="mt-1 h-9 text-xs" /></div></div>}
+    </CardContent></Card>
     <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">{[["Employees", query.data?.summary?.employees ?? 0], ["Records", query.data?.summary?.records ?? 0], ["Total hours", hours(query.data?.summary?.totalSeconds)], ["Needs review", query.data?.summary?.needsReview ?? 0]].map(([label, value]) => <Card key={label} className="rounded-xl border-slate-200 shadow-sm"><CardContent className="p-4"><p className="text-lg font-bold text-slate-800">{value}</p><p className="mt-1 text-[11px] text-slate-400">{label}</p></CardContent></Card>)}</div>
-    <Card className="mt-4 overflow-hidden rounded-xl border-slate-200 shadow-sm"><CardHeader className="border-b border-slate-100 pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-sm">Attendance by day <span className="font-normal text-slate-400">{query.data?.from} → {query.data?.to}</span></CardTitle></div></CardHeader><CardContent className="p-0">
+    <Card className="mt-4 overflow-hidden rounded-xl border-slate-200 shadow-sm"><CardHeader className="border-b border-slate-100 pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-sm">{employee ? `${employee.employee_name} · attendance details` : "Attendance details"} <span className="font-normal text-slate-400">{query.data?.from} → {query.data?.to}</span></CardTitle></div></CardHeader><CardContent className="p-0">
       {query.isLoading ? <div className="p-10 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /><p className="mt-2">Loading attendance report…</p></div>
         : query.isError ? <div className="p-10 text-center text-sm text-red-600">Attendance report could not be loaded. Try refreshing the page.</div>
-        : !days.length || !employees.length ? <div className="p-10 text-center text-sm text-slate-400">No attendance records for this period.</div>
-        : <div className="overflow-x-auto"><table className="min-w-max w-full text-left text-xs"><thead><tr className="border-b border-slate-200 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><th className="sticky left-0 z-10 min-w-[150px] border-r border-slate-200 bg-slate-50 px-4 py-3 font-semibold">Day</th>{employees.map((employee: any) => <th key={employee.user_id} className="min-w-[175px] px-4 py-3 font-semibold text-slate-600">{employee.employee_name}</th>)}</tr></thead><tbody>
-          {days.map((day: any) => <tr key={day.date} className={`border-b border-slate-100 last:border-0 ${day.isWeekend ? "bg-slate-100/80" : "bg-white"}`}>
-            <th className={`sticky left-0 z-10 border-r border-slate-200 px-4 py-3 font-medium ${day.isWeekend ? "bg-slate-100 text-slate-400" : "bg-white text-slate-700"}`}><span className="block font-semibold">{day.date}</span><span className="mt-0.5 block text-[11px]">{day.day}{day.isWeekend ? " · Weekend" : ""}</span></th>
-            {employees.map((employee: any) => {
-              const cell = day.cells?.[String(employee.user_id)];
-              return <td key={employee.user_id} className={`min-w-[175px] px-4 py-3 align-top ${day.isWeekend ? "text-slate-500" : "text-slate-700"}`}>
-                 {cell ? <><div className="font-medium">{reportDateTime(cell.time_in, day.date, fmt)} <span className="text-slate-300">→</span> {reportDateTime(cell.time_out, day.date, fmt)}</div>{cell.breaks?.length > 0 && <div className="mt-1 text-[11px] text-slate-500">{cell.breaks.map((breakItem: any, index: number) => <div key={`${breakItem.break_started_at}-${index}`}>Break {index + 1}: {reportDateTime(breakItem.break_started_at, day.date, fmt)} → {breakItem.break_ended_at ? reportDateTime(breakItem.break_ended_at, day.date, fmt) : "In progress"}</div>)}</div>}<div className="mt-1 flex flex-wrap items-baseline gap-x-2 font-semibold"><span className={day.isWeekend ? "text-slate-600" : "text-emerald-700"}>{hours(cell.total_seconds)}</span><span className="text-red-600">Break {compactDuration(breakDurationSeconds(cell, now))}</span></div></> : <span className="text-slate-300">—</span>}
-              </td>;
-            })}
-          </tr>)}
-        </tbody><tfoot><tr className="border-t-2 border-slate-300 bg-slate-50"><th className="sticky bottom-0 left-0 z-10 border-r border-slate-200 bg-slate-50 px-4 py-3 text-left font-bold text-slate-700">Total worked hours</th>{employees.map((employee: any) => <td key={employee.user_id} className="px-4 py-3"><div className="flex flex-wrap items-baseline gap-x-2 font-bold"><span className="text-emerald-700">{hours(employee.total_seconds)}</span><span className="text-red-600">Break {compactDuration(breakTotalsByEmployee[String(employee.user_id)] ?? 0)}</span></div></td>)}</tr></tfoot></table></div>}
+        : !employeeRecords.length ? <div className="p-10 text-center text-sm text-slate-400">{employees.length ? "No attendance records for this employee in the selected period." : "No attendance records for this period."}</div>
+        : <>
+          <div className="hidden overflow-x-auto md:block">
+            <table className="min-w-[1050px] w-full text-left text-xs">
+              <thead><tr className="border-b border-slate-200 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400">
+                <th className="px-3 py-3 font-semibold">Date / Session</th><th className="px-3 py-3 font-semibold">Workday Type</th><th className="px-3 py-3 font-semibold">Time In</th><th className="px-3 py-3 font-semibold">Break Start</th><th className="px-3 py-3 font-semibold">Break End</th><th className="px-3 py-3 font-semibold">Time Out</th><th className="px-3 py-3 font-semibold">Total Worked</th><th className="px-3 py-3 font-semibold">Review</th>
+              </tr></thead>
+              <tbody>{employeeRecords.map((record: any) => <tr key={record.id} className="border-b border-slate-100 align-top last:border-0">
+                <td className="px-3 py-3 font-medium text-slate-700">{record.work_date}<span className="mt-1 block text-[10px] text-slate-400">Session {record.session_number ?? 1}</span></td>
+                <td className="px-3 py-3 text-slate-600">{record.daily_report ? (record.daily_report.workday_type === "other" ? "Other" : "Regular Workday") : "—"}</td>
+                <td className="px-3 py-3 text-slate-700">{reportDateTime(record.time_in, record.work_date, fmt)}</td>
+                <td className="px-3 py-3 text-slate-700">{record.breaks?.length ? formatBreakTimes(record, "break_started_at") : "—"}</td>
+                <td className="px-3 py-3 text-slate-700">{record.breaks?.length ? formatBreakTimes(record, "break_ended_at") : "—"}</td>
+                <td className="px-3 py-3 text-slate-700">{reportDateTime(record.time_out, record.work_date, fmt)}</td>
+                <td className="px-3 py-3 font-semibold text-emerald-700">{hours(record.total_seconds)}</td>
+                <td className="px-3 py-3 capitalize text-slate-600">{String(record.review_status ?? "").replace(/_/g, " ")}</td>
+              </tr>)}</tbody>
+              <tfoot><tr className="border-t-2 border-slate-300 bg-slate-50 font-bold"><td className="px-3 py-3" colSpan={6}>Employee total</td><td className="px-3 py-3 text-emerald-700">{hours(employee.total_seconds)}</td><td className="px-3 py-3 text-red-600">Break {compactDuration(totalBreakSeconds)}</td></tr></tfoot>
+            </table>
+          </div>
+          <div className="space-y-3 p-3 md:hidden">
+            {employeeRecords.map((record: any) => <div key={record.id} className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-slate-800">{record.work_date}</p><p className="text-[11px] text-slate-400">Session {record.session_number ?? 1} · {record.daily_report ? (record.daily_report.workday_type === "other" ? "Other" : "Regular Workday") : "No daily report"}</p></div><span className="text-xs font-semibold text-emerald-700">{hours(record.total_seconds)}</span></div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                <div><span className="block text-slate-400">Time In</span><span className="font-medium text-slate-700">{reportDateTime(record.time_in, record.work_date, fmt)}</span></div>
+                <div><span className="block text-slate-400">Time Out</span><span className="font-medium text-slate-700">{reportDateTime(record.time_out, record.work_date, fmt)}</span></div>
+                <div><span className="block text-slate-400">Break Start</span><span className="font-medium text-slate-700">{record.breaks?.length ? formatBreakTimes(record, "break_started_at") : "—"}</span></div>
+                <div><span className="block text-slate-400">Break End</span><span className="font-medium text-slate-700">{record.breaks?.length ? formatBreakTimes(record, "break_ended_at") : "—"}</span></div>
+              </div>
+              <p className="mt-3 border-t border-slate-100 pt-2 text-[11px] capitalize text-slate-500">Review: {String(record.review_status ?? "").replace(/_/g, " ")}</p>
+            </div>)}
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3 text-xs font-semibold"><span>Employee total</span><span className="text-emerald-700">{hours(employee.total_seconds)} · Break {compactDuration(totalBreakSeconds)}</span></div>
+          </div>
+        </>}
     </CardContent></Card>
+    {dailyReports.length > 0 && <Card className="mt-4 rounded-xl border-slate-200 shadow-sm">
+      <CardHeader className="border-b border-slate-100 pb-3"><CardTitle className="text-sm">Daily work reports</CardTitle></CardHeader>
+      <CardContent className="divide-y divide-slate-100 p-0">
+        {dailyReports.map((record: any) => <div key={record.work_date} className="grid gap-2 p-4 sm:grid-cols-[150px_minmax(0,1fr)]">
+          <div><p className="text-sm font-semibold text-slate-800">{record.work_date}</p><p className="mt-1 text-[11px] text-slate-500">{record.daily_report.workday_type === "other" ? "Other workday" : "Regular Workday"}</p></div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              ["Work completed", record.daily_report.work_completed],
+              ["Customer interactions", record.daily_report.customer_interactions],
+              ["Challenges or blockers", record.daily_report.challenges],
+              ["Follow-up", record.daily_report.follow_up],
+              ["Additional note", record.daily_report.note],
+            ].filter(([, value]) => value).map(([label, value]) => <div key={label}><p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-slate-700">{value}</p></div>)}
+          </div>
+        </div>)}
+      </CardContent>
+    </Card>}
   </AdminShell>;
 }
 
