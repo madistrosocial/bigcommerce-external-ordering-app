@@ -1,4 +1,4 @@
--- Synthetic attendance data for staging only.
+-- Synthetic attendance data for a non-production test database only.
 -- September 2026: weekdays only; excludes U.S. Labor Day (2026-09-07).
 -- Creates one completed 9:00 AM-6:00 PM local shift per user/workday,
 -- with a one-hour break (8 net hours). Includes every row in public.users,
@@ -7,7 +7,7 @@
 -- Re-running is safe: an attendance row is inserted only if that user has no
 -- session at all for that work date.
 --
--- Run only against staging. Review the insert count before using this dataset.
+-- Run only against a non-production database. Review the insert count before using this dataset.
 
 BEGIN;
 SET LOCAL TIME ZONE 'UTC';
