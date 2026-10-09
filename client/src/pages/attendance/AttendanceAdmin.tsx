@@ -370,23 +370,43 @@ function Overview() {
   </AdminShell>;
 }
 
-function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
+function AttendanceLogActions({ attendance, canViewAll, label }: { attendance: any; canViewAll: boolean; label?: string }) {
   const fmt = useTimeService();
   const { hasPermission } = usePermissions();
-  const query = useQuery({ queryKey: ["attendance", "log", id], queryFn: () => apiJson(`/api/attendance/admin/logs/${id}`) });
   const client = useQueryClient();
-  const canReview = Boolean(query.data?.can_view_all) && hasPermission("attendance", "approve");
-  const canManage = Boolean(query.data?.can_view_all) && hasPermission("attendance", "manage");
-  const canAudit = Boolean(query.data?.can_view_all) && hasPermission("attendance", "audit");
+  const canReview = canViewAll && hasPermission("attendance", "approve");
+  const canManage = canViewAll && hasPermission("attendance", "manage");
+  const canAudit = canViewAll && hasPermission("attendance", "audit");
   const [editing, setEditing] = useState(false);
   const [reason, setReason] = useState("");
   const [timeIn, setTimeIn] = useState("");
   const [timeOut, setTimeOut] = useState("");
-  if (query.isLoading) return <Card className="rounded-xl border-slate-200"><CardContent className="p-6 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></CardContent></Card>;
-  const data = query.data;
-  if (!data) return null;
-  const { attendance, dailyNote, employee, audit = [] } = data;
-  const toInput = (value: string | Date | null | undefined) => formatDateTimeLocal(value, fmt.tz);
+  const id = Number(attendance.id);
+  const refreshAttendance = () => {
+    client.invalidateQueries({ queryKey: ["attendance", "log", id] });
+    client.invalidateQueries({ queryKey: ["attendance", "logs"] });
+    client.invalidateQueries({ queryKey: ["attendance", "overview"] });
+  };
+  const changeReview = async (review_status: string) => {
+    const reviewReason = review_status === "needs_review" ? window.prompt("Why does this record need review?") : "";
+    if (review_status === "needs_review" && !reviewReason?.trim()) return;
+    await apiJson(`/api/attendance/admin/logs/${id}/review`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ review_status, reason: reviewReason ?? "" }),
+    });
+    refreshAttendance();
+  };
+  const approveSecondSession = async () => {
+    const approvalReason = window.prompt("Why is a second work session approved for this employee today?");
+    if (!approvalReason?.trim()) return;
+    await apiJson("/api/attendance/admin/allow-second-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ attendance_id: id, reason: approvalReason.trim() }),
+    });
+    refreshAttendance();
+  };
   const submitCorrection = async () => {
     const parsedTimeIn = timeIn ? parseDateTimeLocal(timeIn, fmt.tz) : null;
     const parsedTimeOut = timeOut ? parseDateTimeLocal(timeOut, fmt.tz) : null;
@@ -403,32 +423,44 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
     });
     setEditing(false);
     setReason("");
-    client.invalidateQueries({ queryKey: ["attendance", "log", id] });
-    client.invalidateQueries({ queryKey: ["attendance", "logs"] });
+    refreshAttendance();
   };
-  const changeReview = async (review_status: string) => {
-    const reviewReason = review_status === "needs_review" ? window.prompt("Why does this record need review?") : "";
-    if (review_status === "needs_review" && !reviewReason?.trim()) return;
-    await apiJson(`/api/attendance/admin/logs/${id}/review`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ review_status, reason: reviewReason ?? "" }),
-    });
-    client.invalidateQueries({ queryKey: ["attendance", "log", id] });
-    client.invalidateQueries({ queryKey: ["attendance", "logs"] });
-    client.invalidateQueries({ queryKey: ["attendance", "overview"] });
-  };
-  const approveSecondSession = async () => {
-    const approvalReason = window.prompt("Why is a second work session approved for this employee today?");
-    if (!approvalReason?.trim()) return;
-    await apiJson("/api/attendance/admin/allow-second-session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ attendance_id: id, reason: approvalReason.trim() }),
-    });
-    client.invalidateQueries({ queryKey: ["attendance", "log", id] });
-    client.invalidateQueries({ queryKey: ["attendance", "logs"] });
-  };
+  if (!canReview && !canManage && !canAudit) return null;
+  return <div className="min-w-0 space-y-2">
+    {label && <p className="text-[10px] font-medium text-slate-500">{label}</p>}
+    <div className="flex flex-wrap gap-1.5">
+      {canReview && attendance.review_status !== "needs_review" && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-7 px-2 text-[10px] text-orange-700" onClick={() => changeReview("needs_review").catch((error: any) => window.alert(error.message))}><AlertTriangle className="mr-1 h-3 w-3" />Needs review</Button>}
+      {canReview && attendance.review_status !== "approved" && attendance.review_status !== "locked" && <Button size="sm" className="h-7 bg-emerald-600 px-2 text-[10px] hover:bg-emerald-700" onClick={() => changeReview("approved").catch((error: any) => window.alert(error.message))}><Check className="mr-1 h-3 w-3" />Approve</Button>}
+      {canReview && attendance.review_status === "approved" && <Button size="sm" className="h-7 bg-blue-700 px-2 text-[10px] hover:bg-blue-800" onClick={() => changeReview("locked").catch((error: any) => window.alert(error.message))}><LockKeyhole className="mr-1 h-3 w-3" />Lock record</Button>}
+      {canAudit && attendance.session_number === 1 && !attendance.second_session_approved && attendance.status !== "active" && <Button size="sm" variant="outline" className="h-7 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50" onClick={() => approveSecondSession().catch((error: any) => window.alert(error.message))}><Clock3 className="mr-1 h-3 w-3" />Approve second session</Button>}
+      {canManage && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => {
+        if (!editing) {
+          setTimeIn(formatDateTimeLocal(attendance.time_in, fmt.tz));
+          setTimeOut(formatDateTimeLocal(attendance.time_out, fmt.tz));
+          setReason("");
+        }
+        setEditing(value => !value);
+      }}><Pencil className="mr-1 h-3 w-3" />{editing ? "Cancel correction" : "Correct times"}</Button>}
+    </div>
+    {editing && canManage && <div className="rounded-lg border border-red-100 bg-red-50/50 p-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div><Label className="text-[10px]">Time in</Label><Input type="datetime-local" value={timeIn} onChange={e => setTimeIn(e.target.value)} className="mt-1 h-8 text-[11px]" /></div>
+        <div><Label className="text-[10px]">Time out</Label><Input type="datetime-local" value={timeOut} onChange={e => setTimeOut(e.target.value)} className="mt-1 h-8 text-[11px]" /></div>
+      </div>
+      <Label className="mt-2 block text-[10px]">Reason required</Label>
+      <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Forgot to clock out" className="mt-1 h-8 text-[11px]" />
+      <div className="mt-2 flex justify-end"><Button size="sm" className="h-7 bg-red-600 text-[10px] hover:bg-red-700" disabled={!reason.trim()} onClick={() => submitCorrection().catch((error: any) => window.alert(error.message))}>Save correction</Button></div>
+    </div>}
+  </div>;
+}
+
+function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
+  const fmt = useTimeService();
+  const query = useQuery({ queryKey: ["attendance", "log", id], queryFn: () => apiJson(`/api/attendance/admin/logs/${id}`) });
+  if (query.isLoading) return <Card className="rounded-xl border-slate-200"><CardContent className="p-6 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></CardContent></Card>;
+  const data = query.data;
+  if (!data) return null;
+  const { attendance, dailyNote, employee, audit = [] } = data;
   return <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader className="flex flex-row items-start justify-between gap-3 pb-3"><div><CardTitle className="text-sm">{employee?.name ?? "Employee"} · {attendance.work_date}</CardTitle><div className="mt-2 flex flex-wrap items-center gap-2">{statusBadge(attendance.status)}{statusBadge(attendance.review_status ?? "not_reviewed")}</div></div><Button variant="ghost" size="sm" onClick={onClose}>Close</Button></CardHeader><CardContent className="space-y-5">
      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Time In", attendance.time_in ? fmt.dateTime(attendance.time_in) : "—"], ["Time Out", attendance.time_out ? fmt.dateTime(attendance.time_out) : "—"], ["Total Hours", hours(attendance.total_seconds)], ["Start Method", attendance.start_method === "warehouse" ? "Warehouse" : attendance.start_method === "offsite" ? "Off-site" : "Driving"]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] text-slate-400">{label}</p><p className="mt-1 text-xs font-semibold capitalize text-slate-700">{value}</p></div>)}</div>
       {attendance.breaks?.length > 0 && <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Break intervals</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{attendance.breaks.map((breakItem: any, index: number) => <div key={`${breakItem.break_started_at}-${index}`} className="rounded-lg bg-white p-2 text-xs"><p className="font-medium text-slate-700">Break {index + 1}</p><p className="mt-1 text-slate-500">Start · {fmt.dateTime(breakItem.break_started_at)}</p><p className="text-slate-500">End · {breakItem.break_ended_at ? fmt.dateTime(breakItem.break_ended_at) : "In progress"}</p></div>)}</div></div>}
@@ -465,14 +497,7 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
          </CardContent>
        </Card>
      </div>
-      {(canReview || canManage || canAudit) && <div className="flex flex-wrap gap-2 border-y border-slate-100 py-3">
-       {canReview && attendance.review_status !== "needs_review" && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs text-orange-700" onClick={() => changeReview("needs_review")}><AlertTriangle className="mr-1.5 h-3.5 w-3.5" />Needs review</Button>}
-       {canReview && attendance.review_status !== "approved" && attendance.review_status !== "locked" && <Button size="sm" className="h-8 bg-emerald-600 text-xs hover:bg-emerald-700" onClick={() => changeReview("approved")}><Check className="mr-1.5 h-3.5 w-3.5" />Approve</Button>}
-       {canReview && attendance.review_status === "approved" && <Button size="sm" className="h-8 bg-blue-700 text-xs hover:bg-blue-800" onClick={() => changeReview("locked")}><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Lock record</Button>}
-        {canAudit && attendance.session_number === 1 && !attendance.second_session_approved && attendance.status !== "active" && <Button size="sm" variant="outline" className="h-8 border-blue-200 text-xs text-blue-700 hover:bg-blue-50" onClick={() => approveSecondSession().catch((error: any) => window.alert(error.message))}><Clock3 className="mr-1.5 h-3.5 w-3.5" />Approve second session</Button>}
-       {canManage && attendance.review_status !== "locked" && <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { setTimeIn(toInput(attendance.time_in)); setTimeOut(toInput(attendance.time_out)); setEditing(value => !value); }}><Pencil className="mr-1.5 h-3.5 w-3.5" />Correct times</Button>}
-     </div>}
-     {editing && canManage && <div className="rounded-xl border border-red-100 bg-red-50/50 p-4"><div className="grid gap-3 sm:grid-cols-2"><div><Label className="text-[11px]">Time in</Label><Input type="datetime-local" value={timeIn} onChange={e => setTimeIn(e.target.value)} className="mt-1 h-9 text-xs" /></div><div><Label className="text-[11px]">Time out</Label><Input type="datetime-local" value={timeOut} onChange={e => setTimeOut(e.target.value)} className="mt-1 h-9 text-xs" /></div></div><Label className="mt-3 block text-[11px]">Reason required</Label><Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Forgot to clock out" className="mt-1 h-9 text-xs" /><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button><Button size="sm" className="bg-red-600 text-xs hover:bg-red-700" disabled={!reason.trim()} onClick={() => submitCorrection().catch((error: any) => window.alert(error.message))}>Save correction</Button></div></div>}
+      <div className="border-y border-slate-100 py-3"><AttendanceLogActions attendance={attendance} canViewAll={Boolean(data.can_view_all)} /></div>
     <div><h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><History className="h-3.5 w-3.5" />Record History</h3><div className="space-y-2">{audit.length ? audit.map((entry: any) => <div key={entry.id} className="rounded-lg border border-slate-100 p-3 text-xs"><div className="flex justify-between gap-3"><span className="font-medium capitalize text-slate-700">{String(entry.action).replace(/_/g, " ")}</span><span className="text-slate-400">{fmt.dateTime(entry.created_at)}</span></div><p className="mt-1 text-slate-500">{entry.changed_field ? `${entry.changed_field} changed` : "Attendance event"}{entry.reason ? ` · ${entry.reason}` : ""}</p></div>) : <p className="text-sm text-slate-400">No administrative changes recorded.</p>}</div></div>
   </CardContent></Card>;
 }
@@ -483,6 +508,9 @@ function Logs() {
   const fmt = useTimeService();
   const { hasPermission, isLoading: permissionsLoading } = usePermissions();
   const canViewAll = hasPermission("attendance", "view_all");
+  const canReviewAttendance = canViewAll && hasPermission("attendance", "approve");
+  const canManageAttendance = canViewAll && hasPermission("attendance", "manage");
+  const canAuditAttendance = canViewAll && hasPermission("attendance", "audit");
   const [status, setStatus] = useState("all");
   const [startMethod, setStartMethod] = useState("all");
   const [reviewStatus, setReviewStatus] = useState(() => attendanceSearchParams(location).get("reviewStatus") ?? "all");
@@ -531,15 +559,21 @@ function Logs() {
   }, [rows]);
   const expectedTeamMembers = selectedMember ? 1 : teamMembers.length;
   const selectedUserId = canViewAll ? userId : String(currentUser?.id ?? "");
-  const getExpandedRecordsForDate = (dateRecords: any[]) => {
-    if (selectedId == null || !dateRecords.some((row: any) => Number(row.id) === selectedId)) return [];
-    const matchingRecords = selectedMember
+  const rowActionItems = (dateRecords: any[]) => {
+    const actionRecords = selectedMember
       ? dateRecords.filter((row: any) => String(row.user_id) === selectedUserId)
-      : dateRecords.filter((row: any) => Number(row.id) === selectedId);
-    return matchingRecords.sort((a: any, b: any) => new Date(a.time_in ?? 0).getTime() - new Date(b.time_in ?? 0).getTime());
+      : dateRecords;
+    return actionRecords.map((attendance: any) => {
+      const sameEmployeeRecords = dateRecords.filter((row: any) => String(row.user_id) === String(attendance.user_id));
+      const labelParts = [];
+      if (!selectedMember) labelParts.push(attendance.employee_name || attendance.employee_username || "Employee");
+      if (sameEmployeeRecords.length > 1 || Number(attendance.session_number) > 1) {
+        labelParts.push(`Session ${attendance.session_number ?? 1}`);
+      }
+      return { attendance, label: labelParts.join(" · ") || undefined };
+    });
   };
-  const selectedRecordIsInLedger = selectedId != null && rows.some((row: any) => Number(row.id) === selectedId);
-  const showStandaloneSelectedLog = selectedId != null && !query.isLoading && !selectedRecordIsInLedger;
+  const showStandaloneSelectedLog = selectedId != null && !query.isLoading && !query.isError;
   const formatDailyTime = (records: any[], field: "time_in" | "time_out") => {
       const values = records
       .map(row => row[field])
