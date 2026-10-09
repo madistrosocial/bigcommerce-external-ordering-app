@@ -21,7 +21,7 @@ export async function generatePdfBase64FromElement(element: HTMLElement | null):
 
   const canvas = await html2canvas(element, {
     scale: 2,
-    backgroundColor: "#fbfaf7",
+    backgroundColor: "#f4f4f4",
     useCORS: true,
     logging: false,
   });
@@ -45,7 +45,7 @@ export async function generatePdfBase64FromElement(element: HTMLElement | null):
     pageCanvas.height = sourceHeight;
     const context = pageCanvas.getContext("2d");
     if (!context) throw new Error("Could not prepare the payslip PDF.");
-    context.fillStyle = "#fbfaf7";
+    context.fillStyle = "#f4f4f4";
     context.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
     context.drawImage(canvas, 0, sourceY, canvas.width, sourceHeight, 0, 0, canvas.width, sourceHeight);
     pdf.addImage(

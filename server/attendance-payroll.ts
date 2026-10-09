@@ -54,6 +54,17 @@ function hours(value: number): number {
   return Math.round((value / 3600) * 100) / 100;
 }
 
+function resolvePayslipHourlyRate(slip: any, lines: any[], fallbackRate: unknown = 0): string {
+  const snapshotRate = Number(slip.hourly_rate_snapshot ?? 0);
+  const regularLineRate = Number(lines.find((line) =>
+    line.line_type === "regular" && Number(line.rate) > 0,
+  )?.rate ?? 0);
+  const currentProfileRate = Number(fallbackRate ?? 0);
+  const rate = [snapshotRate, regularLineRate, currentProfileRate]
+    .find((candidate) => Number.isFinite(candidate) && candidate > 0) ?? 0;
+  return rate.toFixed(4);
+}
+
 async function getAttendancePayBreakdowns(sessions: any[], now = new Date()) {
   if (!sessions.length) return new Map();
   const [timeZone, breaksByAttendance] = await Promise.all([
@@ -350,6 +361,7 @@ async function buildDraftPayslips(tx: any, run: any) {
       user_id: employee.id,
       employee_name_snapshot: employee.name,
       employee_username_snapshot: employee.username,
+      hourly_rate_snapshot: hourlyRate.toFixed(4),
       currency,
       regular_hours: regularHours.toFixed(2),
       overtime_hours: overtimeHours.toFixed(2),
@@ -389,7 +401,25 @@ async function fetchRunDetails(runId: number) {
     list.push(line);
     linesBySlip.set(line.payslip_id, list);
   }
-  return { run, payslips: slips.map((slip) => ({ ...slip, lines: linesBySlip.get(slip.id) ?? [] })) };
+  const profiles = slips.length
+    ? await db.select({
+      user_id: employeePayProfiles.user_id,
+      hourly_rate: employeePayProfiles.hourly_rate,
+    }).from(employeePayProfiles)
+      .where(inArray(employeePayProfiles.user_id, slips.map((slip) => slip.user_id)))
+    : [];
+  const profileRateByUser = new Map(profiles.map((profile) => [profile.user_id, profile.hourly_rate]));
+  return {
+    run,
+    payslips: slips.map((slip) => {
+      const slipLines = linesBySlip.get(slip.id) ?? [];
+      return {
+        ...slip,
+        hourly_rate: resolvePayslipHourlyRate(slip, slipLines, profileRateByUser.get(slip.user_id)),
+        lines: slipLines,
+      };
+    }),
+  };
 }
 
 export function registerAttendancePayrollRoutes(app: Express, requirePermission: PermissionMiddleware) {
@@ -428,11 +458,15 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
       res.json({
         profile: profile ?? null,
         payItems: items,
-        payslips: slipRows.map(({ slip, run }) => ({
-          ...slip,
-          run,
-          lines: linesBySlip.get(slip.id) ?? [],
-        })),
+        payslips: slipRows.map(({ slip, run }) => {
+          const slipLines = linesBySlip.get(slip.id) ?? [];
+          return {
+            ...slip,
+            hourly_rate: resolvePayslipHourlyRate(slip, slipLines, profile?.hourly_rate),
+            run,
+            lines: slipLines,
+          };
+        }),
       });
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? "Could not load your payroll information." });

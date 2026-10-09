@@ -821,6 +821,26 @@ export async function registerRoutes(
     CREATE INDEX IF NOT EXISTS attendance_daily_notes_user_date_idx
       ON attendance_daily_notes (user_id, work_date);
   `));
+  await db.execute(sql.raw(`
+    DO $$
+    BEGIN
+      IF to_regclass('public.payslips') IS NOT NULL THEN
+        ALTER TABLE payslips
+          ADD COLUMN IF NOT EXISTS hourly_rate_snapshot decimal(12,4) NOT NULL DEFAULT 0;
+        UPDATE payslips AS slip
+        SET hourly_rate_snapshot = COALESCE((
+          SELECT line.rate
+          FROM payslip_line_items AS line
+          WHERE line.payslip_id = slip.id
+            AND line.line_type = 'regular'
+            AND line.rate IS NOT NULL
+          ORDER BY line.id
+          LIMIT 1
+        ), 0)
+        WHERE slip.hourly_rate_snapshot = 0;
+      END IF;
+    END $$;
+  `));
 
   // ===== AUTH MIDDLEWARE =====
   const sessionSecret = process.env.SESSION_SECRET;

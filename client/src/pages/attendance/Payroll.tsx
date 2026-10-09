@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Banknote, CalendarDays, Check, ChevronDown, CircleDollarSign, Clock3, Download, FileText, Loader2, Mail, RefreshCw, Send, Settings2, Truck, UserRound, X } from "lucide-react";
+import { Banknote, CalendarDays, Check, ChevronDown, CircleDollarSign, Clock3, Download, FileText, Loader2, Mail, RefreshCw, Send, Settings2, UserRound, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -135,12 +135,10 @@ type PayslipForView = PayslipDocumentData & {
 function PayStatement({
   slip,
   canEmail = false,
-  businessLogo,
   company,
 }: {
   slip: PayslipForView;
   canEmail?: boolean;
-  businessLogo?: string | null;
   company?: Record<string, string | null | undefined>;
 }) {
   const documentRef = useRef<HTMLDivElement>(null);
@@ -151,10 +149,6 @@ function PayStatement({
   const [emailNotice, setEmailNotice] = useState("");
   const isFinalized = slip.run?.status === "finalized";
   const branding = {
-    businessLogo: businessLogo
-      ? <img src={businessLogo} alt="Company logo" />
-      : <Truck aria-hidden="true" className="h-12 w-12 text-white" />,
-    company_name: company?.company_name,
     company_address: company?.company_address,
     company_phone: company?.company_phone,
     company_email: company?.company_email,
@@ -466,11 +460,6 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
   const eligible = useQuery({ queryKey: ["attendance-overtime-eligible"], queryFn: () => apiJson("/api/attendance/payroll/overtime/eligible"), enabled: isEmployeePage });
   const claims = useQuery({ queryKey: ["attendance-overtime-mine"], queryFn: () => apiJson("/api/attendance/payroll/overtime/mine"), enabled: isEmployeePage });
   const config = useQuery({ queryKey: ["attendance-payroll-config"], queryFn: () => apiJson("/api/attendance/payroll/admin/config"), enabled: canViewPayroll });
-  const businessLogo = useQuery({
-    queryKey: ["public-business-logo"],
-    queryFn: () => apiJson("/api/public/business-logo"),
-    enabled: isEmployeePage || canViewPayroll,
-  });
   const invoiceRenderSettings = useQuery({
     queryKey: ["invoice-render-settings"],
     queryFn: () => apiJson("/api/invoice/render-settings"),
@@ -635,7 +624,6 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
         <div className="grid gap-3 lg:grid-cols-2">{ownPayslips.map((slip: any) => <PayStatement
           key={slip.id}
           slip={slip}
-          businessLogo={businessLogo.data?.value}
           company={invoiceRenderSettings.data}
         />)}</div>
       </section>}
@@ -728,7 +716,6 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
               key={slip.id}
               slip={{ ...slip, run: runDetails.data.run }}
               canEmail={canManage}
-              businessLogo={businessLogo.data?.value}
               company={invoiceRenderSettings.data}
             />)}</div>
           </CardContent>
