@@ -601,6 +601,7 @@ function Logs() {
         variant={showFilters ? "default" : "outline"}
         className={`h-8 gap-1.5 text-xs ${showFilters ? "bg-red-600 hover:bg-red-700" : ""}`}
         onClick={() => setShowFilters(value => !value)}
+        aria-expanded={showFilters}
         data-testid="btn-toggle-attendance-filters"
       >
         {showFilters ? <X className="h-3.5 w-3.5" /> : <Filter className="h-3.5 w-3.5" />}
@@ -658,18 +659,21 @@ function Logs() {
                   const names = dateRecords.map((row: any) => row.employee_name || row.employee_username).filter(Boolean);
                    const notes = dateRecords.map((row: any) => row.daily_note).filter(Boolean);
                    const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
-                   const displayHours = noAttendance ? "—" : selectedMember ? hours(record?.total_seconds) : hours(summary?.totalSeconds);
-                  return <tr key={date} className={`border-b border-slate-100 last:border-0 ${statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
+                   const memberTotalSeconds = memberRecords.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
+                   const displayHours = noAttendance ? "—" : selectedMember ? hours(memberTotalSeconds) : hours(summary?.totalSeconds);
+                   return <Fragment key={date}><tr className={`border-b border-slate-100 last:border-0 ${statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
                     <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold text-slate-800">{shortDate(date)}</span><span className="ml-2 text-[10px] text-slate-400">{date}</span></td>
                     <td className={`px-4 py-3 font-medium ${statusKey === "weekend" ? "text-slate-400" : "text-slate-600"}`}>{weekday(date)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span>{holiday && <span className="ml-2 text-[10px] text-amber-700">{holiday}</span>}</td>
-                     <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? (record?.time_in ? fmt.dateTime(record.time_in) : "—") : formatDailyTime(dateRecords, "time_in")}</td>
-                     <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? (record?.time_out ? fmt.dateTime(record.time_out) : "—") : formatDailyTime(dateRecords, "time_out")}</td>
-                     <td className="max-w-[320px] px-4 py-3 text-[11px] text-slate-500">{selectedMember ? formatDailyBreaks(record ? [record] : []) : formatDailyBreaks(dateRecords)}</td>
+                     <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_in") : formatDailyTime(dateRecords, "time_in")}</td>
+                     <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_out") : formatDailyTime(dateRecords, "time_out")}</td>
+                     <td className="max-w-[320px] px-4 py-3 text-[11px] text-slate-500">{selectedMember ? formatDailyBreaks(memberRecords) : formatDailyBreaks(dateRecords)}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</td>
                       <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? <><span>{record.start_method === "warehouse" ? "Warehouse" : record.start_method === "offsite" ? "Off-site" : "Route start"} · {record.status}</span>{record.daily_note && <span className="mt-1 block truncate text-[11px] text-blue-700" title={record.daily_note}>Note: {record.daily_note}</span>}</> : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "" : "Not expected") : (names.length ? <><span>{names.slice(0, 3).join(", ")}{names.length > 3 ? ` +${names.length - 3}` : ""}</span>{notes.length > 0 && <span className="mt-1 block truncate text-[11px] text-blue-700" title={notes.join(" | ")}>Notes available: {notes.length}</span>}</> : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "" : "Not expected")}</td>
-                     <td className="px-4 py-3 text-right">{canViewAll && record && <Button variant="ghost" size="sm" className="h-7 text-[11px] text-red-600 hover:text-red-700" onClick={() => setSelectedId(record.id)}>Open log<ChevronRight className="ml-1 h-3 w-3" /></Button>}</td>
-                  </tr>;
+                     <td className="px-4 py-3 text-right">{record && <Button variant="ghost" size="sm" className="h-7 text-[11px] text-red-600 hover:text-red-700" aria-expanded={isExpanded} aria-controls={detailsId} onClick={() => setSelectedId(isExpanded ? null : Number(record.id))}>{isExpanded ? `Close ${memberRecords.length > 1 ? "logs" : "log"}` : memberRecords.length > 1 ? `Open ${memberRecords.length} logs` : "Open log"}{isExpanded ? <X className="ml-1 h-3 w-3" /> : <ChevronRight className="ml-1 h-3 w-3" />}</Button>}</td>
+                   </tr>
+                   {isExpanded && <tr className="border-b border-slate-100 bg-slate-50/60"><td colSpan={9} className="p-3"><div id={detailsId} className="space-y-3">{expandedRecords.map((expandedRecord: any) => <LogDetail key={expandedRecord.id} id={Number(expandedRecord.id)} onClose={() => setSelectedId(null)} />)}</div></td></tr>}
+                 </Fragment>;
                 })}
               </tbody>
             </table>
@@ -677,20 +681,29 @@ function Logs() {
            <div className="space-y-2 p-3 md:hidden">
              {dates.map(date => {
                const summary = recordsByDate.get(date);
-                const record = selectedMember ? summary?.records.find((row: any) => String(row.user_id) === selectedUserId) : undefined;
+                const dateRecords = summary?.records ?? [];
+                const memberRecords = selectedMember
+                  ? dateRecords.filter((row: any) => String(row.user_id) === selectedUserId)
+                  : [];
+                const record = memberRecords[0];
+                const expandedRecords = getExpandedRecordsForDate(dateRecords);
+                const isExpanded = expandedRecords.length > 0;
+                const detailsId = `attendance-log-mobile-details-${date}`;
                 const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, selectedMember ? selectedUserId : "");
                const holiday = holidayMap.get(date);
                 const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
-                const displayHours = noAttendance ? "—" : selectedMember ? hours(record?.total_seconds) : hours(summary?.totalSeconds);
+                const memberTotalSeconds = memberRecords.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
+                const displayHours = noAttendance ? "—" : selectedMember ? hours(memberTotalSeconds) : hours(summary?.totalSeconds);
                return <div key={date} className="rounded-xl border border-slate-100 bg-white p-3">
                  <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{shortDate(date)} <span className="font-normal text-slate-400">{weekday(date)}</span></p><p className="mt-1 text-[11px] text-slate-400">{date}{holiday ? ` · ${holiday}` : ""}</p></div><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span></div>
                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                      <div><span className="block text-slate-500">Time in</span><span className="font-medium text-slate-700">{selectedMember ? (record?.time_in ? fmt.dateTime(record.time_in) : "—") : formatDailyTime(summary?.records ?? [], "time_in")}</span></div>
-                      <div><span className="block text-slate-500">Time out</span><span className="font-medium text-slate-700">{selectedMember ? (record?.time_out ? fmt.dateTime(record.time_out) : "—") : formatDailyTime(summary?.records ?? [], "time_out")}</span></div>
+                       <div><span className="block text-slate-500">Time in</span><span className="font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_in") : formatDailyTime(summary?.records ?? [], "time_in")}</span></div>
+                       <div><span className="block text-slate-500">Time out</span><span className="font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_out") : formatDailyTime(summary?.records ?? [], "time_out")}</span></div>
                      <div><span className="block text-slate-500">Hours</span><span className="font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</span></div>
                    </div>
-                    {(selectedMember ? record?.breaks?.length : summary?.records?.some((row: any) => row.breaks?.length)) ? <p className="mt-2 text-[11px] text-slate-500"><span className="font-medium text-slate-600">Breaks: </span>{selectedMember ? formatDailyBreaks([record]) : formatDailyBreaks(summary?.records ?? [])}</p> : null}
-                  {canViewAll && record && <Button variant="outline" size="sm" className="mt-3 h-8 w-full text-xs text-red-600" onClick={() => setSelectedId(record.id)}>Open log<ChevronRight className="ml-1 h-3 w-3" /></Button>}
+                     {(selectedMember ? memberRecords.some((row: any) => row.breaks?.length) : summary?.records?.some((row: any) => row.breaks?.length)) ? <p className="mt-2 text-[11px] text-slate-500"><span className="font-medium text-slate-600">Breaks: </span>{selectedMember ? formatDailyBreaks(memberRecords) : formatDailyBreaks(summary?.records ?? [])}</p> : null}
+                   {record && <Button variant="outline" size="sm" className="mt-3 h-8 w-full text-xs text-red-600" aria-expanded={isExpanded} aria-controls={detailsId} onClick={() => setSelectedId(isExpanded ? null : Number(record.id))}>{isExpanded ? `Close ${memberRecords.length > 1 ? "logs" : "log"}` : memberRecords.length > 1 ? `Open ${memberRecords.length} logs` : "Open log"}{isExpanded ? <X className="ml-1 h-3 w-3" /> : <ChevronRight className="ml-1 h-3 w-3" />}</Button>}
+                   {isExpanded && <div id={detailsId} className="mt-3 space-y-3">{expandedRecords.map((expandedRecord: any) => <LogDetail key={expandedRecord.id} id={Number(expandedRecord.id)} onClose={() => setSelectedId(null)} />)}</div>}
                </div>;
              })}
            </div>
@@ -701,20 +714,20 @@ function Logs() {
             variant="outline"
             size="sm"
             className="h-8 gap-1 text-xs"
-            onClick={() => setMonth(value => shiftMonth(value, -1))}
+            onClick={() => { setSelectedId(null); setMonth(value => shiftMonth(value, -1)); }}
             aria-label="View previous month"
           >
             <ChevronLeft className="h-3.5 w-3.5" />Previous month
           </Button>
           <div className="text-center">
             <p className="text-xs font-semibold text-slate-700">{monthLabel(month)}</p>
-            {month !== currentMonthKey() && <Button variant="link" size="sm" className="h-5 p-0 text-[11px] text-red-600" onClick={() => setMonth(currentMonthKey())}>Return to current month</Button>}
+            {month !== currentMonthKey() && <Button variant="link" size="sm" className="h-5 p-0 text-[11px] text-red-600" onClick={() => { setSelectedId(null); setMonth(currentMonthKey()); }}>Return to current month</Button>}
           </div>
           <Button
             variant="outline"
             size="sm"
             className="h-8 gap-1 text-xs"
-            onClick={() => setMonth(value => shiftMonth(value, 1))}
+            onClick={() => { setSelectedId(null); setMonth(value => shiftMonth(value, 1)); }}
             aria-label="View next month"
           >
             Next month<ChevronRight className="h-3.5 w-3.5" />

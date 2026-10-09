@@ -11917,9 +11917,10 @@ export async function registerRoutes(
       if (nextTimeIn && nextTimeOut && nextTimeOut < nextTimeIn) {
         return res.status(400).json({ error: "Time out must be after time in." });
       }
-      const nextTotal = nextTimeIn && nextTimeOut
+      const elapsedSeconds = nextTimeIn && nextTimeOut
         ? Math.max(0, Math.floor((nextTimeOut.getTime() - nextTimeIn.getTime()) / 1000))
         : 0;
+      const nextTotal = Math.max(0, elapsedSeconds - Math.max(0, Math.floor(Number(attendance.break_seconds ?? 0))));
       const updated = await storage.updateAttendance(id, {
         time_in: nextTimeIn ?? null,
         time_out: nextTimeOut ?? null,
