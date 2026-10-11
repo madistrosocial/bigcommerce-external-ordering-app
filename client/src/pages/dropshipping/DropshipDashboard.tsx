@@ -108,7 +108,7 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
       <BrandOrdersWidget
         className={embedded ? "min-w-0" : "px-4 py-5 md:px-6"}
         title={embedded ? "Dropship Brand Monitor" : "Dropship Dashboard"}
-        description={embedded ? "Pin BigCommerce brands to track their orders alongside your sales and inventory activity." : "Monitor BigCommerce orders by the brands you pin here."}
+        description={embedded ? undefined : "Monitor BigCommerce orders by the brands you pin here."}
         titleIcon={<PackageOpen className="h-5 w-5 text-blue-600" />}
         titleLevel={embedded ? "h2" : "h1"}
         brands={pinnedBrands}
@@ -118,6 +118,7 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
         today={embedded ? undefined : dashboardQuery.data?.dates.today}
         timezone={dashboardQuery.data?.timezone}
         manageButtonLabel={embedded ? "Pin brands" : "Add brands to dashboard"}
+        manageButtonIconOnly={embedded}
         manageButtonLoading={brandsQuery.isLoading}
         removeDisabled={savePins.isPending}
         hideEmptyState={embedded}

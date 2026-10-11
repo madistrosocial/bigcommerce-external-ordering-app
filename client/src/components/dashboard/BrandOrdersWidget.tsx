@@ -40,6 +40,7 @@ export interface BrandOrdersWidgetProps {
   showHeader?: boolean;
   className?: string;
   manageButtonLabel?: string;
+  manageButtonIconOnly?: boolean;
   manageButtonLoading?: boolean;
   removeDisabled?: boolean;
   hideEmptyState?: boolean;
@@ -91,6 +92,7 @@ export function BrandOrdersWidget({
   showHeader = true,
   className = "",
   manageButtonLabel = "Manage brands",
+  manageButtonIconOnly = false,
   manageButtonLoading = false,
   removeDisabled = false,
   hideEmptyState = false,
@@ -122,9 +124,17 @@ export function BrandOrdersWidget({
             {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
           </div>
           {onManageBrands && (
-            <Button onClick={onManageBrands} disabled={manageButtonLoading}>
-              {manageButtonLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-              {manageButtonLabel}
+            <Button
+              onClick={onManageBrands}
+              disabled={manageButtonLoading}
+              className={manageButtonIconOnly ? "w-full sm:w-auto" : undefined}
+              aria-label={manageButtonIconOnly ? manageButtonLabel : undefined}
+              title={manageButtonIconOnly ? manageButtonLabel : undefined}
+            >
+              {manageButtonLoading
+                ? <Loader2 className={manageButtonIconOnly ? "h-4 w-4 animate-spin" : "mr-2 h-4 w-4 animate-spin"} />
+                : <Plus className={manageButtonIconOnly ? "h-4 w-4" : "mr-2 h-4 w-4"} />}
+              {!manageButtonIconOnly && manageButtonLabel}
             </Button>
           )}
         </header>
