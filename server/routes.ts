@@ -1315,26 +1315,40 @@ export async function registerRoutes(
       syncStage = "downloading CSV feed";
       let feedResponse: Awaited<ReturnType<typeof fetch>> | undefined;
       let lastFetchError: unknown;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      const maxFetchAttempts = 5;
+      for (let attempt = 0; attempt < maxFetchAttempts; attempt++) {
         try {
           const response = await fetch(KOLE_CSV_FEED_URL, {
-            headers: { Accept: "text/csv, application/octet-stream" },
-            signal: AbortSignal.timeout(20_000),
+            headers: {
+              Accept: "text/csv, application/octet-stream, */*",
+              "User-Agent": "Mozilla/5.0 (compatible; VendorCatalogSync/1.0)",
+              Referer: "https://www.koleimports.com/",
+            },
+            cache: "no-store",
+            signal: AbortSignal.timeout(120_000),
           });
-          if (response.ok || response.status < 500 || attempt === 2) {
+          const retryableStatus = response.status === 408 || response.status === 429 || response.status >= 500;
+          if (response.ok || !retryableStatus || attempt === maxFetchAttempts - 1) {
             feedResponse = response;
             break;
           }
           if (response.body) await response.body.cancel().catch(() => {});
+          const retryAfter = response.headers.get("retry-after") || "";
+          const retryAfterDate = Date.parse(retryAfter);
+          const retryAfterMs = /^\d+(?:\.\d+)?$/.test(retryAfter)
+            ? Number(retryAfter) * 1_000
+            : Number.isFinite(retryAfterDate) ? Math.max(0, retryAfterDate - Date.now()) : 0;
+          const backoffMs = Math.min(8_000, 500 * 2 ** attempt);
+          await new Promise((resolve) => setTimeout(resolve, Math.min(15_000, Math.max(backoffMs, retryAfterMs))));
         } catch (error) {
           lastFetchError = error;
-          if (attempt === 2) break;
+          if (attempt === maxFetchAttempts - 1) break;
+          await new Promise((resolve) => setTimeout(resolve, Math.min(8_000, 500 * 2 ** attempt)));
         }
-        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
       }
       if (!feedResponse) {
         const detail = lastFetchError instanceof Error ? ` (${lastFetchError.message})` : "";
-        throw new Error(`The vendor CSV feed could not be reached after 3 attempts${detail}.`);
+        throw new Error(`The vendor CSV feed could not be reached after ${maxFetchAttempts} attempts${detail}.`);
       }
       if (!feedResponse.ok) {
         if (feedResponse.status >= 500) {
