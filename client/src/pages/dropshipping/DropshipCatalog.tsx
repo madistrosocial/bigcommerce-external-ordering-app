@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChevronLeft, ChevronRight, Eye, Filter, Link2, Loader2, Package, Plus, RefreshCw, Search, Upload, X } from "lucide-react";
 
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 50;
 const MAX_CSV_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 function formatCost(value: string | null | undefined) {
@@ -513,7 +513,7 @@ export default function DropshipCatalogPage() {
                   const image = imageSources(product.image_data);
                   return <tr key={product.id} className="hover:bg-slate-50/80">
                     <td className="px-3 py-3"><input type="checkbox" checked={selected.has(product.id)} disabled={Boolean(product.bigcommerce_product_id)} onChange={() => toggleProductSelected(product)} aria-label={`Select ${product.title}`} /></td>
-                    <td className="relative px-3 py-1 min-w-[240px]">
+                    <td className="relative px-3 py-0 min-w-[240px]">
                       <div className="relative min-h-[56px] pl-[60px] py-1.5 flex flex-col justify-center">
                         <div className="absolute inset-y-1 left-0 w-12">
                           {image.thumbnail ? (
