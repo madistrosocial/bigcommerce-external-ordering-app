@@ -148,7 +148,16 @@ export default function ProductSyncPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<SyncKind>("details");
+  const [activeTab, setActiveTab] = useState<SyncKind | "autosync">("details");
   const [selectedFields, setSelectedFields] = useState<SyncField[]>(["cost", "description", "inventory", "identity"]);
+  const [autoSyncDraft, setAutoSyncDraft] = useState<api.KoleProductSyncAutoSync>({
+    enabled: false,
+    fields: ["cost", "description", "inventory", "identity"],
+    frequency: "daily",
+    dailyTime: "02:00",
+    hourlyInterval: 4,
+    timezone: "",
+  });
   const [selectedProductIdsByKind, setSelectedProductIdsByKind] = useState<Record<SyncKind, Set<number>>>({
     details: new Set(),
     images: new Set(),
@@ -210,6 +219,27 @@ export default function ProductSyncPage() {
   const logoQuery = useQuery({
     queryKey: ["kole-product-sync-logo"],
     queryFn: api.getKoleProductSyncLogo,
+  });
+
+  const autoSyncQuery = useQuery({
+    queryKey: ["kole-product-sync-autosync"],
+    queryFn: api.getKoleProductSyncAutoSync,
+  });
+  useEffect(() => {
+    if (autoSyncQuery.data) setAutoSyncDraft(autoSyncQuery.data);
+  }, [autoSyncQuery.data]);
+  const saveAutoSync = useMutation({
+    mutationFn: api.saveKoleProductSyncAutoSync,
+    onSuccess: (config) => {
+      setAutoSyncDraft(config);
+      queryClient.setQueryData(["kole-product-sync-autosync"], config);
+      toast({ title: config.enabled ? "AutoSync schedule saved" : "AutoSync disabled" });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not save AutoSync",
+      description: toPublicVendorMessage(error.message),
+      variant: "destructive",
+    }),
   });
 
   const startSync = useMutation({
@@ -443,9 +473,6 @@ export default function ProductSyncPage() {
               Vendor Catalog · BigCommerce
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-[#1e332d] sm:text-[30px]">Product sync</h1>
-            <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-600">
-              Maintain mapped catalog details and image overlays. Review the latest run before starting another.
-            </p>
           </div>
           <div className="flex items-center gap-2 self-start rounded-lg border border-[#d6e2da] bg-[#eaf1ec] px-3 py-2 text-xs font-medium text-[#416556] sm:self-auto">
             <PackageCheck className="h-4 w-4" />
@@ -460,8 +487,13 @@ export default function ProductSyncPage() {
           </div>
         )}
 
-        <Tabs value={kind} onValueChange={(value) => {
+        <Tabs value={activeTab} onValueChange={(value) => {
+          if (value === "autosync") {
+            setActiveTab(value);
+            return;
+          }
           const nextKind = value as SyncKind;
+          setActiveTab(nextKind);
           setKind(nextKind);
           setPage(1);
           if (nextKind !== "images") setForceImageReupload(false);
@@ -473,6 +505,9 @@ export default function ProductSyncPage() {
               </TabsTrigger>
               <TabsTrigger value="images" className="h-9 flex-1 gap-2 rounded-lg px-4 text-sm data-[state=active]:bg-white data-[state=active]:text-[#245143] data-[state=active]:shadow-sm sm:flex-none">
                 <ImageIcon className="h-4 w-4" /> Image Sync
+              </TabsTrigger>
+              <TabsTrigger value="autosync" className="h-9 flex-1 gap-2 rounded-lg px-3 text-sm data-[state=active]:bg-white data-[state=active]:text-[#245143] data-[state=active]:shadow-sm sm:flex-none">
+                <Clock3 className="h-4 w-4" /> AutoSync
               </TabsTrigger>
             </TabsList>
             <p className="text-xs text-slate-500">
@@ -488,7 +523,6 @@ export default function ProductSyncPage() {
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">Details sync</p>
                       <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#243b32]">Choose what to update</h2>
-                      <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Compare selected listings against the current Product Catalog import (URL feed or uploaded CSV), or sync only the selected fields. Cost comparison never changes listings.</p>
                     </div>
                     <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
                       <Button
@@ -767,8 +801,134 @@ export default function ProductSyncPage() {
               </Card>
             </div>
           </TabsContent>
+
+          <TabsContent value="autosync" className="mt-4">
+            <Card className="border-[#dce4dd] bg-white shadow-sm">
+              <CardContent className="space-y-5 p-4 sm:p-5">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#638375]">Automated details sync</p>
+                  <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#243b32]">Schedule AutoSync</h2>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    Runs the selected Details Sync fields for all mapped products, using the company timezone{autoSyncDraft.timezone ? ` (${autoSyncDraft.timezone})` : ""}. Image Sync is not included.
+                  </p>
+                </div>
+
+                {autoSyncQuery.isError && (
+                  <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                    Could not load the saved schedule: {toPublicVendorMessage((autoSyncQuery.error as Error).message)}
+                  </p>
+                )}
+
+                <label className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3.5 py-3 ${autoSyncDraft.enabled ? "border-[#a8c0b3] bg-[#f2f7f3]" : "border-slate-200 bg-white"} ${!canManage ? "cursor-not-allowed opacity-75" : ""}`}>
+                  <Checkbox
+                    checked={autoSyncDraft.enabled}
+                    onCheckedChange={(checked) => setAutoSyncDraft((current) => ({ ...current, enabled: checked === true }))}
+                    disabled={!canManage || saveAutoSync.isPending || autoSyncQuery.isLoading}
+                    className="mt-0.5"
+                    aria-label="Enable AutoSync"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-slate-800">Enable AutoSync</span>
+                    <span className="mt-0.5 block text-xs text-slate-500">When enabled, the schedule runs for every mapped catalog product.</span>
+                  </span>
+                </label>
+
+                <fieldset disabled={!canManage || saveAutoSync.isPending || autoSyncQuery.isLoading} className="space-y-5 disabled:opacity-75">
+                  <div>
+                    <Label className="text-sm font-semibold text-slate-800">Details to sync</Label>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      {SYNC_FIELDS.map((field) => (
+                        <label key={field.value} className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3.5 py-3 ${autoSyncDraft.fields.includes(field.value) ? "border-[#a8c0b3] bg-[#f2f7f3]" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+                          <Checkbox
+                            checked={autoSyncDraft.fields.includes(field.value)}
+                            onCheckedChange={(checked) => setAutoSyncDraft((current) => ({
+                              ...current,
+                              fields: checked
+                                ? Array.from(new Set([...current.fields, field.value]))
+                                : current.fields.filter((item) => item !== field.value),
+                            }))}
+                            className="mt-0.5"
+                            aria-label={`AutoSync ${field.label}`}
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium text-slate-800">{field.label}</span>
+                            <span className="mt-0.5 block text-xs text-slate-500">{field.note}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    {autoSyncDraft.enabled && autoSyncDraft.fields.length === 0 && (
+                      <p className="mt-2 text-xs text-rose-700">Select at least one detail to enable AutoSync.</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label className="text-sm font-semibold text-slate-800">Schedule interval</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button type="button" variant={autoSyncDraft.frequency === "daily" ? "default" : "outline"} onClick={() => setAutoSyncDraft((current) => ({ ...current, frequency: "daily" }))}>Daily</Button>
+                      <Button type="button" variant={autoSyncDraft.frequency === "hourly" ? "default" : "outline"} onClick={() => setAutoSyncDraft((current) => ({ ...current, frequency: "hourly" }))}>Hourly</Button>
+                    </div>
+                    {autoSyncDraft.frequency === "daily" ? (
+                      <div className="max-w-xs space-y-1.5">
+                        <Label htmlFor="autosync-daily-time" className="text-xs text-slate-600">Run every day at</Label>
+                        <Input
+                          id="autosync-daily-time"
+                          type="time"
+                          value={autoSyncDraft.dailyTime}
+                          onChange={(event) => setAutoSyncDraft((current) => ({ ...current, dailyTime: event.target.value }))}
+                        />
+                      </div>
+                    ) : (
+                      <div className="max-w-xs space-y-1.5">
+                        <Label htmlFor="autosync-hourly-interval" className="text-xs text-slate-600">Run every (hours)</Label>
+                        <Input
+                          id="autosync-hourly-interval"
+                          type="number"
+                          min={1}
+                          max={23}
+                          step={1}
+                          value={autoSyncDraft.hourlyInterval}
+                          onChange={(event) => setAutoSyncDraft((current) => ({
+                            ...current,
+                            hourlyInterval: Number(event.target.value),
+                          }))}
+                        />
+                        <p className="text-[11px] leading-4 text-slate-500">Hourly runs align to the company clock (for example, every 4 hours at 00:00, 04:00, 08:00).</p>
+                      </div>
+                    )}
+                  </div>
+                </fieldset>
+
+                <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-slate-500">One shared schedule applies to all users.</p>
+                  <Button
+                    onClick={() => saveAutoSync.mutate({
+                      enabled: autoSyncDraft.enabled,
+                      fields: autoSyncDraft.fields,
+                      frequency: autoSyncDraft.frequency,
+                      dailyTime: autoSyncDraft.dailyTime,
+                      hourlyInterval: autoSyncDraft.hourlyInterval,
+                    })}
+                    disabled={
+                      !canManage
+                      || saveAutoSync.isPending
+                      || autoSyncQuery.isLoading
+                      || autoSyncQuery.isError
+                      || (autoSyncDraft.enabled && autoSyncDraft.fields.length === 0)
+                      || (autoSyncDraft.frequency === "hourly" && (!Number.isInteger(autoSyncDraft.hourlyInterval) || autoSyncDraft.hourlyInterval < 1 || autoSyncDraft.hourlyInterval > 23))
+                    }
+                    className="w-full bg-[#315f4d] text-white hover:bg-[#274f40] sm:w-auto"
+                  >
+                    {saveAutoSync.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    {saveAutoSync.isPending ? "Saving schedule…" : "Save AutoSync settings"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
 
+        {activeTab !== "autosync" && (
         <section aria-label="Mapped product sync results">
           <div className="mb-3 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
             <div>
@@ -918,6 +1078,7 @@ export default function ProductSyncPage() {
             <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />Completed {fmt.dateTime(job.completedAt)}.</p>
           )}
         </section>
+        )}
       </div>
     </main>
   );

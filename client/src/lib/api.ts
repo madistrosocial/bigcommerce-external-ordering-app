@@ -314,6 +314,14 @@ export type KoleProductMappingResult = {
 
 export type KoleProductSyncKind = "details" | "images";
 export type KoleProductSyncField = "cost" | "description" | "inventory" | "identity";
+export type KoleProductSyncAutoSync = {
+  enabled: boolean;
+  fields: KoleProductSyncField[];
+  frequency: "daily" | "hourly";
+  dailyTime: string;
+  hourlyInterval: number;
+  timezone: string;
+};
 export type KoleProductSyncJobSummary = {
   id: number;
   kind: KoleProductSyncKind;
@@ -388,6 +396,19 @@ export function getKoleProductSyncLatest(kind: KoleProductSyncKind) {
   return dropshipRequest<KoleProductSyncJobSummary | null>(
     `/dropshipping/product-sync/jobs/latest?kind=${encodeURIComponent(kind)}`,
   );
+}
+
+export function getKoleProductSyncAutoSync() {
+  return dropshipRequest<KoleProductSyncAutoSync>("/dropshipping/product-sync/autosync");
+}
+
+export function saveKoleProductSyncAutoSync(
+  config: Omit<KoleProductSyncAutoSync, "timezone">,
+) {
+  return dropshipRequest<KoleProductSyncAutoSync>("/dropshipping/product-sync/autosync", {
+    method: "PUT",
+    body: JSON.stringify(config),
+  });
 }
 
 export function getKoleProductSyncImageHistory(productIds: number[]) {

@@ -1149,6 +1149,103 @@ export async function registerRoutes(
     fetchBigCommerce: (url, init) => fetchBigCommerceWithRetry(url, init),
     getBigCommerceBrands: () => getCachedBcBrandOptions(),
   });
+  type KoleDetailsAutoSyncConfig = {
+    enabled: boolean;
+    fields: KoleProductSyncField[];
+    frequency: "daily" | "hourly";
+    dailyTime: string;
+    hourlyInterval: number;
+  };
+  const KOLE_DETAILS_AUTOSYNC_SETTING = "kole_details_autosync";
+  const validAutoSyncFields = new Set<KoleProductSyncField>(["cost", "description", "inventory", "identity"]);
+  const defaultAutoSyncConfig: KoleDetailsAutoSyncConfig = {
+    enabled: false,
+    fields: ["cost", "description", "inventory", "identity"],
+    frequency: "daily",
+    dailyTime: "02:00",
+    hourlyInterval: 4,
+  };
+  const normalizeAutoSyncConfig = (value: unknown): KoleDetailsAutoSyncConfig => {
+    let source = value;
+    if (source && typeof source === "object" && "value" in source) {
+      source = (source as { value: unknown }).value;
+    }
+    if (typeof source === "string") {
+      try { source = JSON.parse(source); } catch { source = null; }
+    }
+    const record = source && typeof source === "object" ? source as Record<string, unknown> : {};
+    const fields = Array.isArray(record.fields)
+      ? Array.from(new Set(record.fields.filter((field): field is KoleProductSyncField =>
+          typeof field === "string" && validAutoSyncFields.has(field as KoleProductSyncField),
+        )))
+      : defaultAutoSyncConfig.fields;
+    const frequency = record.frequency === "hourly" ? "hourly" : "daily";
+    const dailyTime = typeof record.dailyTime === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(record.dailyTime)
+      ? record.dailyTime
+      : defaultAutoSyncConfig.dailyTime;
+    const hourlyInterval = Number.isInteger(record.hourlyInterval) && Number(record.hourlyInterval) >= 1 && Number(record.hourlyInterval) <= 23
+      ? Number(record.hourlyInterval)
+      : defaultAutoSyncConfig.hourlyInterval;
+    return {
+      enabled: record.enabled === true && fields.length > 0,
+      fields,
+      frequency,
+      dailyTime,
+      hourlyInterval,
+    };
+  };
+  let koleDetailsAutoSyncTask: cron.ScheduledTask | null = null;
+  const runKoleDetailsAutoSync = async (fields: KoleProductSyncField[]) => {
+    const vendor = await getKoleVendor();
+    const productIds: number[] = [];
+    for (let page = 1; ; page++) {
+      const result = await storage.getDropshipProducts({
+        vendorId: vendor.id,
+        page,
+        limit: 100,
+        imported: true,
+      });
+      productIds.push(...result.rows
+        .filter((product) => Number.isSafeInteger(Number(product.id))
+          && Number(product.id) > 0
+          && Number.isSafeInteger(Number(product.bigcommerce_product_id))
+          && Number(product.bigcommerce_product_id) > 0)
+        .map((product) => Number(product.id)));
+      if (result.rows.length === 0 || productIds.length >= result.total) break;
+    }
+    if (!productIds.length) {
+      console.info("[Kole Product Sync] AutoSync skipped: no mapped products.");
+      return;
+    }
+    await koleProductSyncManager.start("details", vendor.id, productIds, fields);
+    console.info("[Kole Product Sync] AutoSync started.", { products: productIds.length, fields });
+  };
+  const applyKoleDetailsAutoSync = async (config: KoleDetailsAutoSyncConfig) => {
+    if (koleDetailsAutoSyncTask) {
+      koleDetailsAutoSyncTask.stop();
+      koleDetailsAutoSyncTask = null;
+    }
+    const timezone = await getCompanyTimezone(storage);
+    if (config.enabled) {
+      const schedule = config.frequency === "daily"
+        ? `${Number(config.dailyTime.slice(3))} ${Number(config.dailyTime.slice(0, 2))} * * *`
+        : `0 */${config.hourlyInterval} * * *`;
+      koleDetailsAutoSyncTask = cron.schedule(schedule, async () => {
+        try {
+          await runKoleDetailsAutoSync(config.fields);
+        } catch (error: any) {
+          console.error("[Kole Product Sync] AutoSync failed.", error?.message || String(error));
+        }
+      }, { timezone });
+    }
+    return { ...config, timezone };
+  };
+  void (async () => {
+    const saved = await storage.getSetting(KOLE_DETAILS_AUTOSYNC_SETTING).catch(() => null);
+    await applyKoleDetailsAutoSync(normalizeAutoSyncConfig(saved));
+  })().catch((error) => {
+    console.error("[Kole Product Sync] AutoSync schedule could not be loaded.", error);
+  });
 
   app.get("/api/dropshipping/kole/connection", requireAnyPermission([
     { module: "dropshipping_vendor", action: "view" },
@@ -1909,6 +2006,45 @@ export async function registerRoutes(
       res.json(await koleProductSyncManager.getLogo());
     } catch (error: any) {
       res.status(500).json({ error: error?.message || "Could not load the saved Product Sync logo." });
+    }
+  });
+
+  app.get("/api/dropshipping/product-sync/autosync", requirePermission("dropshipping_product_sync", "view"), async (_req, res) => {
+    try {
+      const saved = await storage.getSetting(KOLE_DETAILS_AUTOSYNC_SETTING);
+      res.json({ ...normalizeAutoSyncConfig(saved), timezone: await getCompanyTimezone(storage) });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Could not load the AutoSync schedule." });
+    }
+  });
+
+  app.put("/api/dropshipping/product-sync/autosync", requirePermission("dropshipping_product_sync", "manage"), async (req, res) => {
+    const { enabled, fields, frequency, dailyTime, hourlyInterval } = req.body ?? {};
+    if (typeof enabled !== "boolean") return res.status(400).json({ error: "Choose whether AutoSync is enabled." });
+    if (
+      !Array.isArray(fields)
+      || fields.some((field: unknown) => typeof field !== "string" || !validAutoSyncFields.has(field as KoleProductSyncField))
+    ) {
+      return res.status(400).json({ error: "Choose valid product details for AutoSync." });
+    }
+    if (enabled && fields.length === 0) {
+      return res.status(400).json({ error: "Select at least one product detail before enabling AutoSync." });
+    }
+    if (frequency !== "daily" && frequency !== "hourly") {
+      return res.status(400).json({ error: "Choose daily or hourly AutoSync." });
+    }
+    if (typeof dailyTime !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(dailyTime)) {
+      return res.status(400).json({ error: "Choose a valid daily AutoSync time." });
+    }
+    if (!Number.isInteger(hourlyInterval) || hourlyInterval < 1 || hourlyInterval > 23) {
+      return res.status(400).json({ error: "Hourly AutoSync must be between every 1 and 23 hours." });
+    }
+    const config = normalizeAutoSyncConfig({ enabled, fields, frequency, dailyTime, hourlyInterval });
+    try {
+      await storage.setSetting(KOLE_DETAILS_AUTOSYNC_SETTING, config);
+      res.json(await applyKoleDetailsAutoSync(config));
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Could not save the AutoSync schedule." });
     }
   });
 
