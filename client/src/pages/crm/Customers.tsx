@@ -38,13 +38,13 @@ type CrmUserOption = { id: number; name: string; avatar_thumbnail: string | null
 function RepBadge({ userId, name, avatar }: { userId: number | null; name: string; avatar?: string | null }) {
   const initials = name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase();
   return (
-    <Badge variant="secondary" className="inline-flex items-center gap-1.5 text-xs font-medium">
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700">
       <Avatar className="h-8 w-8">
         <AvatarImage src={avatar || undefined} alt="" />
         <AvatarFallback className={`text-[11px] font-bold ${getCustomerAvatarColor(userId ?? 0)}`}>{initials}</AvatarFallback>
       </Avatar>
       {name}
-    </Badge>
+    </span>
   );
 }
 
