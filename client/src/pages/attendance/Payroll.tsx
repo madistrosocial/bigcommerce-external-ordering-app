@@ -150,6 +150,8 @@ function PayStatement({
   const [emailNotice, setEmailNotice] = useState("");
   const isFinalized = slip.run?.status === "finalized";
   const branding = {
+    company_name: company?.company_name,
+    logo_base64: company?.logo_base64,
     company_address: company?.company_address,
     company_phone: company?.company_phone,
     company_email: company?.company_email,
@@ -585,7 +587,6 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
               ? <div className="grid grid-cols-2 gap-3">
                 <SummaryMetric label="Hourly rate" value={`${formatMoney(me.data.profile.hourly_rate, me.data.profile.currency)} / hr`} />
                 <SummaryMetric label="Currency" value={me.data.profile.currency} />
-                <p className="col-span-2 text-xs leading-5 text-slate-500">Regular hours are calculated per workday from 9:00 AM, excluding recorded breaks and early punches, and capped at 8 hours per day. Overtime starts only after 8 counted work hours and the scheduled end (6:00 PM, shifted for a late start); approved overtime is paid through payroll.</p>
               </div>
               : <EmptyState>Your hourly pay profile has not been set up. Ask a payroll manager to add it.</EmptyState>}
           </CardContent>
