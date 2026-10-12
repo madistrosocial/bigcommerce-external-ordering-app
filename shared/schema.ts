@@ -66,6 +66,13 @@ export const products = pgTable("products", {
   brand_id: integer("brand_id"),
   brand_name: text("brand_name"),
   categories: jsonb("categories").default([]), // Array of category IDs
+  inventory_tracking: text("inventory_tracking").notNull().default("none"),
+  bc_availability: text("bc_availability"),
+  bc_is_visible: boolean("bc_is_visible"),
+  bc_created_at: timestamp("bc_created_at"),
+  bc_updated_at: timestamp("bc_updated_at"),
+  catalog_synced_at: timestamp("catalog_synced_at"),
+  catalog_data: jsonb("catalog_data").notNull().default({}),
 });
 
 export const orders = pgTable("orders", {

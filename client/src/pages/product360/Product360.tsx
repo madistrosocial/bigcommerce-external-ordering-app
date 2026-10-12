@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useRoute } from "wouter";
 import {
   Area,
@@ -47,6 +47,7 @@ import {
   getProduct360Detail,
   getProduct360Overview,
   getProduct360Products,
+  syncProduct360Catalog,
   type Product360Detail,
   type Product360Overview,
   getAuthHeaders,
@@ -54,6 +55,7 @@ import {
 
 import { useTimeService } from "@/hooks/useTimeService";
 import { dateOnlyInTimeZone } from "@shared/timezone";
+import { useStore } from "@/lib/store";
 
 const COLORS = ["#2563eb", "#14b8a6", "#f59e0b", "#8b5cf6", "#ef4444", "#64748b"];
 
@@ -494,19 +496,39 @@ function DashboardOverviewContent({ data, focus }: { data: Product360Overview; f
 export function Product360OverviewPage() {
   const fmt = useTimeService();
   const [location] = useLocation();
+  const currentUser = useStore((state) => state.currentUser);
+  const queryClient = useQueryClient();
   const [from, setFrom] = useState(() => isoDaysAgo(29, fmt.tz));
   const [to, setTo] = useState(() => fmt.dateOnly());
   const [brand, setBrand] = useState("");
   const [category, setCategory] = useState("");
   const focus = location.split("/")[2] || "overview";
   const query = useQuery({ queryKey: ["product-360-overview", from, to, brand, category], queryFn: () => getProduct360Overview({ dateFrom: from, dateTo: to, brand, category }) });
+  const catalogSync = useMutation({
+    mutationFn: syncProduct360Catalog,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["product-360-overview"] });
+      await queryClient.invalidateQueries({ queryKey: ["product-360-products"] });
+    },
+  });
   const brandOptions = query.data?.brandOptions || [];
   const categoryOptions = query.data?.categoryOptions || ["Disposables", "E-Liquid", "Hardware", "Smoke Shop"];
   return (
-    <PageFrame title="Product 360" description="Complete product intelligence for better decisions" actions={<DateRangeControls from={from} to={to} brand={brand} category={category} brandOptions={brandOptions} categoryOptions={categoryOptions} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); }} onBrandChange={setBrand} onCategoryChange={setCategory} onExport={() => query.data && exportProduct360Overview(query.data, from, to, brand, category)} />}>
+    <PageFrame title="Product 360" description="Complete product intelligence for better decisions" actions={<div className="flex flex-wrap items-center justify-end gap-2"><DateRangeControls from={from} to={to} brand={brand} category={category} brandOptions={brandOptions} categoryOptions={categoryOptions} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); }} onBrandChange={setBrand} onCategoryChange={setCategory} onExport={() => query.data && exportProduct360Overview(query.data, from, to, brand, category)} />{currentUser?.role === "admin" && focus === "overview" && <Button variant="outline" size="sm" onClick={() => catalogSync.mutate()} disabled={catalogSync.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${catalogSync.isPending ? "animate-spin" : ""}`} />{catalogSync.isPending ? "Syncing catalog…" : "Temporary: sync catalog"}</Button>}</div>}>
+      {catalogSync.data && <Card className="mb-4 border-blue-200 bg-blue-50 p-4 text-sm text-blue-950"><div className="font-semibold">Catalog sync complete</div><div className="mt-1">Fetched {catalogSync.data.productsFetched.toLocaleString()} products across {catalogSync.data.pagesCompleted} pages. {catalogSync.data.productsAdded.toLocaleString()} added; {catalogSync.data.productsUpdated.toLocaleString()} updated.</div><div className="mt-1">Products table storage: {formatStorage(catalogSync.data.storageAfterBytes)} total ({formatStorage(catalogSync.data.tableBytes)} table, {formatStorage(catalogSync.data.indexBytes)} indexes); change: {catalogSync.data.storageDeltaBytes >= 0 ? "+" : ""}{formatStorage(catalogSync.data.storageDeltaBytes)}.</div></Card>}
+      {catalogSync.isError && <Card className="mb-4 border-red-200 bg-red-50 p-4 text-sm text-red-800">Catalog sync failed: {catalogSync.error.message}</Card>}
       {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : query.data ? <DashboardOverviewContent data={query.data} focus={focus} /> : <EmptyState message="No Product 360 data is available." />}
     </PageFrame>
   );
+}
+
+function formatStorage(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes === 0) return "0 bytes";
+  const sign = bytes < 0 ? "-" : "";
+  bytes = Math.abs(bytes);
+  const units = ["bytes", "KB", "MB", "GB"];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${sign}${(bytes / 1024 ** exponent).toFixed(exponent === 0 ? 0 : 2)} ${units[exponent]}`;
 }
 
 function LoadingState() {

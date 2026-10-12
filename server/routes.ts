@@ -6,6 +6,7 @@ import {
   insertOrderSchema,
   payslips,
   payrollRuns,
+  products,
   type InsertProduct,
   type InsertOrder,
   type InsertPriceHistoryCache,
@@ -2552,6 +2553,156 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[Product 360] overview failed:", error);
       res.status(500).json({ error: "Unable to load Product 360 overview" });
+    }
+  });
+
+  // Temporary admin-only full catalog sync for Product 360 storage sizing.
+  // This upserts BigCommerce-owned fields and deliberately preserves POS flags.
+  app.post("/api/product-360/catalog-sync", requireAdmin, async (_req, res) => {
+    let pagesCompleted = 0;
+    let productsFetched = 0;
+    try {
+      const { storeHash, headers } = await getBcCreds();
+      const brands = await getCachedBcBrandOptions(true);
+      const brandNames = new Map(brands.map((brand) => [brand.id, brand.name]));
+      const beforeResult = await db.execute(sql.raw(`
+        SELECT COUNT(*)::int AS products,
+               pg_total_relation_size('products'::regclass)::bigint AS total_bytes,
+               pg_table_size('products'::regclass)::bigint AS table_bytes,
+               pg_indexes_size('products'::regclass)::bigint AS index_bytes
+        FROM products
+      `));
+      const before = beforeResult.rows[0] as Record<string, unknown>;
+      const syncedAt = new Date();
+
+      for (let page = 1; ; page++) {
+        const url = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products?limit=250&page=${page}&include=variants,primary_image,custom_fields`;
+        const response = await fetchBigCommerceWithRetry(url, { headers });
+        if (!response.ok) {
+          throw new Error(`BigCommerce product page ${page} failed (${response.status}).`);
+        }
+        const payload = await response.json();
+        const items = Array.isArray(payload.data) ? payload.data : null;
+        if (!items) throw new Error(`BigCommerce returned an invalid product page (${page}).`);
+        if (items.length === 0) break;
+
+        const rows = items.map((product: any) => {
+          const brandId = Number(product.brand_id);
+          const primaryImage = product.primary_image?.url_standard
+            || product.primary_image?.url_thumbnail
+            || "";
+          const variants = (Array.isArray(product.variants) ? product.variants : []).map((variant: any) => ({
+            id: variant.id,
+            sku: variant.sku || "",
+            price: String(variant.price ?? product.price ?? "0"),
+            cost_price: variant.cost_price == null ? null : String(variant.cost_price),
+            stock_level: Number(variant.inventory_level) || 0,
+            min_purchase_quantity: variant.order_quantity_minimum ?? null,
+            max_purchase_quantity: variant.order_quantity_maximum ?? null,
+            option_values: (variant.option_values || []).map((option: any) => ({
+              id: option.id,
+              option_id: option.option_id,
+              label: option.label,
+              option_display_name: option.option_display_name,
+            })),
+          }));
+          const parsedDate = (value: unknown) => {
+            if (!value) return null;
+            const date = new Date(String(value));
+            return Number.isNaN(date.getTime()) ? null : date;
+          };
+          return {
+            bigcommerce_id: Number(product.id),
+            name: String(product.name || `Product ${product.id}`),
+            sku: String(product.sku || ""),
+            price: String(product.price ?? "0"),
+            image: String(primaryImage),
+            description: String(product.description || "").replace(/<[^>]*>?/gm, ""),
+            cost_price: product.cost_price == null ? null : String(product.cost_price),
+            stock_level: Number(product.inventory_level) || 0,
+            variants,
+            brand_id: Number.isInteger(brandId) && brandId > 0 ? brandId : null,
+            brand_name: brandNames.get(brandId) || null,
+            categories: Array.isArray(product.categories)
+              ? product.categories.map(Number).filter((id: number) => Number.isInteger(id) && id > 0)
+              : [],
+            inventory_tracking: String(product.inventory_tracking || "none"),
+            bc_availability: product.availability == null ? null : String(product.availability),
+            bc_is_visible: typeof product.is_visible === "boolean" ? product.is_visible : null,
+            bc_created_at: parsedDate(product.date_created),
+            bc_updated_at: parsedDate(product.date_modified),
+            catalog_synced_at: syncedAt,
+            catalog_data: product,
+          };
+        }).filter((product: any) => Number.isInteger(product.bigcommerce_id) && product.bigcommerce_id > 0);
+
+        for (let offset = 0; offset < rows.length; offset += 100) {
+          const batch = rows.slice(offset, offset + 100);
+          if (!batch.length) continue;
+          await db.insert(products).values(batch).onConflictDoUpdate({
+            target: products.bigcommerce_id,
+            set: {
+              name: sql`excluded.name`,
+              sku: sql`excluded.sku`,
+              price: sql`excluded.price`,
+              image: sql`excluded.image`,
+              description: sql`excluded.description`,
+              cost_price: sql`excluded.cost_price`,
+              stock_level: sql`excluded.stock_level`,
+              variants: sql`excluded.variants`,
+              brand_id: sql`excluded.brand_id`,
+              brand_name: sql`excluded.brand_name`,
+              categories: sql`excluded.categories`,
+              inventory_tracking: sql`excluded.inventory_tracking`,
+              bc_availability: sql`excluded.bc_availability`,
+              bc_is_visible: sql`excluded.bc_is_visible`,
+              bc_created_at: sql`excluded.bc_created_at`,
+              bc_updated_at: sql`excluded.bc_updated_at`,
+              catalog_synced_at: sql`excluded.catalog_synced_at`,
+              catalog_data: sql`excluded.catalog_data`,
+            },
+          });
+        }
+
+        productsFetched += rows.length;
+        pagesCompleted++;
+        const totalPages = Number(payload.meta?.pagination?.total_pages);
+        if (Number.isFinite(totalPages) && totalPages > 0) {
+          if (page >= totalPages) break;
+        } else if (items.length < 250) {
+          break;
+        }
+      }
+
+      const afterResult = await db.execute(sql.raw(`
+        SELECT COUNT(*)::int AS products,
+               pg_total_relation_size('products'::regclass)::bigint AS total_bytes,
+               pg_table_size('products'::regclass)::bigint AS table_bytes,
+               pg_indexes_size('products'::regclass)::bigint AS index_bytes
+        FROM products
+      `));
+      const after = afterResult.rows[0] as Record<string, unknown>;
+      const beforeCount = Number(before.products || 0);
+      const afterCount = Number(after.products || 0);
+      res.json({
+        pagesCompleted,
+        productsFetched,
+        productsInDatabase: afterCount,
+        productsAdded: Math.max(0, afterCount - beforeCount),
+        productsUpdated: Math.max(0, productsFetched - Math.max(0, afterCount - beforeCount)),
+        storageBeforeBytes: Number(before.total_bytes || 0),
+        storageAfterBytes: Number(after.total_bytes || 0),
+        storageDeltaBytes: Number(after.total_bytes || 0) - Number(before.total_bytes || 0),
+        tableBytes: Number(after.table_bytes || 0),
+        indexBytes: Number(after.index_bytes || 0),
+      });
+    } catch (error: any) {
+      console.error("[Product 360] catalog sync failed:", error);
+      res.status(502).json({
+        error: error?.message || "Product catalog sync failed.",
+        pagesCompleted,
+        productsFetched,
+      });
     }
   });
 
@@ -7159,12 +7310,12 @@ export async function registerRoutes(
   // Helper to get BC creds inline
   async function getBcCreds() {
     const setting = await storage.getSetting("bigcommerce_config");
-    let storeHash = process.env.BC_STORE_HASH || "";
-    let token = process.env.BC_TOKEN || "";
+    let storeHash = process.env.BC_STORE_HASH || process.env.BIGCOMMERCE_STORE_HASH || "";
+    let token = process.env.BC_TOKEN || process.env.BIGCOMMERCE_ACCESS_TOKEN || "";
     if (setting?.value) {
       const cfg = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
       storeHash = cfg.storeHash || storeHash;
-      token = cfg.token || token;
+      token = cfg.token || cfg.accessToken || token;
     }
     if (!storeHash || !token) throw new Error("BigCommerce credentials not configured");
     const headers = { "X-Auth-Token": token, "Content-Type": "application/json", Accept: "application/json" };

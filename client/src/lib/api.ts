@@ -48,6 +48,19 @@ export interface Product360ProductsResponse {
   limit: number;
 }
 
+export interface Product360CatalogSyncResult {
+  pagesCompleted: number;
+  productsFetched: number;
+  productsInDatabase: number;
+  productsAdded: number;
+  productsUpdated: number;
+  storageBeforeBytes: number;
+  storageAfterBytes: number;
+  storageDeltaBytes: number;
+  tableBytes: number;
+  indexBytes: number;
+}
+
 export interface Product360Detail {
   range: Product360Range;
   product: Record<string, unknown>;
@@ -72,6 +85,16 @@ export function getProduct360Overview(query: { dateFrom?: string; dateTo?: strin
   if (query.brand) params.set("brand", query.brand);
   if (query.category) params.set("category", query.category);
   return product360Request<Product360Overview>(`/product-360/overview?${params.toString()}`);
+}
+
+export async function syncProduct360Catalog(): Promise<Product360CatalogSyncResult> {
+  const response = await fetch(`${API_BASE}/product-360/catalog-sync`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Product catalog sync failed");
+  return body as Product360CatalogSyncResult;
 }
 
 export function getProduct360Products(query: Record<string, string | number | undefined> = {}) {
