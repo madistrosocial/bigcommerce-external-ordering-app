@@ -40,6 +40,13 @@
   --radius-lg: 0.5rem;
 }
 
+@media (max-width: 639px) {
+  .mt-5.space-y-5 > .grid.gap-3.sm\:grid-cols-2.lg\:grid-cols-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+}
+
 :root {
   /* Industrial Slate Theme */
   --background: 210 20% 98%;

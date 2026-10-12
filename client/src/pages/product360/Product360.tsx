@@ -134,6 +134,9 @@ function DateRangeControls({
   onBrandChange,
   onCategoryChange,
   onExport,
+  mobileOpen,
+  onMobileOpenChange,
+  showMobileToggle = true,
 }: {
   from: string;
   to: string;
@@ -145,11 +148,19 @@ function DateRangeControls({
   onBrandChange?: (value: string) => void;
   onCategoryChange?: (value: string) => void;
   onExport?: () => void;
+  mobileOpen?: boolean;
+  onMobileOpenChange?: (open: boolean) => void;
+  showMobileToggle?: boolean;
 }) {
   const fmt = useTimeService();
   const today = fmt.dateOnly();
+  const [localMobileOpen, setLocalMobileOpen] = useState(false);
+  const filtersOpen = mobileOpen ?? localMobileOpen;
+  const setFiltersOpen = onMobileOpenChange ?? setLocalMobileOpen;
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
+      {showMobileToggle && <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5 bg-white text-xs sm:hidden" aria-label="Toggle filters" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(!filtersOpen)}><ListFilter className="h-4 w-4" /><span>Filters</span></Button>}
+      <div className={`${filtersOpen ? "flex" : "hidden"} w-full flex-col items-stretch gap-2 sm:flex sm:w-auto sm:flex-row sm:items-center`}>
       <select
         className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm"
         value={`${from}|${to}`}
@@ -164,18 +175,19 @@ function DateRangeControls({
         <option value={`${isoDaysAgo(364, fmt.tz)}|${today}`}>Last 12 months</option>
         <option value={`${from}|${to}`}>Custom range</option>
       </select>
-      <Input type="date" className="h-9 w-[135px] bg-white text-xs" value={from} onChange={(e) => onChange(e.target.value, to)} />
-      <span className="text-xs text-slate-400">to</span>
-      <Input type="date" className="h-9 w-[135px] bg-white text-xs" value={to} onChange={(e) => onChange(from, e.target.value)} />
-      <select className="h-9 max-w-[150px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm" value={brand} onChange={(event) => onBrandChange?.(event.target.value)}>
+      <Input type="date" className="h-9 w-full bg-white text-xs sm:w-[135px]" value={from} onChange={(e) => onChange(e.target.value, to)} />
+      <span className="hidden text-xs text-slate-400 sm:inline">to</span>
+      <Input type="date" className="h-9 w-full bg-white text-xs sm:w-[135px]" value={to} onChange={(e) => onChange(from, e.target.value)} />
+      <select className="h-9 max-w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm sm:max-w-[150px]" value={brand} onChange={(event) => onBrandChange?.(event.target.value)}>
         <option value="">All Brands</option>
         {brandOptions.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
-      <select className="h-9 max-w-[150px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm" value={category} onChange={(event) => onCategoryChange?.(event.target.value)}>
+      <select className="h-9 max-w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm sm:max-w-[150px]" value={category} onChange={(event) => onCategoryChange?.(event.target.value)}>
         <option value="">All Categories</option>
         {categoryOptions.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
-      <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5 bg-white text-xs" onClick={onExport}><Download className="h-3.5 w-3.5" /> Export</Button>
+      {onExport && <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5 bg-white text-xs" onClick={onExport}><Download className="h-3.5 w-3.5" /> Export</Button>}
+      </div>
     </div>
   );
 }
@@ -352,7 +364,7 @@ function OverviewContent({ data, focus }: { data: Product360Overview; focus?: st
   return (
     <>
       {focus && focus !== "overview" && <Card className="mb-5 border-blue-100 bg-blue-50/50 p-4"><p className="text-sm font-semibold text-blue-900">{focus === "sales" ? "Sales Performance" : focus === "profitability" ? "Profitability" : focus === "inventory" ? "Inventory Intelligence" : focus === "replenishment" ? "Replenishment" : focus === "customers" ? "Product Customers" : "Product History"}</p><p className="mt-1 text-xs text-blue-700">This view is powered by the same server-side Product 360 data, with the overview below providing the portfolio context.</p></Card>}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
         <MetricCard label="Total products" value={number(metrics.total_products)} detail="Product Master records" icon={Boxes} />
         <MetricCard label="Active products" value={number(metrics.active_products)} detail="With current stock" icon={PackageCheck} tone="emerald" />
         <MetricCard label="Fast sellers" value={number(metrics.fast_sellers)} detail="Over 5 units per day" icon={ArrowUpRight} tone="blue" />
@@ -427,7 +439,7 @@ function DashboardOverviewContent({ data, focus }: { data: Product360Overview; f
   return (
     <>
       {focus && focus !== "overview" && <Card className="mb-3 border-blue-100 bg-blue-50/50 p-3"><p className="text-xs font-semibold text-blue-900">{focus === "sales" ? "Sales Performance" : focus === "profitability" ? "Profitability" : focus === "inventory" ? "Inventory Intelligence" : focus === "replenishment" ? "Replenishment" : focus === "customers" ? "Product Customers" : "Product History"}</p><p className="mt-1 text-[10px] text-blue-700">This view is powered by the same Product 360 data, with the overview below providing the portfolio context.</p></Card>}
-      <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-8">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
         <MetricCard label="Total Products" value={number(metrics.total_products)} detail="Product Master records" icon={Boxes} />
         <MetricCard label="Active Products" value={number(metrics.active_products)} detail={`${totalProducts ? Math.round((activeProducts / totalProducts) * 100) : 0}% of total`} icon={CheckCircle2} tone="emerald" />
         <MetricCard label="Fast Sellers" value={number(metrics.fast_sellers)} detail="Over 5 units per day" icon={TrendingUp} tone="blue" />
@@ -524,6 +536,7 @@ export function Product360ProductsPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [stockStatus, setStockStatus] = useState("");
   const [replenishmentStatus, setReplenishmentStatus] = useState("");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const query = useQuery({ queryKey: ["product-360-products", from, to, search, page, sortBy, sortDir, stockStatus, replenishmentStatus], queryFn: () => getProduct360Products({ dateFrom: from, dateTo: to, search, page, limit: 25, sortBy, sortDir, stockStatus, replenishmentStatus }) });
   const rows = query.data?.rows || [];
   const totalPages = Math.max(1, Math.ceil((query.data?.total || 0) / 25));
@@ -545,8 +558,8 @@ export function Product360ProductsPage() {
     }).catch(() => {});
   }
   return (
-    <PageFrame title="Products workspace" description="A server-paginated product intelligence view across sales, profitability, stock coverage, and replenishment." actions={<div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={exportCsv} disabled={!rows.length}><Download className="mr-2 h-4 w-4" /> Export current page</Button><DateRangeControls from={from} to={to} onChange={(a, b) => { setFrom(a); setTo(b); setPage(0); }} /></div>}>
-      <Card className="mb-5 border-slate-200 bg-white p-4 shadow-sm"><div className="flex flex-col gap-3 xl:flex-row xl:items-center"><div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><Input className="pl-9" placeholder="Search product, SKU, brand, variant, or BigCommerce ID" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} /></div><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={stockStatus} onChange={(e) => { setStockStatus(e.target.value); setPage(0); }}><option value="">All stock</option><option value="low">Low stock</option><option value="healthy">Healthy stock</option></select><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={replenishmentStatus} onChange={(e) => { setReplenishmentStatus(e.target.value); setPage(0); }}><option value="">All replenishment</option><option value="urgent">Urgent</option><option value="soon">Restock soon</option><option value="overstock">Overstock</option></select><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={`${sortBy}|${sortDir}`} onChange={(e) => { const [s, d] = e.target.value.split("|"); setSortBy(s); setSortDir(d as "asc" | "desc"); setPage(0); }}><option value="units_sold|desc">Sort: units sold</option><option value="revenue|desc">Sort: revenue</option><option value="gross_profit|desc">Sort: gross profit</option><option value="sales_velocity|desc">Sort: velocity</option><option value="current_stock|asc">Sort: stock low to high</option><option value="name|asc">Sort: name</option></select></div></Card>
+    <PageFrame title="Products workspace" description="A server-paginated product intelligence view across sales, profitability, stock coverage, and replenishment." actions={<div className="flex flex-wrap gap-2"><Button className="sm:hidden" variant="outline" size="sm" aria-label="Toggle filters" aria-expanded={mobileFiltersOpen} onClick={() => setMobileFiltersOpen((open) => !open)}><ListFilter className="mr-2 h-4 w-4" /> Filters</Button><Button variant="outline" size="sm" onClick={exportCsv} disabled={!rows.length}><Download className="mr-2 h-4 w-4" /> Export current page</Button><DateRangeControls from={from} to={to} mobileOpen={mobileFiltersOpen} showMobileToggle={false} onChange={(a, b) => { setFrom(a); setTo(b); setPage(0); }} /></div>}>
+      <Card className={`${mobileFiltersOpen ? "block" : "hidden"} mb-5 border-slate-200 bg-white p-4 shadow-sm sm:block`}><div className="flex flex-col gap-3 xl:flex-row xl:items-center"><div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><Input className="pl-9" placeholder="Search product, SKU, brand, variant, or BigCommerce ID" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} /></div><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={stockStatus} onChange={(e) => { setStockStatus(e.target.value); setPage(0); }}><option value="">All stock</option><option value="low">Low stock</option><option value="healthy">Healthy stock</option></select><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={replenishmentStatus} onChange={(e) => { setReplenishmentStatus(e.target.value); setPage(0); }}><option value="">All replenishment</option><option value="urgent">Urgent</option><option value="soon">Restock soon</option><option value="overstock">Overstock</option></select><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={`${sortBy}|${sortDir}`} onChange={(e) => { const [s, d] = e.target.value.split("|"); setSortBy(s); setSortDir(d as "asc" | "desc"); setPage(0); }}><option value="units_sold|desc">Sort: units sold</option><option value="revenue|desc">Sort: revenue</option><option value="gross_profit|desc">Sort: gross profit</option><option value="sales_velocity|desc">Sort: velocity</option><option value="current_stock|asc">Sort: stock low to high</option><option value="name|asc">Sort: name</option></select></div></Card>
       <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">{query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : rows.length ? <ProductTable rows={rows} /> : <EmptyState message="No products match these filters. Try a wider date range or clear the search." />}<div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><span>{query.data?.total ? `${page * 25 + 1}–${Math.min((page + 1) * 25, query.data.total)} of ${query.data.total}` : "0 products"}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button></div></div></Card>
     </PageFrame>
   );
