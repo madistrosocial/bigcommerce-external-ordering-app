@@ -256,8 +256,8 @@ function PayStatement({
           </div>
           {(downloadError || emailNotice) && <p role={downloadError ? "alert" : "status"} className={`mt-2 text-xs ${downloadError ? "text-rose-600" : "text-emerald-700"}`}>{downloadError || emailNotice}</p>}
         </CardHeader>
-        <CardContent className="pt-0">
-          <div ref={documentRef} className="min-w-0">
+        <CardContent className="max-w-full overflow-x-auto pt-0">
+          <div ref={documentRef} className="mx-auto w-[794px]">
             <PayslipDocument payslip={slip} branding={branding} />
           </div>
         </CardContent>
