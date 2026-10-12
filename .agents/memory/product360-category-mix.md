@@ -5,6 +5,6 @@ description: Product 360 category-sales attribution and category-catalog persist
 
 Product 360 category sales should use the existing product-to-category IDs and the BigCommerce category hierarchy rather than introducing a second product-category system. The four main categories are Disposables, E-Liquid, Hardware, and Smoke Shop. Products assigned to multiple main categories use the established primary-category order so the totals reconcile; unmatched sales remain visible in an Other / Uncategorized bucket. The chart supports both units sold and revenue.
 
-**Why:** Product Master already stores BigCommerce category IDs, while category names and hierarchy are available through the existing cached BigCommerce catalog. A new category table would duplicate existing relationships and add synchronization work without improving the initial report.
+**Why:** Product Master already stores BigCommerce category IDs, while category names and hierarchy are available through the existing cached BigCommerce catalog. These IDs are stored as numeric JSONB array elements; PostgreSQL's `?|` operator silently misses them when compared to text IDs.
 
-**How to apply:** Preserve the same category names, attribution rule, and reconciled totals when extending Product 360 category reporting or adding category filters.
+**How to apply:** Preserve the same category names, attribution rule, and reconciled totals when extending Product 360 category reporting or adding category filters. Use `jsonb_array_elements_text` for SQL matching and exclude higher-priority categories in selected-category filters so filtered totals match the chart.

@@ -145,13 +145,29 @@ function salesCte(range: Product360Range, productId?: number): string {
   `;
 }
 
-type Product360Filters = { brand?: string; categoryIds?: number[] };
+type Product360Filters = { brand?: string; categoryIds?: number[]; categoryExcludeIds?: number[] };
+
+function categoryMatchCondition(column: string, categoryIds: number[], excludedCategoryIds: number[] = []): string {
+  const ids = categoryIds.map((id) => quote(String(Math.trunc(id)))).join(", ");
+  const include = `EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(COALESCE(${column}, '[]'::jsonb)) AS product_category(category_id)
+    WHERE product_category.category_id IN (${ids})
+  )`;
+  if (!excludedCategoryIds.length) return include;
+  const excludedIds = excludedCategoryIds.map((id) => quote(String(Math.trunc(id)))).join(", ");
+  return `${include} AND NOT EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(COALESCE(${column}, '[]'::jsonb)) AS excluded_product_category(category_id)
+    WHERE excluded_product_category.category_id IN (${excludedIds})
+  )`;
+}
 
 function lineItemProductFilter(filters?: Product360Filters): string {
   const conditions = [
     filters?.brand ? `p_filter.brand_name = ${quote(filters.brand)}` : "",
     filters?.categoryIds?.length
-      ? `p_filter.categories ?| ARRAY[${filters.categoryIds.map((id) => quote(String(Math.trunc(id)))).join(", ")}]`
+      ? categoryMatchCondition("p_filter.categories", filters.categoryIds, filters.categoryExcludeIds)
       : "",
   ].filter(Boolean);
   return conditions.length
@@ -169,7 +185,7 @@ function productBaseCte(range: Product360Range, productId?: number, filters?: Pr
     productId ? `p.id = ${Math.trunc(productId)}` : "",
     filters?.brand ? `p.brand_name = ${quote(filters.brand)}` : "",
     filters?.categoryIds?.length
-      ? `p.categories ?| ARRAY[${filters.categoryIds.map((id) => quote(String(Math.trunc(id)))).join(", ")}]`
+      ? categoryMatchCondition("p.categories", filters.categoryIds, filters.categoryExcludeIds)
       : "",
   ].filter(Boolean);
   const productFilter = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -268,12 +284,24 @@ export async function getProduct360Overview(input: { dateFrom?: unknown; dateTo?
   const brand = String(input.brand ?? "").trim().slice(0, 100);
   const category = PRODUCT_360_MAIN_CATEGORIES.find((label) => categoryKey(label) === categoryKey(input.category));
   const categoryIds = category ? categoryIdsForMainCategory(category, categoryCatalog.categories) : undefined;
+  const categoryIndex = category ? PRODUCT_360_MAIN_CATEGORIES.indexOf(category) : -1;
+  const categoryExcludeIds = categoryIndex > 0
+    ? PRODUCT_360_MAIN_CATEGORIES.slice(0, categoryIndex).flatMap((label) => categoryIdsForMainCategory(label, categoryCatalog.categories))
+    : [];
   const filters: Product360Filters = {
     brand: brand || undefined,
     categoryIds: category ? (categoryIds?.length ? categoryIds : [0]) : undefined,
+    categoryExcludeIds,
   };
   const base = productBaseCte(range, undefined, filters);
   const lineFilter = lineItemProductFilter(filters);
+  const activityConditions = [
+    filters.brand ? `p.brand_name = ${quote(filters.brand)}` : "",
+    filters.categoryIds?.length
+      ? categoryMatchCondition("p.categories", filters.categoryIds, filters.categoryExcludeIds)
+      : "",
+  ].filter(Boolean);
+  const activityFilter = activityConditions.length ? `WHERE ${activityConditions.join(" AND ")}` : "";
   const [metrics, trend, fastSellers, profitDrivers, restockAlerts, slowMovers, brandPerformance, inventoryStatus, salesVelocity, replenishmentPriority, recentActivity, brandOptions, categorySales] = await Promise.all([
     db.execute(sql.raw(`
       SELECT
@@ -411,6 +439,7 @@ export async function getProduct360Overview(input: { dateFrom?: unknown; dateTo?
           'Inventory push' AS detail
         FROM inventory_push_logs l
         LEFT JOIN products p ON p.id = l.product_id
+        ${activityFilter}
         UNION ALL
         SELECT
           l.created_at AS event_date,
@@ -419,6 +448,7 @@ export async function getProduct360Overview(input: { dateFrom?: unknown; dateTo?
           'Inventory removal' AS detail
         FROM inventory_remove_logs l
         LEFT JOIN products p ON p.id = l.product_id
+        ${activityFilter}
       ) activity
       ORDER BY event_date DESC
       LIMIT 5
@@ -446,7 +476,7 @@ export async function getProduct360Overview(input: { dateFrom?: unknown; dateTo?
   const categoryTotals = new Map(PRODUCT_360_MAIN_CATEGORIES.map((label) => [label, { label, units: 0, revenue: 0 }]));
   let otherTotals = { label: "Other / Uncategorized", units: 0, revenue: 0 };
   for (const row of categorySales.rows as Record<string, unknown>[]) {
-    const label = resolveMainCategory(parseCategoryIds(row.categories), categoryMap);
+    const label = category || resolveMainCategory(parseCategoryIds(row.categories), categoryMap);
     const target = label === "Other / Uncategorized" ? otherTotals : categoryTotals.get(label)!;
     target.units += Number(row.units || 0);
     target.revenue += Number(row.revenue || 0);
