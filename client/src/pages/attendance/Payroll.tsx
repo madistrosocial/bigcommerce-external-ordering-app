@@ -150,7 +150,6 @@ function PayStatement({
   const [emailNotice, setEmailNotice] = useState("");
   const isFinalized = slip.run?.status === "finalized";
   const branding = {
-    company_name: company?.company_name,
     logo_base64: company?.logo_base64,
     company_address: company?.company_address,
     company_phone: company?.company_phone,

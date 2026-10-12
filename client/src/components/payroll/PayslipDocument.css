@@ -4,7 +4,6 @@
   display: flex;
   flex-direction: column;
   margin: 0 auto;
-  border-top: 3px solid #3576c7;
   color: #4a4a4a;
   background: #f4f4f4;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.09);
@@ -21,20 +20,20 @@
 }
 
 .payslip-brand {
+  position: relative;
   display: flex;
   min-height: 68px;
   align-items: center;
-  justify-content: center;
-  gap: 18px;
+  justify-content: flex-start;
   padding: 6px 5%;
-  border-bottom: 1px solid #3576c7;
   text-align: center;
 }
 
 .payslip-logo {
+  position: absolute;
+  left: 5%;
   width: 74px;
   max-height: 56px;
-  flex: 0 0 auto;
   object-fit: contain;
 }
 
@@ -44,6 +43,8 @@
   font-weight: 700;
   line-height: 1.2;
   overflow-wrap: anywhere;
+  text-align: center;
+  width: 100%;
 }
 
 .payslip-contact {
@@ -189,7 +190,6 @@
 @media (max-width: 600px) {
   .payslip-brand {
     min-height: 58px;
-    gap: 10px;
   }
 
   .payslip-logo {
