@@ -24,7 +24,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
 import { getCustomerAvatarColor } from "@/components/crm/CustomerIdentity";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { CrmUserAvatar } from "@/components/crm/CrmUserAvatar";
 
 type SortField =
   | "company" | "first_name" | "state" | "customer_group_name"
@@ -36,13 +36,9 @@ type HealthFilter = "" | "Healthy" | "Watch" | "At Risk" | "Lost";
 type CrmUserOption = { id: number; name: string; avatar_thumbnail: string | null };
 
 function RepBadge({ userId, name, avatar }: { userId: number | null; name: string; avatar?: string | null }) {
-  const initials = name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase();
   return (
     <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700">
-      <Avatar className="h-8 w-8">
-        <AvatarImage src={avatar || undefined} alt="" />
-        <AvatarFallback className={`text-[11px] font-bold ${getCustomerAvatarColor(userId ?? 0)}`}>{initials}</AvatarFallback>
-      </Avatar>
+      <CrmUserAvatar userId={userId} name={name} thumbnail={avatar} />
       {name}
     </span>
   );

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Wallet, Search, Download } from "lucide-react";
 import { Link } from "wouter";
 import { CustomerIdentity } from "@/components/crm/CustomerIdentity";
+import { CrmUserAvatar } from "@/components/crm/CrmUserAvatar";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -74,15 +75,20 @@ export default function StoreCreditLedger() {
   const ledgerFetch  = typeFilter !== "usage";
 
   // User lookup for cashier names (usage rows)
-  const { data: usersData } = useQuery({
-    queryKey: ["admin-users-lookup"],
-    queryFn: api.getAdminUsers,
-    staleTime: 300_000,
+  const { data: usersData = [] } = useQuery({
+    queryKey: ["crm", "users"],
+    queryFn: async () => {
+      const response = await fetch("/api/crm/users", { headers: getAuthHeaders() });
+      if (!response.ok) throw new Error("Failed to load users");
+      return response.json() as Promise<{ id: number; name: string; avatar_thumbnail: string | null }[]>;
+    },
+    staleTime: 120_000,
   });
   const userMap = useMemo(
-    () => new Map((usersData ?? []).map(u => [u.id, u.name || u.username])),
+    () => new Map(usersData.map(user => [user.id, user.name])),
     [usersData],
   );
+  const usersById = useMemo(() => new Map(usersData.map(user => [user.id, user])), [usersData]);
 
   // ── Ledger query ─────────────────────────────────────────────────────────
   // In "all" mode fetch a large batch for client-side merge; otherwise paginate.
@@ -374,7 +380,16 @@ export default function StoreCreditLedger() {
                           {fmtCurrency(totalAmt)}
                         </td>
                         <td className="px-3 py-2.5">
-                          <span className="text-[13px] text-slate-600">{row.issued_by_name || "—"}</span>
+                          {row.issued_by_name
+                            ? <span className="inline-flex items-center gap-2 text-[13px] text-slate-600">
+                                <CrmUserAvatar
+                                  userId={row.issued_by}
+                                  name={row.issued_by_name}
+                                  thumbnail={row.issued_by ? usersById.get(row.issued_by)?.avatar_thumbnail : undefined}
+                                />
+                                {row.issued_by_name}
+                              </span>
+                            : <span className="text-slate-300">—</span>}
                         </td>
                       </tr>
                     );

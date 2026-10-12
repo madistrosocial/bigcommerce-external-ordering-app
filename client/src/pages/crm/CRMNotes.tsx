@@ -11,6 +11,7 @@ import { MessageSquare, ChevronLeft, ChevronRight, Search, X, Filter } from "luc
 import { useTimeService } from "@/hooks/useTimeService";
 import { Link, useLocation } from "wouter";
 import { CustomerIdentity } from "@/components/crm/CustomerIdentity";
+import { CrmUserAvatar } from "@/components/crm/CrmUserAvatar";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -179,10 +180,11 @@ export default function CRMNotes() {
     queryFn: async () => {
       const r = await fetch("/api/crm/users", { headers: getAuthHeaders() });
       if (!r.ok) return [];
-      return r.json() as Promise<{ id: number; name: string }[]>;
+      return r.json() as Promise<{ id: number; name: string; avatar_thumbnail: string | null }[]>;
     },
     staleTime: 60_000,
   });
+  const crmUsersById = new Map(crmUsers.map(user => [user.id, user]));
 
   const { data: filterOpts } = useQuery({
     queryKey: ["crm", "filter-opts"],
@@ -429,8 +431,17 @@ export default function CRMNotes() {
                               </button>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap font-medium">
-                            {note.created_by_name || <span className="text-slate-300">—</span>}
+                      <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap font-medium">
+                        {note.created_by_name
+                          ? <span className="inline-flex items-center gap-2">
+                              <CrmUserAvatar
+                                userId={note.created_by ?? null}
+                                name={note.created_by_name}
+                                thumbnail={crmUsersById.get(note.created_by)?.avatar_thumbnail}
+                              />
+                              {note.created_by_name}
+                            </span>
+                          : <span className="text-slate-300">—</span>}
                           </td>
                           <td className="px-4 py-3">
                             <button
