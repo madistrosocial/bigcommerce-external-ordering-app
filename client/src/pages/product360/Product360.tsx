@@ -527,9 +527,6 @@ function ProductTable({ rows }: { rows: Record<string, unknown>[] }) {
 }
 
 export function Product360ProductsPage() {
-  const fmt = useTimeService();
-  const [from, setFrom] = useState(() => isoDaysAgo(29, fmt.tz));
-  const [to, setTo] = useState(() => fmt.dateOnly());
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [sortBy, setSortBy] = useState("bigcommerce_id");
@@ -537,7 +534,7 @@ export function Product360ProductsPage() {
   const [stockStatus, setStockStatus] = useState("");
   const [replenishmentStatus, setReplenishmentStatus] = useState("");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  const query = useQuery({ queryKey: ["product-360-products", from, to, search, page, sortBy, sortDir, stockStatus, replenishmentStatus], queryFn: () => getProduct360Products({ dateFrom: from, dateTo: to, search, page, limit: 25, sortBy, sortDir, stockStatus, replenishmentStatus }) });
+  const query = useQuery({ queryKey: ["product-360-products", search, page, sortBy, sortDir, stockStatus, replenishmentStatus], queryFn: () => getProduct360Products({ search, page, limit: 25, sortBy, sortDir, stockStatus, replenishmentStatus }) });
   const rows = query.data?.rows || [];
   const totalPages = Math.max(1, Math.ceil((query.data?.total || 0) / 25));
   function exportCsv() {
@@ -551,16 +548,16 @@ export function Product360ProductsPage() {
       body: JSON.stringify({
         report: "product_360",
         view: "product-performance",
-        filters: { dateFrom: from, dateTo: to, search, stockStatus, replenishmentStatus, page },
+        filters: { search, stockStatus, replenishmentStatus, page },
         exportType: "csv",
         rowCount: rows.length,
       }),
     }).catch(() => {});
   }
   return (
-    <PageFrame title="Products workspace" description="A server-paginated product intelligence view across sales, profitability, stock coverage, and replenishment." actions={<div className="flex flex-wrap gap-2"><Button className="sm:hidden" variant="outline" size="sm" aria-label="Toggle filters" aria-expanded={mobileFiltersOpen} onClick={() => setMobileFiltersOpen((open) => !open)}><ListFilter className="mr-2 h-4 w-4" /> Filters</Button><Button variant="outline" size="sm" onClick={exportCsv} disabled={!rows.length}><Download className="mr-2 h-4 w-4" /> Export current page</Button><DateRangeControls from={from} to={to} mobileOpen={mobileFiltersOpen} showMobileToggle={false} onChange={(a, b) => { setFrom(a); setTo(b); setPage(0); }} /></div>}>
+    <PageFrame title="Products workspace" description="A server-paginated product intelligence view across sales, profitability, stock coverage, and replenishment." actions={<div className="flex flex-wrap gap-2"><Button className="sm:hidden" variant="outline" size="sm" aria-label="Toggle filters" aria-expanded={mobileFiltersOpen} onClick={() => setMobileFiltersOpen((open) => !open)}><ListFilter className="mr-2 h-4 w-4" /> Filters</Button><Button variant="outline" size="sm" onClick={exportCsv} disabled={!rows.length}><Download className="mr-2 h-4 w-4" /> Export current page</Button></div>}>
       <Card className={`${mobileFiltersOpen ? "block" : "hidden"} mb-5 border-slate-200 bg-white p-4 shadow-sm sm:block`}><div className="flex flex-col gap-3 xl:flex-row xl:items-center"><div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><Input className="pl-9" placeholder="Search product, SKU, brand, variant, or BigCommerce ID" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} /></div><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={stockStatus} onChange={(e) => { setStockStatus(e.target.value); setPage(0); }}><option value="">All stock</option><option value="low">Low stock</option><option value="healthy">Healthy stock</option></select><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={replenishmentStatus} onChange={(e) => { setReplenishmentStatus(e.target.value); setPage(0); }}><option value="">All replenishment</option><option value="urgent">Urgent</option><option value="soon">Restock soon</option><option value="overstock">Overstock</option></select><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={`${sortBy}|${sortDir}`} onChange={(e) => { const [s, d] = e.target.value.split("|"); setSortBy(s); setSortDir(d as "asc" | "desc"); setPage(0); }}><option value="bigcommerce_id|desc">Sort: newest to oldest (BigCommerce)</option><option value="units_sold|desc">Sort: units sold</option><option value="revenue|desc">Sort: revenue</option><option value="gross_profit|desc">Sort: gross profit</option><option value="sales_velocity|desc">Sort: velocity</option><option value="current_stock|asc">Sort: stock low to high</option><option value="name|asc">Sort: name</option></select></div></Card>
-      <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">{query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : rows.length ? <ProductTable rows={rows} /> : <EmptyState message="No products match these filters. Try a wider date range or clear the search." />}<div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><span>{query.data?.total ? `${page * 25 + 1}–${Math.min((page + 1) * 25, query.data.total)} of ${query.data.total}` : "0 products"}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button></div></div></Card>
+      <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">{query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : rows.length ? <ProductTable rows={rows} /> : <EmptyState message="No products match these filters. Clear the search or stock and replenishment filters." />}<div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><span>{query.data?.total ? `${page * 25 + 1}–${Math.min((page + 1) * 25, query.data.total)} of ${query.data.total}` : "0 products"}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button></div></div></Card>
     </PageFrame>
   );
 }
