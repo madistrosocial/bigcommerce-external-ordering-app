@@ -1,6 +1,8 @@
 import { db } from "../db";
 import { bulkOrderImports } from "@shared/schema";
 import type { BulkOrderImport, InsertBulkOrderImport } from "@shared/schema";
+import { marketingOrderFormDrafts } from "@shared/schema";
+import type { MarketingOrderFormDraft } from "@shared/schema";
  import { type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type InsertPriceHistoryCache, type PriceHistoryCacheEntry, type InsertInventoryPushLog, type InventoryPushLog, type InsertInventoryRemoveLog, type InventoryRemoveLog, type InventoryLogRow, type InsertProductLinkLog, type ProductLinkLog, type Role, type InsertRole, type Permission, type InsertPermission, type InsertRolePermission, type InsertUserPermission, type InsertShipstationExportHistory, type ShipstationExportHistory, type InsertPromoFreeSkuTracker, type PromoFreeSkuTracker, type CrmCustomer, type InsertCrmCustomer, type CrmOrder, type InsertCrmOrder, type CrmSalesRep, type InsertCrmSalesRep, type CrmNote, type InsertCrmNote, type InsertCrmAuditLog, type CrmReactivationStage, type CrmReactivationCase, type CrmReactivationHistory, type PosPriceOverrideAudit, type InsertPosPriceOverrideAudit, type PosStoreCreditUsage, type InsertPosStoreCreditUsage, type InsertReportExportLog, type InsertBcOrderLineItem, type StoreCreditLedgerEntry, type InsertStoreCreditLedger, type EmailTemplate, type InventoryAuditTask, type CustomerSignup, type CustomerSignupAttempt, type InsertCustomerSignup, type MarketingCampaign, type MarketingAudience, type MarketingProductList, type MarketingProductListItem, type MarketingDeliveryLog, type AttendanceSession, type InsertAttendanceSession, type AttendanceDailyNote, type AttendanceCheckpoint, type InsertAttendanceCheckpoint, type AttendanceException, type InsertAttendanceException, type DropshipProduct, type InsertDropshipProduct, type DropshipSyncLog, type DropshipVendor, type InsertDropshipSyncLog, type ZohoAccountMapping, type InsertZohoAccountMapping, users, products, orders, settings, priceHistoryCache, inventoryPushLogs, inventoryRemoveLogs, productLinkLogs, roles, permissions, rolePermissions, userPermissions, shipstationExportHistory, promoFreeSkuTracker, customersMirror, zohoAccountMappings, customerOrdersMirror, customerSalesRep, customerSignups, customerSignupAttempts, crmCustomerNotes, crmAuditLog, crmReactivationStages, crmReactivationCases, crmReactivationHistory, attendanceSessions, attendanceDailyNotes, attendanceLocationCheckpoints, attendanceExceptions, posPriceOverrideAudit, posStoreCreditUsage, reportExportLogs, bcOrderLineItems, notifications, storeCreditLedger, emailTemplates, inventoryAuditTasks, dropshipVendors, dropshipProducts, dropshipSyncLogs, marketingCampaigns, marketingAudiences, marketingContacts, marketingAudienceMembers, marketingProductLists, marketingProductListItems, marketingDeliveryLogs, marketingCampaignRecipients, marketingCampaignActivity, marketingCampaignEvents, marketingCustomerPreferences, marketingSuppressions, marketingAutomations, marketingAutomationSteps, marketingAutomationExecutions } from "@shared/schema";
 import { eq, desc, and, inArray, notInArray, gt, gte, lt, lte, asc, or, ilike, sql, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -361,6 +363,11 @@ export interface IStorage {
   getMarketingDashboard(): Promise<any>;
   getMarketingCampaigns(opts?: { search?: string; status?: string; limit?: number; offset?: number }): Promise<{ campaigns: any[]; total: number }>;
   getMarketingCampaign(id: number): Promise<any | undefined>;
+  getMarketingOrderFormDrafts(): Promise<MarketingOrderFormDraft[]>;
+  getMarketingOrderFormDraft(id: number): Promise<MarketingOrderFormDraft | undefined>;
+  createMarketingOrderFormDraft(data: Omit<MarketingOrderFormDraft, "id" | "created_at" | "updated_at">): Promise<MarketingOrderFormDraft>;
+  updateMarketingOrderFormDraft(id: number, data: Partial<Pick<MarketingOrderFormDraft, "name" | "product_snapshots" | "file_format" | "sender_email" | "email_title" | "email_body">>): Promise<MarketingOrderFormDraft | undefined>;
+  deleteMarketingOrderFormDraft(id: number): Promise<boolean>;
   getMarketingProductLists(opts?: { search?: string }): Promise<any[]>;
   getMarketingProductList(id: number): Promise<any | undefined>;
   createMarketingProductList(data: { name: string; description?: string; created_by: number }): Promise<any>;
@@ -4134,6 +4141,40 @@ export class DatabaseStorage implements IStorage {
       db.select({ count: sql<number>`count(*)::int` }).from(marketingCampaigns).where(where),
     ]);
     return { campaigns: rows.map(row => ({ ...row.c, creator_name: row.creator_name, audience_name: row.audience_name })), total: countRows[0]?.count ?? 0 };
+  }
+
+  async getMarketingOrderFormDrafts(): Promise<MarketingOrderFormDraft[]> {
+    return db.select().from(marketingOrderFormDrafts)
+      .orderBy(desc(marketingOrderFormDrafts.updated_at), desc(marketingOrderFormDrafts.id));
+  }
+
+  async getMarketingOrderFormDraft(id: number): Promise<MarketingOrderFormDraft | undefined> {
+    const [draft] = await db.select().from(marketingOrderFormDrafts)
+      .where(eq(marketingOrderFormDrafts.id, id)).limit(1);
+    return draft;
+  }
+
+  async createMarketingOrderFormDraft(data: Omit<MarketingOrderFormDraft, "id" | "created_at" | "updated_at">): Promise<MarketingOrderFormDraft> {
+    const [draft] = await db.insert(marketingOrderFormDrafts).values(data).returning();
+    return draft;
+  }
+
+  async updateMarketingOrderFormDraft(
+    id: number,
+    data: Partial<Pick<MarketingOrderFormDraft, "name" | "product_snapshots" | "file_format" | "sender_email" | "email_title" | "email_body">>,
+  ): Promise<MarketingOrderFormDraft | undefined> {
+    const [draft] = await db.update(marketingOrderFormDrafts)
+      .set({ ...data, updated_at: new Date() })
+      .where(eq(marketingOrderFormDrafts.id, id))
+      .returning();
+    return draft;
+  }
+
+  async deleteMarketingOrderFormDraft(id: number): Promise<boolean> {
+    const rows = await db.delete(marketingOrderFormDrafts)
+      .where(eq(marketingOrderFormDrafts.id, id))
+      .returning({ id: marketingOrderFormDrafts.id });
+    return rows.length > 0;
   }
 
   async getMarketingCampaign(id: number): Promise<any | undefined> {

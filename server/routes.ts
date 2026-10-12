@@ -14097,6 +14097,71 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/marketing/order-forms/drafts", requireMarketingPageAccess("view_order_form"), async (_req, res) => {
+    try {
+      res.json(await storage.getMarketingOrderFormDrafts());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/marketing/order-forms/drafts", requireMarketingPageAccess("view_order_form", "create"), async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const name = String(body.name ?? "").trim();
+      if (!name || name.length > 120) return res.status(400).json({ error: "Draft name must be between 1 and 120 characters" });
+      if (body.file_format !== "csv" && body.file_format !== "xlsx") return res.status(400).json({ error: "Choose CSV or XLSX format" });
+      const draft = await storage.createMarketingOrderFormDraft({
+        name,
+        product_snapshots: Array.isArray(body.product_snapshots) ? body.product_snapshots.slice(0, 250) : [],
+        file_format: body.file_format,
+        sender_email: String(body.sender_email ?? "").trim().slice(0, 254),
+        email_title: String(body.email_title ?? "").trim().slice(0, 180),
+        email_body: sanitizeMarketingEditorHtml(String(body.email_body ?? "")),
+        created_by: getMarketingUserId(req),
+      });
+      res.status(201).json(draft);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/marketing/order-forms/drafts/:id", requireMarketingPageAccess("view_order_form", "edit"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!await storage.getMarketingOrderFormDraft(id)) return res.status(404).json({ error: "Order Form draft not found" });
+      const body = req.body ?? {};
+      const update: Record<string, unknown> = {};
+      if (body.name !== undefined) {
+        const name = String(body.name).trim();
+        if (!name || name.length > 120) return res.status(400).json({ error: "Draft name must be between 1 and 120 characters" });
+        update.name = name;
+      }
+      if (body.product_snapshots !== undefined) update.product_snapshots = Array.isArray(body.product_snapshots) ? body.product_snapshots.slice(0, 250) : [];
+      if (body.file_format !== undefined) {
+        if (body.file_format !== "csv" && body.file_format !== "xlsx") return res.status(400).json({ error: "Choose CSV or XLSX format" });
+        update.file_format = body.file_format;
+      }
+      if (body.sender_email !== undefined) update.sender_email = String(body.sender_email).trim().slice(0, 254);
+      if (body.email_title !== undefined) update.email_title = String(body.email_title).trim().slice(0, 180);
+      if (body.email_body !== undefined) update.email_body = sanitizeMarketingEditorHtml(String(body.email_body));
+      const draft = await storage.updateMarketingOrderFormDraft(id, update);
+      if (!draft) return res.status(404).json({ error: "Order Form draft not found" });
+      res.json(draft);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/marketing/order-forms/drafts/:id", requireMarketingPageAccess("view_order_form", "delete"), async (req, res) => {
+    try {
+      if (!await storage.deleteMarketingOrderFormDraft(Number(req.params.id))) return res.status(404).json({ error: "Order Form draft not found" });
+      res.status(204).end();
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Order Form customer lookup uses the CRM mirror and applies the caller's
   // existing CRM visibility scope without changing Marketing Audiences.
   app.get("/api/marketing/order-forms/customers", requireMarketingPageAccess("view_order_form"), async (req, res) => {

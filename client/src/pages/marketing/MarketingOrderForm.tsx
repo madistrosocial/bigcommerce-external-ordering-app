@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CheckCircle2, FileSpreadsheet, FileText, History, Loader2, Mail, Package, Search, Send, Users, X, XCircle } from "lucide-react";
+import { ArrowLeft, Bookmark, Check, CheckCircle2, FileSpreadsheet, FileText, History, Loader2, Mail, Package, Search, Send, Trash2, Users, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,6 +12,7 @@ import RichTextEditor, { stripHtml } from "@/components/editor/RichTextEditor";
 import {
   getMarketingAudiences,
   getMarketingOrderFormCustomers,
+  getMarketingOrderFormDrafts,
   getMarketingOrderFormHistory,
   getMarketingDeliveryLogs,
   getMarketingProductList,
@@ -19,6 +20,9 @@ import {
   getMarketingSenderSettings,
   searchMarketingProducts,
   sendMarketingOrderForms,
+  createMarketingOrderFormDraft,
+  updateMarketingOrderFormDraft,
+  deleteMarketingOrderFormDraft,
 } from "@/lib/api";
 import { PageShell } from "./Marketing";
 import { MarketingDeliveryLogPreview } from "./MarketingDeliveryLogPreview";
@@ -52,6 +56,16 @@ type OrderFormAudience = {
   name: string;
   audience_type: "manual" | "dynamic";
   member_count?: number;
+};
+
+type OrderFormDraft = {
+  id: number;
+  name: string;
+  product_snapshots: OrderFormProduct[];
+  file_format: "xlsx" | "csv";
+  sender_email: string;
+  email_title: string;
+  email_body: string;
 };
 
 const DEFAULT_EMAIL_TITLE = "Your Order Form from MidAtlantic Distribution";
@@ -91,6 +105,10 @@ export default function MarketingOrderForm() {
   const [senderEmail, setSenderEmail] = useState("");
   const [emailTitle, setEmailTitle] = useState(DEFAULT_EMAIL_TITLE);
   const [emailBody, setEmailBody] = useState(DEFAULT_EMAIL_BODY);
+  const [selectedDraftId, setSelectedDraftId] = useState("");
+  const [loadedDraftId, setLoadedDraftId] = useState("");
+  const [draftName, setDraftName] = useState("");
+  const [draftSaveOpen, setDraftSaveOpen] = useState(false);
   const [productListOpen, setProductListOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
 
@@ -125,6 +143,10 @@ export default function MarketingOrderForm() {
     queryKey: ["marketing-delivery-logs", "order_form"],
     queryFn: () => getMarketingDeliveryLogs({ type: "order_form", limit: 10 }),
   });
+  const { data: drafts = [], isLoading: draftsLoading } = useQuery<OrderFormDraft[]>({
+    queryKey: ["marketing-order-form-drafts"],
+    queryFn: getMarketingOrderFormDrafts,
+  });
 
   const customers = Object.values(selectedCustomers);
   const products = Object.values(selectedProducts);
@@ -142,6 +164,11 @@ export default function MarketingOrderForm() {
     ? Boolean(selectedAudienceId && recipientCount > 0)
     : audienceType === "selected_customers" && customers.length > 0;
   const canSend = hasPermission("marketing", "send");
+  const canCreateDraft = hasPermission("marketing", "create");
+  const canEditDraft = hasPermission("marketing", "edit");
+  const canDeleteDraft = hasPermission("marketing", "delete");
+  const selectedDraft = drafts.find(draft => String(draft.id) === selectedDraftId);
+  const selectedDraftLoaded = selectedDraftId !== "" && selectedDraftId === loadedDraftId;
 
   const sendMutation = useMutation({
     mutationFn: () => sendMarketingOrderForms({
@@ -166,6 +193,39 @@ export default function MarketingOrderForm() {
       });
     },
     onError: (error: any) => toast({ title: "Unable to send order forms", description: error.message, variant: "destructive" }),
+  });
+  const saveDraftMutation = useMutation({
+    mutationFn: async (mode: "new" | "update") => {
+      const payload = {
+        name: draftName.trim(),
+        product_snapshots: products,
+        file_format: format,
+        sender_email: senderEmail,
+        email_title: emailTitle,
+        email_body: emailBody,
+      };
+      return mode === "update" && selectedDraft
+        ? updateMarketingOrderFormDraft(selectedDraft.id, payload)
+        : createMarketingOrderFormDraft(payload);
+    },
+    onSuccess: (draft: OrderFormDraft) => {
+      setSelectedDraftId(String(draft.id));
+      setLoadedDraftId(String(draft.id));
+      setDraftSaveOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["marketing-order-form-drafts"] });
+      toast({ title: "Order Form draft saved", description: `“${draft.name}” is ready to reuse.` });
+    },
+    onError: (error: any) => toast({ title: "Unable to save draft", description: error.message, variant: "destructive" }),
+  });
+  const deleteDraftMutation = useMutation({
+    mutationFn: () => deleteMarketingOrderFormDraft(Number(selectedDraftId)),
+    onSuccess: () => {
+      setSelectedDraftId("");
+      setLoadedDraftId("");
+      queryClient.invalidateQueries({ queryKey: ["marketing-order-form-drafts"] });
+      toast({ title: "Order Form draft deleted" });
+    },
+    onError: (error: any) => toast({ title: "Unable to delete draft", description: error.message, variant: "destructive" }),
   });
 
   const toggleCustomer = (customer: OrderFormCustomer) => {
@@ -193,6 +253,22 @@ export default function MarketingOrderForm() {
       Array.from(new Map([...Object.values(current), ...listProducts].map(product => [product.id, product])).values())
         .map(product => [product.id, product]),
     ));
+  };
+  const loadDraft = () => {
+    if (!selectedDraft) return;
+    const savedProducts = (Array.isArray(selectedDraft.product_snapshots) ? selectedDraft.product_snapshots : [])
+      .map(product => ({ ...product, id: Number(product.id), variants: Array.isArray(product.variants) ? product.variants : [] }))
+      .filter(product => Number.isInteger(product.id) && product.id > 0);
+    setSelectedProducts(Object.fromEntries(savedProducts.map(product => [product.id, product])));
+    setFormat(selectedDraft.file_format === "csv" ? "csv" : "xlsx");
+    setSenderEmail(selectedDraft.sender_email || "");
+    setEmailTitle(selectedDraft.email_title || DEFAULT_EMAIL_TITLE);
+    setEmailBody(selectedDraft.email_body || DEFAULT_EMAIL_BODY);
+    setLoadedDraftId(String(selectedDraft.id));
+    setAudienceType("");
+    setSelectedAudienceId(null);
+    setSelectedCustomers({});
+    toast({ title: "Draft loaded", description: "Choose recipients before sending." });
   };
 
   const visibleProducts = useMemo(() => productResults.map(product => ({
@@ -309,6 +385,21 @@ export default function MarketingOrderForm() {
         <div className="min-w-0 space-y-5">
           <section className="min-w-0 rounded-xl border bg-white p-5 shadow-sm">
             <h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><Send className="h-4 w-4 text-blue-500" /> Review & Send</h2>
+            <div className="mb-4 rounded-lg border bg-slate-50 p-3">
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><Bookmark className="h-4 w-4 text-blue-500" /> Saved drafts</div>
+              <p className="mb-2 text-xs text-slate-500">Reuse products and email settings later. Recipients are never saved with a draft.</p>
+              <div className="flex flex-wrap gap-2">
+                <select className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm" value={selectedDraftId} onChange={event => setSelectedDraftId(event.target.value)} disabled={draftsLoading || drafts.length === 0} aria-label="Select a saved Order Form draft">
+                  <option value="">{draftsLoading ? "Loading drafts…" : drafts.length ? "Choose a saved draft…" : "No saved drafts yet"}</option>
+                  {drafts.map(draft => <option key={draft.id} value={draft.id}>{draft.name}</option>)}
+                </select>
+                <Button type="button" size="sm" variant="outline" onClick={loadDraft} disabled={!selectedDraft}>Load</Button>
+                {(canCreateDraft || (selectedDraftLoaded && canEditDraft)) && <Button type="button" size="sm" variant="outline" onClick={() => { setDraftName(selectedDraftLoaded ? selectedDraft?.name || "" : ""); setDraftSaveOpen(true); }}><Bookmark className="mr-1.5 h-3.5 w-3.5" /> Save draft</Button>}
+                {selectedDraft && canDeleteDraft && <Button type="button" size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => {
+                  if (window.confirm(`Delete the saved draft “${selectedDraft.name}”?`)) deleteDraftMutation.mutate();
+                }} disabled={deleteDraftMutation.isPending}><Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete</Button>}
+              </div>
+            </div>
              <label className="block min-w-0 text-sm font-medium text-slate-700">Email sent from
                <select className="mt-1.5 h-10 w-full min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm" value={senderEmail} disabled={senderSettingsLoading} onChange={event => setSenderEmail(event.target.value)}>
                  <option value="">{senderSettingsLoading ? "Loading sender emails…" : `Use default${senderSettings.defaultEmail ? ` (${senderSettings.defaultEmail})` : ""}`}</option>
@@ -375,6 +466,20 @@ export default function MarketingOrderForm() {
               <div className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Email</p><p className="mt-2 text-sm font-medium text-slate-800">{emailTitle || "No email title"}</p><p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{stripHtml(emailBody) || (/<img\b/i.test(emailBody) ? "Formatted message with inline image(s)." : "No email message")}</p></div>
             <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">The files are built from current BigCommerce product and variant availability. This action does not create an order or modify inventory.</div>
              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><Button className="w-full sm:w-auto" variant="outline" onClick={() => setReviewOpen(false)}>Back</Button><Button className="h-auto min-h-10 w-full whitespace-normal px-3 py-2 sm:w-auto" onClick={() => sendMutation.mutate()} disabled={sendMutation.isPending}>{sendMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin" /> Sending…</> : <><Send className="mr-2 h-4 w-4 shrink-0" /> Generate & Send Order Forms</>}</Button></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={draftSaveOpen} onOpenChange={setDraftSaveOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Save Order Form draft</DialogTitle><DialogDescription>Save products, file format, sender, and email content. Recipients must be selected each time.</DialogDescription></DialogHeader>
+          <label className="block text-sm font-medium text-slate-700">Draft name
+            <Input className="mt-1.5" value={draftName} maxLength={120} onChange={event => setDraftName(event.target.value)} placeholder="e.g. Seasonal accessories order form" />
+          </label>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="outline" onClick={() => setDraftSaveOpen(false)}>Cancel</Button>
+            {canCreateDraft && <Button onClick={() => saveDraftMutation.mutate("new")} disabled={!draftName.trim() || saveDraftMutation.isPending}>Save as new</Button>}
+            {selectedDraftLoaded && selectedDraft && canEditDraft && <Button onClick={() => saveDraftMutation.mutate("update")} disabled={!draftName.trim() || saveDraftMutation.isPending}>Update draft</Button>}
           </div>
         </DialogContent>
       </Dialog>

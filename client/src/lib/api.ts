@@ -787,6 +787,13 @@ export const getMarketingAudiencePreview = (filters: any) =>
   marketingRequest("/marketing/audience-preview", { method: "POST", body: JSON.stringify({ filters, limit: 25 }) });
 export const getMarketingOrderFormCustomers = (params: { search?: string; limit?: number; offset?: number } = {}) =>
   marketingRequest(`/marketing/order-forms/customers?search=${encodeURIComponent(params.search || "")}&limit=${params.limit || 25}&offset=${params.offset || 0}`);
+export const getMarketingOrderFormDrafts = () => marketingRequest("/marketing/order-forms/drafts");
+export const createMarketingOrderFormDraft = (data: any) =>
+  marketingRequest("/marketing/order-forms/drafts", { method: "POST", body: JSON.stringify(data) });
+export const updateMarketingOrderFormDraft = (id: number, data: any) =>
+  marketingRequest(`/marketing/order-forms/drafts/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+export const deleteMarketingOrderFormDraft = (id: number) =>
+  marketingRequest(`/marketing/order-forms/drafts/${id}`, { method: "DELETE" });
 export const getMarketingOrderFormHistory = () => marketingRequest("/marketing/order-forms/history");
 export const getMarketingDeliveryLogs = (params: { type?: "all" | "campaign" | "order_form"; campaignId?: number; customerId?: number; limit?: number; offset?: number } = {}) =>
   marketingRequest(`/marketing/logs?${new URLSearchParams({

@@ -874,6 +874,21 @@ export const marketingCampaigns = pgTable("marketing_campaigns", {
   updated_at: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const marketingOrderFormDrafts = pgTable("marketing_order_form_drafts", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  product_snapshots: jsonb("product_snapshots").notNull().default([]),
+  file_format: text("file_format").notNull().default("xlsx"),
+  sender_email: text("sender_email").notNull().default(""),
+  email_title: text("email_title").notNull().default(""),
+  email_body: text("email_body").notNull().default(""),
+  created_by: integer("created_by").notNull().references(() => users.id),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  updatedIdx: index("marketing_order_form_drafts_updated_idx").on(t.updated_at),
+}));
+
 export const marketingAudiences = pgTable("marketing_audiences", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   name: text("name").notNull(),
@@ -1152,6 +1167,7 @@ export type StoreCreditLedgerEntry = typeof storeCreditLedger.$inferSelect;
 export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type MarketingCampaign = typeof marketingCampaigns.$inferSelect;
+export type MarketingOrderFormDraft = typeof marketingOrderFormDrafts.$inferSelect;
 export type MarketingAudience = typeof marketingAudiences.$inferSelect;
 export type MarketingAudienceMember = typeof marketingAudienceMembers.$inferSelect;
 export type MarketingProductList = typeof marketingProductLists.$inferSelect;
