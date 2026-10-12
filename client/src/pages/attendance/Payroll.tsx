@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useLocation } from "wouter";
 import PayslipDocument, { type PayslipDocumentData } from "@/components/payroll/PayslipDocument";
 import { getAuthHeaders } from "@/lib/api";
 import { generatePdfBase64FromElement } from "@/lib/payslip-renderer";
@@ -430,13 +431,16 @@ export default function AttendancePayrollPage() {
   return <PayrollPage mode="employee" />;
 }
 
-export function PayrollManagementPage() {
-  return <PayrollPage mode="management" />;
+export type PayrollManagementSection = "overview" | "schedules" | "employee-rates";
+
+export function PayrollManagementPage({ section = "overview" }: { section?: PayrollManagementSection }) {
+  return <PayrollPage mode="management" section={section} />;
 }
 
-function PayrollPage({ mode }: { mode: "employee" | "management" }) {
+function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "management"; section?: PayrollManagementSection }) {
   const queryClient = useQueryClient();
   const { hasPermission } = usePermissions();
+  const [, setLocation] = useLocation();
   const isEmployeePage = mode === "employee";
   const canViewPayroll = mode === "management" && hasPermission("payroll", "view");
   const canManage = mode === "management" && hasPermission("payroll", "manage");
@@ -555,13 +559,18 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
   const rebuildReviewSessions = rebuildError?.code === "attendance_needs_review"
     ? rebuildError.attendanceReviewSessions ?? []
     : [];
+  const managementTitle = section === "schedules"
+    ? "Existing User-Group Schedules"
+    : section === "employee-rates"
+      ? "Employee Rates and Recurring Items"
+      : "Payroll Management";
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-5 md:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-700"><Banknote className="h-5 w-5" /></div>
-          <div><h1 className="text-xl font-bold text-slate-900">{isEmployeePage ? "My Pay & Overtime" : "Payroll Management"}</h1><p className="text-sm text-slate-500">{isEmployeePage ? "View your pay information and submit overtime claims." : canManage ? "Manage employee pay, schedules, payroll runs, and overtime reviews." : canViewPayroll ? "View employee pay, schedules, payroll runs, and overtime reviews." : "Review employee overtime claims."}</p></div>
+          <div><h1 className="text-xl font-bold text-slate-900">{isEmployeePage ? "My Pay & Overtime" : managementTitle}</h1><p className="text-sm text-slate-500">{isEmployeePage ? "View your pay information and submit overtime claims." : canManage ? "Manage employee pay, schedules, payroll runs, and overtime reviews." : canViewPayroll ? "View employee pay, schedules, payroll runs, and overtime reviews." : "Review employee overtime claims."}</p></div>
         </div>
         <Button type="button" variant="outline" size="sm" className="print:hidden" onClick={refresh}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
       </div>
@@ -628,8 +637,13 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
         />)}</div>
       </section>}
 
-      {mode === "management" && canViewPayroll && <div className="space-y-5 border-t border-slate-200 pt-5">
-        <div className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-slate-600" /><h2 className="text-lg font-bold text-slate-900">Payroll management</h2></div>
+      {mode === "management" && canViewPayroll && <nav aria-label="Payroll management sections" className="flex flex-wrap gap-2 border-t border-slate-200 pt-5">
+        <Button type="button" variant={section === "overview" ? "default" : "outline"} onClick={() => setLocation("/payroll")}>Payroll Management</Button>
+        <Button type="button" variant={section === "schedules" ? "default" : "outline"} onClick={() => setLocation("/payroll/schedules")}><CalendarDays className="mr-2 h-4 w-4" />Existing User-Group Schedules</Button>
+        <Button type="button" variant={section === "employee-rates" ? "default" : "outline"} onClick={() => setLocation("/payroll/employee-rates")}><UserRound className="mr-2 h-4 w-4" />Employee Rates and Recurring Items</Button>
+      </nav>}
+
+      {mode === "management" && canViewPayroll && section === "schedules" && <div className="space-y-5">
         {config.error && <p role="alert" className="text-sm text-rose-600">{config.error.message}</p>}
         <Card className="border-slate-200 shadow-sm">
           <CardHeader><CardTitle className="text-base">Existing user-group schedules</CardTitle></CardHeader>
@@ -638,7 +652,11 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
             {(config.data?.groups ?? []).map((group: any) => <ScheduleEditor key={group.id} group={group} onSaved={refresh} readOnly={!canManage} />)}
           </CardContent>
         </Card>
+        {!config.isLoading && config.data?.groups?.length === 0 && <p className="text-sm text-slate-500">Create or assign the existing user groups in Admin before setting payroll schedules.</p>}
+      </div>}
 
+      {mode === "management" && canViewPayroll && section === "employee-rates" && <div className="space-y-5">
+        {config.error && <p role="alert" className="text-sm text-rose-600">{config.error.message}</p>}
         <Card className="border-slate-200 shadow-sm">
           <CardHeader><CardTitle className="text-base">Employee rates and recurring items</CardTitle></CardHeader>
           <CardContent className="space-y-3">
@@ -649,7 +667,10 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
             <div className="space-y-3">{(employees.data?.employees ?? []).map((employee: any) => <EmployeePayEditor key={employee.id} employee={employee} onRefresh={refresh} readOnly={!canManage} />)}</div>
           </CardContent>
         </Card>
+      </div>}
 
+      {mode === "management" && canViewPayroll && section === "overview" && <div className="space-y-5">
+        <div className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-slate-600" /><h2 className="text-lg font-bold text-slate-900">Payroll runs</h2></div>
         {canManage && <Card className="border-slate-200 shadow-sm">
           <CardHeader><CardTitle className="text-base">Create a payroll run</CardTitle></CardHeader>
           <CardContent>
@@ -721,7 +742,6 @@ function PayrollPage({ mode }: { mode: "employee" | "management" }) {
           </CardContent>
         </Card>}
       </div>}
-      {mode === "management" && canViewPayroll && !config.isLoading && config.data?.groups?.length === 0 && <p className="text-sm text-slate-500">Create or assign the existing user groups in Admin before setting payroll schedules.</p>}
     </div>
   );
 }
