@@ -54,6 +54,7 @@
 - [Sales Report live inventory](sales-report-live-inventory.md) — resolve stock by SKU as well as variant ID, and never replace a cached value with zero on a live lookup miss.
 - [POS customer search layers](pos-customer-search-mirror.md) — device cache first, then customers_mirror with sync-on-miss; live BigCommerce calls stay post-selection or final fallback.
 - [POS product catalog scope](pos-product-catalog-scope.md) — the products table began as POS pinning state; catalog sync must preserve pin and promotion flags.
+- [Product 360 future goals](product360-future-goals.md) — plan for product change attribution, sales performance, and a BigCommerce draft lifecycle.
 - [Zoho CRM Account mapping](zoho-account-mapping.md) — Phase 1 reads Zoho Accounts only; local one-to-many mappings preserve manual decisions and CRM visibility.
 - [Product 360 category mix](product360-category-mix.md) — category IDs stay on products; category sales use the four main BigCommerce categories with primary assignment and a units/revenue toggle.
 - [Focused JSX patching](focused-jsx-patching.md) — use small, exact hunks for compressed JSX so one context mismatch does not block unrelated edits.
