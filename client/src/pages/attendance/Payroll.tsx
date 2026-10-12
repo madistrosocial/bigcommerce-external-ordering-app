@@ -136,17 +136,21 @@ type PayslipForView = PayslipDocumentData & {
 function PayStatement({
   slip,
   canEmail = false,
+  canEditEarnings = false,
   company,
   showActions = true,
   emailEndpoint,
+  onEarningsSaved,
   pendingAction,
   onPendingActionComplete,
 }: {
   slip: PayslipForView;
   canEmail?: boolean;
+  canEditEarnings?: boolean;
   company?: Record<string, string | null | undefined>;
   showActions?: boolean;
   emailEndpoint?: string;
+  onEarningsSaved?: () => void;
   pendingAction?: "download" | "email" | null;
   onPendingActionComplete?: () => void;
 }) {
@@ -156,7 +160,23 @@ function PayStatement({
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailTo, setEmailTo] = useState("");
   const [emailNotice, setEmailNotice] = useState("");
+  const manualAmount = (type: string) => (slip.lines ?? [])
+    .filter((line: any) => line.line_type === type)
+    .reduce((sum: number, line: any) => sum + Number(line.amount || 0), 0);
+  const [commission, setCommission] = useState("0.00");
+  const [incentives, setIncentives] = useState("0.00");
   const isFinalized = slip.run?.status === "finalized";
+  useEffect(() => {
+    setCommission(manualAmount("commission").toFixed(2));
+    setIncentives(manualAmount("incentive").toFixed(2));
+  }, [slip.id, slip.lines]);
+  const saveEarnings = useMutation({
+    mutationFn: () => apiJson(`/api/attendance/payroll/admin/payslips/${slip.id}/earnings`, jsonInit("PATCH", {
+      commission: Number(commission),
+      incentives: Number(incentives),
+    })),
+    onSuccess: onEarningsSaved,
+  });
   const branding = {
     logo_base64: company?.logo_base64,
     company_address: company?.company_address,
@@ -257,6 +277,15 @@ function PayStatement({
           {(downloadError || emailNotice) && <p role={downloadError ? "alert" : "status"} className={`mt-2 text-xs ${downloadError ? "text-rose-600" : "text-emerald-700"}`}>{downloadError || emailNotice}</p>}
         </CardHeader>
         <CardContent className="max-w-full overflow-x-auto pt-0">
+          {canEditEarnings && <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="mb-3 text-sm font-semibold text-slate-800">Additional earnings for this employee and period</p>
+            <div className="grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
+              <div><Label htmlFor={`commission-${slip.id}`}>Commission</Label><Input id={`commission-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={commission} onChange={event => setCommission(event.target.value)} /></div>
+              <div><Label htmlFor={`incentives-${slip.id}`}>Incentives</Label><Input id={`incentives-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={incentives} onChange={event => setIncentives(event.target.value)} /></div>
+              <Button type="button" disabled={saveEarnings.isPending} onClick={() => saveEarnings.mutate()}>{saveEarnings.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Save amounts</Button>
+            </div>
+            {saveEarnings.error && <p role="alert" className="mt-2 text-sm text-rose-600">{saveEarnings.error.message}</p>}
+          </div>}
           <div ref={documentRef} className="mx-auto w-[794px]">
             <PayslipDocument payslip={slip} branding={branding} />
           </div>
@@ -577,6 +606,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const [periodEnd, setPeriodEnd] = useState("");
   const [payday, setPayday] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
+  const [selectedRunEmployeeId, setSelectedRunEmployeeId] = useState("");
   const [reviewError, setReviewError] = useState("");
   const me = useQuery({ queryKey: ["attendance-payroll-me"], queryFn: () => apiJson("/api/attendance/payroll/me"), enabled: isEmployeePage });
   const eligible = useQuery({ queryKey: ["attendance-overtime-eligible"], queryFn: () => apiJson("/api/attendance/payroll/overtime/eligible"), enabled: isEmployeePage });
@@ -665,6 +695,12 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
 
   const ownPayslips = me.data?.payslips ?? [];
   const runSlips = runDetails.data?.payslips ?? [];
+  const selectedRunSlip = runSlips.find((slip: any) => String(slip.id) === selectedRunEmployeeId) ?? runSlips[0];
+  useEffect(() => {
+    if (!runSlips.some((slip: any) => String(slip.id) === selectedRunEmployeeId)) {
+      setSelectedRunEmployeeId(String(runSlips[0]?.id ?? ""));
+    }
+  }, [selectedRunId, runSlips, selectedRunEmployeeId]);
   const finalizeError = finalizeRun.error as PayrollApiError | null;
   const openAttendanceSessions = finalizeError?.code === "active_attendance_sessions"
     ? finalizeError.openAttendanceSessions ?? []
@@ -788,7 +824,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
           <CardHeader><CardTitle className="text-base">Create a payroll run</CardTitle></CardHeader>
           <CardContent>
             <form className="grid gap-3 md:grid-cols-4" onSubmit={event => { event.preventDefault(); createRun.mutate(); }}>
-              <div className="md:col-span-4 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">The run uses completed Attendance session totals, approved overtime, approved weekday leave, and recurring pay items. Attendance sessions are included automatically unless they are flagged as Needs Review. Net pay is calculated after deductions. Employee currencies remain separate; no conversion is performed. Enter the payday explicitly for short months.</div>
+              <div className="md:col-span-4 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">The run uses completed Attendance session totals, approved overtime, approved weekday leave, and recurring pay items. After the draft is built, select each employee to enter commission and incentives for that pay period before finalizing. Attendance sessions are included automatically unless they are flagged as Needs Review. Net pay is calculated after deductions. Employee currencies remain separate; no conversion is performed. Enter the payday explicitly for short months.</div>
               <div><Label>User group</Label><select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" required value={runRoleId} onChange={event => setRunRoleId(event.target.value)}><option value="">Choose a group</option>{(config.data?.groups ?? []).map((group: any) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></div>
               <div><Label>Period start</Label><Input className="mt-1.5" type="date" required value={periodStart} onChange={event => setPeriodStart(event.target.value)} /></div>
               <div><Label>Period end</Label><Input className="mt-1.5" type="date" min={periodStart || undefined} required value={periodEnd} onChange={event => setPeriodEnd(event.target.value)} /></div>
@@ -846,12 +882,22 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
             </div>}
             {runDetails.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
             {!runDetails.isLoading && !runSlips.length && <EmptyState>This run has no payslips.</EmptyState>}
-            <div className="grid gap-3 lg:grid-cols-2">{runSlips.map((slip: any) => <PayStatement
-              key={slip.id}
-              slip={{ ...slip, run: runDetails.data.run }}
-              canEmail={canManage}
-              company={invoiceRenderSettings.data}
-            />)}</div>
+            {runSlips.length > 0 && <>
+              <div className="max-w-md">
+                <Label htmlFor="run-payslip-employee">Preview employee</Label>
+                <select id="run-payslip-employee" className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={selectedRunSlip ? String(selectedRunSlip.id) : ""} onChange={event => setSelectedRunEmployeeId(event.target.value)}>
+                  {runSlips.map((slip: any) => <option key={slip.id} value={String(slip.id)}>{slip.employee_name_snapshot}</option>)}
+                </select>
+              </div>
+              {selectedRunSlip && <PayStatement
+                key={selectedRunSlip.id}
+                slip={{ ...selectedRunSlip, run: runDetails.data.run }}
+                canEmail={canManage}
+                canEditEarnings={canManage && runDetails.data.run.status === "draft"}
+                onEarningsSaved={() => { void queryClient.invalidateQueries({ queryKey: ["attendance-payroll-run", selectedRunId] }); }}
+                company={invoiceRenderSettings.data}
+              />}
+            </>}
           </CardContent>
         </Card>}
       </div>}

@@ -120,7 +120,11 @@ async function writePayrollAudit(
   });
 }
 
-async function buildDraftPayslips(tx: any, run: any) {
+async function buildDraftPayslips(
+  tx: any,
+  run: any,
+  preservedEarningsByUser = new Map<number, { commission: number; incentives: number }>(),
+) {
   const groupMembers = await tx.select({
     id: users.id,
     name: users.name,
@@ -348,6 +352,34 @@ async function buildDraftPayslips(tx: any, run: any) {
         source_date: run.period_start,
       });
     }
+
+    const manualEarnings = preservedEarningsByUser.get(employee.id) ?? { commission: 0, incentives: 0 };
+    const commission = roundMoney(Number(manualEarnings.commission) || 0);
+    const incentives = roundMoney(Number(manualEarnings.incentives) || 0);
+    if (!Number.isFinite(commission) || commission < 0 || !Number.isFinite(incentives) || incentives < 0) {
+      throw new PayrollRequestError(400, `Manual earnings for ${employee.name} have an invalid amount.`);
+    }
+    gross += commission + incentives;
+    if (commission > 0) lines.push({
+      line_type: "commission",
+      description: "Commission",
+      units: "1.00",
+      rate: asMoney(commission),
+      amount: asMoney(commission),
+      source_type: "commission",
+      source_id: employee.id,
+      source_date: run.period_start,
+    });
+    if (incentives > 0) lines.push({
+      line_type: "incentive",
+      description: "Incentives",
+      units: "1.00",
+      rate: asMoney(incentives),
+      amount: asMoney(incentives),
+      source_type: "incentive",
+      source_id: employee.id,
+      source_date: run.period_start,
+    });
 
     gross = roundMoney(gross);
     deductions = roundMoney(deductions);
@@ -1055,11 +1087,28 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
         const [run] = await tx.select().from(payrollRuns).where(eq(payrollRuns.id, id)).limit(1);
         if (!run) throw new PayrollRequestError(404, "Payroll run not found.");
         if (run.status !== "draft") throw new PayrollRequestError(409, "Finalized payroll runs cannot be rebuilt.");
-        const oldSlips = await tx.select({ id: payslips.id }).from(payslips).where(eq(payslips.payroll_run_id, id));
-        if (oldSlips.length) await tx.delete(payslips).where(eq(payslips.payroll_run_id, id));
+        const oldSlips = await tx.select({ id: payslips.id, user_id: payslips.user_id }).from(payslips)
+          .where(eq(payslips.payroll_run_id, id));
+        const oldSlipUserById = new Map(oldSlips.map((slip: any) => [slip.id, slip.user_id]));
+        const preservedEarningsByUser = new Map<number, { commission: number; incentives: number }>();
+        if (oldSlips.length) {
+          const oldManualLines = await tx.select().from(payslipLineItems).where(and(
+            inArray(payslipLineItems.payslip_id, oldSlips.map((slip: any) => slip.id)),
+            inArray(payslipLineItems.line_type, ["commission", "incentive"]),
+          ));
+          for (const line of oldManualLines) {
+            const userId = oldSlipUserById.get(line.payslip_id);
+            if (!userId) continue;
+            const earnings = preservedEarningsByUser.get(userId) ?? { commission: 0, incentives: 0 };
+            if (line.line_type === "commission") earnings.commission += Number(line.amount);
+            if (line.line_type === "incentive") earnings.incentives += Number(line.amount);
+            preservedEarningsByUser.set(userId, earnings);
+          }
+          await tx.delete(payslips).where(eq(payslips.payroll_run_id, id));
+        }
         const [refreshedRun] = await tx.update(payrollRuns).set({ snapshot_updated_at: new Date() })
           .where(eq(payrollRuns.id, id)).returning();
-        await buildDraftPayslips(tx, refreshedRun);
+        await buildDraftPayslips(tx, refreshedRun, preservedEarningsByUser);
         await writePayrollAudit(tx, requestUser(req).id, "payroll_run", id, "rebuilt", { previous_slips: oldSlips.length }, { rebuilt: true });
         return refreshedRun;
       });
@@ -1068,6 +1117,93 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
       if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message, ...(error.payload ?? {}) });
       if (error?.code === "23505") return res.status(409).json({ error: "Some attendance, leave, or pay items are already included in another run." });
       res.status(500).json({ error: error?.message ?? "Could not rebuild the draft payroll run." });
+    }
+  });
+
+  app.patch("/api/attendance/payroll/admin/payslips/:id/earnings", canManagePayroll, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid payslip." });
+    const parsed = z.object({
+      commission: z.coerce.number().finite().min(0).max(999999999999.99),
+      incentives: z.coerce.number().finite().min(0).max(999999999999.99),
+    }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Enter valid non-negative amounts for commission and incentives." });
+    try {
+      const result = await db.transaction(async (tx) => {
+        const [record] = await tx.select({
+          slip: payslips,
+          run_status: payrollRuns.status,
+          period_start: payrollRuns.period_start,
+        }).from(payslips)
+          .innerJoin(payrollRuns, eq(payrollRuns.id, payslips.payroll_run_id))
+          .where(eq(payslips.id, id))
+          .limit(1);
+        if (!record) throw new PayrollRequestError(404, "Payslip not found.");
+        if (record.run_status !== "draft") throw new PayrollRequestError(409, "Earnings can only be changed on a draft payroll run.");
+
+        const oldLines = await tx.select().from(payslipLineItems).where(and(
+          eq(payslipLineItems.payslip_id, id),
+          inArray(payslipLineItems.line_type, ["commission", "incentive"]),
+        ));
+        const oldCommission = roundMoney(oldLines
+          .filter((line: any) => line.line_type === "commission")
+          .reduce((sum: number, line: any) => sum + Number(line.amount), 0));
+        const oldIncentives = roundMoney(oldLines
+          .filter((line: any) => line.line_type === "incentive")
+          .reduce((sum: number, line: any) => sum + Number(line.amount), 0));
+        const commission = roundMoney(parsed.data.commission);
+        const incentives = roundMoney(parsed.data.incentives);
+        const gross = roundMoney(Number(record.slip.gross_amount) - oldCommission - oldIncentives + commission + incentives);
+        const net = roundMoney(gross - Number(record.slip.deductions_amount));
+        if (net < 0) throw new PayrollRequestError(400, "These earnings would leave the payslip with negative net pay.");
+
+        const [updated] = await tx.update(payslips).set({
+          gross_amount: asMoney(gross),
+          net_amount: asMoney(net),
+        }).where(eq(payslips.id, id)).returning();
+        await tx.delete(payslipLineItems).where(and(
+          eq(payslipLineItems.payslip_id, id),
+          inArray(payslipLineItems.line_type, ["commission", "incentive"]),
+        ));
+        const manualLines: any[] = [];
+        if (commission > 0) manualLines.push({
+          payslip_id: id,
+          line_type: "commission",
+          description: "Commission",
+          units: "1.00",
+          rate: asMoney(commission),
+          amount: asMoney(commission),
+          source_type: "commission",
+          source_id: record.slip.user_id,
+          source_date: record.period_start,
+        });
+        if (incentives > 0) manualLines.push({
+          payslip_id: id,
+          line_type: "incentive",
+          description: "Incentives",
+          units: "1.00",
+          rate: asMoney(incentives),
+          amount: asMoney(incentives),
+          source_type: "incentive",
+          source_id: record.slip.user_id,
+          source_date: record.period_start,
+        });
+        if (manualLines.length) await tx.insert(payslipLineItems).values(manualLines);
+        await writePayrollAudit(
+          tx,
+          requestUser(req).id,
+          "payslip",
+          id,
+          "manual_earnings_updated",
+          { commission: asMoney(oldCommission), incentives: asMoney(oldIncentives) },
+          { commission: asMoney(commission), incentives: asMoney(incentives) },
+        );
+        return updated;
+      });
+      res.json({ payslip: result });
+    } catch (error: any) {
+      if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message });
+      res.status(500).json({ error: error?.message ?? "Could not update the employee's draft earnings." });
     }
   });
 

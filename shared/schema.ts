@@ -712,7 +712,7 @@ export const payslips = pgTable("payslips", {
 export const payslipLineItems = pgTable("payslip_line_items", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   payslip_id: integer("payslip_id").notNull().references(() => payslips.id, { onDelete: "cascade" }),
-  line_type: text("line_type").notNull(), // regular | overtime | paid_leave | unpaid_leave | allowance | deduction
+  line_type: text("line_type").notNull(), // regular | overtime | paid_leave | unpaid_leave | allowance | deduction | commission | incentive
   description: text("description").notNull(),
   units: decimal("units", { precision: 10, scale: 2 }).notNull().default("0"),
   rate: decimal("rate", { precision: 12, scale: 4 }),

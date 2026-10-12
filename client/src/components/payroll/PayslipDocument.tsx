@@ -130,8 +130,8 @@ export default function PayslipDocument({ payslip, branding }: PayslipDocumentPr
     ? sumLineAmounts(lines, "regular")
     : roundMoney(regularHours * hourlyRate);
   const overtimePay = sumLineAmounts(lines, "overtime");
-  const commission = 0;
-  const incentives = 0;
+  const commission = sumLineAmounts(lines, "commission");
+  const incentives = sumLineAmounts(lines, "incentive");
   const grossPay = numberValue(payslip.gross_amount);
   const otherEarnings = Math.max(0, roundMoney(grossPay - regularPay - overtimePay - commission - incentives));
 
