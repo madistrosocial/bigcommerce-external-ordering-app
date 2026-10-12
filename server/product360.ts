@@ -30,7 +30,7 @@ async function getProduct360CategoryCatalog(): Promise<Product360CategoryCatalog
   const cached = await storage.getSetting(PRODUCT_360_CATEGORY_CACHE_KEY);
   if (cached?.value) {
     const cachedValue = cached.value as { data?: unknown; ts?: unknown };
-    if (Array.isArray(cachedValue.data) && (!cachedValue.ts || Date.now() - Number(cachedValue.ts) < 3600_000)) {
+    if (Array.isArray(cachedValue.data) && cachedValue.data.length > 0 && (!cachedValue.ts || Date.now() - Number(cachedValue.ts) < 3600_000)) {
       return {
         categories: cachedValue.data
           .map((category: any) => ({
@@ -56,11 +56,10 @@ async function getProduct360CategoryCatalog(): Promise<Product360CategoryCatalog
   }
 
   try {
-    const apiBase = (process.env.BIGCOMMERCE_API_BASE || "https://api.bigcommerce.com").replace(/\/$/, "");
     const headers = { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" };
     const categories: Product360Category[] = [];
     for (let page = 1; ; page++) {
-      const response = await fetch(`${apiBase}/stores/${storeHash}/v3/catalog/categories?limit=250&page=${page}`, { headers });
+      const response = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/categories?limit=250&page=${page}`, { headers });
       if (!response.ok) throw new Error(`BigCommerce category request failed: ${response.status}`);
       const body = await response.json();
       const pageCategories = Array.isArray(body.data) ? body.data : [];
