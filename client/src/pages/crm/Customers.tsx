@@ -39,9 +39,9 @@ function RepBadge({ userId, name, avatar }: { userId: number | null; name: strin
   const initials = name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase();
   return (
     <Badge variant="secondary" className="inline-flex items-center gap-1.5 text-xs font-medium">
-      <Avatar className="h-5 w-5">
+      <Avatar className="h-8 w-8">
         <AvatarImage src={avatar || undefined} alt="" />
-        <AvatarFallback className={`text-[8px] ${getCustomerAvatarColor(userId ?? 0)}`}>{initials}</AvatarFallback>
+        <AvatarFallback className={`text-[11px] font-bold ${getCustomerAvatarColor(userId ?? 0)}`}>{initials}</AvatarFallback>
       </Avatar>
       {name}
     </Badge>
@@ -504,7 +504,7 @@ export default function CRMCustomers() {
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-white">
 
       {/* ── Health Cards ─────────────────────────────────────────────────────── */}
       {metrics && (
