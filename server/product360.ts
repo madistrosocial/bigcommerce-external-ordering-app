@@ -496,6 +496,7 @@ export async function getProduct360Products(input: {
   const limit = Math.min(100, Math.max(10, Number(input.limit) || 25));
   const sortDir = String(input.sortDir).toLowerCase() === "asc" ? "ASC" : "DESC";
   const sortMap: Record<string, string> = {
+    bigcommerce_id: "bigcommerce_id",
     name: "name",
     units_sold: "units_sold",
     revenue: "revenue",
@@ -505,7 +506,7 @@ export async function getProduct360Products(input: {
     days_of_stock: "days_of_stock",
     last_sold: "last_sold",
   };
-  const sortBy = sortMap[String(input.sortBy)] || "units_sold";
+  const sortBy = sortMap[String(input.sortBy)] || "bigcommerce_id";
   const searchCondition = search
     ? `AND (name ILIKE ${quote(`%${search}%`)} ESCAPE '\\\\' OR sku ILIKE ${quote(`%${search}%`)} ESCAPE '\\\\' OR brand_name ILIKE ${quote(`%${search}%`)} ESCAPE '\\\\' OR bigcommerce_id::text ILIKE ${quote(`%${search}%`)} ESCAPE '\\\\' OR variants::text ILIKE ${quote(`%${search}%`)} ESCAPE '\\\\')`
     : "";
