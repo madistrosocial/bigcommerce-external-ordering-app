@@ -66,3 +66,4 @@
 - [Image Editor full-canvas logo overlay](image-editor-logo-overlay.md) — preserve the transparent 1200×1200 PNG's built-in coordinates; match the generated canvas to it.
 - [Company timezone display](company-timezone-display.md) — use the configured IANA timezone for app timestamps and local-day boundaries; preserve date-only values and Payroll's separate timezone.
 - [Attendance spreadsheet scope](attendance-spreadsheet-scope.md) — use the workbook as a feature reference only; never import its records or synchronize it.
+- [CRM rep avatar thumbnails](crm-rep-avatar-thumbnails.md) — fetch cached 32px thumbnails through the shared users lookup; avoid repeating full data URLs on customer rows.

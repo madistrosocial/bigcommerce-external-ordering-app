@@ -24,6 +24,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
 import { getCustomerAvatarColor } from "@/components/crm/CustomerIdentity";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 type SortField =
   | "company" | "first_name" | "state" | "customer_group_name"
@@ -32,6 +33,20 @@ type SortField =
   | "city" | "last_follow_up";
 
 type HealthFilter = "" | "Healthy" | "Watch" | "At Risk" | "Lost";
+type CrmUserOption = { id: number; name: string; avatar_thumbnail: string | null };
+
+function RepBadge({ userId, name, avatar }: { userId: number | null; name: string; avatar?: string | null }) {
+  const initials = name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase();
+  return (
+    <Badge variant="secondary" className="inline-flex items-center gap-1.5 text-xs font-medium">
+      <Avatar className="h-5 w-5">
+        <AvatarImage src={avatar || undefined} alt="" />
+        <AvatarFallback className={`text-[8px] ${getCustomerAvatarColor(userId ?? 0)}`}>{initials}</AvatarFallback>
+      </Avatar>
+      {name}
+    </Badge>
+  );
+}
 
 // Original column order restored; first col is combined customer identity.
 // "Days Since" is merged into the Last Order cell — no separate column for it.
@@ -303,10 +318,11 @@ export default function CRMCustomers() {
     queryFn: async () => {
       const r = await fetch("/api/crm/users", { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load users");
-      return r.json() as Promise<{ id: number; name: string }[]>;
+      return r.json() as Promise<CrmUserOption[]>;
     },
     staleTime: 120_000,
   });
+  const activeUsersById = new Map(activeUsers.map(user => [user.id, user]));
 
   const { data: metrics } = useQuery({
     queryKey: ["crm", "metrics", debouncedSearch, group, stateFilter, primaryRepFilter, secondaryRepFilter, customerTypeFilter, addressTypeFilter, accountTypeFilter],
@@ -924,14 +940,22 @@ export default function CRMCustomers() {
                     {vis("primary_rep") && (
                       <td className="px-3 py-2">
                         {c.primary_rep_name
-                          ? <Badge variant="secondary" className="text-xs font-medium">{c.primary_rep_name}</Badge>
+                          ? <RepBadge
+                              userId={c.primary_rep_id ?? null}
+                              name={c.primary_rep_name}
+                              avatar={activeUsersById.get(c.primary_rep_id ?? -1)?.avatar_thumbnail}
+                            />
                           : <span className="text-slate-300">—</span>}
                       </td>
                     )}
                     {vis("secondary_rep") && (
                       <td className="px-3 py-2">
                         {c.secondary_rep_name
-                          ? <Badge variant="secondary" className="text-xs font-medium">{c.secondary_rep_name}</Badge>
+                          ? <RepBadge
+                              userId={c.secondary_rep_id ?? null}
+                              name={c.secondary_rep_name}
+                              avatar={activeUsersById.get(c.secondary_rep_id ?? -1)?.avatar_thumbnail}
+                            />
                           : <span className="text-slate-300">—</span>}
                       </td>
                     )}

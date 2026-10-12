@@ -9,6 +9,32 @@ import { attendanceAuditLog } from "@shared/schema";
 import type { AttendanceAuditLog, InsertAttendanceAuditLog } from "@shared/schema";
 import { userActivityLogs } from "@shared/schema";
 import type { InsertUserActivityLog, UserActivityLog } from "@shared/schema";
+import sharp from "sharp";
+import { createHash } from "node:crypto";
+
+const crmUserAvatarThumbCache = new Map<number, { sourceHash: string; dataUrl: string }>();
+
+async function getCrmUserAvatarThumbnail(userId: number, avatarData: string | null): Promise<string | null> {
+  if (!avatarData?.startsWith("data:image/")) return null;
+  const sourceHash = createHash("sha256").update(avatarData).digest("hex");
+  const cached = crmUserAvatarThumbCache.get(userId);
+  if (cached?.sourceHash === sourceHash) return cached.dataUrl;
+
+  try {
+    const encoded = avatarData.slice(avatarData.indexOf(",") + 1);
+    const input = Buffer.from(encoded, "base64");
+    if (!input.length || input.length > 5 * 1024 * 1024) return null;
+    const thumbnail = await sharp(input, { limitInputPixels: 512 * 512 })
+      .resize(32, 32, { fit: "cover", withoutEnlargement: true })
+      .jpeg({ quality: 48 })
+      .toBuffer();
+    const dataUrl = `data:image/jpeg;base64,${thumbnail.toString("base64")}`;
+    crmUserAvatarThumbCache.set(userId, { sourceHash, dataUrl });
+    return dataUrl;
+  } catch {
+    return null;
+  }
+}
 
 export type AttendanceBreakInterval = {
   break_started_at: Date;
@@ -3192,12 +3218,16 @@ export class DatabaseStorage implements IStorage {
 
   // ─── CRM Users ────────────────────────────────────────────────────────────────
 
-  async getCrmUsers(): Promise<{ id: number; name: string }[]> {
-    const rows = await db.select({ id: users.id, name: users.name })
+  async getCrmUsers(): Promise<{ id: number; name: string; avatar_thumbnail: string | null }[]> {
+    const rows = await db.select({ id: users.id, name: users.name, avatar_data: users.avatar_data })
       .from(users)
       .where(eq(users.is_enabled, true))
       .orderBy(asc(users.name));
-    return rows.map(r => ({ id: r.id, name: r.name ?? '' }));
+    return Promise.all(rows.map(async r => ({
+      id: r.id,
+      name: r.name ?? "",
+      avatar_thumbnail: await getCrmUserAvatarThumbnail(r.id, r.avatar_data),
+    })));
   }
 
   // ─── Attendance ──────────────────────────────────────────────────────────────
