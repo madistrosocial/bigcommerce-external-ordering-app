@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Banknote, CalendarDays, Check, ChevronDown, CircleDollarSign, Clock3, Download, FileText, Loader2, Mail, RefreshCw, Send, Settings2, UserRound, X } from "lucide-react";
+import { Banknote, CalendarDays, Check, ChevronDown, CircleDollarSign, Clock3, Download, FileText, Loader2, Mail, RefreshCw, Send, Settings2, Trash2, UserRound, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -607,6 +608,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const [payday, setPayday] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [selectedRunEmployeeId, setSelectedRunEmployeeId] = useState("");
+  const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
   const [reviewError, setReviewError] = useState("");
   const me = useQuery({ queryKey: ["attendance-payroll-me"], queryFn: () => apiJson("/api/attendance/payroll/me"), enabled: isEmployeePage });
   const eligible = useQuery({ queryKey: ["attendance-overtime-eligible"], queryFn: () => apiJson("/api/attendance/payroll/overtime/eligible"), enabled: isEmployeePage });
@@ -671,6 +673,15 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const finalizeRun = useMutation({
     mutationFn: (id: number) => apiJson(`/api/attendance/payroll/admin/runs/${id}/finalize`, jsonInit("POST", {})),
     onSuccess: result => { setSelectedRunId(result.run.id); refresh(); },
+  });
+  const deleteRun = useMutation({
+    mutationFn: (id: number) => apiJson(`/api/attendance/payroll/admin/runs/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      setDeleteRunDialogOpen(false);
+      setSelectedRunId(null);
+      setSelectedRunEmployeeId("");
+      refresh();
+    },
   });
   useEffect(() => {
     const firstGroup = config.data?.groups?.[0]?.id;
@@ -854,14 +865,17 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div><CardTitle className="text-base">Run details</CardTitle>{runDetails.data?.run && <p className="mt-1 text-sm text-slate-500">{runDetails.data.run.group_name_snapshot} · {dateLabel(runDetails.data.run.period_start)} – {dateLabel(runDetails.data.run.period_end)}</p>}</div>
-              {canManage && runDetails.data?.run?.status === "draft" && <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" disabled={rebuildRun.isPending || finalizeRun.isPending} onClick={() => { finalizeRun.reset(); rebuildRun.mutate(selectedRunId); }}>{rebuildRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rebuild draft</Button>
-                <Button size="sm" disabled={finalizeRun.isPending || rebuildRun.isPending} onClick={() => finalizeRun.mutate(selectedRunId)}>{finalizeRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Finalize and lock</Button>
+              {runDetails.data?.run && <div className="flex flex-wrap gap-2">
+                {canManage && runDetails.data.run.status === "draft" && <>
+                  <Button size="sm" variant="outline" disabled={rebuildRun.isPending || finalizeRun.isPending || deleteRun.isPending} onClick={() => { finalizeRun.reset(); rebuildRun.mutate(selectedRunId); }}>{rebuildRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rebuild draft</Button>
+                  <Button size="sm" disabled={finalizeRun.isPending || rebuildRun.isPending || deleteRun.isPending} onClick={() => finalizeRun.mutate(selectedRunId)}>{finalizeRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Finalize and lock</Button>
+                </>}
+                {runs.data?.canDelete && <Button size="sm" variant="destructive" disabled={deleteRun.isPending || rebuildRun.isPending || finalizeRun.isPending} onClick={() => setDeleteRunDialogOpen(true)}><Trash2 className="mr-2 h-4 w-4" />Delete run</Button>}
               </div>}
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {(runDetails.error || (rebuildRun.error && !rebuildReviewSessions.length) || (finalizeRun.error && !openAttendanceSessions.length)) && <p role="alert" className="text-sm text-rose-600">{runDetails.error?.message || rebuildRun.error?.message || finalizeRun.error?.message}</p>}
+            {(runDetails.error || (rebuildRun.error && !rebuildReviewSessions.length) || (finalizeRun.error && !openAttendanceSessions.length) || deleteRun.error) && <p role="alert" className="text-sm text-rose-600">{runDetails.error?.message || rebuildRun.error?.message || finalizeRun.error?.message || deleteRun.error?.message}</p>}
             {rebuildReviewSessions.length > 0 && <AttendanceReviewBlockerList sessions={rebuildReviewSessions} canReviewAttendance={canReviewAttendance} />}
             {openAttendanceSessions.length > 0 && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4">
               <div className="flex items-start gap-2"><Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" /><div>
@@ -900,6 +914,27 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
             </>}
           </CardContent>
         </Card>}
+        <AlertDialog open={deleteRunDialogOpen} onOpenChange={open => { if (!deleteRun.isPending) setDeleteRunDialogOpen(open); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this payroll run?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This removes the run and its generated payslips from payroll history. Any approved overtime linked to the run will become available for a later payroll run. It will not reverse payments already made or recall payslip emails already sent. The payroll audit trail is retained.
+              </AlertDialogDescription>
+              {deleteRun.error && <p role="alert" className="text-sm text-rose-600">{deleteRun.error.message}</p>}
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteRun.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                disabled={deleteRun.isPending || selectedRunId == null}
+                onClick={event => { event.preventDefault(); if (selectedRunId != null) deleteRun.mutate(selectedRunId); }}
+              >
+                {deleteRun.isPending ? "Deleting…" : "Delete payroll run"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>}
     </div>
   );

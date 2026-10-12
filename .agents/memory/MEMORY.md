@@ -24,6 +24,7 @@
 - [Zoho marketing delivery boundary](zoho-marketing-delivery.md) — ZeptoMail is transactional-only; compliant campaign delivery requires Zoho Campaigns/Email API access.
 - [Attendance accounting baseline](attendance-accounting-baseline.md) — ledger excludes weekends and observed US holidays; short hours use an 8-hour weekday expectation until schedules are configurable.
 - [Payroll and leave boundaries](payroll-leave-boundaries.md) — Attendance owns self-service/time capture; separate Payroll owns pay settings, runs, and overtime review.
+- [Payroll run deletion](payroll-run-deletion.md) — payroll history deletion is admin-only; remove generated slips, reopen linked approved overtime, retain audit records.
 - [Payslip calculation scope](payslip-calculation-scope.md) — compute rates, regular pay, paid work hours, and worked days; keep unavailable deductions, metrics, FX, commission, and incentives at zero.
 - [Payslip fixed-page layout](payslip-fixed-page-layout.md) — keep on-screen payslips fixed to an A4 canvas across devices; phones pan/zoom rather than reflowing content.
 - [Payroll period disclosure](payroll-period-disclosure.md) — use a native accessible disclosure for pay periods; Radix Accordion triggered an invalid React hook call in the payroll route.

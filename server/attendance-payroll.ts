@@ -995,10 +995,10 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
     }
   });
 
-  app.get("/api/attendance/payroll/admin/runs", canViewPayroll, async (_req, res) => {
+  app.get("/api/attendance/payroll/admin/runs", canViewPayroll, async (req, res) => {
     try {
       const rows = await db.select().from(payrollRuns).orderBy(desc(payrollRuns.period_start), desc(payrollRuns.created_at));
-      res.json({ rows });
+      res.json({ rows, canDelete: requestUser(req).role === "admin" });
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? "Could not load payroll runs." });
     }
@@ -1204,6 +1204,42 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
     } catch (error: any) {
       if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message });
       res.status(500).json({ error: error?.message ?? "Could not update the employee's draft earnings." });
+    }
+  });
+
+  app.delete("/api/attendance/payroll/admin/runs/:id", canManagePayroll, async (req, res) => {
+    if (requestUser(req).role !== "admin") return res.status(403).json({ error: "Only an administrator can delete payroll runs." });
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid payroll run." });
+    try {
+      const result = await db.transaction(async (tx) => {
+        const [run] = await tx.select().from(payrollRuns).where(eq(payrollRuns.id, id)).limit(1);
+        if (!run) throw new PayrollRequestError(404, "Payroll run not found.");
+        const linkedOvertime = await tx.select({ id: attendanceOvertimeRequests.id })
+          .from(attendanceOvertimeRequests)
+          .where(eq(attendanceOvertimeRequests.paid_in_run_id, id));
+        if (linkedOvertime.length) {
+          await tx.update(attendanceOvertimeRequests)
+            .set({ paid_in_run_id: null, updated_at: new Date() })
+            .where(eq(attendanceOvertimeRequests.paid_in_run_id, id));
+        }
+        await tx.delete(payslips).where(eq(payslips.payroll_run_id, id));
+        await tx.delete(payrollRuns).where(eq(payrollRuns.id, id));
+        await writePayrollAudit(
+          tx,
+          requestUser(req).id,
+          "payroll_run",
+          id,
+          "deleted",
+          { status: run.status, group: run.group_name_snapshot, period_start: run.period_start, period_end: run.period_end },
+          { deleted: true, released_overtime_requests: linkedOvertime.length },
+        );
+        return { deleted: true, released_overtime_requests: linkedOvertime.length };
+      });
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message });
+      res.status(500).json({ error: error?.message ?? "Could not delete the payroll run." });
     }
   });
 
