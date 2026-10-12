@@ -12133,6 +12133,8 @@ export async function registerRoutes(
     try {
       const user = (req as any).authUser;
       const canViewAll = await canViewAllAttendance(user);
+      const canViewLocations = user.role === "admin"
+        || (await storage.getUserPermissionStrings(user.id)).includes("attendance:view_home_locations");
       const q = req.query as Record<string, string>;
       const result = await storage.getAttendanceRecords({
         from: q.from || undefined,
@@ -12144,7 +12146,14 @@ export async function registerRoutes(
         limit: q.limit ? Number(q.limit) : 100,
         offset: q.offset ? Number(q.offset) : 0,
       });
-      res.json({ ...result, can_view_all: canViewAll });
+      const rows = canViewLocations ? result.rows : result.rows.map(row => ({
+        ...row,
+        time_in_latitude: null,
+        time_in_longitude: null,
+        time_out_latitude: null,
+        time_out_longitude: null,
+      }));
+      res.json({ ...result, rows, can_view_all: canViewAll, can_view_locations: canViewLocations });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -12154,6 +12163,8 @@ export async function registerRoutes(
     try {
       const user = (req as any).authUser;
       const canViewAll = await canViewAllAttendance(user);
+      const canViewLocations = user.role === "admin"
+        || (await storage.getUserPermissionStrings(user.id)).includes("attendance:view_home_locations");
       const attendance = await storage.getAttendanceById(Number(req.params.id));
       if (!attendance) return res.status(404).json({ error: "Attendance record not found." });
       if (!canViewAll && attendance.user_id !== user.id) {
@@ -12161,12 +12172,22 @@ export async function registerRoutes(
       }
       const [employee, checkpoints, audit, dailyNote, breakMap] = await Promise.all([
         storage.getUser(attendance.user_id),
-        storage.getAttendanceCheckpoints(attendance.id),
+        canViewLocations ? storage.getAttendanceCheckpoints(attendance.id) : Promise.resolve([]),
         storage.getAttendanceAuditHistory(attendance.id),
         storage.getAttendanceDailyNote(attendance.user_id, attendance.work_date),
         storage.getAttendanceBreakIntervals([attendance.id]),
       ]);
-      res.json({ attendance: { ...attendance, breaks: breakMap[attendance.id] ?? [] }, dailyNote, employee: employee ? { id: employee.id, name: employee.name, username: employee.username } : null, checkpoints, audit, can_view_all: canViewAll });
+      const attendanceDetails = {
+        ...attendance,
+        ...(!canViewLocations ? {
+          time_in_latitude: null,
+          time_in_longitude: null,
+          time_out_latitude: null,
+          time_out_longitude: null,
+        } : {}),
+        breaks: breakMap[attendance.id] ?? [],
+      };
+      res.json({ attendance: attendanceDetails, dailyNote, employee: employee ? { id: employee.id, name: employee.name, username: employee.username } : null, checkpoints, audit, can_view_all: canViewAll, can_view_locations: canViewLocations });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

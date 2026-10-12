@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getAuthHeaders } from "@/lib/api";
 import { useTimeService } from "@/hooks/useTimeService";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -374,7 +375,7 @@ function Overview() {
   </AdminShell>;
 }
 
-function AttendanceLogActions({ attendance, canViewAll, label }: { attendance: any; canViewAll: boolean; label?: string }) {
+function AttendanceLogActions({ attendance, canViewAll, label, onViewLog }: { attendance: any; canViewAll: boolean; label?: string; onViewLog?: () => void }) {
   const fmt = useTimeService();
   const { hasPermission } = usePermissions();
   const client = useQueryClient();
@@ -435,12 +436,13 @@ function AttendanceLogActions({ attendance, canViewAll, label }: { attendance: a
     setReason("");
     refreshAttendance();
   };
-  if (!canReview && !canManage && !canAudit) return null;
+  if (!canReview && !canManage && !canAudit && !(onViewLog && hasPermission("attendance", "view_home_locations"))) return null;
   return <div className="min-w-0 space-y-2">
     {label && <p className="text-[10px] font-medium text-slate-500">{label}</p>}
     <div className="flex flex-wrap gap-1.5">
       {canReview && <Button size="icon" variant="outline" title={needsReview ? "Clear review flag" : "Needs review"} aria-label={needsReview ? `Clear the needs-review flag for ${actionTarget}` : `Mark ${actionTarget} as needing review`} className={`h-8 w-8 shrink-0 ${needsReview ? "text-slate-600" : "text-orange-700"}`} onClick={() => changeReview(needsReview ? "approved" : "needs_review").catch((error: any) => window.alert(error.message))}>{needsReview ? <X className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}</Button>}
       {canAudit && attendance.session_number === 1 && !attendance.second_session_approved && attendance.status !== "active" && <Button size="icon" variant="outline" title="Approve second session" aria-label={`Approve a second session for ${actionTarget}`} className="h-8 w-8 shrink-0 border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => approveSecondSession().catch((error: any) => window.alert(error.message))}><Clock3 className="h-3.5 w-3.5" /></Button>}
+      {onViewLog && hasPermission("attendance", "view_home_locations") && <Button size="icon" variant="outline" title="View attendance log and login locations" aria-label={`View attendance log and login locations for ${actionTarget}`} className="h-8 w-8 shrink-0 text-blue-700" onClick={onViewLog}><FileClock className="h-3.5 w-3.5" /></Button>}
       {canManage && <Button size="icon" variant="outline" title={editing ? "Cancel correction" : "Correct times"} aria-label={editing ? `Cancel time correction for ${actionTarget}` : `Correct times for ${actionTarget}`} className="h-8 w-8 shrink-0" onClick={() => {
         if (!editing) {
           setTimeIn(formatDateTimeLocal(attendance.time_in, fmt.tz));
@@ -450,20 +452,24 @@ function AttendanceLogActions({ attendance, canViewAll, label }: { attendance: a
         setEditing(value => !value);
       }}>{editing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}</Button>}
     </div>
-    {editing && canManage && <div className="rounded-lg border border-red-100 bg-red-50/50 p-3">
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div><Label className="text-[10px]">Time in</Label><Input type="datetime-local" value={timeIn} onChange={e => setTimeIn(e.target.value)} className="mt-1 h-8 text-[11px]" /></div>
-        <div><Label className="text-[10px]">Time out</Label><Input type="datetime-local" value={timeOut} onChange={e => setTimeOut(e.target.value)} className="mt-1 h-8 text-[11px]" /></div>
-      </div>
-      <Label className="mt-2 block text-[10px]">Reason required</Label>
-      <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Forgot to clock out" className="mt-1 h-8 text-[11px]" />
-      <div className="mt-2 flex justify-end"><Button size="icon" title="Save correction" aria-label={`Save time correction for ${actionTarget}`} className="h-8 w-8 bg-red-600 hover:bg-red-700" disabled={!reason.trim()} onClick={() => submitCorrection().catch((error: any) => window.alert(error.message))}><Check className="h-3.5 w-3.5" /></Button></div>
-    </div>}
+    <Dialog open={editing && canManage} onOpenChange={setEditing}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader><DialogTitle>Correct attendance times</DialogTitle><DialogDescription>{actionTarget}. Enter corrected times and a reason for the audit history.</DialogDescription></DialogHeader>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="min-w-0"><Label>Time in</Label><Input type="datetime-local" value={timeIn} onChange={e => setTimeIn(e.target.value)} className="mt-1 w-full" /></div>
+          <div className="min-w-0"><Label>Time out</Label><Input type="datetime-local" value={timeOut} onChange={e => setTimeOut(e.target.value)} className="mt-1 w-full" /></div>
+        </div>
+        <div><Label>Reason required</Label><Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Forgot to clock out" className="mt-1 w-full" /></div>
+        <DialogFooter><Button variant="outline" onClick={() => setEditing(false)}>Cancel</Button><Button className="bg-red-600 hover:bg-red-700" disabled={!reason.trim()} onClick={() => submitCorrection().catch((error: any) => window.alert(error.message))}><Check className="mr-2 h-4 w-4" />Save correction</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>;
 }
 
 function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   const fmt = useTimeService();
+  const { hasPermission } = usePermissions();
+  const canViewLocations = hasPermission("attendance", "view_home_locations");
   const query = useQuery({ queryKey: ["attendance", "log", id], queryFn: () => apiJson(`/api/attendance/admin/logs/${id}`) });
   if (query.isLoading) return <Card className="rounded-xl border-slate-200"><CardContent className="p-6 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></CardContent></Card>;
   const data = query.data;
@@ -473,7 +479,7 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Time In", attendance.time_in ? fmt.dateTime(attendance.time_in) : "—"], ["Time Out", attendance.time_out ? fmt.dateTime(attendance.time_out) : "—"], ["Total Hours", hours(attendance.total_seconds)], ["Start Method", attendance.start_method === "warehouse" ? "Warehouse" : attendance.start_method === "offsite" ? "Off-site" : "Driving"]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] text-slate-400">{label}</p><p className="mt-1 text-xs font-semibold capitalize text-slate-700">{value}</p></div>)}</div>
       {attendance.breaks?.length > 0 && <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Break intervals</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{attendance.breaks.map((breakItem: any, index: number) => <div key={`${breakItem.break_started_at}-${index}`} className="rounded-lg bg-white p-2 text-xs"><p className="font-medium text-slate-700">Break {index + 1}</p><p className="mt-1 text-slate-500">Start · {fmt.dateTime(breakItem.break_started_at)}</p><p className="text-slate-500">End · {breakItem.break_ended_at ? fmt.dateTime(breakItem.break_ended_at) : "In progress"}</p></div>)}</div></div>}
       {dailyNote && <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-blue-800">Daily attendance note</p><p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{dailyNote}</p></div>}
-     <div className="grid gap-3 md:grid-cols-2">
+      {canViewLocations && <div className="grid gap-3 md:grid-cols-2">
        <Card className="rounded-xl border-slate-200 shadow-none">
          <CardHeader className="pb-2"><CardTitle className="text-xs">Time In Verification</CardTitle></CardHeader>
          <CardContent className="text-xs text-slate-500">
@@ -504,7 +510,7 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
            </div>
          </CardContent>
        </Card>
-     </div>
+      </div>}
       <div className="border-y border-slate-100 py-3"><AttendanceLogActions attendance={attendance} canViewAll={Boolean(data.can_view_all)} /></div>
     <div><h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><History className="h-3.5 w-3.5" />Record History</h3><div className="space-y-2">{audit.length ? audit.map((entry: any) => <div key={entry.id} className="rounded-lg border border-slate-100 p-3 text-xs"><div className="flex justify-between gap-3"><span className="font-medium capitalize text-slate-700">{String(entry.action).replace(/_/g, " ")}</span><span className="text-slate-400">{fmt.dateTime(entry.created_at)}</span></div><p className="mt-1 text-slate-500">{entry.changed_field ? `${entry.changed_field} changed` : "Attendance event"}{entry.reason ? ` · ${entry.reason}` : ""}</p></div>) : <p className="text-sm text-slate-400">No administrative changes recorded.</p>}</div></div>
   </CardContent></Card>;
@@ -519,6 +525,7 @@ function Logs() {
   const canReviewAttendance = canViewAll && hasPermission("attendance", "approve");
   const canManageAttendance = canViewAll && hasPermission("attendance", "manage");
   const canAuditAttendance = canViewAll && hasPermission("attendance", "audit");
+  const canViewAttendanceLocations = hasPermission("attendance", "view_home_locations");
   const [status, setStatus] = useState(() => {
     const requestedStatus = attendanceSearchParams(location).get("status");
     return ["all", "active", "completed", "exception"].includes(requestedStatus ?? "") ? requestedStatus! : "all";
@@ -692,7 +699,7 @@ function Logs() {
          <div className="min-w-0"><Label className="text-[11px] text-slate-500">Log status</Label><Select value={status} onValueChange={value => { setStatus(value); setSelectedId(null); setFocusDate(""); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="active">Working</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="exception">Exception</SelectItem></SelectContent></Select></div>
          <div className="min-w-0"><Label className="text-[11px] text-slate-500">Start method</Label><Select value={startMethod} onValueChange={value => { setStartMethod(value); setSelectedId(null); setFocusDate(""); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All methods</SelectItem><SelectItem value="warehouse">Warehouse</SelectItem><SelectItem value="driving">Route start</SelectItem><SelectItem value="offsite">Off-site</SelectItem></SelectContent></Select></div>
            <div className="min-w-0"><Label className="text-[11px] text-slate-500">Review status</Label><Select value={reviewStatus} onValueChange={value => { setReviewStatus(value); setSelectedId(null); setFocusDate(""); }}><SelectTrigger className="mt-1 h-9 w-full min-w-0 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All review states</SelectItem><SelectItem value="needs_review">Needs review</SelectItem><SelectItem value="missing_time_out">Missing time out</SelectItem></SelectContent></Select></div>
-        <div className="flex min-w-0 items-end"><Button variant="outline" className="h-9 w-full min-w-0 text-xs" onClick={clearFilters}><X className="mr-1.5 h-3.5 w-3.5 shrink-0" />Reset</Button></div>
+         <div className="flex min-w-0 items-end"><Button variant="outline" className="h-9 w-full min-w-0 text-xs" onClick={clearFilters}><X className="mr-1.5 h-3.5 w-3.5 shrink-0" />Reset</Button></div>
       </div>
     </CardContent></Card>}
     <div className="mt-4 flex gap-3 overflow-x-auto px-0 pb-2 lg:grid lg:grid-cols-5 lg:overflow-visible">
@@ -746,7 +753,7 @@ function Logs() {
                      <td className="max-w-[320px] px-4 py-3 text-[11px] text-slate-500">{selectedMember ? formatDailyBreaks(memberRecords) : formatDailyBreaks(dateRecords)}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</td>
                        <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? <><span>{record.start_method === "warehouse" ? "Warehouse" : record.start_method === "offsite" ? "Off-site" : "Route start"} · {record.status}</span>{record.daily_note && <span className="mt-1 block truncate text-[11px] text-blue-700" title={record.daily_note}>Note: {record.daily_note}</span>}</> : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "" : "Not expected") : (names.length ? <><span>{names.slice(0, 3).join(", ")}{names.length > 3 ? ` +${names.length - 3}` : ""}</span>{notes.length > 0 && <span className="mt-1 block truncate text-[11px] text-blue-700" title={notes.join(" | ")}>Notes available: {notes.length}</span>}</> : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "" : "Not expected")}</td>
-                     <td className="min-w-[190px] px-2 py-2 align-top text-right">{canReviewAttendance || canManageAttendance || canAuditAttendance ? <div className="flex flex-col items-end gap-2">{actions.map(({ attendance, label }: any) => <AttendanceLogActions key={attendance.id} attendance={attendance} canViewAll={canViewAll} label={label} />)}</div> : "—"}</td>
+                      <td className="min-w-[190px] px-2 py-2 align-top text-right">{canReviewAttendance || canManageAttendance || canAuditAttendance || canViewAttendanceLocations ? <div className="flex flex-col items-end gap-2">{actions.map(({ attendance, label }: any) => <AttendanceLogActions key={attendance.id} attendance={attendance} canViewAll={canViewAll} label={label} onViewLog={() => setSelectedId(Number(attendance.id))} />)}</div> : "—"}</td>
                      </tr>;
                 })}
               </tbody>
@@ -775,7 +782,7 @@ function Logs() {
                      <div><span className="block text-slate-500">Hours</span><span className="font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</span></div>
                    </div>
                      {(selectedMember ? memberRecords.some((row: any) => row.breaks?.length) : summary?.records?.some((row: any) => row.breaks?.length)) ? <p className="mt-2 text-[11px] text-slate-500"><span className="font-medium text-slate-600">Breaks: </span>{selectedMember ? formatDailyBreaks(memberRecords) : formatDailyBreaks(summary?.records ?? [])}</p> : null}
-                    {actions.length > 0 && (canReviewAttendance || canManageAttendance || canAuditAttendance) && <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">{actions.map(({ attendance, label }: any) => <AttendanceLogActions key={attendance.id} attendance={attendance} canViewAll={canViewAll} label={label} />)}</div>}
+                     {actions.length > 0 && (canReviewAttendance || canManageAttendance || canAuditAttendance || canViewAttendanceLocations) && <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">{actions.map(({ attendance, label }: any) => <AttendanceLogActions key={attendance.id} attendance={attendance} canViewAll={canViewAll} label={label} onViewLog={() => setSelectedId(Number(attendance.id))} />)}</div>}
                </div>;
              })}
            </div>
