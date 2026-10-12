@@ -39,9 +39,9 @@ export interface PayslipDocumentData {
 }
 
 export interface PayslipBranding {
-  company_name?: string | null;
   logo_base64?: string | null;
   company_address?: string | null;
+  company_phone?: string | null;
 }
 
 export interface PayslipDocumentProps {
@@ -151,16 +151,16 @@ export default function PayslipDocument({ payslip, branding }: PayslipDocumentPr
   const netTakeHomePhp = roundMoney(netPay * conversionRate);
   const contactDetails = [
     branding.company_address,
+    branding.company_phone,
     "corporate@midatalanticdistribution.com",
   ].filter((value): value is string => Boolean(value?.trim()));
   const isDraft = (payslip.run?.status ?? "").toLowerCase() === "draft";
-  const companyName = branding.company_name?.trim() || "MIDATLANTIC DISTRIBUTION";
 
   return (
     <article className="payslip-document" data-testid="payslip-document" aria-label="Employee payslip">
       <header className="payslip-brand" aria-label="Company branding">
-        {branding.logo_base64 && <img className="payslip-logo" src={branding.logo_base64} alt={`${companyName} logo`} />}
-        <strong className="payslip-company-name">{companyName}</strong>
+        {branding.logo_base64 && <img className="payslip-logo" src={branding.logo_base64} alt="MIDATLANTIC DISTRIBUTION logo" />}
+        <strong className="payslip-company-name">MIDATLANTIC DISTRIBUTION</strong>
       </header>
       <header className="payslip-contact" aria-label="Company contact information">
         {contactDetails.join(" | ")}
