@@ -525,8 +525,8 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
           {isOfflineMode && (
             <span className="hidden sm:inline ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-600 uppercase tracking-wide whitespace-nowrap">Offline</span>
           )}
-          <div ref={searchRef} className="relative min-w-0 flex-1 max-w-md ml-auto mr-2 sm:mr-4">
-            <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 text-slate-400 transition-colors focus-within:border-blue-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100">
+          <div ref={searchRef} className="relative min-w-0 flex-1 max-w-md ml-auto mr-2 sm:mr-4 self-stretch flex items-center">
+            <div className="flex h-full w-full items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 text-slate-400 transition-colors focus-within:border-blue-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100">
               {globalSearchLoading ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Search className="h-4 w-4 shrink-0" />}
               <input
                 value={globalSearchQuery}
@@ -549,7 +549,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
                 placeholder="Search customers or order IDs"
                 aria-label="Search customers or BigCommerce order IDs"
                 data-testid="input-global-search"
-                className="min-w-0 flex-1 bg-transparent px-2 text-xs text-slate-700 outline-none placeholder:text-slate-400"
+                className="min-w-0 flex-1 bg-transparent px-2 text-sm font-semibold text-slate-700 outline-none placeholder:text-slate-400"
               />
             </div>
             {globalSearchOpen && globalSearchQuery.trim().length >= 2 && (
