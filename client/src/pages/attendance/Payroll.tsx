@@ -137,10 +137,18 @@ function PayStatement({
   slip,
   canEmail = false,
   company,
+  showActions = true,
+  emailEndpoint,
+  pendingAction,
+  onPendingActionComplete,
 }: {
   slip: PayslipForView;
   canEmail?: boolean;
   company?: Record<string, string | null | undefined>;
+  showActions?: boolean;
+  emailEndpoint?: string;
+  pendingAction?: "download" | "email" | null;
+  onPendingActionComplete?: () => void;
 }) {
   const documentRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -157,7 +165,7 @@ function PayStatement({
   const emailPayslip = useMutation({
     mutationFn: async (recipient: string) => {
       const pdf_base64 = await generatePdfBase64FromElement(documentRef.current);
-      return apiJson(`/api/attendance/payroll/admin/payslips/${slip.id}/email`, jsonInit("POST", {
+      return apiJson(emailEndpoint ?? `/api/attendance/payroll/admin/payslips/${slip.id}/email`, jsonInit("POST", {
         to: recipient,
         pdf_base64,
       }));
@@ -199,6 +207,22 @@ function PayStatement({
     }
   }
 
+  useEffect(() => {
+    if (!pendingAction) return;
+    if (pendingAction === "email") {
+      emailPayslip.reset();
+      setEmailNotice("");
+      setEmailTo(slip.employee_email ?? "");
+      setEmailOpen(true);
+      onPendingActionComplete?.();
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      void downloadPayslip().finally(() => onPendingActionComplete?.());
+    }, 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [pendingAction, slip.id]);
+
   return (
     <>
       <Card className="border-slate-200 shadow-sm print:break-inside-avoid">
@@ -208,7 +232,7 @@ function PayStatement({
               <CardTitle className="text-sm">Employee payslip</CardTitle>
               <p className="mt-1 text-xs text-slate-500">{slip.employee_name_snapshot} · {dateLabel(slip.run.period_start)} – {dateLabel(slip.run.period_end)}</p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            {showActions && <div className="flex flex-wrap gap-2">
               <Button type="button" size="sm" variant="outline" disabled={isDownloading} onClick={downloadPayslip} data-testid={`download-payslip-${slip.id}`}>
                 {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                 Download PDF
@@ -227,7 +251,7 @@ function PayStatement({
               >
                 <Mail className="mr-2 h-4 w-4" />Email payslip
               </Button>}
-            </div>
+            </div>}
           </div>
           {(downloadError || emailNotice) && <p role={downloadError ? "alert" : "status"} className={`mt-2 text-xs ${downloadError ? "text-rose-600" : "text-emerald-700"}`}>{downloadError || emailNotice}</p>}
         </CardHeader>
@@ -276,6 +300,100 @@ function PayStatement({
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+function EmployeePayslipList({
+  payslips,
+  company,
+}: {
+  payslips: PayslipForView[];
+  company?: Record<string, string | null | undefined>;
+}) {
+  const [openPeriod, setOpenPeriod] = useState("");
+  const [pendingAction, setPendingAction] = useState<{
+    slipId: number;
+    action: "download" | "email";
+  } | null>(null);
+
+  return (
+    <div className="space-y-2">
+      {payslips.map((slip) => {
+        const value = String(slip.id);
+        const isOpen = openPeriod === value;
+        const isPending = pendingAction?.slipId === slip.id;
+        return (
+          <section key={slip.id} className="rounded-lg border border-slate-200 bg-white px-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center justify-between gap-3 py-3 text-left"
+                aria-expanded={isOpen}
+                aria-controls={`payslip-period-${slip.id}`}
+                onClick={() => {
+                  setOpenPeriod(isOpen ? "" : value);
+                  if (isOpen) setPendingAction(null);
+                }}
+                data-testid={`expand-payslip-${slip.id}`}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium text-slate-900">Pay period</span>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    {dateLabel(slip.run.period_start)} – {dateLabel(slip.run.period_end)}
+                  </span>
+                </span>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+              </button>
+              <div className="flex shrink-0 gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Download payslip for ${dateLabel(slip.run.period_start)} to ${dateLabel(slip.run.period_end)}`}
+                  disabled={isPending}
+                  onClick={() => {
+                    setOpenPeriod(value);
+                    setPendingAction({ slipId: slip.id, action: "download" });
+                  }}
+                  data-testid={`download-payslip-${slip.id}`}
+                >
+                  {isPending && pendingAction?.action === "download"
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <Download className="h-4 w-4" />}
+                  <span className="hidden sm:inline">Download</span>
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Email payslip for ${dateLabel(slip.run.period_start)} to ${dateLabel(slip.run.period_end)}`}
+                  disabled={isPending}
+                  onClick={() => {
+                    setOpenPeriod(value);
+                    setPendingAction({ slipId: slip.id, action: "email" });
+                  }}
+                  data-testid={`email-payslip-${slip.id}`}
+                >
+                  <Mail className="h-4 w-4" />
+                  <span className="hidden sm:inline">Email</span>
+                </Button>
+              </div>
+            </div>
+            {isOpen && <div id={`payslip-period-${slip.id}`} role="region" aria-label={`Payslip for ${dateLabel(slip.run.period_start)} to ${dateLabel(slip.run.period_end)}`} className="pb-3">
+              <PayStatement
+                slip={slip}
+                canEmail
+                showActions={false}
+                emailEndpoint={`/api/attendance/payroll/me/payslips/${slip.id}/email`}
+                pendingAction={isPending ? pendingAction?.action : null}
+                onPendingActionComplete={() => setPendingAction(current => current?.slipId === slip.id ? null : current)}
+                company={company}
+              />
+            </div>}
+          </section>
+        );
+      })}
+    </div>
   );
 }
 
@@ -628,11 +746,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
         <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-slate-500" /><h2 className="font-semibold text-slate-900">Your finalized payslips</h2></div>
         {me.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
         {!me.isLoading && !ownPayslips.length && <EmptyState>Finalized payslips will appear here.</EmptyState>}
-        <div className="grid gap-3 lg:grid-cols-2">{ownPayslips.map((slip: any) => <PayStatement
-          key={slip.id}
-          slip={slip}
-          company={invoiceRenderSettings.data}
-        />)}</div>
+        <EmployeePayslipList payslips={ownPayslips} company={invoiceRenderSettings.data} />
       </section>}
 
       {mode === "management" && canViewPayroll && <nav aria-label="Payroll management sections" className="flex flex-wrap gap-2 border-t border-slate-200 pt-5">

@@ -442,7 +442,8 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
           eq(employeePayItems.user_id, userId),
           eq(employeePayItems.is_active, true),
         )),
-        db.select({ slip: payslips, run: payrollRuns }).from(payslips)
+        db.select({ slip: payslips, run: payrollRuns, employee_email: users.username }).from(payslips)
+          .innerJoin(users, eq(users.id, payslips.user_id))
           .innerJoin(payrollRuns, eq(payrollRuns.id, payslips.payroll_run_id))
           .where(and(eq(payslips.user_id, userId), eq(payrollRuns.status, "finalized")))
           .orderBy(desc(payrollRuns.period_start)),
@@ -460,10 +461,11 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
       res.json({
         profile: profile ?? null,
         payItems: items,
-        payslips: slipRows.map(({ slip, run }) => {
+        payslips: slipRows.map(({ slip, run, employee_email }) => {
           const slipLines = linesBySlip.get(slip.id) ?? [];
           return {
             ...slip,
+            employee_email,
             hourly_rate: resolvePayslipHourlyRate(slip, slipLines, profile?.hourly_rate),
             run,
             lines: slipLines,

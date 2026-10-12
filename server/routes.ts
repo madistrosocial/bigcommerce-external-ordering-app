@@ -8374,7 +8374,7 @@ export async function registerRoutes(
     });
   }
 
-  app.post("/api/attendance/payroll/admin/payslips/:id/email", requirePermission("payroll", "manage"), async (req, res) => {
+  const sendPayslipEmail = async (req: Request, res: Response, ownerUserId?: number) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid payslip." });
 
@@ -8386,6 +8386,7 @@ export async function registerRoutes(
 
     try {
       const [record] = await db.select({
+        userId: payslips.user_id,
         employeeName: payslips.employee_name_snapshot,
         runStatus: payrollRuns.status,
         periodStart: payrollRuns.period_start,
@@ -8395,6 +8396,7 @@ export async function registerRoutes(
         .where(eq(payslips.id, id))
         .limit(1);
       if (!record) return res.status(404).json({ error: "Payslip not found." });
+      if (ownerUserId !== undefined && record.userId !== ownerUserId) return res.status(404).json({ error: "Payslip not found." });
       if (record.runStatus !== "finalized") return res.status(409).json({ error: "Only finalized payslips can be emailed." });
 
       const providedPdf = payload.data.pdf_base64.trim();
@@ -8425,6 +8427,16 @@ export async function registerRoutes(
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? "Could not email this payslip." });
     }
+  };
+
+  app.post("/api/attendance/payroll/admin/payslips/:id/email", requirePermission("payroll", "manage"), async (req, res) => {
+    await sendPayslipEmail(req, res);
+  });
+
+  app.post("/api/attendance/payroll/me/payslips/:id/email", requirePermission("attendance", "view"), async (req, res) => {
+    const ownerUserId = Number((req as any).authUser?.id);
+    if (!Number.isInteger(ownerUserId) || ownerUserId <= 0) return res.status(401).json({ error: "Authentication required." });
+    await sendPayslipEmail(req, res, ownerUserId);
   });
 
   app.post("/api/invoice/send-email", requireAuth, async (req, res) => {
