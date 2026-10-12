@@ -2047,10 +2047,14 @@ export class DatabaseStorage implements IStorage {
           ${customersMirror.shipping_address}->>'address2',
           ${customersMirror.shipping_address}->>'street_1',
           ${customersMirror.shipping_address}->>'street_2',
+          ${customersMirror.shipping_address}->>'street1',
+          ${customersMirror.shipping_address}->>'street2',
           ${customersMirror.billing_address}->>'address1',
           ${customersMirror.billing_address}->>'address2',
           ${customersMirror.billing_address}->>'street_1',
-          ${customersMirror.billing_address}->>'street_2'
+          ${customersMirror.billing_address}->>'street_2',
+          ${customersMirror.billing_address}->>'street1',
+          ${customersMirror.billing_address}->>'street2'
         ) ILIKE ${s}`,
       ));
     }
