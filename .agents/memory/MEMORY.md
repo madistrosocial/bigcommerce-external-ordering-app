@@ -25,6 +25,7 @@
 - [Attendance accounting baseline](attendance-accounting-baseline.md) — ledger excludes weekends and observed US holidays; short hours use an 8-hour weekday expectation until schedules are configurable.
 - [Payroll and leave boundaries](payroll-leave-boundaries.md) — Attendance owns self-service/time capture; separate Payroll owns pay settings, runs, and overtime review.
 - [Payslip calculation scope](payslip-calculation-scope.md) — compute rates, regular pay, paid work hours, and worked days; keep unavailable deductions, metrics, FX, commission, and incentives at zero.
+- [Payroll period disclosure](payroll-period-disclosure.md) — use a native accessible disclosure for pay periods; Radix Accordion triggered an invalid React hook call in the payroll route.
 - [Attendance breaks and daily notes](attendance-breaks-notes.md) — breaks pause the same session; daily notes are stored once per employee/work date.
 - [Attendance overnight session recovery](attendance-overdue-session.md) — require employees to close an open prior-day session before starting today; show the daily report only after today's time-in.
 - [Stale session recovery](stale-session-recovery.md) — invalid saved auth must fail safely and expose a cache-clearing force-logout path.
