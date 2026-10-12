@@ -14223,7 +14223,8 @@ export async function registerRoutes(
       ));
       const format = req.body?.format === "csv" ? "csv" : req.body?.format === "xlsx" ? "xlsx" : "";
       const emailTitle = String(req.body?.email_title ?? defaultEmailTitle).trim().slice(0, 180) || defaultEmailTitle;
-      const emailBody = String(req.body?.email_body ?? defaultEmailBody).trim().slice(0, 10000) || defaultEmailBody;
+      const rawEmailBody = String(req.body?.email_body ?? defaultEmailBody);
+      const emailBody = rawEmailBody.trim() ? sanitizeMarketingEditorHtml(rawEmailBody) : defaultEmailBody;
       if (audienceType === "saved_audience") {
         if (!audienceId) return res.status(400).json({ error: "Choose a saved audience" });
         const audience = await storage.getMarketingAudience(audienceId);
@@ -14331,7 +14332,8 @@ export async function registerRoutes(
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
-      const resolveEmailTemplate = (template: string, customer: any) => {
+      const emailBodyIsHtml = /<[a-z][\s\S]*>/i.test(emailBody);
+      const resolveEmailTemplate = (template: string, customer: any, escapeValues = false) => {
         const firstName = String(customer.first_name ?? "").trim();
         const lastName = String(customer.last_name ?? "").trim();
         const fullName = [firstName, lastName].filter(Boolean).join(" ");
@@ -14349,15 +14351,29 @@ export async function registerRoutes(
           company: businessName,
           email: String(customer.email ?? "").trim(),
         };
-        return template.replace(/\{([^{}]+)\}/g, (match, key: string) => values[key.trim().toLowerCase()] ?? match);
+        return template.replace(/\{([^{}]+)\}/g, (match, key: string) => {
+          const value = values[key.trim().toLowerCase()];
+          return value === undefined ? match : escapeValues ? escapeHtml(value) : value;
+        });
       };
+      const stripHtml = (html: string) => html
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/p>/gi, "\n\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+        .replace(/&nbsp;/g, " ").replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+        .trim();
       for (const customer of customers) {
         const sendId = randomUUID();
         const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ");
         const businessName = String(customer.company ?? "");
         const displayName = businessName || customerName || `Customer ${customer.id}`;
         const resolvedEmailTitle = resolveEmailTemplate(emailTitle, customer);
-        const resolvedEmailBody = resolveEmailTemplate(emailBody, customer);
+        const resolvedEmailBody = resolveEmailTemplate(emailBody, customer, emailBodyIsHtml);
+        const emailHtml = emailBodyIsHtml
+          ? resolvedEmailBody
+          : escapeHtml(resolvedEmailBody).replace(/\r?\n/g, "<br />");
+        const emailText = emailBodyIsHtml ? stripHtml(resolvedEmailBody) : resolvedEmailBody;
         const rows = currentProducts.flatMap((product) => product.variants.map((variant: any) => [
           product.brand || product.name.split(/\s+/)[0],
           product.name,
@@ -14395,8 +14411,8 @@ export async function registerRoutes(
             from: smtpFrom,
             to: String(customer.email).trim(),
             subject: resolvedEmailTitle,
-            text: resolvedEmailBody,
-            html: escapeHtml(resolvedEmailBody).replace(/\r?\n/g, "<br />"),
+            text: emailText,
+            html: emailHtml,
             attachments: [{
               filename,
               content: fileBuffer,

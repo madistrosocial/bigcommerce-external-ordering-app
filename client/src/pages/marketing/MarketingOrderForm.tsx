@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useTimeService } from "@/hooks/useTimeService";
 import { useLocation } from "wouter";
 import { usePermissions } from "@/hooks/usePermissions";
+import RichTextEditor, { stripHtml } from "@/components/editor/RichTextEditor";
 import {
   getMarketingAudiences,
   getMarketingOrderFormCustomers,
@@ -318,10 +319,11 @@ export default function MarketingOrderForm() {
              <label className="mt-4 block min-w-0 text-sm font-medium text-slate-700">Email title
                <Input className="mt-1.5" value={emailTitle} maxLength={180} onChange={event => setEmailTitle(event.target.value)} placeholder="Your order form is ready" />
              </label>
-             <label className="mt-4 block min-w-0 text-sm font-medium text-slate-700">Email message
-               <textarea className="mt-1.5 min-h-36 w-full rounded-md border border-slate-200 p-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" value={emailBody} maxLength={10000} onChange={event => setEmailBody(event.target.value)} placeholder="Write the message customers will receive with their order form attached." />
-               <span className="mt-1 block text-xs font-normal text-slate-400">Placeholders are replaced for each customer: <code>{"{first_name}"}</code>, <code>{"{last_name}"}</code>, <code>{"{fullname}"}</code>, <code>{"{business_name}"}</code>, and <code>{"{email}"}</code>.</span>
-             </label>
+              <div className="mt-4 min-w-0 text-sm font-medium text-slate-700">
+                <p className="mb-1.5">Email message</p>
+                <RichTextEditor value={emailBody} onChange={setEmailBody} minHeight={180} />
+                <span className="mt-1 block text-xs font-normal text-slate-400">Placeholders are replaced for each customer: <code>{"{first_name}"}</code>, <code>{"{last_name}"}</code>, <code>{"{fullname}"}</code>, <code>{"{business_name}"}</code>, and <code>{"{email}"}</code>.</span>
+              </div>
              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                <p className="text-xs text-slate-400">Use the customer’s business name with <code>{"{business name}"}</code> or <code>{"{company}"}</code> too.</p>
                <Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={() => { setEmailTitle(DEFAULT_EMAIL_TITLE); setEmailBody(DEFAULT_EMAIL_BODY); }}>Use starter template</Button>
@@ -370,7 +372,7 @@ export default function MarketingOrderForm() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3"><SummaryStat label="Recipients" value={recipientCount} /><SummaryStat label="Products" value={products.length} /><SummaryStat label="Files" value={recipientCount} /></div>
             <div className="rounded-lg border p-3"><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Recipients</p><div className="space-y-1">{audienceType === "saved_audience" && selectedAudience ? <p className="text-sm text-slate-700">{selectedAudience.name} <span className="text-xs text-slate-400">· {recipientCount} members resolved at send time</span></p> : customers.map(customer => <p key={customer.id} className="text-sm text-slate-700">{customer.email} <span className="text-xs text-slate-400">· {customerName(customer)}</span></p>)}</div></div>
-             <div className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Email</p><p className="mt-2 text-sm font-medium text-slate-800">{emailTitle || "No email title"}</p><p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{emailBody || "No email message"}</p></div>
+              <div className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Email</p><p className="mt-2 text-sm font-medium text-slate-800">{emailTitle || "No email title"}</p><p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{stripHtml(emailBody) || (/<img\b/i.test(emailBody) ? "Formatted message with inline image(s)." : "No email message")}</p></div>
             <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">The files are built from current BigCommerce product and variant availability. This action does not create an order or modify inventory.</div>
              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><Button className="w-full sm:w-auto" variant="outline" onClick={() => setReviewOpen(false)}>Back</Button><Button className="h-auto min-h-10 w-full whitespace-normal px-3 py-2 sm:w-auto" onClick={() => sendMutation.mutate()} disabled={sendMutation.isPending}>{sendMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin" /> Sending…</> : <><Send className="mr-2 h-4 w-4 shrink-0" /> Generate & Send Order Forms</>}</Button></div>
           </div>

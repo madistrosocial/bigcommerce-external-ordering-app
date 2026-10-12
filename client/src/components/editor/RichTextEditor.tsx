@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { TextStyle, FontFamily, FontSize } from "@tiptap/extension-text-style";
-import { Underline as UnderlineExt } from "@tiptap/extension-underline";
 import Image from "@tiptap/extension-image";
 import TextAlign from "@tiptap/extension-text-align";
 import {
@@ -104,7 +103,6 @@ export default function RichTextEditor({ value, onChange, minHeight = 300 }: Pro
       TextStyle,
       FontFamily,
       FontSize,
-      UnderlineExt,
       Image.configure({
         inline: true,
         allowBase64: true,
