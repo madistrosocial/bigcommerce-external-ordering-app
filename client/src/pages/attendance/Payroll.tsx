@@ -153,7 +153,6 @@ function PayStatement({
     logo_base64: company?.logo_base64,
     company_address: company?.company_address,
     company_phone: company?.company_phone,
-    company_email: company?.company_email,
   };
 
   const emailPayslip = useMutation({

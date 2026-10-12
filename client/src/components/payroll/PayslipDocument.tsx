@@ -42,7 +42,6 @@ export interface PayslipBranding {
   logo_base64?: string | null;
   company_address?: string | null;
   company_phone?: string | null;
-  company_email?: string | null;
 }
 
 export interface PayslipDocumentProps {
@@ -153,7 +152,6 @@ export default function PayslipDocument({ payslip, branding }: PayslipDocumentPr
   const contactDetails = [
     branding.company_address,
     branding.company_phone,
-    branding.company_email,
   ].filter((value): value is string => Boolean(value?.trim()));
   const isDraft = (payslip.run?.status ?? "").toLowerCase() === "draft";
 
