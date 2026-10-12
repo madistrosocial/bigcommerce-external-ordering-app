@@ -720,6 +720,8 @@ export async function registerRoutes(
     CREATE INDEX IF NOT EXISTS password_reset_tokens_user_idx ON password_reset_tokens (user_id);
     CREATE INDEX IF NOT EXISTS password_reset_tokens_expiry_idx ON password_reset_tokens (expires_at);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS company_role text NOT NULL DEFAULT '';
+    ALTER TABLE IF EXISTS payslips ADD COLUMN IF NOT EXISTS position_snapshot text NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS dropship_vendors (
       id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       code text NOT NULL UNIQUE,
@@ -3031,6 +3033,10 @@ export async function registerRoutes(
   app.post("/api/users", requireAdmin, async (req, res) => {
     try {
       const { username, password, name, role } = req.body;
+      const companyRole = typeof req.body?.company_role === "string" ? req.body.company_role.trim() : "";
+      if (companyRole.length > 120) {
+        return res.status(400).json({ error: "Company role must be 120 characters or fewer." });
+      }
 
       // Validate role
       const validRoles = ["admin", "agent"];
@@ -3051,6 +3057,7 @@ export async function registerRoutes(
         username,
         password: hashedPassword,
         name,
+        company_role: companyRole,
         role: normalizedRole,
         is_enabled: true,
       });
@@ -3074,6 +3081,12 @@ export async function registerRoutes(
       if (is_enabled !== undefined) update.is_enabled = is_enabled;
       if (allow_bigcommerce_search !== undefined) update.allow_bigcommerce_search = allow_bigcommerce_search;
       if (default_landing_page !== undefined) update.default_landing_page = default_landing_page;
+      if (req.body.company_role !== undefined) {
+        if (typeof req.body.company_role !== "string" || req.body.company_role.trim().length > 120) {
+          return res.status(400).json({ error: "Company role must be 120 characters or fewer." });
+        }
+        update.company_role = req.body.company_role.trim();
+      }
       if (password && password.trim()) {
         if (password.trim().length < 8 || password.trim().length > 128) {
           return res.status(400).json({ error: "Temporary password must be between 8 and 128 characters." });
@@ -3255,12 +3268,16 @@ export async function registerRoutes(
         : typeof req.body.avatar_data === "string"
           ? req.body.avatar_data.trim()
           : "";
+      const companyRole = typeof req.body?.company_role === "string" ? req.body.company_role.trim() : "";
 
       if (name.length < 2 || name.length > 120) {
         return res.status(400).json({ error: "Name must be between 2 and 120 characters." });
       }
       if (!isEmailAddress(username)) {
         return res.status(400).json({ error: "Enter a valid email address." });
+      }
+      if (companyRole.length > 120) {
+        return res.status(400).json({ error: "Company role must be 120 characters or fewer." });
       }
       if (avatarData && (
         avatarData.length > 2_800_000
@@ -3274,7 +3291,7 @@ export async function registerRoutes(
         return res.status(409).json({ error: "That email address is already in use." });
       }
 
-      const updated = await storage.updateUserDetails(user.id, { name, username, avatar_data: avatarData || null });
+      const updated = await storage.updateUserDetails(user.id, { name, username, avatar_data: avatarData || null, company_role: companyRole });
       const { password: _, ...safeUser } = updated;
       res.json(safeUser);
     } catch (error: any) {

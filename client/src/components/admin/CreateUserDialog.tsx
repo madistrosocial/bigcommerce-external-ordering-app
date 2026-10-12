@@ -65,6 +65,10 @@ export default function CreateUserDialog({ onCreated, className }: CreateUserDia
             <Input id="create-user-username" name="username" type="email" placeholder="john@example.com" required data-testid="input-user-email" />
           </div>
           <div className="space-y-2">
+            <Label htmlFor="create-user-company-role">Company Role / Position</Label>
+            <Input id="create-user-company-role" name="company_role" placeholder="e.g. Sales Representative" maxLength={120} data-testid="input-user-company-role" />
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="create-user-password">Password</Label>
             <Input id="create-user-password" name="password" type="password" placeholder="••••••••" required data-testid="input-user-password" />
           </div>

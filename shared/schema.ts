@@ -38,6 +38,7 @@ export const users = pgTable("users", {
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   name: text("name").notNull(),
+  company_role: text("company_role").notNull().default(""),
   avatar_data: text("avatar_data"),
   role: text("role").notNull(), // 'admin' or 'agent'
   is_enabled: boolean("is_enabled").notNull().default(true),
@@ -692,6 +693,7 @@ export const payslips = pgTable("payslips", {
   user_id: integer("user_id").notNull().references(() => users.id),
   employee_name_snapshot: text("employee_name_snapshot").notNull(),
   employee_username_snapshot: text("employee_username_snapshot").notNull(),
+  position_snapshot: text("position_snapshot").notNull().default(""),
   hourly_rate_snapshot: decimal("hourly_rate_snapshot", { precision: 12, scale: 4 }).notNull().default("0"),
   currency: text("currency").notNull(),
   regular_hours: decimal("regular_hours", { precision: 10, scale: 2 }).notNull().default("0"),

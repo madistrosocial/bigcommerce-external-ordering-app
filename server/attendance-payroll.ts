@@ -125,6 +125,7 @@ async function buildDraftPayslips(tx: any, run: any) {
     id: users.id,
     name: users.name,
     username: users.username,
+    company_role: users.company_role,
   }).from(users)
     .where(eq(users.role_id, run.role_id))
     .orderBy(asc(users.name));
@@ -361,6 +362,7 @@ async function buildDraftPayslips(tx: any, run: any) {
       user_id: employee.id,
       employee_name_snapshot: employee.name,
       employee_username_snapshot: employee.username,
+      position_snapshot: employee.company_role || "",
       hourly_rate_snapshot: hourlyRate.toFixed(4),
       currency,
       regular_hours: regularHours.toFixed(2),

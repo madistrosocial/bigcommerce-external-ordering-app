@@ -23,6 +23,7 @@ export interface PayslipRunSnapshot {
 
 export interface PayslipDocumentData {
   employee_name_snapshot: string;
+  position_snapshot?: string | null;
   currency: string;
   hourly_rate?: PayslipAmount;
   hourly_rate_snapshot?: PayslipAmount;
@@ -185,7 +186,7 @@ export default function PayslipDocument({ payslip, branding }: PayslipDocumentPr
           </div>
           <div className="payslip-detail">
             <span>Position :</span>
-            <strong data-testid="payslip-position">{payslip.run?.group_name_snapshot || "0"}</strong>
+            <strong data-testid="payslip-position">{payslip.position_snapshot || payslip.run?.group_name_snapshot || "0"}</strong>
           </div>
           <div className="payslip-detail">
             <span>Pay Date :</span>

@@ -93,6 +93,7 @@ export interface User {
   id: number;
   username: string;
   name: string;
+  company_role?: string;
   avatar_data?: string | null;
   role: 'admin' | 'agent';
   is_enabled: boolean;
@@ -1037,7 +1038,7 @@ export async function getSyslogActivity(opts: {
   return res.json();
 }
 
-export async function updateAccountProfile(data: { name: string; username: string; avatar_data?: string | null }): Promise<User> {
+export async function updateAccountProfile(data: { name: string; username: string; company_role?: string; avatar_data?: string | null }): Promise<User> {
   const res = await fetch(`${API_BASE}/account/profile`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", ...getAuthHeaders() },
@@ -2201,6 +2202,7 @@ export interface RbacUser {
   id: number;
   username: string;
   name: string;
+  company_role?: string;
   role: string;
   is_enabled: boolean;
   allow_bigcommerce_search: boolean;
@@ -2214,7 +2216,7 @@ export interface RbacUser {
 
 export async function updateUserDetails(
   id: number,
-  data: Partial<{ name: string; username: string; password: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>,
+  data: Partial<{ name: string; username: string; password: string; company_role: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>,
 ): Promise<User> {
   const res = await fetch(`${API_BASE}/users/${id}`, {
     method: "PUT",

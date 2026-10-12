@@ -174,6 +174,7 @@ function UserDetail({
 
   const [name, setName] = useState(user.name);
   const [username, setUsername] = useState(user.username);
+  const [companyRole, setCompanyRole] = useState(user.company_role ?? "");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [role, setRole] = useState(user.role);
@@ -185,13 +186,14 @@ function UserDetail({
   const [resettingHome, setResettingHome] = useState(false);
 
   useEffect(() => {
-    setName(user.name); setUsername(user.username); setRole(user.role);
+    setName(user.name); setUsername(user.username); setCompanyRole(user.company_role ?? ""); setRole(user.role);
     setIsEnabled(user.is_enabled); setAllowBcSearch(user.allow_bigcommerce_search);
     setGroupId(user.role_id != null ? String(user.role_id) : "none");
     setLandingPage(user.default_landing_page || "/dashboard");
   }, [user.id]);
 
   const isDirty = name !== user.name || username !== user.username || role !== user.role
+    || companyRole !== (user.company_role ?? "")
     || isEnabled !== user.is_enabled || allowBcSearch !== user.allow_bigcommerce_search
     || password.trim() !== "" || groupId !== (user.role_id != null ? String(user.role_id) : "none")
     || landingPage !== (user.default_landing_page || "/dashboard");
@@ -206,6 +208,7 @@ function UserDetail({
       await Promise.all([
         updateUserDetails(user.id, {
           name: name.trim(), username: username.trim(), role, is_enabled: isEnabled,
+          company_role: companyRole.trim(),
           allow_bigcommerce_search: allowBcSearch,
           default_landing_page: landingPage,
           ...(password.trim() ? { password: password.trim() } : {}),
@@ -289,6 +292,11 @@ function UserDetail({
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-slate-600">Username</Label>
               <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoCapitalize="none" data-testid="input-user-username" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-slate-600">Company Role / Position</Label>
+              <Input value={companyRole} onChange={(e) => setCompanyRole(e.target.value)} placeholder="e.g. Sales Representative" maxLength={120} data-testid="input-user-company-role" />
+              <p className="text-[11px] text-slate-400">Used as the Position on future payslips.</p>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-slate-600">

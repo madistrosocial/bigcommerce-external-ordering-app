@@ -50,7 +50,7 @@ export interface IStorage {
   getAllUsers(): Promise<User[]>;
   updateUserStatus(id: number, is_enabled: boolean): Promise<void>;
   updateUserPermission(id: number, allow_bigcommerce_search: boolean): Promise<void>;
-  updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; avatar_data: string | null; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User>;
+  updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; avatar_data: string | null; company_role: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User>;
   updateAccountPassword(id: number, passwordHash: string): Promise<void>;
   clearPasswordResetTokens(userId: number): Promise<void>;
   createPasswordResetToken(userId: number, tokenHash: string, expiresAt: Date): Promise<void>;
@@ -557,7 +557,7 @@ export class DatabaseStorage implements IStorage {
     await db.update(users).set({ allow_bigcommerce_search }).where(eq(users.id, id));
   }
 
-  async updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; avatar_data: string | null; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User> {
+  async updateUserDetails(id: number, data: Partial<{ name: string; username: string; password: string; avatar_data: string | null; company_role: string; role: string; is_enabled: boolean; allow_bigcommerce_search: boolean; default_landing_page: string }>): Promise<User> {
     const result = await db.update(users).set(data).where(eq(users.id, id)).returning();
     return result[0];
   }

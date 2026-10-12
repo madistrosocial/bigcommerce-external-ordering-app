@@ -42,6 +42,7 @@ export default function AccountSettings() {
   const { toast } = useToast();
   const [name, setName] = useState(currentUser?.name || "");
   const [username, setUsername] = useState(currentUser?.username || "");
+  const [companyRole, setCompanyRole] = useState(currentUser?.company_role || "");
   const [avatarData, setAvatarData] = useState(currentUser?.avatar_data || "");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -58,6 +59,7 @@ export default function AccountSettings() {
         if (!active) return;
         setName(profile.name);
         setUsername(profile.username);
+        setCompanyRole(profile.company_role || "");
         setAvatarData(profile.avatar_data || "");
         if (currentUser) login({ ...currentUser, ...profile, auth_token: currentUser.auth_token });
       })
@@ -74,10 +76,11 @@ export default function AccountSettings() {
     event.preventDefault();
     setIsSaving(true);
     try {
-      const profile = await updateAccountProfile({ name, username, avatar_data: avatarData || null });
+      const profile = await updateAccountProfile({ name, username, company_role: companyRole, avatar_data: avatarData || null });
       if (currentUser) login({ ...currentUser, ...profile, auth_token: currentUser.auth_token });
       setName(profile.name);
       setUsername(profile.username);
+      setCompanyRole(profile.company_role || "");
       setAvatarData(profile.avatar_data || "");
       toast({ title: "Account updated", description: "Your account information has been saved." });
     } catch (error: any) {
@@ -181,6 +184,11 @@ export default function AccountSettings() {
                     <Input id="account-email" type="email" value={username} onChange={(event) => setUsername(event.target.value)} disabled={isLoading || isSaving} maxLength={254} className="pl-9" data-testid="input-account-email" />
                   </div>
                   <p className="text-xs text-slate-500">This is also your login username and password-reset email.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="account-company-role">Role / Position</Label>
+                  <Input id="account-company-role" value={companyRole} onChange={(event) => setCompanyRole(event.target.value)} disabled={isLoading || isSaving} maxLength={120} placeholder="e.g. Sales Representative" data-testid="input-account-company-role" />
+                  <p className="text-xs text-slate-500">Your company position or designation, shown on future payslips.</p>
                 </div>
               </div>
               <Button type="submit" disabled={isLoading || isSaving} data-testid="button-save-account">
