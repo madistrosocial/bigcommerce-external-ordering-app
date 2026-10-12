@@ -9,8 +9,8 @@ Use the attached payslip's compact field order and layout. Compute hourly rate f
 
 **How to apply:** Replace a zero placeholder only when its calculation and data source are implemented; do not infer fees, attendance exceptions, or exchange rates, and retain the hourly-rate snapshot for historical payslips.
 
-Treat `users.company_role` as the employee's company position, separate from system access role and payroll group. Snapshot it when a payslip is built and display that snapshot as Position; legacy slips may fall back to the payroll group name.
+Treat `users.company_role` as the employee's company position, separate from system access role and payroll group. Snapshot it when a payslip is built. At startup, backfill only blank legacy snapshots from the current company role; keep existing snapshots unchanged, and use the payroll group name when no role is available.
 
-**Why:** A finalized payslip must retain the employee's position at the time the payroll run was built, even if their current profile later changes.
+**Why:** A finalized payslip must not drift with a live profile. Older slips lack a saved position, so the first available company role is captured as a fixed legacy value rather than shown live.
 
-**How to apply:** Keep company designation out of permission/group logic, and use the payslip snapshot rather than the live user profile for historical documents.
+**How to apply:** Keep company designation out of permission/group logic, and render saved snapshots for historical documents; use the payroll group fallback only when both saved and backfilled positions are blank.

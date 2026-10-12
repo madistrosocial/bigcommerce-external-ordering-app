@@ -722,6 +722,12 @@ export async function registerRoutes(
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data text;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS company_role text NOT NULL DEFAULT '';
     ALTER TABLE IF EXISTS payslips ADD COLUMN IF NOT EXISTS position_snapshot text NOT NULL DEFAULT '';
+    UPDATE payslips AS p
+    SET position_snapshot = BTRIM(u.company_role)
+    FROM users AS u
+    WHERE p.user_id = u.id
+      AND p.position_snapshot = ''
+      AND NULLIF(BTRIM(u.company_role), '') IS NOT NULL;
     CREATE TABLE IF NOT EXISTS dropship_vendors (
       id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       code text NOT NULL UNIQUE,
