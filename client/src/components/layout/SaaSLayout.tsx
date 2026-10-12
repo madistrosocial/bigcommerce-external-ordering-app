@@ -492,13 +492,13 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     >
       {mobileOpen && <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setMobileOpen(false)} />}
 
-      <aside className={cn("hidden md:flex flex-col bg-slate-900 text-slate-100 transition-all duration-200 shrink-0 border-r border-slate-800",
+      <aside className={cn("hidden md:flex flex-col bg-[#0f172b] text-slate-100 transition-all duration-200 shrink-0 border-r border-slate-800",
         collapsed ? "w-[60px]" : "w-[220px]")}>
         <SidebarContent />
       </aside>
 
       <aside
-        className={cn("fixed left-0 h-full w-[240px] bg-slate-900 text-slate-100 z-40 flex flex-col transition-transform duration-200 border-r border-slate-800 md:hidden",
+        className={cn("fixed left-0 h-full w-[240px] bg-[#0f172b] text-slate-100 z-40 flex flex-col transition-transform duration-200 border-r border-slate-800 md:hidden",
           mobileOpen ? "translate-x-0" : "-translate-x-full")}
         style={{
           top: "env(safe-area-inset-top)",
