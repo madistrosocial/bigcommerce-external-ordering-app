@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MessageSquare, ChevronLeft, ChevronRight, Search, X, Filter } from "lucide-react";
 import { useTimeService } from "@/hooks/useTimeService";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
+import { CustomerIdentity } from "@/components/crm/CustomerIdentity";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,24 @@ function NoteTypePill({ type }: { type: string }) {
       {type}
     </span>
   );
+}
+
+function NoteTextWithOrderLinks({ text }: { text: string }) {
+  const parts: React.ReactNode[] = [];
+  const pattern = /\b(Order\s+#?)(\d+)\b/gi;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    parts.push(text.slice(cursor, match.index));
+    parts.push(
+      <Link key={`${match.index}-${match[2]}`} href={`/orders/bc/${match[2]}`} className="font-medium text-indigo-600 hover:underline">
+        {match[1]}{match[2]}
+      </Link>,
+    );
+    cursor = pattern.lastIndex;
+  }
+  parts.push(text.slice(cursor));
+  return <>{parts}</>;
 }
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
@@ -77,9 +96,9 @@ function NoteExpandModal({ note, onClose }: { note: any; onClose: () => void }) 
           <div className="flex flex-wrap gap-2 text-xs text-slate-400">
             <span>{fmt.dateTimeCompact(note.created_at)}</span>
             {note.created_by_name && <span>by <span className="text-slate-600 font-medium">{note.created_by_name}</span></span>}
-            {note.order_id && <span className="text-indigo-500 font-medium">Order #{note.order_id}</span>}
+            {note.order_id && <Link href={`/orders/bc/${note.order_id}`} className="text-indigo-600 font-medium hover:underline">Order #{note.order_id}</Link>}
           </div>
-          <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{note.note}</p>
+          <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed"><NoteTextWithOrderLinks text={note.note ?? ""} /></p>
         </div>
         <DialogFooter>
           {note.customer_id && (
@@ -384,22 +403,21 @@ export default function CRMNotes() {
                         >
                           <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{fmt.dateTimeCompact(note.created_at)}</td>
                           <td className="px-4 py-3"><NoteTypePill type={note.note_type} /></td>
-                          <td className="px-4 py-3">
-                            {(note.customer_first_name || note.customer_last_name)
-                              ? <span className="text-xs font-medium text-blue-600">
-                                  {[note.customer_first_name, note.customer_last_name].filter(Boolean).join(" ")}
-                                </span>
-                              : <span className="text-slate-300 text-xs">—</span>}
-                            {note.customer_company && (
-                              <p className="text-[11px] text-slate-400 truncate max-w-[160px]">{note.customer_company}</p>
-                            )}
+                          <td className="px-4 py-3 max-w-[260px]">
+                            <CustomerIdentity
+                              customerId={note.customer_id}
+                              company={note.customer_company}
+                              firstName={note.customer_first_name}
+                              lastName={note.customer_last_name}
+                              email={note.customer_email}
+                            />
                           </td>
-                          <td className="px-4 py-3 text-xs text-indigo-600 font-mono whitespace-nowrap">
-                            {note.order_id ? `#${note.order_id}` : <span className="text-slate-300">—</span>}
+                          <td className="px-4 py-3 text-xs font-mono whitespace-nowrap">
+                            {note.order_id ? <Link href={`/orders/bc/${note.order_id}`} className="text-indigo-600 hover:underline">#{note.order_id}</Link> : <span className="text-slate-300">—</span>}
                           </td>
                           <td className="px-4 py-3 text-xs text-slate-600 max-w-xs">
                             <p className={`${isLong ? "line-clamp-2" : ""} whitespace-pre-wrap break-words leading-relaxed`}>
-                              {note.note}
+                              <NoteTextWithOrderLinks text={note.note ?? ""} />
                             </p>
                             {isLong && (
                               <button

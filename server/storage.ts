@@ -2617,6 +2617,7 @@ export class DatabaseStorage implements IStorage {
         customer_company: customersMirror.company,
         customer_first_name: customersMirror.first_name,
         customer_last_name: customersMirror.last_name,
+        customer_email: customersMirror.email,
         customer_bc_id: customersMirror.bigcommerce_customer_id,
         customer_group_name: customersMirror.customer_group_name,
         billing_address: customersMirror.billing_address,
@@ -2638,6 +2639,7 @@ export class DatabaseStorage implements IStorage {
         customer_company: r.customer_company,
         customer_first_name: r.customer_first_name,
         customer_last_name: r.customer_last_name,
+        customer_email: r.customer_email,
         customer_bc_id: r.customer_bc_id,
         customer_group_name: r.customer_group_name,
         created_by_name: r.created_by_name ?? null,
@@ -3886,10 +3888,27 @@ export class DatabaseStorage implements IStorage {
 
     const [countRows, rows] = await Promise.all([
       db.select({ count: sql<number>`count(*)::int` }).from(posStoreCreditUsage).where(where),
-      db.select().from(posStoreCreditUsage).where(where).orderBy(orderFn(sortCol)).limit(limit).offset(offset),
+      db.select({
+        usage: posStoreCreditUsage,
+        customer_company: customersMirror.company,
+        customer_first_name: customersMirror.first_name,
+        customer_last_name: customersMirror.last_name,
+        customer_email: customersMirror.email,
+      }).from(posStoreCreditUsage)
+        .leftJoin(customersMirror, eq(posStoreCreditUsage.customer_id, customersMirror.id))
+        .where(where).orderBy(orderFn(sortCol)).limit(limit).offset(offset),
     ]);
 
-    return { rows, total: countRows[0]?.count ?? 0 };
+    return {
+      rows: rows.map(({ usage, customer_company, customer_first_name, customer_last_name, customer_email }) => ({
+        ...usage,
+        customer_company,
+        customer_first_name,
+        customer_last_name,
+        customer_email,
+      })),
+      total: countRows[0]?.count ?? 0,
+    };
   }
   // ─── Store Credit Ledger ──────────────────────────────────────────────────────
 
@@ -3947,6 +3966,10 @@ export class DatabaseStorage implements IStorage {
         issued_by_name: storeCreditLedger.issued_by_name,
         created_at: storeCreditLedger.created_at,
         customer_name: customerDisplayName,
+        customer_company: customersMirror.company,
+        customer_first_name: customersMirror.first_name,
+        customer_last_name: customersMirror.last_name,
+        customer_email: customersMirror.email,
       })
         .from(storeCreditLedger)
         .leftJoin(customersMirror, eq(storeCreditLedger.customer_id, customersMirror.id))

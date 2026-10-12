@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Wallet, Search, Download } from "lucide-react";
+import { Link } from "wouter";
+import { CustomerIdentity } from "@/components/crm/CustomerIdentity";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,6 +28,10 @@ interface LedgerRow {
   issued_by_name: string | null;
   created_at: string;
   customer_name: string | null;
+  customer_company?: string | null;
+  customer_first_name?: string | null;
+  customer_last_name?: string | null;
+  customer_email?: string | null;
   // usage-only extras
   credit_before?: string;
   credit_remaining?: string;
@@ -139,12 +145,16 @@ export default function StoreCreditLedger() {
     issued_by_name: r.issued_by_name ?? null,
     created_at: r.created_at,
     customer_name: r.customer_name ?? null,
+    customer_company: r.customer_company ?? null,
+    customer_first_name: r.customer_first_name ?? null,
+    customer_last_name: r.customer_last_name ?? null,
+    customer_email: r.customer_email ?? null,
   }));
 
   const usageRows: LedgerRow[] = (usageData?.rows ?? []).map((r: any) => ({
     _source: "usage" as const,
     id: `use-${r.id}`,
-    customer_id: null,
+    customer_id: r.customer_id ?? null,
     bigcommerce_customer_id: r.bigcommerce_customer_id ?? null,
     bigcommerce_order_id: r.bigcommerce_order_id ?? null,
     order_id: null,
@@ -157,6 +167,10 @@ export default function StoreCreditLedger() {
     issued_by_name: r.cashier_id ? (userMap.get(r.cashier_id) ?? `User #${r.cashier_id}`) : null,
     created_at: r.created_at,
     customer_name: r.customer_name ?? null,
+    customer_company: r.customer_company ?? null,
+    customer_first_name: r.customer_first_name ?? null,
+    customer_last_name: r.customer_last_name ?? null,
+    customer_email: r.customer_email ?? null,
     credit_before: r.credit_before,
     credit_remaining: r.credit_remaining,
   }));
@@ -313,12 +327,19 @@ export default function StoreCreditLedger() {
                           <p className="text-[13px] text-slate-700">{fmt.date(row.created_at)}</p>
                           <p className="text-[11px] text-slate-400">{fmt.time ? fmt.time(row.created_at) : ""}</p>
                         </td>
-                        <td className="px-3 py-2.5">
-                          <span className="text-[13px] text-slate-700">{row.customer_name || "—"}</span>
+                        <td className="px-3 py-2.5 max-w-[260px]">
+                          <CustomerIdentity
+                            customerId={row.customer_id}
+                            company={row.customer_company}
+                            firstName={row.customer_first_name}
+                            lastName={row.customer_last_name}
+                            email={row.customer_email}
+                            fallbackName={row.customer_name}
+                          />
                         </td>
                         <td className="px-3 py-2.5">
                           {orderNum
-                            ? <span className="text-[13px] font-mono text-slate-700">#{orderNum}</span>
+                            ? <Link href={row.bigcommerce_order_id ? `/orders/bc/${orderNum}` : `/orders/${orderNum}`} className="text-[13px] font-mono text-indigo-600 hover:underline">#{orderNum}</Link>
                             : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-3 py-2.5">

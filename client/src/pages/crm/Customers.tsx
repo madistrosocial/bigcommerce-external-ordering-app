@@ -23,6 +23,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useTimeService } from "@/hooks/useTimeService";
 import { useToast } from "@/hooks/use-toast";
+import { getCustomerAvatarColor } from "@/components/crm/CustomerIdentity";
 
 type SortField =
   | "company" | "first_name" | "state" | "customer_group_name"
@@ -66,21 +67,6 @@ const COL_MIN_WIDTHS: Record<ColKey, number> = {
 };
 
 const PAGE_SIZE = 50;
-
-const CUSTOMER_AVATAR_COLORS = [
-  "bg-blue-100 text-blue-700",
-  "bg-emerald-100 text-emerald-700",
-  "bg-violet-100 text-violet-700",
-  "bg-amber-100 text-amber-700",
-  "bg-rose-100 text-rose-700",
-  "bg-cyan-100 text-cyan-700",
-  "bg-indigo-100 text-indigo-700",
-  "bg-orange-100 text-orange-700",
-] as const;
-
-function getCustomerAvatarColor(customerId: number): string {
-  return CUSTOMER_AVATAR_COLORS[Math.abs(customerId) % CUSTOMER_AVATAR_COLORS.length];
-}
 
 function daysSince(date: string | null): number | null {
   if (!date) return null;
