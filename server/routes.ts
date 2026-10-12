@@ -11512,6 +11512,8 @@ export async function registerRoutes(
       const now = new Date();
       const workDate = dateOnlyInTimeZone(now, await getCompanyTimezone(storage));
       const todaySessions = await storage.getAttendanceSessionsForDate(user.id, workDate);
+      const overdueSessions = (await storage.getOpenAttendanceSessionsForUser(user.id))
+        .filter(session => session.work_date < workDate);
       const active = todaySessions.find(session => session.status === "active" || session.status === "on_break") ?? null;
       const todayTotalSeconds = todaySessions.reduce((total, session) => {
         if (session.status === "active" && session.time_in) {
@@ -11525,6 +11527,7 @@ export async function registerRoutes(
       const dailyReport = await storage.getAttendanceDailyReport(user.id, workDate);
       res.json({
         active,
+        overdueSessions,
         history,
         todaySessions,
         todayTotalSeconds,
@@ -11665,6 +11668,15 @@ export async function registerRoutes(
       }
       const now = new Date();
       const workDate = dateOnlyInTimeZone(now, await getCompanyTimezone(storage));
+      const overdueSession = (await storage.getOpenAttendanceSessionsForUser(user.id))
+        .find(session => session.work_date < workDate);
+      if (overdueSession) {
+        return res.status(409).json({
+          code: "previous_day_session_open",
+          error: "End your unfinished attendance session from the previous workday before starting today.",
+          attendance: overdueSession,
+        });
+      }
       const todaySessions = await storage.getAttendanceSessionsForDate(user.id, workDate);
       const existing = todaySessions.find(session => session.status === "active" || session.status === "on_break");
       if (existing) return res.status(409).json({ error: "You already have an active attendance session.", attendance: existing });
@@ -11750,6 +11762,13 @@ export async function registerRoutes(
     try {
       const user = (req as any).authUser;
       const workDate = dateOnlyInTimeZone(new Date(), await getCompanyTimezone(storage));
+      const todaySessions = await storage.getAttendanceSessionsForDate(user.id, workDate);
+      if (todaySessions.length === 0) {
+        return res.status(409).json({
+          code: "attendance_login_required",
+          error: "Log in to Attendance today before submitting a daily work report.",
+        });
+      }
       const existing = await storage.getAttendanceDailyReport(user.id, workDate);
       const saved = await storage.saveAttendanceDailyNote(user.id, workDate, {
         note: parsed.data.note ?? existing?.note ?? "",
@@ -11853,8 +11872,14 @@ export async function registerRoutes(
   app.post("/api/attendance/end", requirePermission("attendance", "clock"), async (req, res) => {
     try {
       const user = (req as any).authUser;
-      const active = await storage.getActiveAttendanceForUser(user.id);
+      const requestedAttendanceId = Number(req.body?.attendance_id);
+      const active = Number.isInteger(requestedAttendanceId) && requestedAttendanceId > 0
+        ? await storage.getAttendanceById(requestedAttendanceId)
+        : await storage.getActiveAttendanceForUser(user.id);
       if (!active) return res.status(404).json({ error: "No active attendance session found." });
+      if (active.user_id !== user.id || !["active", "on_break"].includes(active.status)) {
+        return res.status(404).json({ error: "No active attendance session found." });
+      }
       const now = new Date();
       const offsite = active.start_method === "offsite";
       const latitude = offsite ? null : parseCoordinate(req.body?.latitude);

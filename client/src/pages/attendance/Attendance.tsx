@@ -293,6 +293,7 @@ export default function AttendancePage() {
     refetchInterval: 60_000,
   });
   const active = data?.active ?? null;
+  const overdueSessions: any[] = data?.overdueSessions ?? [];
   const history = data?.history ?? [];
   const todaySessions: any[] = data?.todaySessions ?? [];
   const todayTotalSeconds = Number(data?.todayTotalSeconds ?? 0);
@@ -436,12 +437,15 @@ export default function AttendancePage() {
   });
 
   const endMutation = useMutation({
-    mutationFn: async () => {
-      const coords = active?.start_method === "offsite" ? null : await captureLocation();
+    mutationFn: async (attendanceId?: number) => {
+      const selectedSession = attendanceId
+        ? overdueSessions.find(session => session.id === attendanceId)
+        : active;
+      const coords = selectedSession?.start_method === "offsite" ? null : await captureLocation();
       return apiJson("/api/attendance/end", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(coords ?? {}),
+        body: JSON.stringify({ ...(coords ?? {}), ...(attendanceId ? { attendance_id: attendanceId } : {}) }),
       });
     },
     onSuccess: () => {
@@ -517,7 +521,34 @@ export default function AttendancePage() {
         <AttendanceHeader onHistory={() => setShowHistory(true)} />
         {error && <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
 
-        {!active && flow === "start" && (
+        {!active && flow === "start" && overdueSessions.length > 0 && (
+          <Card className="mt-6 rounded-2xl border-amber-300 bg-amber-50 shadow-sm">
+            <CardContent className="p-5">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-base font-bold text-amber-950">Finish your previous day first</h2>
+                  <p className="mt-2 text-sm text-amber-900">
+                    Your session from {overdueSessions[0].work_date} is still open. End that session before starting today.
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-amber-800">
+                    Ending it records the time out now. If you finished earlier, ask your manager to correct the recorded time.
+                  </p>
+                  <Button
+                    className="mt-4 h-10 w-full bg-amber-700 text-white hover:bg-amber-800"
+                    onClick={() => endMutation.mutate(overdueSessions[0].id)}
+                    disabled={endMutation.isPending}
+                  >
+                    {endMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    End previous session
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {!active && flow === "start" && overdueSessions.length === 0 && (
           <div className="mt-8">
             <div className="mx-auto mb-8 flex h-20 w-20 items-center justify-center rounded-full bg-red-50 text-red-600"><Clock3 className="h-10 w-10" /></div>
             <div className="text-center">
@@ -642,7 +673,7 @@ export default function AttendancePage() {
             </Card>
           </div>
         )}
-         <Card className="mt-4 rounded-2xl border-slate-200 shadow-sm">
+         {todaySessions.length > 0 && <Card className="mt-4 rounded-2xl border-slate-200 shadow-sm">
            <CardContent className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <div><h2 className="text-sm font-semibold text-slate-800">Daily work report</h2><p className="mt-1 text-xs text-slate-500">Saved for today in the company timezone.</p></div>
@@ -677,8 +708,8 @@ export default function AttendancePage() {
                 </div>
               </div>
            </CardContent>
-         </Card>
-        {flow === "ending" && <EndDayDialog onCancel={() => setFlow("start")} onConfirm={() => endMutation.mutate()} saving={endMutation.isPending} />}
+         </Card>}
+        {flow === "ending" && <EndDayDialog onCancel={() => setFlow("start")} onConfirm={() => endMutation.mutate(undefined)} saving={endMutation.isPending} />}
       </div>
     </div>
   );

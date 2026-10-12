@@ -292,6 +292,7 @@ export interface IStorage {
   saveAttendanceDailyNote(userId: number, workDate: string, report: Pick<AttendanceDailyNote, "note" | "workday_type" | "work_completed" | "customer_interactions" | "challenges" | "follow_up">): Promise<AttendanceDailyNote>;
   getAttendanceById(id: number): Promise<AttendanceSession | undefined>;
   getActiveAttendanceForUser(userId: number): Promise<AttendanceSession | undefined>;
+  getOpenAttendanceSessionsForUser(userId: number): Promise<AttendanceSession[]>;
   getAttendanceSessionsForDate(userId: number, workDate: string): Promise<Array<AttendanceSession & { breaks?: AttendanceBreakInterval[] }>>;
   getAttendanceHistoryForUser(userId: number, limit?: number): Promise<Array<AttendanceSession & { daily_note?: string; breaks?: AttendanceBreakInterval[] }>>;
   createAttendance(data: InsertAttendanceSession): Promise<AttendanceSession>;
@@ -3250,6 +3251,12 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(attendanceSessions.time_in))
       .limit(1);
     return rows[0];
+  }
+
+  async getOpenAttendanceSessionsForUser(userId: number): Promise<AttendanceSession[]> {
+    return db.select().from(attendanceSessions)
+      .where(and(eq(attendanceSessions.user_id, userId), inArray(attendanceSessions.status, ["active", "on_break"])))
+      .orderBy(asc(attendanceSessions.time_in));
   }
 
   async getAttendanceSessionsForDate(userId: number, workDate: string): Promise<AttendanceSession[]> {
