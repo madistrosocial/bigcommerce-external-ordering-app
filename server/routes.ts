@@ -2742,6 +2742,107 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/product-360/products/:id/catalog-details", requirePermission("product_360", "view"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid product id" });
+    try {
+      const local = await db.execute(sql`SELECT bigcommerce_id FROM products WHERE id = ${id} LIMIT 1`);
+      const bcId = Number((local.rows[0] as any)?.bigcommerce_id);
+      if (!bcId) return res.status(404).json({ error: "Product is not linked to BigCommerce." });
+      const { storeHash, headers } = await getBcCreds();
+      const root = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog`;
+      const productResponse = await fetch(`${root}/products/${bcId}?include=images`, { headers, signal: AbortSignal.timeout(30000) });
+      if (productResponse.status === 404) return res.status(404).json({ error: "BigCommerce product not found." });
+      if (!productResponse.ok) return res.status(502).json({ error: `BigCommerce product lookup failed (${productResponse.status}).` });
+      const productPayload: any = await productResponse.json();
+      const [categories, brands] = await Promise.all(["categories", "brands"].map(async (resource) => {
+        const values: any[] = [];
+        for (let page = 1; ; page++) {
+          const response = await fetch(`${root}/${resource}?limit=250&page=${page}`, { headers, signal: AbortSignal.timeout(30000) });
+          if (!response.ok) throw new Error(`BigCommerce ${resource} lookup failed (${response.status}).`);
+          const payload: any = await response.json();
+          values.push(...(Array.isArray(payload.data) ? payload.data : []));
+          if (!payload.data?.length || values.length >= Number(payload.meta?.pagination?.total || 0)) break;
+        }
+        return values;
+      }));
+      res.json({
+        product: productPayload.data,
+        categories: categories.map((item) => ({ id: Number(item.id), name: String(item.name || ""), parent_id: Number(item.parent_id || 0) })),
+        brands: brands.map((item) => ({ id: Number(item.id), name: String(item.name || "") })),
+      });
+    } catch (error: any) {
+      console.error("[Product 360] BigCommerce details lookup failed:", error);
+      res.status(502).json({ error: error?.message || "Could not load BigCommerce product details." });
+    }
+  });
+
+  app.put("/api/product-360/products/:id/catalog-details", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid product id" });
+    const editable = ["name", "sku", "description", "price", "cost_price", "retail_price", "sale_price", "weight", "width", "height", "depth", "type", "brand_id", "categories", "is_visible", "availability", "condition", "warranty", "sort_order", "search_keywords", "custom_url", "page_title", "meta_description", "meta_keywords"];
+    try {
+      const local = await db.execute(sql`SELECT bigcommerce_id FROM products WHERE id = ${id} LIMIT 1`);
+      const bcId = Number((local.rows[0] as any)?.bigcommerce_id);
+      if (!bcId) return res.status(404).json({ error: "Product is not linked to BigCommerce." });
+      const patch: Record<string, unknown> = {};
+      for (const key of editable) if (Object.prototype.hasOwnProperty.call(req.body || {}, key)) patch[key] = req.body[key];
+      const imagesToAdd = Array.isArray(req.body?.imagesToAdd) ? req.body.imagesToAdd : [];
+      const imagesToDelete = Array.isArray(req.body?.imagesToDelete) ? req.body.imagesToDelete : [];
+      if (imagesToAdd.length > 20 || imagesToDelete.length > 50) return res.status(400).json({ error: "Too many photo changes in one save." });
+      const validImageUrls: string[] = [];
+      for (const value of imagesToAdd) {
+        let url: URL;
+        try { url = new URL(String(value)); } catch { return res.status(400).json({ error: "Photo URLs must be valid HTTPS URLs." }); }
+        if (url.protocol !== "https:" || url.username || url.password) return res.status(400).json({ error: "Photo URLs must be valid HTTPS URLs." });
+        validImageUrls.push(url.toString());
+      }
+      if (imagesToDelete.some((value: unknown) => !Number.isSafeInteger(Number(value)) || Number(value) <= 0)) {
+        return res.status(400).json({ error: "Invalid BigCommerce photo ID." });
+      }
+      if (!Object.keys(patch).length && !imagesToAdd.length && !imagesToDelete.length) return res.status(400).json({ error: "No product changes were provided." });
+      if ("categories" in patch && (!Array.isArray(patch.categories) || patch.categories.some((value: any) => !Number.isSafeInteger(Number(value)) || Number(value) <= 0))) {
+        return res.status(400).json({ error: "Categories must be valid BigCommerce category IDs." });
+      }
+      const { storeHash, token, headers } = await getBcCreds();
+      const root = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products/${bcId}`;
+      if (Object.keys(patch).length) {
+        const response = await fetch(root, { method: "PUT", headers, body: JSON.stringify(patch), signal: AbortSignal.timeout(30000) });
+        const payload: any = await response.json().catch(() => ({}));
+        if (!response.ok) return res.status(502).json({ error: payload.title || payload.detail || `BigCommerce rejected the product update (${response.status}).` });
+      }
+      for (const imageUrl of validImageUrls) {
+        const imageResponse = await fetch(`${root}/images`, { method: "POST", headers, body: JSON.stringify({ image_url: imageUrl }), signal: AbortSignal.timeout(60000) });
+        if (!imageResponse.ok) throw new Error(`BigCommerce could not add image (${imageResponse.status}).`);
+      }
+      for (const imageId of imagesToDelete) {
+        if (!Number.isSafeInteger(Number(imageId)) || Number(imageId) <= 0) continue;
+        const imageResponse = await fetch(`${root}/images/${Number(imageId)}`, { method: "DELETE", headers, signal: AbortSignal.timeout(30000) });
+        if (!imageResponse.ok) throw new Error(`BigCommerce could not remove image ${imageId} (${imageResponse.status}).`);
+      }
+      const freshResponse = await fetch(`${root}?include=images`, { headers, signal: AbortSignal.timeout(30000) });
+      if (!freshResponse.ok) throw new Error(`BigCommerce saved the update but could not refresh the product (${freshResponse.status}).`);
+      const freshPayload: any = await freshResponse.json();
+      const product = freshPayload.data || {};
+      const brandOptions = await getCachedBcBrandOptions().catch(() => []);
+      const brandName = brandOptions.find((brand) => brand.id === Number(product.brand_id))?.name || "";
+      await storage.updateProductByBigCommerceId(bcId, {
+        ...(typeof product.name === "string" ? { name: product.name } : {}),
+        ...(typeof product.sku === "string" ? { sku: product.sku } : {}),
+        ...(product.description !== undefined ? { description: product.description } : {}),
+        ...(product.price !== undefined ? { price: String(product.price) } : {}),
+        ...(product.cost_price !== undefined ? { cost_price: String(product.cost_price) } : {}),
+        ...(Array.isArray(product.categories) ? { categories: product.categories } : {}),
+        ...(product.brand_id !== undefined ? { brand_name: brandName } : {}),
+        ...(Array.isArray(product.images) && product.images[0]?.url_thumbnail ? { image: product.images[0].url_thumbnail } : {}),
+      });
+      res.json({ success: true, product });
+    } catch (error: any) {
+      console.error("[Product 360] BigCommerce product update failed:", error);
+      res.status(502).json({ error: error?.message || "Could not update BigCommerce product." });
+    }
+  });
+
   app.get("/api/products", requireAdmin, async (req, res) => {
     try {
       const products = await storage.getAllProducts();

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useRoute } from "wouter";
 import {
@@ -29,11 +29,13 @@ import {
   Clock3,
   Download,
   History,
+  ImagePlus,
   Lightbulb,
   ListFilter,
   PackageCheck,
   PackageSearch,
   RefreshCw,
+  Save,
   Search,
   ShoppingCart,
   TrendingUp,
@@ -47,6 +49,8 @@ import {
   getProduct360Detail,
   getProduct360Overview,
   getProduct360Products,
+  getProduct360CatalogDetails,
+  saveProduct360CatalogDetails,
   syncProduct360Catalog,
   type Product360Detail,
   type Product360Overview,
@@ -599,8 +603,97 @@ export function Product360ProductsPage() {
 }
 
 function DetailTabs({ active, onChange }: { active: string; onChange: (value: string) => void }) {
-  const tabs = [["overview", "Overview"], ["variants", "Variants"], ["sales", "Sales"], ["profitability", "Profitability"], ["inventory", "Inventory"], ["replenishment", "Replenishment"], ["customers", "Customers"], ["history", "History"]];
+  const tabs = [["overview", "Overview"], ["details", "Details"], ["variants", "Variants"], ["sales", "Sales"], ["profitability", "Profitability"], ["inventory", "Inventory"], ["replenishment", "Replenishment"], ["customers", "Customers"], ["history", "History"]];
   return <div className="flex gap-1 overflow-x-auto border-b border-slate-200">{tabs.map(([value, label]) => <button key={value} onClick={() => onChange(value)} className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-xs font-semibold ${active === value ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500"}`}>{label}</button>)}</div>;
+}
+
+function ProductDetailsTab({ id }: { id: number }) {
+  const queryClient = useQueryClient();
+  const currentUser = useStore((state) => state.currentUser);
+  const canEdit = currentUser?.role === "admin";
+  const query = useQuery({ queryKey: ["product-360-catalog-details", id], queryFn: () => getProduct360CatalogDetails(id), enabled: id > 0 });
+  const [draft, setDraft] = useState<Record<string, any>>({});
+  const [removedImages, setRemovedImages] = useState<number[]>([]);
+  const [newImageUrl, setNewImageUrl] = useState("");
+  const [newImages, setNewImages] = useState<string[]>([]);
+  const [saved, setSaved] = useState(false);
+  const [editedFields, setEditedFields] = useState<Set<string>>(new Set());
+  const numericValue = (value: unknown) => value === null || value === undefined || value === "" ? null : Number(value);
+  useEffect(() => {
+    if (query.data?.product) {
+      setDraft({ ...query.data.product, categories: Array.isArray(query.data.product.categories) ? query.data.product.categories.map(Number) : [] });
+      setRemovedImages([]);
+      setNewImages([]);
+      setEditedFields(new Set());
+    }
+  }, [query.data]);
+  const save = useMutation({
+    mutationFn: () => {
+      const numericFields = new Set(["price", "cost_price", "retail_price", "sale_price", "weight", "width", "height", "depth", "brand_id", "sort_order"]);
+      const changes = Object.fromEntries(Array.from(editedFields, (key) => [key, numericFields.has(key) ? numericValue(draft[key]) : draft[key]]));
+      return saveProduct360CatalogDetails(id, { ...changes, imagesToAdd: newImages, imagesToDelete: removedImages });
+    },
+    onSuccess: async () => {
+      setSaved(true);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["product-360-catalog-details", id] }),
+        queryClient.invalidateQueries({ queryKey: ["product-360-detail", id] }),
+        queryClient.invalidateQueries({ queryKey: ["product-360-products"] }),
+      ]);
+    },
+  });
+  if (query.isLoading) return <Card className="mt-5 p-6 text-sm text-slate-500">Loading live BigCommerce product details…</Card>;
+  if (query.isError) return <Card className="mt-5 border-red-200 bg-red-50 p-5 text-sm text-red-800">{query.error.message}</Card>;
+  const catalogDetails = query.data;
+  if (!catalogDetails?.product) return <Card className="mt-5 p-5 text-sm text-slate-500">BigCommerce product details are unavailable.</Card>;
+  const product = catalogDetails.product;
+  const categories = catalogDetails.categories || [];
+  const images = (Array.isArray(product.images) ? product.images : []).filter((image: any) => !removedImages.includes(Number(image.id)));
+  const update = (key: string, value: unknown) => { setSaved(false); setEditedFields((current) => new Set(current).add(key)); setDraft((current) => ({ ...current, [key]: value })); };
+  const inputClass = "mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm disabled:bg-slate-50";
+  const labelClass = "text-xs font-semibold text-slate-600";
+  const categoryPath = (category: { id: number; name: string; parent_id: number }) => {
+    const parent = categories.find((item) => item.id === category.parent_id);
+    return parent ? `${parent.name} / ${category.name}` : category.name;
+  };
+  return <div className="mt-5 space-y-4">
+    <Card className="border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div><h3 className="text-sm font-semibold text-slate-800">BigCommerce product details</h3><p className="mt-1 text-xs text-slate-500">Loaded live from BigCommerce. Saving writes these changes to the product catalog.</p></div>
+        {canEdit && <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending || (!editedFields.size && !newImages.length && !removedImages.length)}><Save className="mr-2 h-4 w-4" />{save.isPending ? "Saving to BigCommerce…" : "Save changes"}</Button>}
+      </div>
+      {save.isError && <div className="mb-3 rounded-md bg-red-50 p-3 text-xs text-red-800">{save.error.message}</div>}
+      {saved && <div className="mb-3 rounded-md bg-emerald-50 p-3 text-xs text-emerald-800">BigCommerce product updated.</div>}
+      {!canEdit && <div className="mb-3 rounded-md bg-amber-50 p-3 text-xs text-amber-800">Only administrators can edit BigCommerce catalog details.</div>}
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <label className={labelClass}>Product name<input className={inputClass} disabled={!canEdit} value={draft.name ?? ""} onChange={(event) => update("name", event.target.value)} /></label>
+        <label className={labelClass}>SKU<input className={inputClass} disabled={!canEdit} value={draft.sku ?? ""} onChange={(event) => update("sku", event.target.value)} /></label>
+        <label className={labelClass}>Brand<select className={inputClass} disabled={!canEdit} value={draft.brand_id ?? ""} onChange={(event) => update("brand_id", event.target.value ? Number(event.target.value) : null)}><option value="">No brand</option>{catalogDetails.brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></label>
+        {(["price", "cost_price", "retail_price", "sale_price", "weight", "width", "height", "depth"] as const).map((key) => <label className={labelClass} key={key}>{key.replaceAll("_", " ")}<input className={inputClass} type="number" step="any" min="0" disabled={!canEdit} value={draft[key] ?? 0} onChange={(event) => update(key, event.target.value)} /></label>)}
+        <label className={labelClass}>Product type<select className={inputClass} disabled={!canEdit} value={draft.type || "physical"} onChange={(event) => update("type", event.target.value)}><option value="physical">Physical</option><option value="digital">Digital</option></select></label>
+        <label className={labelClass}>Availability<select className={inputClass} disabled={!canEdit} value={draft.availability || "available"} onChange={(event) => update("availability", event.target.value)}><option value="available">Available</option><option value="disabled">Disabled</option><option value="preorder">Preorder</option></select></label>
+        <label className={labelClass}>Condition<select className={inputClass} disabled={!canEdit} value={draft.condition || "New"} onChange={(event) => update("condition", event.target.value)}><option>New</option><option>Used</option><option>Refurbished</option></select></label>
+        <label className={labelClass}>Sort order<input className={inputClass} type="number" disabled={!canEdit} value={draft.sort_order ?? 0} onChange={(event) => update("sort_order", event.target.value)} /></label>
+        <label className={labelClass}>Custom URL path<input className={inputClass} disabled={!canEdit} value={draft.custom_url?.url || ""} onChange={(event) => update("custom_url", { ...(draft.custom_url || {}), url: event.target.value, is_customized: true })} /></label>
+        <label className={`${labelClass} flex items-center gap-2 pt-5`}><input type="checkbox" disabled={!canEdit} checked={Boolean(draft.is_visible)} onChange={(event) => update("is_visible", event.target.checked)} /> Visible on storefront</label>
+      </div>
+      <label className={`${labelClass} mt-4 block`}>Description<textarea className="mt-1 min-h-40 w-full rounded-md border border-slate-200 p-3 text-sm disabled:bg-slate-50" disabled={!canEdit} value={draft.description ?? ""} onChange={(event) => update("description", event.target.value)} /></label>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <label className={labelClass}>Warranty<textarea className="mt-1 min-h-20 w-full rounded-md border border-slate-200 p-3 text-sm disabled:bg-slate-50" disabled={!canEdit} value={draft.warranty ?? ""} onChange={(event) => update("warranty", event.target.value)} /></label>
+        <label className={labelClass}>Search keywords<textarea className="mt-1 min-h-20 w-full rounded-md border border-slate-200 p-3 text-sm disabled:bg-slate-50" disabled={!canEdit} value={draft.search_keywords ?? ""} onChange={(event) => update("search_keywords", event.target.value)} /></label>
+        <label className={labelClass}>Page title<input className={inputClass} disabled={!canEdit} value={draft.page_title ?? ""} onChange={(event) => update("page_title", event.target.value)} /></label>
+        <label className={labelClass}>Meta keywords<input className={inputClass} disabled={!canEdit} value={draft.meta_keywords ?? ""} onChange={(event) => update("meta_keywords", event.target.value)} /></label>
+        <label className={`${labelClass} md:col-span-2`}>Meta description<textarea className="mt-1 min-h-20 w-full rounded-md border border-slate-200 p-3 text-sm disabled:bg-slate-50" disabled={!canEdit} value={draft.meta_description ?? ""} onChange={(event) => update("meta_description", event.target.value)} /></label>
+      </div>
+    </Card>
+    <Card className="border-slate-200 bg-white p-4 shadow-sm"><h3 className="text-sm font-semibold text-slate-800">Assigned categories</h3><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{categories.map((category) => <label key={category.id} className="flex items-center gap-2 rounded border border-slate-100 px-3 py-2 text-xs text-slate-700"><input type="checkbox" disabled={!canEdit} checked={(draft.categories || []).includes(category.id)} onChange={(event) => update("categories", event.target.checked ? [...(draft.categories || []), category.id] : (draft.categories || []).filter((id: number) => id !== category.id))} />{categoryPath(category)}</label>)}</div></Card>
+    <Card className="border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-semibold text-slate-800">Product photos</h3><p className="mt-1 text-xs text-slate-500">Existing photos are retained unless explicitly removed.</p></div></div>
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">{images.map((image: any) => <div key={image.id} className="relative overflow-hidden rounded-md border border-slate-200"><img src={image.url_thumbnail || image.url_standard || image.image_url} alt={image.description || ""} className="aspect-square w-full object-cover" /><div className="p-2 text-[10px] text-slate-500">{image.is_thumbnail ? "Primary photo" : image.description || "Product photo"}{canEdit && <button type="button" className="mt-1 block text-red-600 hover:underline" onClick={() => { if (window.confirm("Remove this photo from BigCommerce?")) { setRemovedImages((current) => [...current, Number(image.id)]); setSaved(false); } }}>Remove</button>}</div></div>)}</div>
+      {canEdit && <div className="mt-4 flex flex-wrap gap-2"><Input className="min-w-0 flex-1" placeholder="https://example.com/product-photo.jpg" value={newImageUrl} onChange={(event) => setNewImageUrl(event.target.value)} /><Button variant="outline" size="sm" onClick={() => { try { const url = new URL(newImageUrl); if (url.protocol !== "https:") return; setNewImages((current) => [...current, url.toString()]); setNewImageUrl(""); setSaved(false); } catch {} }}><ImagePlus className="mr-2 h-4 w-4" />Add photo URL</Button></div>}
+      {!!newImages.length && <ul className="mt-2 space-y-1 text-xs text-slate-500">{newImages.map((url, index) => <li key={`${url}-${index}`} className="flex justify-between gap-2"><span className="truncate">{url}</span><button className="text-red-600" onClick={() => setNewImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button></li>)}</ul>}
+    </Card>
+  </div>;
 }
 
 function DetailBody({ data, tab }: { data: Product360Detail; tab: string }) {
@@ -626,7 +719,7 @@ export function Product360DetailPage() {
   return (
     <PageFrame title={String(product.name || "Product workspace")} description="The central Product 360 workspace for product performance, variants, profitability, inventory, customers, and history." actions={<DateRangeControls from={from} to={to} onChange={(a, b) => { setFrom(a); setTo(b); }} />}>
       <button onClick={() => setLocation("/product-360/products")} className="mb-4 flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-blue-700"><ArrowLeft className="h-4 w-4" /> Back to products</button>
-      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : query.data ? <><Card className="border-slate-200 bg-white p-4 shadow-sm"><div className="flex flex-col gap-4 md:flex-row md:items-center"><div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-slate-100">{product.image ? <img src={String(product.image)} alt="" className="h-full w-full object-cover" /> : <PackageSearch className="m-6 h-8 w-8 text-slate-400" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-bold text-slate-900">{String(product.name)}</h2><StatusBadge status={getStatus(product)} /></div><p className="mt-1 text-sm text-slate-500">{String(product.sku || "No base SKU")} · BigCommerce {String(product.bigcommerce_id)} · {number(product.variants_count)} variants</p><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500"><span>Brand: {String(product.brand_name || "—")}</span><span>Stock: {number(product.current_stock)}</span><span>Last sold: {dateLabel(product.last_sold, fmt)}</span></div></div><Button variant="outline" size="sm" onClick={() => setLocation("/catalog")}><PackageSearch className="mr-2 h-4 w-4" /> View catalog</Button></div><div className="mt-5"><DetailTabs active={tab} onChange={setTab} /></div></Card><DetailBody data={query.data} tab={tab} /></> : <EmptyState message="Product not found." />}
+      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : query.data ? <><Card className="border-slate-200 bg-white p-4 shadow-sm"><div className="flex flex-col gap-4 md:flex-row md:items-center"><div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-slate-100">{product.image ? <img src={String(product.image)} alt="" className="h-full w-full object-cover" /> : <PackageSearch className="m-6 h-8 w-8 text-slate-400" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-bold text-slate-900">{String(product.name)}</h2><StatusBadge status={getStatus(product)} /></div><p className="mt-1 text-sm text-slate-500">{String(product.sku || "No base SKU")} · BigCommerce {String(product.bigcommerce_id)} · {number(product.variants_count)} variants</p><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500"><span>Brand: {String(product.brand_name || "—")}</span><span>Stock: {number(product.current_stock)}</span><span>Last sold: {dateLabel(product.last_sold, fmt)}</span></div></div><Button variant="outline" size="sm" onClick={() => setLocation("/catalog")}><PackageSearch className="mr-2 h-4 w-4" /> View catalog</Button></div><div className="mt-5"><DetailTabs active={tab} onChange={setTab} /></div></Card>{tab === "details" ? <ProductDetailsTab id={id} /> : <DetailBody data={query.data} tab={tab} />}</> : <EmptyState message="Product not found." />}
     </PageFrame>
   );
 }

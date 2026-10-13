@@ -70,12 +70,33 @@ export interface Product360Detail {
   history: Record<string, unknown>[];
 }
 
+export interface Product360CatalogDetails {
+  product: Record<string, any>;
+  categories: Array<{ id: number; name: string; parent_id: number }>;
+  brands: Array<{ id: number; name: string }>;
+}
+
 function product360Request<T>(path: string): Promise<T> {
   return fetch(`${API_BASE}${path}`, { headers: getAuthHeaders() }).then(async (res) => {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || "Product 360 request failed");
     return body as T;
   });
+}
+
+export function getProduct360CatalogDetails(id: number) {
+  return product360Request<Product360CatalogDetails>(`/product-360/products/${id}/catalog-details`);
+}
+
+export async function saveProduct360CatalogDetails(id: number, changes: Record<string, unknown>) {
+  const response = await fetch(`${API_BASE}/product-360/products/${id}/catalog-details`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(changes),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Could not save BigCommerce product details");
+  return body as { success: boolean; product: Record<string, any> };
 }
 
 export function getProduct360Overview(query: { dateFrom?: string; dateTo?: string; brand?: string; category?: string } = {}) {
