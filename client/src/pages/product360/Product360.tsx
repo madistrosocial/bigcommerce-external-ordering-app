@@ -619,6 +619,7 @@ function ProductDetailsTab({ id }: { id: number }) {
   const [saved, setSaved] = useState(false);
   const [editedFields, setEditedFields] = useState<Set<string>>(new Set());
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
+  const [imageDescriptionDrafts, setImageDescriptionDrafts] = useState<Record<string, string>>({});
   const [photoError, setPhotoError] = useState("");
   const [draggingPhotos, setDraggingPhotos] = useState(false);
   const [categorySearch, setCategorySearch] = useState("");
@@ -651,6 +652,7 @@ function ProductDetailsTab({ id }: { id: number }) {
       setRemovedImages([]);
       setNewImages([]);
       setUploadedPhotos([]);
+      setImageDescriptionDrafts({});
       setEditedFields(new Set());
       const expanded = new Set<number>();
       for (const selectedId of Array.isArray(query.data.product.categories) ? query.data.product.categories.map(Number) : []) {
@@ -667,7 +669,8 @@ function ProductDetailsTab({ id }: { id: number }) {
     mutationFn: () => {
       const numericFields = new Set(["price", "cost_price", "retail_price", "sale_price", "weight", "width", "height", "depth", "brand_id", "sort_order"]);
       const changes = Object.fromEntries(Array.from(editedFields, (key) => [key, numericFields.has(key) ? numericValue(draft[key]) : draft[key]]));
-      return saveProduct360CatalogDetails(id, { ...changes, imagesToAdd: newImages, imagesToUpload: uploadedPhotos, imagesToDelete: removedImages });
+      const imagesToUpdate = Object.entries(imageDescriptionDrafts).map(([imageId, description]) => ({ id: Number(imageId), description }));
+      return saveProduct360CatalogDetails(id, { ...changes, imagesToAdd: newImages, imagesToUpload: uploadedPhotos, imagesToUpdate, imagesToDelete: removedImages });
     },
     onSuccess: async () => {
       setSaved(true);
@@ -730,10 +733,41 @@ function ProductDetailsTab({ id }: { id: number }) {
     }
   };
   return <div className="mt-5 space-y-4">
+    <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,65fr)_minmax(280px,35fr)]">
+      <Card className="min-w-0 border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3"><h3 className="text-sm font-semibold text-slate-800">Product photos</h3><p className="mt-1 text-xs text-slate-500">Edit captions below each photo. Changes are saved with the product.</p></div>
+        <div className="grid max-h-[570px] gap-3 overflow-y-auto pb-1" style={{ gridTemplateColumns: "repeat(auto-fill, 150px)" }}>
+          {images.map((image: any) => <div key={image.id} className="w-[150px] overflow-hidden rounded-md border border-slate-200 bg-white">
+            <img src={image.url_thumbnail || image.url_standard || image.image_url} alt={image.description || ""} className="h-[150px] w-[150px] object-contain" />
+            <div className="w-[150px] border-t border-slate-100 p-1.5">
+              {image.is_thumbnail && <span className="mb-1 inline-block rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700">Primary photo</span>}
+              <textarea aria-label={`Caption for photo ${image.id}`} maxLength={255} rows={3} disabled={!canEdit} placeholder="Add a photo caption…" value={imageDescriptionDrafts[String(image.id)] ?? image.description ?? ""} onChange={(event) => { setImageDescriptionDrafts((current) => ({ ...current, [String(image.id)]: event.target.value })); setSaved(false); }} className="block min-h-12 w-full resize-y rounded border border-slate-200 bg-white p-1 text-[9px] leading-3 text-slate-600 placeholder:text-slate-400 disabled:bg-slate-50" />
+              {canEdit && <button type="button" className="mt-1 text-[9px] font-medium text-red-600 hover:underline" onClick={() => { if (window.confirm("Remove this photo from BigCommerce?")) { setRemovedImages((current) => [...current, Number(image.id)]); setSaved(false); } }}>Remove photo</button>}
+            </div>
+          </div>)}
+          {uploadedPhotos.map((photo, index) => <div key={`pending-${index}`} className="w-[150px] overflow-hidden rounded-md border border-blue-200 bg-white">
+            <img src={photo} alt="New photo preview" className="h-[150px] w-[150px] object-contain" />
+            <button type="button" className="w-full p-1.5 text-left text-[9px] text-red-600 hover:underline" onClick={() => setUploadedPhotos((current) => current.filter((_, photoIndex) => photoIndex !== index))}>Remove before upload</button>
+          </div>)}
+          {canEdit && <label onDragOver={(event) => { event.preventDefault(); setDraggingPhotos(true); }} onDragLeave={() => setDraggingPhotos(false)} onDrop={(event) => { event.preventDefault(); setDraggingPhotos(false); void handlePhotoFiles(event.dataTransfer.files); }} className={`flex h-[150px] w-[150px] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed p-2 text-center transition-colors ${draggingPhotos ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/50"}`}>
+            <input className="hidden" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => { if (event.target.files) void handlePhotoFiles(event.target.files); event.target.value = ""; }} />
+            <ImagePlus className="h-5 w-5 text-slate-400" /><span className="mt-2 text-[10px] font-semibold leading-tight text-slate-700">Drop photos or browse</span><span className="mt-1 text-[9px] text-slate-500">JPEG, PNG, WebP</span>
+          </label>}
+        </div>
+        {photoError && <p className="mt-2 text-xs text-red-700">{photoError}</p>}
+        {canEdit && <div className="mt-3 flex gap-2"><Input className="h-8 min-w-0 flex-1 text-xs" placeholder="HTTPS photo URL" value={newImageUrl} onChange={(event) => setNewImageUrl(event.target.value)} /><Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => { try { const url = new URL(newImageUrl); if (url.protocol !== "https:") return; setNewImages((current) => [...current, url.toString()]); setNewImageUrl(""); setSaved(false); } catch {} }}>Add URL</Button></div>}
+        {!!newImages.length && <ul className="mt-2 space-y-1 text-[10px] text-slate-500">{newImages.map((url, index) => <li key={`${url}-${index}`} className="flex justify-between gap-2"><span className="truncate">{url}</span><button type="button" className="text-red-600" onClick={() => setNewImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button></li>)}</ul>}
+      </Card>
+      <Card className="min-w-0 border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-semibold text-slate-800">Assigned categories</h3><p className="mt-1 text-xs text-slate-500">{(draft.categories || []).length} selected</p></div><Input className="h-8 w-full sm:max-w-[190px]" placeholder="Search categories" value={categorySearch} onChange={(event) => setCategorySearch(event.target.value)} /></div>
+        <p className="mt-2 text-[10px] text-slate-500">Expand a category to browse its subcategories.</p>
+        <div className="mt-2 max-h-[490px] overflow-y-auto rounded-md border border-slate-200 py-2">{categories.filter((category) => !categories.some((parent) => parent.id === category.parent_id)).map((category) => categoryNode(category))}</div>
+      </Card>
+    </div>
     <Card className="border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div><h3 className="text-sm font-semibold text-slate-800">BigCommerce product details</h3><p className="mt-1 text-xs text-slate-500">Loaded live from BigCommerce. Saving writes these changes to the product catalog.</p></div>
-        {canEdit && <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending || (!editedFields.size && !newImages.length && !uploadedPhotos.length && !removedImages.length)}><Save className="mr-2 h-4 w-4" />{save.isPending ? "Saving to BigCommerce…" : "Save changes"}</Button>}
+        {canEdit && <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending || (!editedFields.size && !newImages.length && !uploadedPhotos.length && !Object.keys(imageDescriptionDrafts).length && !removedImages.length)}><Save className="mr-2 h-4 w-4" />{save.isPending ? "Saving to BigCommerce…" : "Save changes"}</Button>}
       </div>
       {save.isError && <div className="mb-3 rounded-md bg-red-50 p-3 text-xs text-red-800">{save.error.message}</div>}
       {saved && <div className="mb-3 rounded-md bg-emerald-50 p-3 text-xs text-emerald-800">BigCommerce product updated.</div>}
@@ -763,19 +797,6 @@ function ProductDetailsTab({ id }: { id: number }) {
         <label className={labelClass}>Meta keywords<input className={inputClass} disabled={!canEdit} value={draft.meta_keywords ?? ""} onChange={(event) => update("meta_keywords", event.target.value)} /></label>
         <label className={`${labelClass} md:col-span-2`}>Meta description<textarea className="mt-1 min-h-20 w-full rounded-md border border-slate-200 p-3 text-sm disabled:bg-slate-50" disabled={!canEdit} value={draft.meta_description ?? ""} onChange={(event) => update("meta_description", event.target.value)} /></label>
       </div></Card>
-    <Card className="border-slate-200 bg-white p-4 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-semibold text-slate-800">Assigned categories</h3><p className="mt-1 text-xs text-slate-500">Expand a category to browse its subcategories · {(draft.categories || []).length} selected</p></div><Input className="h-9 max-w-xs" placeholder="Search categories" value={categorySearch} onChange={(event) => setCategorySearch(event.target.value)} /></div><div className="mt-3 max-h-[440px] overflow-y-auto rounded-md border border-slate-200 py-2">{categories.filter((category) => !categories.some((parent) => parent.id === category.parent_id)).map((category) => categoryNode(category))}</div></Card>
-    <Card className="border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-semibold text-slate-800">Product photos</h3><p className="mt-1 text-xs text-slate-500">Drop photos here or browse to upload. Photos are added when you save.</p></div></div>
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">{images.map((image: any) => <div key={image.id} className="relative overflow-hidden rounded-md border border-slate-200"><img src={image.url_thumbnail || image.url_standard || image.image_url} alt={image.description || ""} className="aspect-square w-full object-cover" /><div className="p-2 text-[10px] text-slate-500">{image.is_thumbnail ? "Primary photo" : image.description || "Product photo"}{canEdit && <button type="button" className="mt-1 block text-red-600 hover:underline" onClick={() => { if (window.confirm("Remove this photo from BigCommerce?")) { setRemovedImages((current) => [...current, Number(image.id)]); setSaved(false); } }}>Remove</button>}</div></div>)}</div>
-      {canEdit && <label onDragOver={(event) => { event.preventDefault(); setDraggingPhotos(true); }} onDragLeave={() => setDraggingPhotos(false)} onDrop={(event) => { event.preventDefault(); setDraggingPhotos(false); void handlePhotoFiles(event.dataTransfer.files); }} className={`mt-4 flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 py-5 text-center transition-colors ${draggingPhotos ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/50"}`}>
-        <input className="hidden" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => { if (event.target.files) void handlePhotoFiles(event.target.files); event.target.value = ""; }} />
-        <ImagePlus className="h-6 w-6 text-slate-400" /><span className="mt-2 text-sm font-semibold text-slate-700">Drag and drop product photos</span><span className="mt-1 text-xs text-slate-500">or click to browse · JPEG, PNG, or WebP · up to 20 MB per file</span>
-      </label>}
-      {photoError && <p className="mt-2 text-xs text-red-700">{photoError}</p>}
-      {!!uploadedPhotos.length && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">{uploadedPhotos.map((photo, index) => <div key={`${index}`} className="overflow-hidden rounded-md border border-blue-200"><img src={photo} alt="New photo preview" className="aspect-square w-full object-cover" /><button type="button" className="p-2 text-xs text-red-600" onClick={() => setUploadedPhotos((current) => current.filter((_, photoIndex) => photoIndex !== index))}>Remove before upload</button></div>)}</div>}
-      {canEdit && <div className="mt-4 flex flex-wrap gap-2"><Input className="min-w-0 flex-1" placeholder="https://example.com/product-photo.jpg" value={newImageUrl} onChange={(event) => setNewImageUrl(event.target.value)} /><Button variant="outline" size="sm" onClick={() => { try { const url = new URL(newImageUrl); if (url.protocol !== "https:") return; setNewImages((current) => [...current, url.toString()]); setNewImageUrl(""); setSaved(false); } catch {} }}><ImagePlus className="mr-2 h-4 w-4" />Add photo URL</Button></div>}
-      {!!newImages.length && <ul className="mt-2 space-y-1 text-xs text-slate-500">{newImages.map((url, index) => <li key={`${url}-${index}`} className="flex justify-between gap-2"><span className="truncate">{url}</span><button className="text-red-600" onClick={() => setNewImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button></li>)}</ul>}
-    </Card>
   </div>;
 }
 

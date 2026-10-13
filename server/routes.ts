@@ -2790,7 +2790,16 @@ export async function registerRoutes(
       const imagesToAdd = Array.isArray(req.body?.imagesToAdd) ? req.body.imagesToAdd : [];
       const imagesToDelete = Array.isArray(req.body?.imagesToDelete) ? req.body.imagesToDelete : [];
       const imagesToUpload = Array.isArray(req.body?.imagesToUpload) ? req.body.imagesToUpload : [];
-      if (imagesToAdd.length > 20 || imagesToUpload.length > 3 || imagesToDelete.length > 50) return res.status(400).json({ error: "Too many photo changes in one save." });
+      const imagesToUpdate = Array.isArray(req.body?.imagesToUpdate) ? req.body.imagesToUpdate : [];
+      if (imagesToAdd.length > 20 || imagesToUpload.length > 3 || imagesToDelete.length > 50 || imagesToUpdate.length > 50) return res.status(400).json({ error: "Too many photo changes in one save." });
+      const validImageUpdates: Array<{ id: number; description: string }> = [];
+      for (const image of imagesToUpdate) {
+        const imageId = Number(image?.id);
+        if (!Number.isSafeInteger(imageId) || imageId <= 0 || typeof image?.description !== "string" || image.description.length > 255) {
+          return res.status(400).json({ error: "Photo captions must be valid text no longer than 255 characters." });
+        }
+        validImageUpdates.push({ id: imageId, description: image.description });
+      }
       const preparedUploads: Buffer[] = [];
       for (const imageDataUrl of imagesToUpload) {
         try { preparedUploads.push(decodeGeneratedImageDataUrl(imageDataUrl)); }
@@ -2806,7 +2815,7 @@ export async function registerRoutes(
       if (imagesToDelete.some((value: unknown) => !Number.isSafeInteger(Number(value)) || Number(value) <= 0)) {
         return res.status(400).json({ error: "Invalid BigCommerce photo ID." });
       }
-      if (!Object.keys(patch).length && !imagesToAdd.length && !preparedUploads.length && !imagesToDelete.length) return res.status(400).json({ error: "No product changes were provided." });
+      if (!Object.keys(patch).length && !imagesToAdd.length && !preparedUploads.length && !validImageUpdates.length && !imagesToDelete.length) return res.status(400).json({ error: "No product changes were provided." });
       if ("categories" in patch && (!Array.isArray(patch.categories) || patch.categories.some((value: any) => !Number.isSafeInteger(Number(value)) || Number(value) <= 0))) {
         return res.status(400).json({ error: "Categories must be valid BigCommerce category IDs." });
       }
@@ -2827,6 +2836,15 @@ export async function registerRoutes(
         form.append("is_thumbnail", "false");
         const imageResponse = await fetch(`${root}/images`, { method: "POST", headers: { "X-Auth-Token": token, Accept: "application/json" }, body: form, signal: AbortSignal.timeout(60000) });
         if (!imageResponse.ok) throw new Error(`BigCommerce could not upload photo ${index + 1} (${imageResponse.status}).`);
+      }
+      for (const image of validImageUpdates) {
+        const imageResponse = await fetch(`${root}/images/${image.id}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ description: image.description }),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!imageResponse.ok) throw new Error(`BigCommerce could not update photo ${image.id} (${imageResponse.status}).`);
       }
       for (const imageId of imagesToDelete) {
         if (!Number.isSafeInteger(Number(imageId)) || Number(imageId) <= 0) continue;
