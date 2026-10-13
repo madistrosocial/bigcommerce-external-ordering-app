@@ -2789,7 +2789,13 @@ export async function registerRoutes(
       for (const key of editable) if (Object.prototype.hasOwnProperty.call(req.body || {}, key)) patch[key] = req.body[key];
       const imagesToAdd = Array.isArray(req.body?.imagesToAdd) ? req.body.imagesToAdd : [];
       const imagesToDelete = Array.isArray(req.body?.imagesToDelete) ? req.body.imagesToDelete : [];
-      if (imagesToAdd.length > 20 || imagesToDelete.length > 50) return res.status(400).json({ error: "Too many photo changes in one save." });
+      const imagesToUpload = Array.isArray(req.body?.imagesToUpload) ? req.body.imagesToUpload : [];
+      if (imagesToAdd.length > 20 || imagesToUpload.length > 3 || imagesToDelete.length > 50) return res.status(400).json({ error: "Too many photo changes in one save." });
+      const preparedUploads: Buffer[] = [];
+      for (const imageDataUrl of imagesToUpload) {
+        try { preparedUploads.push(decodeGeneratedImageDataUrl(imageDataUrl)); }
+        catch { return res.status(400).json({ error: "Uploads must be valid JPEG photos, no larger than 2 MB each." }); }
+      }
       const validImageUrls: string[] = [];
       for (const value of imagesToAdd) {
         let url: URL;
@@ -2800,7 +2806,7 @@ export async function registerRoutes(
       if (imagesToDelete.some((value: unknown) => !Number.isSafeInteger(Number(value)) || Number(value) <= 0)) {
         return res.status(400).json({ error: "Invalid BigCommerce photo ID." });
       }
-      if (!Object.keys(patch).length && !imagesToAdd.length && !imagesToDelete.length) return res.status(400).json({ error: "No product changes were provided." });
+      if (!Object.keys(patch).length && !imagesToAdd.length && !preparedUploads.length && !imagesToDelete.length) return res.status(400).json({ error: "No product changes were provided." });
       if ("categories" in patch && (!Array.isArray(patch.categories) || patch.categories.some((value: any) => !Number.isSafeInteger(Number(value)) || Number(value) <= 0))) {
         return res.status(400).json({ error: "Categories must be valid BigCommerce category IDs." });
       }
@@ -2814,6 +2820,13 @@ export async function registerRoutes(
       for (const imageUrl of validImageUrls) {
         const imageResponse = await fetch(`${root}/images`, { method: "POST", headers, body: JSON.stringify({ image_url: imageUrl }), signal: AbortSignal.timeout(60000) });
         if (!imageResponse.ok) throw new Error(`BigCommerce could not add image (${imageResponse.status}).`);
+      }
+      for (const [index, imageBuffer] of preparedUploads.entries()) {
+        const form = new FormData();
+        form.append("image_file", new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" }), `product-${bcId}-${index + 1}.jpg`);
+        form.append("is_thumbnail", "false");
+        const imageResponse = await fetch(`${root}/images`, { method: "POST", headers: { "X-Auth-Token": token, Accept: "application/json" }, body: form, signal: AbortSignal.timeout(60000) });
+        if (!imageResponse.ok) throw new Error(`BigCommerce could not upload photo ${index + 1} (${imageResponse.status}).`);
       }
       for (const imageId of imagesToDelete) {
         if (!Number.isSafeInteger(Number(imageId)) || Number(imageId) <= 0) continue;
