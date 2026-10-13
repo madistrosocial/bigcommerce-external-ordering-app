@@ -2849,7 +2849,10 @@ export async function registerRoutes(
       const imagesToDelete = Array.isArray(req.body?.imagesToDelete) ? req.body.imagesToDelete : [];
       const imagesToUpload = Array.isArray(req.body?.imagesToUpload) ? req.body.imagesToUpload : [];
       const imagesToUpdate = Array.isArray(req.body?.imagesToUpdate) ? req.body.imagesToUpdate : [];
+      const requestedPrimaryImageId = req.body?.primaryImageId;
+      const primaryImageId = requestedPrimaryImageId == null ? null : Number(requestedPrimaryImageId);
       if (imagesToAdd.length > 20 || imagesToUpload.length > 3 || imagesToDelete.length > 50 || imagesToUpdate.length > 50) return res.status(400).json({ error: "Too many photo changes in one save." });
+      if (requestedPrimaryImageId != null && (!Number.isSafeInteger(Number(requestedPrimaryImageId)) || Number(requestedPrimaryImageId) <= 0)) return res.status(400).json({ error: "Invalid primary photo ID." });
       const validImageUpdates: Array<{ id: number; description: string }> = [];
       for (const image of imagesToUpdate) {
         const imageId = Number(image?.id);
@@ -2873,7 +2876,8 @@ export async function registerRoutes(
       if (imagesToDelete.some((value: unknown) => !Number.isSafeInteger(Number(value)) || Number(value) <= 0)) {
         return res.status(400).json({ error: "Invalid BigCommerce photo ID." });
       }
-      if (!Object.keys(patch).length && !imagesToAdd.length && !preparedUploads.length && !validImageUpdates.length && !imagesToDelete.length) return res.status(400).json({ error: "No product changes were provided." });
+      if (primaryImageId !== null && imagesToDelete.some((value: unknown) => Number(value) === Number(primaryImageId))) return res.status(400).json({ error: "The primary photo cannot also be removed." });
+      if (!Object.keys(patch).length && !imagesToAdd.length && !preparedUploads.length && !validImageUpdates.length && !imagesToDelete.length && !primaryImageId) return res.status(400).json({ error: "No product changes were provided." });
       if ("categories" in patch && (!Array.isArray(patch.categories) || patch.categories.some((value: any) => !Number.isSafeInteger(Number(value)) || Number(value) <= 0))) {
         return res.status(400).json({ error: "Categories must be valid BigCommerce category IDs." });
       }
@@ -2904,6 +2908,15 @@ export async function registerRoutes(
         });
         if (!imageResponse.ok) throw new Error(`BigCommerce could not update photo ${image.id} (${imageResponse.status}).`);
       }
+      if (primaryImageId) {
+        const imageResponse = await fetch(`${root}/images/${primaryImageId}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ is_thumbnail: true }),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!imageResponse.ok) throw new Error(`BigCommerce could not set photo ${primaryImageId} as the product thumbnail (${imageResponse.status}).`);
+      }
       for (const imageId of imagesToDelete) {
         if (!Number.isSafeInteger(Number(imageId)) || Number(imageId) <= 0) continue;
         const imageResponse = await fetch(`${root}/images/${Number(imageId)}`, { method: "DELETE", headers, signal: AbortSignal.timeout(30000) });
@@ -2923,7 +2936,11 @@ export async function registerRoutes(
         ...(product.cost_price !== undefined ? { cost_price: String(product.cost_price) } : {}),
         ...(Array.isArray(product.categories) ? { categories: product.categories } : {}),
         ...(product.brand_id !== undefined ? { brand_name: brandName } : {}),
-        ...(Array.isArray(product.images) && product.images[0]?.url_thumbnail ? { image: product.images[0].url_thumbnail } : {}),
+        ...(Array.isArray(product.images) && product.images.length ? {
+          image: (product.images.find((image: any) => image.is_thumbnail) || product.images[0]).url_thumbnail
+            || (product.images.find((image: any) => image.is_thumbnail) || product.images[0]).url_standard
+            || (product.images.find((image: any) => image.is_thumbnail) || product.images[0]).image_url,
+        } : {}),
       });
       res.json({ success: true, product });
     } catch (error: any) {

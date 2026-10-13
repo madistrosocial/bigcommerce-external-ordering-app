@@ -621,6 +621,7 @@ function ProductDetailsTab({ id }: { id: number }) {
   const [editedFields, setEditedFields] = useState<Set<string>>(new Set());
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [imageDescriptionDrafts, setImageDescriptionDrafts] = useState<Record<string, string>>({});
+  const [primaryImageId, setPrimaryImageId] = useState<number | null>(null);
   const [photoError, setPhotoError] = useState("");
   const [draggingPhotos, setDraggingPhotos] = useState(false);
   const [categorySearch, setCategorySearch] = useState("");
@@ -655,6 +656,10 @@ function ProductDetailsTab({ id }: { id: number }) {
       setUploadedPhotos([]);
       setImageDescriptionDrafts({});
       setEditedFields(new Set());
+      const primaryImage = Array.isArray(query.data.product.images)
+        ? query.data.product.images.find((image: any) => image.is_thumbnail)
+        : null;
+      setPrimaryImageId(primaryImage ? Number(primaryImage.id) : null);
       const expanded = new Set<number>();
       for (const selectedId of Array.isArray(query.data.product.categories) ? query.data.product.categories.map(Number) : []) {
         let current = query.data.categories.find((category) => category.id === selectedId);
@@ -666,12 +671,16 @@ function ProductDetailsTab({ id }: { id: number }) {
       setOpenCategoryIds(expanded);
     }
   }, [query.data]);
+  const originalPrimaryImageId = Array.isArray(query.data?.product?.images)
+    ? Number(query.data.product.images.find((image: any) => image.is_thumbnail)?.id || 0) || null
+    : null;
   const save = useMutation({
     mutationFn: () => {
       const numericFields = new Set(["price", "cost_price", "retail_price", "sale_price", "weight", "width", "height", "depth", "brand_id", "sort_order"]);
       const changes = Object.fromEntries(Array.from(editedFields, (key) => [key, numericFields.has(key) ? numericValue(draft[key]) : draft[key]]));
       const imagesToUpdate = Object.entries(imageDescriptionDrafts).map(([imageId, description]) => ({ id: Number(imageId), description }));
-      return saveProduct360CatalogDetails(id, { ...changes, imagesToAdd: newImages, imagesToUpload: uploadedPhotos, imagesToUpdate, imagesToDelete: removedImages });
+      const selectedPrimaryImageId = primaryImageId !== originalPrimaryImageId && primaryImageId ? primaryImageId : undefined;
+      return saveProduct360CatalogDetails(id, { ...changes, imagesToAdd: newImages, imagesToUpload: uploadedPhotos, imagesToUpdate, imagesToDelete: removedImages, primaryImageId: selectedPrimaryImageId });
     },
     onSuccess: async () => {
       setSaved(true);
@@ -740,9 +749,11 @@ function ProductDetailsTab({ id }: { id: number }) {
         {images.map((image: any) => <div key={image.id} className="w-[150px] overflow-hidden rounded-md border border-slate-200 bg-white">
           <img src={image.url_thumbnail || image.url_standard || image.image_url} alt={image.description || ""} className="h-[150px] w-[150px] object-contain" />
           <div className="w-[150px] border-t border-slate-100 p-1.5">
-            {image.is_thumbnail && <span className="mb-1 inline-block rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700">Primary photo</span>}
+            {primaryImageId === Number(image.id) && <span className="mb-1 inline-block rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700">Primary photo</span>}
             <textarea aria-label={`Caption for photo ${image.id}`} maxLength={255} rows={3} disabled={!canEdit} placeholder="Add a photo caption…" value={imageDescriptionDrafts[String(image.id)] ?? image.description ?? ""} onChange={(event) => { setImageDescriptionDrafts((current) => ({ ...current, [String(image.id)]: event.target.value })); setSaved(false); }} className="block min-h-12 w-full resize-y rounded border border-slate-200 bg-white p-1 text-[9px] leading-3 text-slate-600 placeholder:text-slate-400 disabled:bg-slate-50" />
-            {canEdit && <button type="button" className="mt-1 text-[9px] font-medium text-red-600 hover:underline" onClick={() => { if (window.confirm("Remove this photo from BigCommerce?")) { setRemovedImages((current) => [...current, Number(image.id)]); setSaved(false); } }}>Remove photo</button>}
+            {canEdit && primaryImageId !== Number(image.id) && <button type="button" className="mt-1 text-[9px] font-medium text-blue-700 hover:underline" onClick={() => { setPrimaryImageId(Number(image.id)); setSaved(false); }}>Set as primary</button>}
+            {canEdit && primaryImageId === Number(image.id) && <span className="mt-1 block text-[9px] font-medium text-blue-700">Product thumbnail</span>}
+            {canEdit && <button type="button" className="mt-1 text-[9px] font-medium text-red-600 hover:underline" onClick={() => { if (window.confirm("Remove this photo from BigCommerce?")) { const imageId = Number(image.id); setRemovedImages((current) => [...current, imageId]); if (primaryImageId === imageId) { const replacement = images.find((candidate: any) => Number(candidate.id) !== imageId); setPrimaryImageId(replacement ? Number(replacement.id) : null); } setSaved(false); } }}>Remove photo</button>}
           </div>
         </div>)}
         {uploadedPhotos.map((photo, index) => <div key={`pending-${index}`} className="w-[150px] overflow-hidden rounded-md border border-blue-200 bg-white">
@@ -763,7 +774,7 @@ function ProductDetailsTab({ id }: { id: number }) {
       <Card className="border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div><h3 className="text-sm font-semibold text-slate-800">BigCommerce product details</h3><p className="mt-1 text-xs text-slate-500">Loaded live from BigCommerce. Saving writes these changes to the product catalog.</p></div>
-        {canEdit && <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending || (!editedFields.size && !newImages.length && !uploadedPhotos.length && !Object.keys(imageDescriptionDrafts).length && !removedImages.length)}><Save className="mr-2 h-4 w-4" />{save.isPending ? "Saving to BigCommerce…" : "Save changes"}</Button>}
+        {canEdit && <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending || (!editedFields.size && !newImages.length && !uploadedPhotos.length && !Object.keys(imageDescriptionDrafts).length && !removedImages.length && primaryImageId === originalPrimaryImageId)}><Save className="mr-2 h-4 w-4" />{save.isPending ? "Saving to BigCommerce…" : "Save changes"}</Button>}
       </div>
       {save.isError && <div className="mb-3 rounded-md bg-red-50 p-3 text-xs text-red-800">{save.error.message}</div>}
       {saved && <div className="mb-3 rounded-md bg-emerald-50 p-3 text-xs text-emerald-800">BigCommerce product updated.</div>}
