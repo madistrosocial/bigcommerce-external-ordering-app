@@ -625,6 +625,7 @@ export async function getProduct360Detail(input: {
       SELECT
         v->>'id' AS variant_id,
         COALESCE(NULLIF(v->>'sku', ''), '') AS sku,
+        NULLIF(v->>'image_url', '') AS image_url,
         COALESCE(
           NULLIF((
             SELECT string_agg(

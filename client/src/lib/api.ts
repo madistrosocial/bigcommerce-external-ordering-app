@@ -133,6 +133,17 @@ export function getProduct360Detail(id: number, query: { dateFrom?: string; date
   return product360Request<Product360Detail>(`/product-360/products/${id}?${params.toString()}`);
 }
 
+export async function uploadProduct360VariantImage(productId: number, variantId: number, imageDataUrl: string) {
+  const response = await fetch(`${API_BASE}/product-360/products/${productId}/variants/${variantId}/image`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ imageDataUrl }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Could not upload the variant photo");
+  return body as { success: boolean; imageUrl: string };
+}
+
 export interface User {
   id: number;
   username: string;

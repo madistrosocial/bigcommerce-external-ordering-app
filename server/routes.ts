@@ -2742,6 +2742,64 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/product-360/products/:id/variants/:variantId/image", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    const variantId = Number(req.params.variantId);
+    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(variantId) || variantId <= 0) {
+      return res.status(400).json({ error: "Invalid product or variant ID." });
+    }
+    let imageBuffer: Buffer;
+    try {
+      imageBuffer = decodeGeneratedImageDataUrl(req.body?.imageDataUrl);
+      if (imageBuffer.length > 1024 * 1024) {
+        return res.status(400).json({ error: "Variant photos must be no larger than 1 MB after resizing." });
+      }
+    } catch {
+      return res.status(400).json({ error: "Choose a valid JPEG photo no larger than 1 MB after resizing." });
+    }
+    try {
+      const local = await db.execute(sql`SELECT bigcommerce_id, variants FROM products WHERE id = ${id} LIMIT 1`);
+      const product = local.rows[0] as any;
+      const bcId = Number(product?.bigcommerce_id);
+      const variants = Array.isArray(product?.variants) ? product.variants : [];
+      if (!bcId) return res.status(404).json({ error: "Product is not linked to BigCommerce." });
+      if (!variants.some((variant: any) => Number(variant?.id) === variantId)) {
+        return res.status(404).json({ error: "Variant does not belong to this product." });
+      }
+
+      const { storeHash, token } = await getBcCreds();
+      const form = new FormData();
+      form.append("image_file", new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" }), `variant-${variantId}.jpg`);
+      const imageResponse = await fetch(
+        `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products/${bcId}/variants/${variantId}/image`,
+        { method: "POST", headers: { "X-Auth-Token": token, Accept: "application/json" }, body: form, signal: AbortSignal.timeout(60000) },
+      );
+      const payload: any = await imageResponse.json().catch(() => ({}));
+      if (!imageResponse.ok || typeof payload?.data?.image_url !== "string" || !payload.data.image_url) {
+        return res.status(502).json({ error: payload.title || payload.detail || `BigCommerce could not upload the variant photo (${imageResponse.status}).` });
+      }
+      const imageUrl = payload.data.image_url as string;
+      await db.execute(sql`
+        UPDATE products p
+        SET variants = (
+          SELECT jsonb_agg(
+            CASE WHEN NULLIF(variant->>'id', '')::bigint = ${variantId}
+              THEN jsonb_set(variant, '{image_url}', to_jsonb(${imageUrl}::text), true)
+              ELSE variant
+            END
+            ORDER BY ordinal
+          )
+          FROM jsonb_array_elements(COALESCE(p.variants, '[]'::jsonb)) WITH ORDINALITY AS item(variant, ordinal)
+        )
+        WHERE p.id = ${id} AND p.bigcommerce_id = ${bcId}
+      `);
+      return res.json({ success: true, imageUrl });
+    } catch (error: any) {
+      console.error("[Product 360] variant image upload failed:", error);
+      return res.status(500).json({ error: "Unable to upload the variant photo." });
+    }
+  });
+
   app.get("/api/product-360/products/:id/catalog-details", requirePermission("product_360", "view"), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid product id" });
