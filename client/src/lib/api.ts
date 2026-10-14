@@ -88,6 +88,25 @@ export function getProduct360CatalogDetails(id: number) {
   return product360Request<Product360CatalogDetails>(`/product-360/products/${id}/catalog-details`);
 }
 
+export type Product360Draft = {
+  id: number;
+  data: Record<string, any>;
+  status: "draft" | "syncing" | "failed" | "synced";
+  bigcommerce_id: number | null;
+  updated_at: string;
+  error?: string | null;
+};
+
+export const getProduct360Drafts = () => product360Request<Product360Draft[]>("/product-360/drafts");
+export const getProduct360Draft = (id: number) => product360Request<Product360Draft>(`/product-360/drafts/${id}`);
+export const createProduct360Draft = (data: Record<string, unknown>) =>
+  fetch(`${API_BASE}/product-360/drafts`, { method: "POST", headers: { "Content-Type": "application/json", ...getAuthHeaders() }, body: JSON.stringify(data) }).then(async (res) => { const body = await res.json().catch(() => ({})); if (!res.ok) throw new Error(body.error || "Could not create product draft"); return body as Product360Draft; });
+export const saveProduct360Draft = (id: number, data: Record<string, unknown>) =>
+  fetch(`${API_BASE}/product-360/drafts/${id}`, { method: "PUT", headers: { "Content-Type": "application/json", ...getAuthHeaders() }, body: JSON.stringify(data) }).then(async (res) => { const body = await res.json().catch(() => ({})); if (!res.ok) throw new Error(body.error || "Could not save product draft"); return body as Product360Draft; });
+export const syncProduct360Draft = (id: number) =>
+  fetch(`${API_BASE}/product-360/drafts/${id}/sync`, { method: "POST", headers: getAuthHeaders() }).then(async (res) => { const body = await res.json().catch(() => ({})); if (!res.ok) throw new Error(body.error || "Could not sync product draft"); return body as { success: boolean; bigcommerceId: number }; });
+export const getProduct360CreateOptions = () => product360Request<{ categories: Array<{ id: number; name: string }>; brands: Array<{ id: number; name: string }> }>("/product-360/create-options");
+
 export async function saveProduct360CatalogDetails(id: number, changes: Record<string, unknown>) {
   const response = await fetch(`${API_BASE}/product-360/products/${id}/catalog-details`, {
     method: "PUT",

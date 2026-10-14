@@ -786,6 +786,17 @@ export async function registerRoutes(
       END IF;
     END $$;
   `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS product_360_drafts (
+      id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      data jsonb NOT NULL DEFAULT '{}'::jsonb,
+      status text NOT NULL DEFAULT 'draft',
+      bigcommerce_id integer UNIQUE,
+      error text,
+      created_at timestamp NOT NULL DEFAULT now(),
+      updated_at timestamp NOT NULL DEFAULT now()
+    )
+  `));
 
   // Attendance sessions originally allowed unlimited completed sessions per
   // workday. Keep the existing records intact while adding the fields needed
@@ -2797,6 +2808,104 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[Product 360] variant image upload failed:", error);
       return res.status(500).json({ error: "Unable to upload the variant photo." });
+    }
+  });
+
+  app.get("/api/product-360/drafts", requireAdmin, async (_req, res) => {
+    const result = await db.execute(sql`SELECT id, data, status, bigcommerce_id, error, updated_at FROM product_360_drafts WHERE status <> 'synced' ORDER BY updated_at DESC`);
+    res.json(result.rows);
+  });
+  app.get("/api/product-360/drafts/:id", requireAdmin, async (req, res) => {
+    const result = await db.execute(sql`SELECT id, data, status, bigcommerce_id, error, updated_at FROM product_360_drafts WHERE id = ${Number(req.params.id)} LIMIT 1`);
+    if (!result.rows[0]) return res.status(404).json({ error: "Draft not found." });
+    res.json(result.rows[0]);
+  });
+  app.post("/api/product-360/drafts", requireAdmin, async (req, res) => {
+    const result = await db.execute(sql`INSERT INTO product_360_drafts (data) VALUES (${JSON.stringify(req.body || {})}::jsonb) RETURNING id, data, status, bigcommerce_id, error, updated_at`);
+    res.json(result.rows[0]);
+  });
+  app.put("/api/product-360/drafts/:id", requireAdmin, async (req, res) => {
+    const result = await db.execute(sql`UPDATE product_360_drafts SET data = ${JSON.stringify(req.body || {})}::jsonb, status = 'draft', error = NULL, updated_at = now() WHERE id = ${Number(req.params.id)} AND status <> 'synced' RETURNING id, data, status, bigcommerce_id, error, updated_at`);
+    if (!result.rows[0]) return res.status(404).json({ error: "Draft not found or already synced." });
+    res.json(result.rows[0]);
+  });
+  app.get("/api/product-360/create-options", requireAdmin, async (_req, res) => {
+    try {
+      const { storeHash, headers } = await getBcCreds();
+      const root = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog`;
+      const [categories, brands] = await Promise.all(["categories", "brands"].map(async (kind) => {
+        const response = await fetch(`${root}/${kind}?limit=250`, { headers, signal: AbortSignal.timeout(30000) });
+        if (!response.ok) throw new Error(`BigCommerce ${kind} lookup failed.`);
+        const payload: any = await response.json();
+        return (payload.data || []).map((item: any) => ({ id: Number(item.id), name: String(item.name || "") }));
+      }));
+      res.json({ categories, brands });
+    } catch (error: any) { res.status(502).json({ error: error.message || "Could not load product options." }); }
+  });
+  app.post("/api/product-360/drafts/:id/sync", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    try {
+      const query = await db.execute(sql`SELECT data, bigcommerce_id FROM product_360_drafts WHERE id = ${id} AND status <> 'synced' LIMIT 1`);
+      if (!query.rows[0]) return res.status(404).json({ error: "Draft not found or already synced." });
+      const d: any = query.rows[0].data;
+      const variants = Array.isArray(d.variants) ? d.variants : [];
+      if (!String(d.name || "").trim() || !String(d.skuPrefix || "").trim() || !Number.isFinite(Number(d.price)) || (variants.length && variants.some((v: any) => !v.name || !v.shorthand))) return res.status(400).json({ error: "Complete product name, base SKU, price, and each variant's name and SKU shorthand before syncing." });
+      const variantSkus = variants.map((v: any) => `${d.skuPrefix}-${v.shorthand}`.trim().toUpperCase());
+      if (new Set(variantSkus).size !== variantSkus.length) return res.status(400).json({ error: "Each variant needs a unique SKU shorthand." });
+      const { storeHash, headers } = await getBcCreds();
+      const root = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog`;
+      const productBody: any = { name: d.name, type: d.type || "physical", sku: d.skuPrefix, price: Number(d.price), description: d.description || "", weight: Number(d.weight || 0), is_visible: Boolean(d.is_visible), availability: d.availability || "available", condition: d.condition || "New", categories: (Array.isArray(d.categories) ? d.categories : []).map(Number).filter((n: number) => Number.isSafeInteger(n) && n > 0) };
+      if (Number(d.brand_id) > 0) productBody.brand_id = Number(d.brand_id);
+      if (d.image_url) productBody.images = [{ image_url: d.image_url, is_thumbnail: true }];
+      for (const key of ["cost_price","retail_price","sale_price","width","height","depth","sort_order","search_keywords","warranty","page_title","meta_description","meta_keywords"]) if (d[key] !== "" && d[key] != null) productBody[key] = d[key];
+      if (d.custom_url) productBody.custom_url = { url: d.custom_url, is_customized: true };
+      let p: any;
+      const existingBcId = Number(query.rows[0].bigcommerce_id) || 0;
+      if (existingBcId) {
+        const existingResponse = await fetch(`${root}/products/${existingBcId}?include=images,variants`, { headers, signal: AbortSignal.timeout(30000) });
+        const existingPayload: any = await existingResponse.json().catch(() => ({}));
+        if (!existingResponse.ok) throw new Error("The partially synced BigCommerce product could not be reopened.");
+        p = existingPayload.data;
+      } else {
+        const response = await fetch(`${root}/products`, { method: "POST", headers, body: JSON.stringify(productBody), signal: AbortSignal.timeout(60000) });
+        const payload: any = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.title || payload.detail || `BigCommerce product create failed (${response.status}).`);
+        p = payload.data;
+        await db.execute(sql`UPDATE product_360_drafts SET status = 'syncing', bigcommerce_id = ${Number(p.id)}, updated_at = now() WHERE id = ${id}`);
+      }
+      if (variants.length) {
+        const optionsResponse = await fetch(`${root}/products/${p.id}/options`, { headers, signal: AbortSignal.timeout(30000) });
+        const optionsPayload: any = await optionsResponse.json().catch(() => ({}));
+        if (!optionsResponse.ok) throw new Error("BigCommerce could not load product variant options.");
+        let option = (optionsPayload.data || []).find((item: any) => item.display_name === "Variant");
+        if (!option) {
+          const optionResponse = await fetch(`${root}/products/${p.id}/options`, { method: "POST", headers, body: JSON.stringify({ display_name: "Variant", type: "dropdown", option_values: variants.map((v: any, i: number) => ({ label: v.name, sort_order: i })) }), signal: AbortSignal.timeout(30000) });
+          const op: any = await optionResponse.json().catch(() => ({}));
+          if (!optionResponse.ok) throw new Error("BigCommerce could not create the product variant option.");
+          option = op.data;
+        }
+        const existingVariantSkus = new Set((p.variants || []).map((item: any) => String(item.sku || "").toUpperCase()));
+        for (let i = 0; i < variants.length; i++) {
+          const v = variants[i], value = option.option_values?.find((item: any) => item.label === v.name);
+          const generatedSku = `${d.skuPrefix}-${v.shorthand}`.toUpperCase();
+          if (existingVariantSkus.has(generatedSku)) continue;
+          const variantBody: any = { sku: generatedSku, price: Number(v.price || d.price), cost_price: Number(v.cost_price || d.cost_price || 0), inventory_level: Number(v.inventory_level || 0), option_values: [{ option_id: option.id, id: value?.id }] };
+          for (const key of ["weight","width","height","depth","upc"]) if (v[key] !== "" && v[key] != null) variantBody[key] = v[key];
+          const vr = await fetch(`${root}/products/${p.id}/variants`, { method: "POST", headers, body: JSON.stringify(variantBody), signal: AbortSignal.timeout(30000) });
+          if (!vr.ok) throw new Error(`BigCommerce could not create variant ${v.name}.`);
+        }
+      }
+      const fresh = await fetch(`${root}/products/${p.id}?include=images,variants`, { headers, signal: AbortSignal.timeout(30000) });
+      const fp: any = (await fresh.json()).data;
+      const localProduct = { bigcommerce_id: Number(fp.id), name: fp.name, sku: fp.sku || "", price: String(fp.price || 0), image: fp.primary_image?.url_thumbnail || "", description: fp.description || "", variants: fp.variants || [], brand_id: fp.brand_id || null, categories: fp.categories || [], inventory_tracking: fp.inventory_tracking || "none" } as InsertProduct;
+      const localExisting = await storage.getProductByBigCommerceId(Number(fp.id));
+      if (localExisting) await storage.updateProduct(localExisting.id, localProduct);
+      else await storage.createProduct(localProduct);
+      await db.execute(sql`UPDATE product_360_drafts SET status = 'synced', error = NULL, updated_at = now() WHERE id = ${id}`);
+      res.json({ success: true, bigcommerceId: Number(fp.id) });
+    } catch (error: any) {
+      await db.execute(sql`UPDATE product_360_drafts SET status = 'failed', error = ${String(error.message || "Sync failed").slice(0, 500)}, updated_at = now() WHERE id = ${id}`).catch(() => {});
+      res.status(502).json({ error: error.message || "Could not sync product draft." });
     }
   });
 

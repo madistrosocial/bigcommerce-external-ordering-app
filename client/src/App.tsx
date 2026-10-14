@@ -62,6 +62,7 @@ import StoreCreditUsageReportPage from "@/pages/admin/reports/StoreCreditUsageRe
 import SalesReportPage from "@/pages/admin/reports/SalesReport";
 import ExportsPage from "@/pages/admin/reports/Exports";
 import { Product360OverviewPage, Product360ProductsPage, Product360DetailPage } from "@/pages/product360/Product360";
+import Product360DraftPage from "@/pages/product360/Product360Draft";
 import { MarketingDashboard, MarketingCampaigns, MarketingCampaignRoute, MarketingAudiences, MarketingAudienceReadiness, MarketingSettings } from "@/pages/marketing/Marketing";
 import { MarketingAnalytics, MarketingTemplates, MarketingAutomations } from "@/pages/marketing/MarketingPhase2";
 import AttendancePage from "@/pages/attendance/Attendance";
@@ -214,6 +215,9 @@ function Router() {
       {/* ── Agent routes ── */}
       <Route path="/catalog">
         {() => <ProtectedRoute component={Catalog} role="agent" />}
+      </Route>
+      <Route path="/product-360/products/drafts/:draftId">
+        {() => <AdminRoute component={Product360DraftPage} />}
       </Route>
       <Route path="/product-360/products/:id">
         {() => <PermissionRoute component={Product360DetailPage} module="product_360" action="view" />}
