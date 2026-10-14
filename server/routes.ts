@@ -2889,7 +2889,7 @@ export async function registerRoutes(
           const v = variants[i], value = option.option_values?.find((item: any) => item.label === v.name);
           const generatedSku = `${d.skuPrefix}-${v.shorthand}`.toUpperCase();
           if (existingVariantSkus.has(generatedSku)) continue;
-          const variantBody: any = { sku: generatedSku, price: Number(v.price || d.price), cost_price: Number(v.cost_price || d.cost_price || 0), inventory_level: Number(v.inventory_level || 0), option_values: [{ option_id: option.id, id: value?.id }] };
+          const variantBody: any = { sku: generatedSku, price: Number(v.price !== "" && v.price != null ? v.price : d.price), cost_price: Number(v.cost_price !== "" && v.cost_price != null ? v.cost_price : d.cost_price || 0), inventory_level: Number(v.inventory_level || 0), option_values: [{ option_id: option.id, id: value?.id }] };
           for (const key of ["weight","width","height","depth","upc"]) if (v[key] !== "" && v[key] != null) variantBody[key] = v[key];
           const vr = await fetch(`${root}/products/${p.id}/variants`, { method: "POST", headers, body: JSON.stringify(variantBody), signal: AbortSignal.timeout(30000) });
           if (!vr.ok) throw new Error(`BigCommerce could not create variant ${v.name}.`);
