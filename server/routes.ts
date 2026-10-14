@@ -2834,10 +2834,16 @@ export async function registerRoutes(
       const { storeHash, headers } = await getBcCreds();
       const root = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog`;
       const [categories, brands] = await Promise.all(["categories", "brands"].map(async (kind) => {
-        const response = await fetch(`${root}/${kind}?limit=250`, { headers, signal: AbortSignal.timeout(30000) });
-        if (!response.ok) throw new Error(`BigCommerce ${kind} lookup failed.`);
-        const payload: any = await response.json();
-        return (payload.data || []).map((item: any) => ({ id: Number(item.id), name: String(item.name || "") }));
+        const items: any[] = [];
+        for (let page = 1; ; page++) {
+          const response = await fetch(`${root}/${kind}?limit=250&page=${page}`, { headers, signal: AbortSignal.timeout(30000) });
+          if (!response.ok) throw new Error(`BigCommerce ${kind} lookup failed.`);
+          const payload: any = await response.json();
+          const batch = Array.isArray(payload.data) ? payload.data : [];
+          items.push(...batch);
+          if (!batch.length || items.length >= Number(payload.meta?.pagination?.total || 0)) break;
+        }
+        return items.map((item: any) => ({ id: Number(item.id), name: String(item.name || ""), ...(kind === "categories" ? { parent_id: Number(item.parent_id || 0) } : {}) }));
       }));
       res.json({ categories, brands });
     } catch (error: any) { res.status(502).json({ error: error.message || "Could not load product options." }); }
