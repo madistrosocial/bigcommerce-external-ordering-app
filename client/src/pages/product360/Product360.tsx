@@ -46,6 +46,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import RichTextEditor from "@/components/editor/RichTextEditor";
 import {
   getProduct360Detail,
   getProduct360Overview,
@@ -798,7 +799,7 @@ function ProductDetailsTab({ id }: { id: number }) {
         <label className={labelClass}>Custom URL path<input className={inputClass} disabled={!canEdit} value={draft.custom_url?.url || ""} onChange={(event) => update("custom_url", { ...(draft.custom_url || {}), url: event.target.value, is_customized: true })} /></label>
         <label className={`${labelClass} flex items-center gap-2 pt-5`}><input type="checkbox" disabled={!canEdit} checked={Boolean(draft.is_visible)} onChange={(event) => update("is_visible", event.target.checked)} /> Visible on storefront</label>
       </div>
-      <label className={`${labelClass} mt-4 block`}>Description<textarea className="mt-1 min-h-32 w-full rounded-md border border-slate-200 p-3 text-sm disabled:bg-slate-50" disabled={!canEdit} value={draft.description ?? ""} onChange={(event) => update("description", event.target.value)} /></label>
+      <div className={`${labelClass} mt-4`}><label className="mb-1.5 block" htmlFor="product-description-editor">Description</label><RichTextEditor id="product-description-editor" value={String(draft.description ?? "")} onChange={(value) => update("description", value)} minHeight={180} readOnly={!canEdit} /></div>
     </Card>
     <Card className="border-slate-200 bg-white p-4 shadow-sm"><h3 className="text-sm font-semibold text-slate-800">Pricing & cost</h3><p className="mt-1 text-xs text-slate-500">Product-level prices from BigCommerce.</p><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{(["price", "sale_price", "retail_price", "cost_price"] as const).map((key) => <label className={labelClass} key={key}>{({ price: "Price", sale_price: "Sale price", retail_price: "Retail price", cost_price: "Cost" })[key]}<input className={inputClass} type="number" step="any" min="0" disabled={!canEdit} value={draft[key] ?? ""} onChange={(event) => update(key, event.target.value)} /></label>)}</div></Card>
     <Card className="border-slate-200 bg-white p-4 shadow-sm"><h3 className="text-sm font-semibold text-slate-800">Product specifications</h3><div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

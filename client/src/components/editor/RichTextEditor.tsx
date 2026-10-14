@@ -89,11 +89,13 @@ interface Props {
   value: string;        // HTML string
   onChange: (html: string) => void;
   minHeight?: number;
+  readOnly?: boolean;
+  id?: string;
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function RichTextEditor({ value, onChange, minHeight = 300 }: Props) {
+export default function RichTextEditor({ value, onChange, minHeight = 300, readOnly = false, id }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const [imageError, setImageError] = useState("");
@@ -116,9 +118,11 @@ export default function RichTextEditor({ value, onChange, minHeight = 300 }: Pro
       }),
     ],
     content: ensureHtml(value),
+    editable: !readOnly,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     editorProps: {
       attributes: {
+        ...(id ? { id } : {}),
         class: "prose prose-sm max-w-none focus:outline-none px-4 py-3",
         style: `min-height: ${minHeight}px;`,
       },
@@ -136,6 +140,10 @@ export default function RichTextEditor({ value, onChange, minHeight = 300 }: Pro
       editor.commands.setContent(incoming, { emitUpdate: false });
     }
   }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    editor?.setEditable(!readOnly);
+  }, [editor, readOnly]);
 
   if (!editor) return null;
 
@@ -183,10 +191,10 @@ export default function RichTextEditor({ value, onChange, minHeight = 300 }: Pro
   };
 
   return (
-    <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+    <div aria-disabled={readOnly} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
 
       {/* ── Toolbar ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-slate-200 bg-slate-50 flex-wrap">
+      <div aria-disabled={readOnly} className={`flex flex-wrap items-center gap-0.5 border-b border-slate-200 bg-slate-50 px-2 py-1.5 ${readOnly ? "pointer-events-none opacity-50" : ""}`}>
 
         {/* Inline marks */}
         <ToolbarBtn
