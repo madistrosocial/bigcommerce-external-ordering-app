@@ -2860,19 +2860,44 @@ export async function registerRoutes(
       if (new Set(variantSkus).size !== variantSkus.length) return res.status(400).json({ error: "Each variant needs a unique SKU shorthand." });
       const { storeHash, headers } = await getBcCreds();
       const root = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog`;
+      const existingBcId = Number(query.rows[0].bigcommerce_id) || 0;
       const productBody: any = { name: d.name, type: d.type || "physical", sku: d.skuPrefix, price: Number(d.price), description: d.description || "", weight: Number(d.weight || 0), is_visible: Boolean(d.is_visible), availability: d.availability || "available", condition: d.condition || "New", categories: (Array.isArray(d.categories) ? d.categories : []).map(Number).filter((n: number) => Number.isSafeInteger(n) && n > 0) };
       if (Number(d.brand_id) > 0) productBody.brand_id = Number(d.brand_id);
       if (d.image_url) productBody.images = [{ image_url: d.image_url, is_thumbnail: true }];
       for (const key of ["cost_price","retail_price","sale_price","width","height","depth","sort_order","search_keywords","warranty","page_title","meta_description","meta_keywords"]) if (d[key] !== "" && d[key] != null) productBody[key] = d[key];
       if (d.custom_url) productBody.custom_url = { url: d.custom_url, is_customized: true };
       let p: any;
-      const existingBcId = Number(query.rows[0].bigcommerce_id) || 0;
       if (existingBcId) {
         const existingResponse = await fetch(`${root}/products/${existingBcId}?include=images,variants`, { headers, signal: AbortSignal.timeout(30000) });
         const existingPayload: any = await existingResponse.json().catch(() => ({}));
         if (!existingResponse.ok) throw new Error("The partially synced BigCommerce product could not be reopened.");
         p = existingPayload.data;
       } else {
+        const typedBrandName = String(d.brand_name || "").trim();
+        let brandId = Number(d.brand_id) || 0;
+        if (!brandId && typedBrandName) {
+          const allBrands: any[] = [];
+          for (let page = 1; ; page++) {
+            const brandsResponse = await fetch(`${root}/brands?limit=250&page=${page}`, { headers, signal: AbortSignal.timeout(30000) });
+            const brandsPayload: any = await brandsResponse.json().catch(() => ({}));
+            if (!brandsResponse.ok) throw new Error(brandsPayload.title || brandsPayload.detail || `BigCommerce brand lookup failed (${brandsResponse.status}).`);
+            const batch = Array.isArray(brandsPayload.data) ? brandsPayload.data : [];
+            allBrands.push(...batch);
+            if (!batch.length || allBrands.length >= Number(brandsPayload.meta?.pagination?.total || 0)) break;
+          }
+          const normalizedName = typedBrandName.toLocaleLowerCase();
+          const existingBrand = allBrands.find((brand) => String(brand.name || "").trim().toLocaleLowerCase() === normalizedName);
+          if (existingBrand) {
+            brandId = Number(existingBrand.id);
+          } else {
+            const brandResponse = await fetch(`${root}/brands`, { method: "POST", headers, body: JSON.stringify({ name: typedBrandName }), signal: AbortSignal.timeout(30000) });
+            const brandPayload: any = await brandResponse.json().catch(() => ({}));
+            if (!brandResponse.ok) throw new Error(brandPayload.title || brandPayload.detail || `BigCommerce brand create failed (${brandResponse.status}).`);
+            brandId = Number(Array.isArray(brandPayload.data) ? brandPayload.data[0]?.id : brandPayload.data?.id);
+            if (!Number.isSafeInteger(brandId) || brandId < 1) throw new Error("BigCommerce created the brand but did not return its ID.");
+          }
+        }
+        if (brandId > 0) productBody.brand_id = brandId;
         const response = await fetch(`${root}/products`, { method: "POST", headers, body: JSON.stringify(productBody), signal: AbortSignal.timeout(60000) });
         const payload: any = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.title || payload.detail || `BigCommerce product create failed (${response.status}).`);
