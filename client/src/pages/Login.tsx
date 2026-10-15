@@ -58,6 +58,15 @@ export default function Login() {
   const { login, logout, currentUser } = useStore();
   const [, setLocation] = useLocation();
   const [error, setError] = useState("");
+  const [sessionExpired] = useState(() => {
+    try {
+      const expired = sessionStorage.getItem("vansales_session_expired") === "1";
+      sessionStorage.removeItem("vansales_session_expired");
+      return expired;
+    } catch {
+      return false;
+    }
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [isSendingReset, setIsSendingReset] = useState(false);
@@ -172,6 +181,7 @@ export default function Login() {
           <CardDescription>{isForgotPassword ? "Enter your account email to receive a reset link" : "Enter your credentials to access the system"}</CardDescription>
         </CardHeader>
         <CardContent>
+          {sessionExpired && <div className="mb-4 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800" role="status">Your session expired. Please sign in again.</div>}
           {isForgotPassword ? (
             resetRequested ? (
               <div className="space-y-4 text-center">

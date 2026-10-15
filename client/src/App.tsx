@@ -1,6 +1,7 @@
 import { Switch, Route, Redirect, useLocation } from "wouter";
 import { useEffect, useRef } from "react";
 import { queryClient } from "./lib/queryClient";
+import { AUTH_SESSION_EXPIRED_EVENT } from "./lib/authSession";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -168,9 +169,24 @@ function MarketingLandingRoute() {
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 function Router() {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const { currentUser } = useStore();
   const lastActivityPage = useRef("");
+
+  useEffect(() => {
+    const handleExpiredSession = () => {
+      if (!useStore.getState().currentUser) return;
+      try {
+        sessionStorage.setItem("vansales_session_expired", "1");
+      } catch {}
+      useStore.getState().logout();
+      queryClient.clear();
+      setLocation("/");
+    };
+
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, handleExpiredSession);
+    return () => window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleExpiredSession);
+  }, [setLocation]);
 
   useEffect(() => {
     const user = currentUser;
