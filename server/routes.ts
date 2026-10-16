@@ -11681,6 +11681,39 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // GET /api/crm/customers/:id/top-products
+  app.get("/api/crm/customers/:id/top-products", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const id = Number.parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid customer ID" });
+      if (!await assertCrmCustomerAccess(storage, id, userId, user.role, res)) return;
+      const customer = await storage.getCrmCustomerById(id);
+      if (!customer) return res.status(404).json({ error: "Customer not found" });
+      if (!customer.bigcommerce_customer_id) return res.json([]);
+
+      const result = await db.execute(sql`
+        SELECT
+          bigcommerce_product_id AS product_id,
+          MAX(NULLIF(TRIM(product_name), '')) AS product_name,
+          MAX(NULLIF(TRIM(sku), '')) AS sku,
+          COUNT(DISTINCT NULLIF(TRIM(sku), ''))::int AS sku_count,
+          SUM(quantity)::int AS units_ordered,
+          COUNT(DISTINCT bigcommerce_order_id)::int AS order_count,
+          SUM(quantity * base_price)::numeric AS total_spent,
+          MAX(order_date) AS last_order_date
+        FROM bc_order_line_items
+        WHERE bigcommerce_customer_id = ${customer.bigcommerce_customer_id}
+        GROUP BY bigcommerce_product_id
+        ORDER BY SUM(quantity) DESC, COUNT(DISTINCT bigcommerce_order_id) DESC, MAX(order_date) DESC
+        LIMIT 25
+      `);
+      res.json(result.rows);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // PUT /api/crm/customers/:id/sales-rep
   app.put("/api/crm/customers/:id/sales-rep", requireAuth, async (req, res) => {
     try {

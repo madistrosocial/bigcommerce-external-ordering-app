@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   ArrowLeft, Building2, User, Mail, Phone, Hash, TrendingUp, ShoppingBag,
-  Calendar, DollarSign, Users, Plus, Pencil, Trash2, MessageSquare,
+  Calendar, DollarSign, Users, Plus, Pencil, Trash2, MessageSquare, Package,
   UserCheck, UserMinus, AlertTriangle, Clock, ChevronLeft, ChevronRight,
   FileText, CreditCard, Edit3, RefreshCw, BookOpen, Save, CheckSquare,
 } from "lucide-react";
@@ -370,7 +370,7 @@ function NoteModal({ open, onClose, onSave, onSaveTodo, saving, initial, title, 
 
 // ─── Tab type ─────────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "orders" | "notes" | "timeline";
+type Tab = "overview" | "orders" | "top-products" | "notes" | "timeline";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main Component
@@ -474,6 +474,21 @@ export default function CustomerProfile() {
       return r.json();
     },
     enabled: !!id,
+    staleTime: 120_000,
+  });
+
+  const {
+    data: topProducts = [],
+    isLoading: loadingTopProducts,
+    isError: topProductsError,
+  } = useQuery<any[]>({
+    queryKey: ["crm", "customer", id, "top-products"],
+    queryFn: async () => {
+      const r = await fetch(`/api/crm/customers/${id}/top-products`, { headers: getAuthHeaders() });
+      if (!r.ok) throw new Error("Failed to load top products");
+      return r.json();
+    },
+    enabled: !!id && activeTab === "top-products",
     staleTime: 120_000,
   });
 
@@ -733,6 +748,7 @@ export default function CustomerProfile() {
   const TABS: { id: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
     { id: "overview",  label: "Overview",  icon: <User className="h-3.5 w-3.5" /> },
     { id: "orders",    label: "Orders",    icon: <ShoppingBag className="h-3.5 w-3.5" /> },
+    { id: "top-products", label: "Top Products", icon: <Package className="h-3.5 w-3.5" /> },
     { id: "notes",     label: "Actions",   icon: <MessageSquare className="h-3.5 w-3.5" />, count: totalActions || undefined },
     { id: "timeline",  label: "Timeline",  icon: <Clock className="h-3.5 w-3.5" /> },
   ];
@@ -1229,6 +1245,47 @@ export default function CustomerProfile() {
                   bigcommerceCustomerId: customer.bigcommerce_customer_id ?? null,
                 }}
               />
+            </div>
+          )}
+
+          {/* ── TOP PRODUCTS TAB ───────────────────────────────────────────── */}
+          {activeTab === "top-products" && (
+            <div className="border rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b bg-slate-50">
+                <h2 className="text-sm font-semibold text-slate-700">Top Products</h2>
+                <p className="mt-0.5 text-xs text-slate-500">Ranked by total units ordered from synced order history.</p>
+              </div>
+              {loadingTopProducts ? (
+                <div className="px-4 py-10 text-center text-sm text-slate-400">Loading top products…</div>
+              ) : topProductsError ? (
+                <div className="px-4 py-10 text-center text-sm text-red-500">Could not load this customer’s top products.</div>
+              ) : topProducts.length === 0 ? (
+                <div className="px-4 py-10 text-center text-sm text-slate-400">No synced product purchase history found.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[620px] text-left">
+                    <thead className="border-b bg-white">
+                      <tr>
+                        {["Product", "SKU", "Units Ordered", "Orders", "Total Spent", "Last Ordered"].map((label) => (
+                          <th key={label} className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {topProducts.map((product: any) => (
+                        <tr key={product.product_id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 text-sm font-medium text-slate-700">{product.product_name || `Product ${product.product_id}`}</td>
+                          <td className="px-4 py-3 text-xs text-slate-500">{Number(product.sku_count) > 1 ? `${Number(product.sku_count)} SKUs` : product.sku || "—"}</td>
+                          <td className="px-4 py-3 text-sm text-slate-600">{Number(product.units_ordered || 0).toLocaleString()}</td>
+                          <td className="px-4 py-3 text-sm text-slate-600">{Number(product.order_count || 0).toLocaleString()}</td>
+                          <td className="px-4 py-3 text-sm text-slate-600">{fmtCurrency(product.total_spent)}</td>
+                          <td className="px-4 py-3 text-xs text-slate-500">{product.last_order_date ? fmt.date(product.last_order_date) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
