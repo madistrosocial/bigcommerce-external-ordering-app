@@ -35,6 +35,7 @@ export interface Product360Overview {
   replenishmentPriority: Record<string, unknown>[];
   recentActivity: Record<string, unknown>[];
   brandOptions: string[];
+  stateOptions: string[];
   categoryOptions: string[];
   categoryPerformance: Record<string, unknown>[];
   categoryPath: { id: number; name: string }[];
@@ -137,21 +138,23 @@ export async function saveProduct360CatalogDetails(id: number, changes: Record<s
   return body as { success: boolean; product: Record<string, any> };
 }
 
-export function getProduct360Overview(query: { dateFrom?: string; dateTo?: string; brand?: string; category?: string; categoryId?: number } = {}) {
+export function getProduct360Overview(query: { dateFrom?: string; dateTo?: string; brand?: string; state?: string; category?: string; categoryId?: number } = {}) {
   const params = new URLSearchParams();
   if (query.dateFrom) params.set("dateFrom", query.dateFrom);
   if (query.dateTo) params.set("dateTo", query.dateTo);
   if (query.brand) params.set("brand", query.brand);
+  if (query.state) params.set("state", query.state);
   if (query.category) params.set("category", query.category);
   if (query.categoryId) params.set("categoryId", String(query.categoryId));
   return product360Request<Product360Overview>(`/product-360/overview?${params.toString()}`);
 }
 
-export function getProduct360TopCustomers(query: { dateFrom?: string; dateTo?: string; brand?: string; category?: string; categoryId?: number; page?: number; limit?: number } = {}) {
+export function getProduct360TopCustomers(query: { dateFrom?: string; dateTo?: string; brand?: string; state?: string; category?: string; categoryId?: number; page?: number; limit?: number } = {}) {
   const params = new URLSearchParams();
   if (query.dateFrom) params.set("dateFrom", query.dateFrom);
   if (query.dateTo) params.set("dateTo", query.dateTo);
   if (query.brand) params.set("brand", query.brand);
+  if (query.state) params.set("state", query.state);
   if (query.category) params.set("category", query.category);
   if (query.categoryId) params.set("categoryId", String(query.categoryId));
   params.set("page", String(query.page ?? 0));
@@ -164,6 +167,7 @@ export function getProduct360DashboardList(query: {
   dateFrom?: string;
   dateTo?: string;
   brand?: string;
+  state?: string;
   category?: string;
   categoryId?: number;
   page?: number;
@@ -173,6 +177,7 @@ export function getProduct360DashboardList(query: {
   if (query.dateFrom) params.set("dateFrom", query.dateFrom);
   if (query.dateTo) params.set("dateTo", query.dateTo);
   if (query.brand) params.set("brand", query.brand);
+  if (query.state) params.set("state", query.state);
   if (query.category) params.set("category", query.category);
   if (query.categoryId) params.set("categoryId", String(query.categoryId));
   params.set("page", String(query.page ?? 0));

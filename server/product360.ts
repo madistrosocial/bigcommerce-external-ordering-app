@@ -8,6 +8,16 @@ type Product360CategoryCatalog = { categories: Product360Category[]; warning?: s
 
 const PRODUCT_360_MAIN_CATEGORIES = ["Disposables", "E-Liquid", "Hardware", "Smoke Shop"];
 const PRODUCT_360_CATEGORY_CACHE_KEY = "report_bc_categories_cache";
+const ALL_TIME_START = "1900-01-01";
+let earliestOrderDateCache: { value: string; expiresAt: number } | undefined;
+
+async function getEarliestOrderDate(fallback: string): Promise<string> {
+  if (earliestOrderDateCache && earliestOrderDateCache.expiresAt > Date.now()) return earliestOrderDateCache.value;
+  const result = await db.execute(sql.raw("SELECT MIN(order_date)::date AS first_date FROM bc_order_line_items"));
+  const firstDate = safeDate(result.rows[0]?.first_date, fallback);
+  earliestOrderDateCache = { value: firstDate, expiresAt: Date.now() + 5 * 60_000 };
+  return firstDate;
+}
 
 function categoryKey(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
@@ -110,13 +120,15 @@ function safeSearch(value: unknown): string {
     .replace(/[%_]/g, (char) => `\\${char}`);
 }
 
-function dateRange(from?: unknown, to?: unknown): Product360Range {
+async function dateRange(from?: unknown, to?: unknown): Promise<Product360Range> {
   const today = new Date();
   const end = safeDate(to, today.toISOString().slice(0, 10));
   const startDate = new Date(`${end}T00:00:00Z`);
   startDate.setUTCDate(startDate.getUTCDate() - 29);
+  const fallback = startDate.toISOString().slice(0, 10);
+  const requestedFrom = String(from ?? "");
   return {
-    dateFrom: safeDate(from, startDate.toISOString().slice(0, 10)),
+    dateFrom: requestedFrom === ALL_TIME_START ? await getEarliestOrderDate(fallback) : safeDate(from, fallback),
     dateTo: end,
   };
 }
@@ -127,8 +139,9 @@ function rangeDays(range: Product360Range): number {
   return Math.max(1, Math.floor((to - from) / 86_400_000) + 1);
 }
 
-function salesCte(range: Product360Range, productId?: number): string {
+function salesCte(range: Product360Range, productId?: number, filters?: Product360Filters): string {
   const productFilter = productId ? `AND li.bigcommerce_product_id = ${Math.trunc(productId)}` : "";
+  const stateFilter = filters?.state ? `AND ${stateMatchCondition(filters.state)}` : "";
   return `
     SELECT
       li.bigcommerce_product_id,
@@ -141,11 +154,29 @@ function salesCte(range: Product360Range, productId?: number): string {
     WHERE li.order_date >= ${quote(range.dateFrom)}::date
       AND li.order_date < ${quote(range.dateTo)}::date + interval '1 day'
       ${productFilter}
+      ${stateFilter}
     GROUP BY li.bigcommerce_product_id, li.variant_id
   `;
 }
 
-type Product360Filters = { brand?: string; categoryIds?: number[]; categoryExcludeIds?: number[] };
+type Product360Filters = { brand?: string; state?: string; categoryIds?: number[]; categoryExcludeIds?: number[] };
+
+function stateExpression(alias: string): string {
+  return `COALESCE(
+    NULLIF(TRIM(${alias}.shipping_address->>'state_or_province'), ''),
+    NULLIF(TRIM(${alias}.shipping_address->>'state'), ''),
+    NULLIF(TRIM(${alias}.billing_address->>'state_or_province'), ''),
+    NULLIF(TRIM(${alias}.billing_address->>'state'), '')
+  )`;
+}
+
+function stateMatchCondition(state: string): string {
+  return `EXISTS (
+    SELECT 1 FROM customers_mirror cm_state
+    WHERE cm_state.bigcommerce_customer_id = li.bigcommerce_customer_id
+      AND UPPER(${stateExpression("cm_state")}) = UPPER(${quote(state)})
+  )`;
+}
 
 function categoryMatchCondition(column: string, categoryIds: number[], excludedCategoryIds: number[] = []): string {
   const ids = categoryIds.map((id) => quote(String(Math.trunc(id)))).join(", ");
@@ -165,6 +196,7 @@ function categoryMatchCondition(column: string, categoryIds: number[], excludedC
 
 function lineItemProductFilter(filters?: Product360Filters): string {
   const conditions = [
+    filters?.state ? stateMatchCondition(filters.state) : "",
     filters?.brand ? `p_filter.brand_name = ${quote(filters.brand)}` : "",
     filters?.categoryIds?.length
       ? categoryMatchCondition("p_filter.categories", filters.categoryIds, filters.categoryExcludeIds)
@@ -191,7 +223,7 @@ function productBaseCte(range: Product360Range, productId?: number, filters?: Pr
   const productFilter = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const days = rangeDays(range);
   return `
-    WITH sales AS (${salesCte(range, productId)}),
+    WITH sales AS (${salesCte(range, productId, filters)}),
     product_sales AS (
       SELECT
         bigcommerce_product_id,
@@ -340,15 +372,17 @@ export async function getProduct360Overview(input: {
   dateFrom?: unknown;
   dateTo?: unknown;
   brand?: unknown;
+  state?: unknown;
   category?: unknown;
   categoryId?: unknown;
   customerVisibility?: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY";
   visibilityUserId?: number;
 }) {
-  const range = dateRange(input.dateFrom, input.dateTo);
+  const range = await dateRange(input.dateFrom, input.dateTo);
   const categoryCatalog = await getProduct360CategoryCatalog();
   const categoryMap = new Map(categoryCatalog.categories.map((item) => [item.id, item]));
   const brand = String(input.brand ?? "").trim().slice(0, 100);
+  const state = String(input.state ?? "").trim().slice(0, 100);
   const category = PRODUCT_360_MAIN_CATEGORIES.find((label) => categoryKey(label) === categoryKey(input.category));
   const requestedCategoryId = normalizeCategoryId(input.categoryId, categoryCatalog.categories);
   const drillRootName = requestedCategoryId ? categoryRootName(requestedCategoryId, categoryMap) : undefined;
@@ -364,6 +398,7 @@ export async function getProduct360Overview(input: {
     : [];
   const filters: Product360Filters = {
     brand: brand || undefined,
+    state: state || undefined,
     categoryIds: effectiveRoot ? (categoryIds?.length ? categoryIds : [0]) : undefined,
     categoryExcludeIds,
   };
@@ -545,6 +580,13 @@ export async function getProduct360Overview(input: {
       GROUP BY p.id, p.categories
     `)),
   ]);
+  const stateOptionsResult = await db.execute(sql.raw(`
+    SELECT DISTINCT ${stateExpression("cm")} AS state
+    FROM customers_mirror cm
+    WHERE ${stateExpression("cm")} IS NOT NULL
+    ORDER BY state
+    LIMIT 100
+  `));
 
   const categoryTrailRows = drillCategoryId ? categoryTrail(drillCategoryId, categoryMap) : [];
   const categoryPath = drillCategoryId
@@ -598,6 +640,7 @@ export async function getProduct360Overview(input: {
     dateFrom: range.dateFrom,
     dateTo: range.dateTo,
     brand,
+    state,
     category,
     categoryId: drillCategoryId,
     customerVisibility: input.customerVisibility,
@@ -619,6 +662,7 @@ export async function getProduct360Overview(input: {
     replenishmentPriority: normalizeRows(replenishmentPriority.rows as Record<string, unknown>[]),
     recentActivity: normalizeRows(recentActivity.rows as Record<string, unknown>[]),
     brandOptions: (brandOptions.rows as Record<string, unknown>[]).map((row) => String(row.label || "")).filter(Boolean),
+    stateOptions: (stateOptionsResult.rows as Record<string, unknown>[]).map((row) => String(row.state || "")).filter(Boolean),
     categoryOptions: categoryCatalog.categories.length ? PRODUCT_360_MAIN_CATEGORIES : [],
     categoryPerformance,
     categoryPath,
@@ -633,6 +677,7 @@ export async function getProduct360DashboardList(input: {
   dateFrom?: unknown;
   dateTo?: unknown;
   brand?: unknown;
+  state?: unknown;
   category?: unknown;
   categoryId?: unknown;
   page?: unknown;
@@ -647,10 +692,11 @@ export async function getProduct360DashboardList(input: {
   };
   const definition = definitions[kind];
   if (!definition) throw new Error("Invalid Product 360 dashboard list");
-  const range = dateRange(input.dateFrom, input.dateTo);
+  const range = await dateRange(input.dateFrom, input.dateTo);
   const catalog = await getProduct360CategoryCatalog();
   const categoryMap = new Map(catalog.categories.map((item) => [item.id, item]));
   const brand = String(input.brand ?? "").trim().slice(0, 100);
+  const state = String(input.state ?? "").trim().slice(0, 100);
   const category = PRODUCT_360_MAIN_CATEGORIES.find((label) => categoryKey(label) === categoryKey(input.category));
   const requestedCategoryId = normalizeCategoryId(input.categoryId, catalog.categories);
   const drillRootName = requestedCategoryId ? categoryRootName(requestedCategoryId, categoryMap) : undefined;
@@ -666,6 +712,7 @@ export async function getProduct360DashboardList(input: {
     : [];
   const filters: Product360Filters = {
     brand: brand || undefined,
+    state: state || undefined,
     categoryIds: effectiveRoot ? (categoryIds?.length ? categoryIds : [0]) : undefined,
     categoryExcludeIds,
   };
@@ -729,6 +776,7 @@ export async function getProduct360TopCustomers(input: {
   dateFrom?: unknown;
   dateTo?: unknown;
   brand?: unknown;
+  state?: unknown;
   category?: unknown;
   categoryId?: unknown;
   customerVisibility?: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY";
@@ -736,10 +784,11 @@ export async function getProduct360TopCustomers(input: {
   page?: unknown;
   limit?: unknown;
 }) {
-  const range = dateRange(input.dateFrom, input.dateTo);
+  const range = await dateRange(input.dateFrom, input.dateTo);
   const catalog = await getProduct360CategoryCatalog();
   const categoryMap = new Map(catalog.categories.map((item) => [item.id, item]));
   const brand = String(input.brand ?? "").trim().slice(0, 100);
+  const state = String(input.state ?? "").trim().slice(0, 100);
   const category = PRODUCT_360_MAIN_CATEGORIES.find((label) => categoryKey(label) === categoryKey(input.category));
   const requestedCategoryId = normalizeCategoryId(input.categoryId, catalog.categories);
   const drillRootName = requestedCategoryId ? categoryRootName(requestedCategoryId, categoryMap) : undefined;
@@ -755,6 +804,7 @@ export async function getProduct360TopCustomers(input: {
     : [];
   const lineFilter = lineItemProductFilter({
     brand: brand || undefined,
+    state: state || undefined,
     categoryIds: effectiveRoot ? (categoryIds.length ? categoryIds : [0]) : undefined,
     categoryExcludeIds: excludedIds,
   });
@@ -810,7 +860,7 @@ export async function getProduct360Products(input: {
   sortBy?: unknown;
   sortDir?: unknown;
 }) {
-  const range = dateRange(input.dateFrom, input.dateTo);
+  const range = await dateRange(input.dateFrom, input.dateTo);
   const search = safeSearch(input.search);
   const stockStatus = String(input.stockStatus ?? "");
   const replenishmentStatus = String(input.replenishmentStatus ?? "");
@@ -869,7 +919,7 @@ export async function getProduct360Detail(input: {
   customerVisibility?: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY";
   visibilityUserId?: number;
 }) {
-  const range = dateRange(input.dateFrom, input.dateTo);
+  const range = await dateRange(input.dateFrom, input.dateTo);
   const base = productBaseCte(range, input.id);
   const days = rangeDays(range);
   const visibility = input.customerVisibility || "ASSIGNED_ONLY";

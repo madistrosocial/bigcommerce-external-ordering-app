@@ -155,8 +155,14 @@ function DateRangeControls({
   brandOptions = [],
   categoryOptions = [],
   onChange,
+  rangePreset,
+  onRangePresetChange,
   onBrandChange,
   onCategoryChange,
+  state = "",
+  stateOptions = [],
+  onStateChange,
+  dashboardFilters = false,
   onExport,
   mobileOpen,
   onMobileOpenChange,
@@ -169,8 +175,14 @@ function DateRangeControls({
   brandOptions?: string[];
   categoryOptions?: string[];
   onChange: (from: string, to: string) => void;
+  rangePreset?: "7" | "30" | "90" | "365" | "all" | "custom";
+  onRangePresetChange?: (preset: "7" | "30" | "90" | "365" | "all" | "custom") => void;
   onBrandChange?: (value: string) => void;
   onCategoryChange?: (value: string) => void;
+  state?: string;
+  stateOptions?: string[];
+  onStateChange?: (value: string) => void;
+  dashboardFilters?: boolean;
   onExport?: () => void;
   mobileOpen?: boolean;
   onMobileOpenChange?: (open: boolean) => void;
@@ -185,27 +197,51 @@ function DateRangeControls({
     <div className="flex flex-wrap items-center justify-end gap-2">
       {showMobileToggle && <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5 bg-white text-xs sm:hidden" aria-label="Toggle filters" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(!filtersOpen)}><ListFilter className="h-4 w-4" /><span>Filters</span></Button>}
       <div className={`${filtersOpen ? "flex" : "hidden"} w-full flex-col items-stretch gap-2 sm:flex sm:w-auto sm:flex-row sm:items-center`}>
-      <select
-        className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm"
-        value={`${from}|${to}`}
-        onChange={(event) => {
-          const [nextFrom, nextTo] = event.target.value.split("|");
-          onChange(nextFrom, nextTo);
-        }}
-      >
-        <option value={`${isoDaysAgo(6, fmt.tz)}|${today}`}>Last 7 days</option>
-        <option value={`${isoDaysAgo(29, fmt.tz)}|${today}`}>Last 30 days</option>
-        <option value={`${isoDaysAgo(89, fmt.tz)}|${today}`}>Last 90 days</option>
-        <option value={`${isoDaysAgo(364, fmt.tz)}|${today}`}>Last 12 months</option>
-        <option value={`${from}|${to}`}>Custom range</option>
-      </select>
-      <Input type="date" className="h-9 w-full bg-white text-xs sm:w-[135px]" value={from} onChange={(e) => onChange(e.target.value, to)} />
-      <span className="hidden text-xs text-slate-400 sm:inline">to</span>
-      <Input type="date" className="h-9 w-full bg-white text-xs sm:w-[135px]" value={to} onChange={(e) => onChange(from, e.target.value)} />
+      {dashboardFilters ? <>
+        <select
+          className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm"
+          value={rangePreset || "custom"}
+          onChange={(event) => onRangePresetChange?.(event.target.value as "7" | "30" | "90" | "365" | "all" | "custom")}
+        >
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="365">Last 12 months</option>
+          <option value="all">All Time</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        {rangePreset === "custom" && <>
+          <Input type="date" className="h-9 w-full bg-white text-xs sm:w-[135px]" value={from} onChange={(e) => onChange(e.target.value, to)} />
+          <span className="hidden text-xs text-slate-400 sm:inline">to</span>
+          <Input type="date" className="h-9 w-full bg-white text-xs sm:w-[135px]" value={to} onChange={(e) => onChange(from, e.target.value)} />
+        </>}
+      </> : <>
+        <select
+          className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm"
+          value={`${from}|${to}`}
+          onChange={(event) => {
+            const [nextFrom, nextTo] = event.target.value.split("|");
+            onChange(nextFrom, nextTo);
+          }}
+        >
+          <option value={`${isoDaysAgo(6, fmt.tz)}|${today}`}>Last 7 days</option>
+          <option value={`${isoDaysAgo(29, fmt.tz)}|${today}`}>Last 30 days</option>
+          <option value={`${isoDaysAgo(89, fmt.tz)}|${today}`}>Last 90 days</option>
+          <option value={`${isoDaysAgo(364, fmt.tz)}|${today}`}>Last 12 months</option>
+          <option value={`${from}|${to}`}>Custom range</option>
+        </select>
+        <Input type="date" className="h-9 w-full bg-white text-xs sm:w-[135px]" value={from} onChange={(e) => onChange(e.target.value, to)} />
+        <span className="hidden text-xs text-slate-400 sm:inline">to</span>
+        <Input type="date" className="h-9 w-full bg-white text-xs sm:w-[135px]" value={to} onChange={(e) => onChange(from, e.target.value)} />
+      </>}
       <select className="h-9 max-w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm sm:max-w-[150px]" value={brand} onChange={(event) => onBrandChange?.(event.target.value)}>
         <option value="">All Brands</option>
         {brandOptions.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
+      {onStateChange && <select className="h-9 max-w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm sm:max-w-[150px]" value={state} onChange={(event) => onStateChange(event.target.value)}>
+        <option value="">All States</option>
+        {stateOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>}
       <select className="h-9 max-w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm sm:max-w-[150px]" value={category} onChange={(event) => onCategoryChange?.(event.target.value)}>
         <option value="">All Categories</option>
         {categoryOptions.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -216,11 +252,12 @@ function DateRangeControls({
   );
 }
 
-function exportProduct360Overview(data: Product360Overview, from: string, to: string, brand: string, category: string) {
+function exportProduct360Overview(data: Product360Overview, from: string, to: string, brand: string, state: string, category: string) {
   const rows: string[][] = [
     ["Product 360 Overview", ""],
     ["Date range", `${from} to ${to}`],
     ["Brand", brand || "All Brands"],
+    ["State", state || "All States"],
     ["Category", category || "All Categories"],
     [],
     ["Metric", "Value"],
@@ -402,7 +439,7 @@ function DashboardListDialog({
   kind: "sales" | "profit" | "restock" | "slow";
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  filters: { dateFrom: string; dateTo: string; brand: string; category: string; categoryId?: number };
+  filters: { dateFrom: string; dateTo: string; brand: string; state: string; category: string; categoryId?: number };
 }) {
   const fmt = useTimeService();
   const [, setLocation] = useLocation();
@@ -416,12 +453,12 @@ function DashboardListDialog({
     slow: "Slow Movers (High Inventory, Low Sales)",
   };
   const query = useQuery({
-    queryKey: ["product-360-dashboard-list", kind, filters.dateFrom, filters.dateTo, filters.brand, filters.category, filters.categoryId, page],
+    queryKey: ["product-360-dashboard-list", kind, filters.dateFrom, filters.dateTo, filters.brand, filters.state, filters.category, filters.categoryId, page],
     queryFn: () => getProduct360DashboardList({ kind, ...filters, page, limit: 25 }),
     enabled: open,
     placeholderData: (previous) => previous,
   });
-  useEffect(() => setPage(0), [kind, filters.dateFrom, filters.dateTo, filters.brand, filters.category, filters.categoryId]);
+  useEffect(() => setPage(0), [kind, filters.dateFrom, filters.dateTo, filters.brand, filters.state, filters.category, filters.categoryId]);
 
   const exportAll = async () => {
     setExporting(true);
@@ -566,12 +603,13 @@ function OverviewContent({ data, focus }: { data: Product360Overview; focus?: st
   );
 }
 
-function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath, brand, onCategorySelect, onCategoryPathChange }: {
+function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath, brand, state, onCategorySelect, onCategoryPathChange }: {
   data: Product360Overview;
   focus?: string;
   selectedCategory: string;
   categoryPath: { id: number; name: string }[];
   brand: string;
+  state: string;
   onCategorySelect: (category: { id: number; name: string }) => void;
   onCategoryPathChange: (path: { id: number; name: string }[]) => void;
 }) {
@@ -586,11 +624,12 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
   const drillCategoryId = categoryPath.at(-1)?.id;
   const categoryDisplayName = categoryPath.at(-1)?.name || selectedCategory;
   const customersQuery = useQuery({
-    queryKey: ["product-360-top-customers", data.range.dateFrom, data.range.dateTo, brand, selectedCategory, drillCategoryId, customerPage],
+    queryKey: ["product-360-top-customers", data.range.dateFrom, data.range.dateTo, brand, state, selectedCategory, drillCategoryId, customerPage],
     queryFn: () => getProduct360TopCustomers({
       dateFrom: data.range.dateFrom,
       dateTo: data.range.dateTo,
       brand,
+      state,
       category: selectedCategory,
       categoryId: drillCategoryId,
       page: customerPage,
@@ -607,6 +646,7 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
         dateFrom: data.range.dateFrom,
         dateTo: data.range.dateTo,
         brand,
+        state,
         category: selectedCategory,
         categoryId: drillCategoryId,
       };
@@ -736,7 +776,7 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
           <DialogHeader>
             <DialogTitle>Top Customers{categoryDisplayName ? ` · ${categoryDisplayName}` : ""}</DialogTitle>
           </DialogHeader>
-          <DialogDescription className="-mt-3 text-sm text-slate-500">
+      <DialogDescription className="-mt-3 text-sm text-slate-500">
             Customer revenue from {data.range.dateFrom} to {data.range.dateTo}. {customersQuery.data ? `${number(customersQuery.data.total)} customers` : ""}
           </DialogDescription>
           <div className="flex items-center justify-between gap-3">
@@ -772,6 +812,7 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
           dateFrom: data.range.dateFrom,
           dateTo: data.range.dateTo,
           brand,
+          state,
           category: selectedCategory,
           categoryId: drillCategoryId,
         }}
@@ -787,12 +828,14 @@ export function Product360OverviewPage() {
   const queryClient = useQueryClient();
   const [from, setFrom] = useState(() => isoDaysAgo(29, fmt.tz));
   const [to, setTo] = useState(() => fmt.dateOnly());
+  const [rangePreset, setRangePreset] = useState<"7" | "30" | "90" | "365" | "all" | "custom">("30");
   const [brand, setBrand] = useState("");
+  const [state, setState] = useState("");
   const [category, setCategory] = useState("");
   const [categoryPath, setCategoryPath] = useState<{ id: number; name: string }[]>([]);
   const focus = location.split("/")[2] || "overview";
   const categoryId = categoryPath.at(-1)?.id;
-  const query = useQuery({ queryKey: ["product-360-overview", from, to, brand, category, categoryId], queryFn: () => getProduct360Overview({ dateFrom: from, dateTo: to, brand, category, categoryId }) });
+  const query = useQuery({ queryKey: ["product-360-overview", from, to, brand, state, category, categoryId], queryFn: () => getProduct360Overview({ dateFrom: from, dateTo: to, brand, state, category, categoryId }) });
   const catalogSync = useMutation({
     mutationFn: syncProduct360Catalog,
     onSuccess: async () => {
@@ -801,9 +844,10 @@ export function Product360OverviewPage() {
     },
   });
   const brandOptions = query.data?.brandOptions || [];
+  const stateOptions = query.data?.stateOptions || [];
   const categoryOptions = query.data?.categoryOptions || ["Disposables", "E-Liquid", "Hardware", "Smoke Shop"];
   return (
-    <PageFrame title="Product 360" description="Complete product intelligence for better decisions" actions={<div className="flex flex-wrap items-center justify-end gap-2"><DateRangeControls from={from} to={to} brand={brand} category={category} brandOptions={brandOptions} categoryOptions={categoryOptions} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); }} onBrandChange={setBrand} onCategoryChange={(nextCategory) => { setCategory(nextCategory); setCategoryPath([]); }} onExport={() => query.data && exportProduct360Overview(query.data, from, to, brand, category)} />{currentUser?.role === "admin" && focus === "overview" && <Button variant="outline" size="sm" onClick={() => catalogSync.mutate()} disabled={catalogSync.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${catalogSync.isPending ? "animate-spin" : ""}`} />{catalogSync.isPending ? "Syncing catalog…" : "Temporary: sync catalog"}</Button>}</div>}>
+    <PageFrame title="Product 360" description="Complete product intelligence for better decisions" actions={<div className="flex flex-wrap items-center justify-end gap-2"><DateRangeControls from={from} to={to} rangePreset={rangePreset} dashboardFilters onRangePresetChange={(preset) => { setRangePreset(preset); if (preset !== "custom") { const today = fmt.dateOnly(); setTo(today); setFrom(preset === "all" ? "1900-01-01" : isoDaysAgo(Number(preset) - 1, fmt.tz)); } }} brand={brand} state={state} category={category} brandOptions={brandOptions} stateOptions={stateOptions} categoryOptions={categoryOptions} onChange={(nextFrom, nextTo) => { setRangePreset("custom"); setFrom(nextFrom); setTo(nextTo); }} onBrandChange={setBrand} onStateChange={setState} onCategoryChange={(nextCategory) => { setCategory(nextCategory); setCategoryPath([]); }} onExport={() => query.data && exportProduct360Overview(query.data, query.data.range.dateFrom, query.data.range.dateTo, brand, state, category)} />{currentUser?.role === "admin" && focus === "overview" && <Button variant="outline" size="sm" onClick={() => catalogSync.mutate()} disabled={catalogSync.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${catalogSync.isPending ? "animate-spin" : ""}`} />{catalogSync.isPending ? "Syncing catalog…" : "Temporary: sync catalog"}</Button>}</div>}>
       {catalogSync.data && <Card className="mb-4 border-blue-200 bg-blue-50 p-4 text-sm text-blue-950"><div className="font-semibold">Catalog sync complete</div><div className="mt-1">Fetched {catalogSync.data.productsFetched.toLocaleString()} products across {catalogSync.data.pagesCompleted} pages. {catalogSync.data.productsAdded.toLocaleString()} added; {catalogSync.data.productsUpdated.toLocaleString()} updated.</div><div className="mt-1">Products table storage: {formatStorage(catalogSync.data.storageAfterBytes)} total ({formatStorage(catalogSync.data.tableBytes)} table, {formatStorage(catalogSync.data.indexBytes)} indexes); change: {catalogSync.data.storageDeltaBytes >= 0 ? "+" : ""}{formatStorage(catalogSync.data.storageDeltaBytes)}.</div></Card>}
       {catalogSync.isError && <Card className="mb-4 border-red-200 bg-red-50 p-4 text-sm text-red-800">Catalog sync failed: {catalogSync.error.message}</Card>}
       {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : query.data ? <DashboardOverviewContent
@@ -812,6 +856,7 @@ export function Product360OverviewPage() {
         selectedCategory={category}
         categoryPath={categoryPath}
         brand={brand}
+        state={state}
         onCategorySelect={(selected) => {
           setCategory("");
           setCategoryPath((current) => [...current, selected]);
