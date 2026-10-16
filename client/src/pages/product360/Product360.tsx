@@ -740,8 +740,8 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
 
       <div className="mt-3 grid gap-3 xl:grid-cols-3">
         <DashboardTable title="Fastest Selling Products" rows={data.fastSellers} kind="sales" onViewAll={() => setDashboardListKind("sales")} />
+        <DashboardTable title="Slow Movers (High Inventory, Low Sales)" rows={data.slowMovers} kind="slow" onViewAll={() => setDashboardListKind("slow")} />
         <DashboardTable title="Top Profit Drivers" rows={data.profitDrivers} kind="profit" onViewAll={() => setDashboardListKind("profit")} />
-        <DashboardTable title="Restock Alerts" rows={data.restockAlerts} kind="restock" onViewAll={() => setDashboardListKind("restock")} />
       </div>
 
       <div className="mt-3 grid gap-3 xl:grid-cols-[1fr_1fr_1.25fr]">
@@ -751,7 +751,7 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
         <DashboardPanel title="Products by Sales Velocity" subtitle="Products grouped by units per day">
           {velocityData.length === 0 ? <div className="flex h-[180px] items-center justify-center text-xs text-slate-400">No velocity data.</div> : <div className="h-[180px] px-2 py-2"><ResponsiveContainer width="100%" height="100%"><BarChart data={velocityData} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5eaf1" /><XAxis dataKey="label" tick={{ fontSize: 8 }} tickLine={false} axisLine={false} /><YAxis tick={{ fontSize: 8 }} tickLine={false} axisLine={false} /><Tooltip formatter={(value: number) => [number(value), "Products"]} /><Bar dataKey="products" fill="#2bb673" radius={[3, 3, 0, 0]} barSize={28} /></BarChart></ResponsiveContainer></div>}
         </DashboardPanel>
-        <DashboardTable title="Slow Movers (High Inventory, Low Sales)" rows={data.slowMovers} kind="slow" onViewAll={() => setDashboardListKind("slow")} />
+        <DashboardTable title="Restock Alerts" rows={data.restockAlerts} kind="restock" onViewAll={() => setDashboardListKind("restock")} />
       </div>
 
       <div className="mt-3 grid gap-3 xl:grid-cols-[1.2fr_0.9fr_1.2fr]">
