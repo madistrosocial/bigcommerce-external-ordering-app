@@ -28,7 +28,7 @@ import { db } from "../db";
 import { eq, sql } from "drizzle-orm";
 import { addSkuVaultInventory, removeSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, getSkuVaultTransactionReasons, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
 import { getMarketingSenderSettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
-import { getProduct360Overview, getProduct360Products, getProduct360Detail } from "./product360";
+import { getProduct360Overview, getProduct360Products, getProduct360Detail, getProduct360TopCustomers } from "./product360";
 import {
   buildMissingBulkOrderCsv,
   customerNameFromOrderFormFileName,
@@ -2555,15 +2555,51 @@ export async function registerRoutes(
   // reporting database.
   app.get("/api/product-360/overview", requirePermission("product_360", "view"), async (req, res) => {
     try {
+      const user = (req as any).authUser;
+      const permissionStrings = user?.role === "admin" ? [] : await storage.getUserPermissionStrings(user.id);
+      const customerVisibility: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY" =
+        user?.role === "admin" || permissionStrings.includes("crm:visibility_all")
+          ? "ALL"
+          : permissionStrings.includes("crm:visibility_assigned_unassigned")
+            ? "ASSIGNED_AND_UNASSIGNED"
+            : "ASSIGNED_ONLY";
       res.json(await getProduct360Overview({
         dateFrom: req.query.dateFrom,
         dateTo: req.query.dateTo,
         brand: req.query.brand,
         category: req.query.category,
+        customerVisibility,
+        visibilityUserId: Number(user?.id || 0),
       }));
     } catch (error: any) {
       console.error("[Product 360] overview failed:", error);
       res.status(500).json({ error: "Unable to load Product 360 overview" });
+    }
+  });
+
+  app.get("/api/product-360/top-customers", requirePermission("product_360", "view"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const permissionStrings = user?.role === "admin" ? [] : await storage.getUserPermissionStrings(user.id);
+      const customerVisibility: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY" =
+        user?.role === "admin" || permissionStrings.includes("crm:visibility_all")
+          ? "ALL"
+          : permissionStrings.includes("crm:visibility_assigned_unassigned")
+            ? "ASSIGNED_AND_UNASSIGNED"
+            : "ASSIGNED_ONLY";
+      res.json(await getProduct360TopCustomers({
+        dateFrom: req.query.dateFrom,
+        dateTo: req.query.dateTo,
+        brand: req.query.brand,
+        category: req.query.category,
+        page: req.query.page,
+        limit: req.query.limit,
+        customerVisibility,
+        visibilityUserId: Number(user?.id || 0),
+      }));
+    } catch (error: any) {
+      console.error("[Product 360] top customers failed:", error);
+      res.status(500).json({ error: "Unable to load Product 360 top customers" });
     }
   });
 

@@ -30,7 +30,6 @@ import {
   Download,
   History,
   ImagePlus,
-  Lightbulb,
   ListFilter,
   PackageCheck,
   PackageSearch,
@@ -46,10 +45,12 @@ import {
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import RichTextEditor from "@/components/editor/RichTextEditor";
 import {
   getProduct360Detail,
   getProduct360Overview,
+  getProduct360TopCustomers,
   getProduct360Products,
   getProduct360CatalogDetails,
   getProduct360Drafts,
@@ -422,15 +423,31 @@ function OverviewContent({ data, focus }: { data: Product360Overview; focus?: st
   );
 }
 
-function DashboardOverviewContent({ data, focus, selectedCategory, onCategorySelect }: {
+function DashboardOverviewContent({ data, focus, selectedCategory, brand, onCategorySelect }: {
   data: Product360Overview;
   focus?: string;
   selectedCategory: string;
+  brand: string;
   onCategorySelect: (category: string) => void;
 }) {
   const fmt = useTimeService();
   const [categoryMetric, setCategoryMetric] = useState<"units" | "revenue">("revenue");
+  const [customersDialogOpen, setCustomersDialogOpen] = useState(false);
+  const [customerPage, setCustomerPage] = useState(0);
   const [, setLocation] = useLocation();
+  const customersQuery = useQuery({
+    queryKey: ["product-360-top-customers", data.range.dateFrom, data.range.dateTo, brand, selectedCategory, customerPage],
+    queryFn: () => getProduct360TopCustomers({
+      dateFrom: data.range.dateFrom,
+      dateTo: data.range.dateTo,
+      brand,
+      category: selectedCategory,
+      page: customerPage,
+      limit: 25,
+    }),
+    enabled: customersDialogOpen,
+    placeholderData: (previous) => previous,
+  });
   const metrics = data.metrics || {};
   const trend = data.trend.map((row) => ({ ...row, units: Number(row.units || 0), revenue: Number(row.revenue || 0), gross_profit: Number(row.gross_profit || 0) }));
   const categoryRows = data.categoryPerformance
@@ -455,9 +472,6 @@ function DashboardOverviewContent({ data, focus, selectedCategory, onCategorySel
   const activeProducts = Number(metrics.active_products || 0);
   const restockNeeded = Number(metrics.restock_needed || 0);
   const categoryTotal = categoryData.reduce((sum, row) => sum + Number(row[categoryMetric]), 0);
-  const keyInsight = restockNeeded > 0
-    ? `You have ${number(restockNeeded)} products that need restocking based on current sales velocity. Focus on high-demand products with less than 7 days of stock.`
-    : "Your current product inventory is covered based on the selected sales range.";
   const priorityColors: Record<string, string> = { Urgent: "#ef4444", "Restock Soon": "#f3a51c", Monitor: "#3b82f6", Healthy: "#2bb673", "No Action": "#94a3b8" };
   const priorityMax = Math.max(...priorityData.map((item) => item.products), 1);
 
@@ -510,8 +524,49 @@ function DashboardOverviewContent({ data, focus, selectedCategory, onCategorySel
         <DashboardPanel title="Replenishment Priority" subtitle="Products by action needed">
           <div className="space-y-2 px-3 py-3">{priorityData.map((row) => <div key={String(row.label)} className="flex items-center gap-2 text-[9px]"><span className="w-[68px] shrink-0 text-slate-500">{String(row.label)}</span><div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${(row.products / priorityMax) * 100}%`, backgroundColor: priorityColors[String(row.label)] || "#94a3b8" }} /></div><span className="w-8 text-right font-semibold text-slate-600">{number(row.products)}</span></div>)}</div>
         </DashboardPanel>
-        <Card className="border-blue-200 bg-blue-50/70 p-3 shadow-sm"><div className="flex items-start gap-2"><span className="rounded-full bg-white p-2 text-blue-600 shadow-sm"><Lightbulb className="h-4 w-4" /></span><div><h3 className="text-xs font-bold text-blue-900">Key Insight</h3><p className="mt-2 text-[11px] leading-5 text-blue-800">{keyInsight}</p><Button size="sm" className="mt-3 h-7 bg-blue-600 px-3 text-[10px] hover:bg-blue-700" onClick={() => setLocation("/product-360/replenishment")}>View Replenishment <ChevronRight className="ml-1 h-3 w-3" /></Button></div></div></Card>
+        <DashboardPanel
+          title="Top Customers"
+          subtitle={selectedCategory ? `Highest revenue · ${selectedCategory}` : "Highest revenue in the selected range"}
+          action={<Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[9px] text-blue-700" onClick={() => { setCustomerPage(0); setCustomersDialogOpen(true); }}>View all <ChevronRight className="ml-0.5 h-3 w-3" /></Button>}
+        >
+          {data.topCustomers.length === 0
+            ? <div className="flex h-[150px] items-center justify-center text-xs text-slate-400">No customer sales for this period.</div>
+            : <div className="divide-y divide-slate-100">
+              {data.topCustomers.slice(0, 5).map((row, index) => <div key={`${String(row.customer_id)}-${index}`} className="flex items-center gap-2 px-3 py-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[10px] font-bold text-blue-700">{index + 1}</span>
+                <span className="min-w-0 flex-1 truncate text-[10px] font-semibold text-slate-700">{String(row.customer || "Unknown customer")}</span>
+                <span className="shrink-0 text-[10px] font-bold text-slate-800">{money(row.revenue)}</span>
+              </div>)}
+            </div>}
+        </DashboardPanel>
       </div>
+      <Dialog open={customersDialogOpen} onOpenChange={setCustomersDialogOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Top Customers{selectedCategory ? ` · ${selectedCategory}` : ""}</DialogTitle>
+          </DialogHeader>
+          <DialogDescription className="-mt-3 text-sm text-slate-500">
+            Customer revenue from {data.range.dateFrom} to {data.range.dateTo}. {customersQuery.data ? `${number(customersQuery.data.total)} customers` : ""}
+          </DialogDescription>
+          {customersQuery.isLoading ? <div className="py-12 text-center text-sm text-slate-500">Loading customers…</div>
+            : customersQuery.isError ? <div className="py-12 text-center text-sm text-red-600">Could not load customers. Close and try again.</div>
+              : customersQuery.data?.rows.length ? <>
+                <div className="max-h-[55vh] overflow-auto rounded-md border border-slate-200">
+                  <table className="w-full min-w-[560px] text-left text-sm">
+                    <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500"><tr><th className="px-3 py-2.5">Customer</th><th className="px-3 py-2.5 text-right">Revenue</th><th className="px-3 py-2.5 text-right">Units</th><th className="px-3 py-2.5 text-right">Orders</th><th className="px-3 py-2.5">Last purchase</th></tr></thead>
+                    <tbody className="divide-y divide-slate-100">{customersQuery.data.rows.map((row, index) => <tr key={`${String(row.customer_id)}-${index}`}><td className="max-w-[240px] truncate px-3 py-2.5 font-medium">{String(row.customer || "Unknown customer")}</td><td className="px-3 py-2.5 text-right">{money(row.revenue)}</td><td className="px-3 py-2.5 text-right">{number(row.units_purchased)}</td><td className="px-3 py-2.5 text-right">{number(row.orders)}</td><td className="px-3 py-2.5 text-slate-500">{dateLabel(row.last_purchase, fmt)}</td></tr>)}</tbody>
+                  </table>
+                </div>
+                <div className="flex items-center justify-between text-sm text-slate-500">
+                  <span>Page {customerPage + 1} of {Math.max(1, Math.ceil(customersQuery.data.total / customersQuery.data.limit))}</span>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" size="sm" disabled={customerPage === 0} onClick={() => setCustomerPage((page) => Math.max(0, page - 1))}>Previous</Button>
+                    <Button type="button" variant="outline" size="sm" disabled={(customerPage + 1) * customersQuery.data.limit >= customersQuery.data.total} onClick={() => setCustomerPage((page) => page + 1)}>Next</Button>
+                  </div>
+                </div>
+              </> : <div className="py-12 text-center text-sm text-slate-500">No customer sales for this period.</div>}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -540,7 +595,7 @@ export function Product360OverviewPage() {
     <PageFrame title="Product 360" description="Complete product intelligence for better decisions" actions={<div className="flex flex-wrap items-center justify-end gap-2"><DateRangeControls from={from} to={to} brand={brand} category={category} brandOptions={brandOptions} categoryOptions={categoryOptions} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); }} onBrandChange={setBrand} onCategoryChange={setCategory} onExport={() => query.data && exportProduct360Overview(query.data, from, to, brand, category)} />{currentUser?.role === "admin" && focus === "overview" && <Button variant="outline" size="sm" onClick={() => catalogSync.mutate()} disabled={catalogSync.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${catalogSync.isPending ? "animate-spin" : ""}`} />{catalogSync.isPending ? "Syncing catalog…" : "Temporary: sync catalog"}</Button>}</div>}>
       {catalogSync.data && <Card className="mb-4 border-blue-200 bg-blue-50 p-4 text-sm text-blue-950"><div className="font-semibold">Catalog sync complete</div><div className="mt-1">Fetched {catalogSync.data.productsFetched.toLocaleString()} products across {catalogSync.data.pagesCompleted} pages. {catalogSync.data.productsAdded.toLocaleString()} added; {catalogSync.data.productsUpdated.toLocaleString()} updated.</div><div className="mt-1">Products table storage: {formatStorage(catalogSync.data.storageAfterBytes)} total ({formatStorage(catalogSync.data.tableBytes)} table, {formatStorage(catalogSync.data.indexBytes)} indexes); change: {catalogSync.data.storageDeltaBytes >= 0 ? "+" : ""}{formatStorage(catalogSync.data.storageDeltaBytes)}.</div></Card>}
       {catalogSync.isError && <Card className="mb-4 border-red-200 bg-red-50 p-4 text-sm text-red-800">Catalog sync failed: {catalogSync.error.message}</Card>}
-      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : query.data ? <DashboardOverviewContent data={query.data} focus={focus} selectedCategory={category} onCategorySelect={(selected) => setCategory((current) => current === selected ? "" : selected)} /> : <EmptyState message="No Product 360 data is available." />}
+      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : query.data ? <DashboardOverviewContent data={query.data} focus={focus} selectedCategory={category} brand={brand} onCategorySelect={(selected) => setCategory((current) => current === selected ? "" : selected)} /> : <EmptyState message="No Product 360 data is available." />}
     </PageFrame>
   );
 }

@@ -278,7 +278,14 @@ function normalizeRows(rows: Record<string, unknown>[]) {
   });
 }
 
-export async function getProduct360Overview(input: { dateFrom?: unknown; dateTo?: unknown; brand?: unknown; category?: unknown }) {
+export async function getProduct360Overview(input: {
+  dateFrom?: unknown;
+  dateTo?: unknown;
+  brand?: unknown;
+  category?: unknown;
+  customerVisibility?: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY";
+  visibilityUserId?: number;
+}) {
   const range = dateRange(input.dateFrom, input.dateTo);
   const categoryCatalog = await getProduct360CategoryCatalog();
   const brand = String(input.brand ?? "").trim().slice(0, 100);
@@ -485,6 +492,15 @@ export async function getProduct360Overview(input: { dateFrom?: unknown; dateTo?
     ...Array.from(categoryTotals.values()),
     ...(otherTotals.units || otherTotals.revenue ? [otherTotals] : []),
   ];
+  const topCustomers = await getProduct360TopCustomers({
+    dateFrom: range.dateFrom,
+    dateTo: range.dateTo,
+    brand,
+    category,
+    customerVisibility: input.customerVisibility,
+    visibilityUserId: input.visibilityUserId,
+    limit: 5,
+  });
 
   return {
     range,
@@ -502,7 +518,99 @@ export async function getProduct360Overview(input: { dateFrom?: unknown; dateTo?
     brandOptions: (brandOptions.rows as Record<string, unknown>[]).map((row) => String(row.label || "")).filter(Boolean),
     categoryOptions: categoryCatalog.categories.length ? PRODUCT_360_MAIN_CATEGORIES : [],
     categoryPerformance,
+    topCustomers: topCustomers.rows,
     categoryWarning: categoryCatalog.warning,
+  };
+}
+
+function customerVisibilitySql(visibility: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY", userId: number): string {
+  if (visibility === "ALL") return "";
+  const scopedUserId = Math.trunc(userId || 0);
+  if (visibility === "ASSIGNED_AND_UNASSIGNED") {
+    return `AND li.bigcommerce_customer_id IS NOT NULL AND (
+      NOT EXISTS (
+        SELECT 1 FROM customers_mirror cm_scope
+        JOIN customer_sales_rep csr_scope ON csr_scope.customer_id = cm_scope.id
+        WHERE cm_scope.bigcommerce_customer_id = li.bigcommerce_customer_id
+      )
+      OR EXISTS (
+        SELECT 1 FROM customers_mirror cm_scope
+        JOIN customer_sales_rep csr_scope ON csr_scope.customer_id = cm_scope.id
+        WHERE cm_scope.bigcommerce_customer_id = li.bigcommerce_customer_id
+          AND csr_scope.assigned_user_id = ${scopedUserId}
+      )
+    )`;
+  }
+  return `AND li.bigcommerce_customer_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM customers_mirror cm_scope
+    JOIN customer_sales_rep csr_scope ON csr_scope.customer_id = cm_scope.id
+    WHERE cm_scope.bigcommerce_customer_id = li.bigcommerce_customer_id
+      AND csr_scope.assigned_user_id = ${scopedUserId}
+  )`;
+}
+
+export async function getProduct360TopCustomers(input: {
+  dateFrom?: unknown;
+  dateTo?: unknown;
+  brand?: unknown;
+  category?: unknown;
+  customerVisibility?: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY";
+  visibilityUserId?: number;
+  page?: unknown;
+  limit?: unknown;
+}) {
+  const range = dateRange(input.dateFrom, input.dateTo);
+  const catalog = await getProduct360CategoryCatalog();
+  const brand = String(input.brand ?? "").trim().slice(0, 100);
+  const category = PRODUCT_360_MAIN_CATEGORIES.find((label) => categoryKey(label) === categoryKey(input.category));
+  const categoryIndex = category ? PRODUCT_360_MAIN_CATEGORIES.indexOf(category) : -1;
+  const categoryIds = category ? categoryIdsForMainCategory(category, catalog.categories) : [];
+  const excludedIds = categoryIndex > 0
+    ? PRODUCT_360_MAIN_CATEGORIES.slice(0, categoryIndex).flatMap((label) => categoryIdsForMainCategory(label, catalog.categories))
+    : [];
+  const lineFilter = lineItemProductFilter({
+    brand: brand || undefined,
+    categoryIds: category ? (categoryIds.length ? categoryIds : [0]) : undefined,
+    categoryExcludeIds: excludedIds,
+  });
+  const visibility = customerVisibilitySql(input.customerVisibility || "ASSIGNED_ONLY", Number(input.visibilityUserId || 0));
+  const page = Math.max(0, Math.trunc(Number(input.page) || 0));
+  const limit = Math.min(100, Math.max(1, Math.trunc(Number(input.limit) || 25)));
+  const offset = page * limit;
+  const result = await db.execute(sql.raw(`
+    WITH customer_sales AS (
+      SELECT
+        COALESCE(NULLIF(li.bigcommerce_customer_id::text, ''), 'unknown') AS customer_id,
+        COALESCE(cm.company, NULLIF(li.customer_name, ''), NULLIF(li.customer_email, ''), 'Unknown customer') AS customer,
+        SUM(li.quantity)::numeric AS units_purchased,
+        SUM(li.quantity * li.base_price)::numeric AS revenue,
+        MAX(li.order_date) AS last_purchase,
+        COUNT(DISTINCT li.bigcommerce_order_id)::int AS orders
+      FROM bc_order_line_items li
+      LEFT JOIN customers_mirror cm ON cm.bigcommerce_customer_id = li.bigcommerce_customer_id
+      WHERE li.order_date >= ${quote(range.dateFrom)}::date
+        AND li.order_date < ${quote(range.dateTo)}::date + interval '1 day'
+        ${lineFilter}
+        ${visibility}
+      GROUP BY customer_id, customer
+    ), totals AS (
+      SELECT COUNT(*)::int AS total FROM customer_sales
+    )
+    SELECT customer_page.*, totals.total AS total_count
+    FROM totals
+    LEFT JOIN (
+      SELECT * FROM customer_sales
+      ORDER BY revenue DESC, units_purchased DESC, customer
+      LIMIT ${limit} OFFSET ${offset}
+    ) customer_page ON TRUE
+  `));
+  const rows = normalizeRows((result.rows as Record<string, unknown>[]).filter((row) => row.customer_id != null));
+  return {
+    range,
+    rows: rows.map(({ total_count: _total, ...row }) => row),
+    total: Number((result.rows as Record<string, unknown>[])[0]?.total_count ?? 0),
+    page,
+    limit,
   };
 }
 
