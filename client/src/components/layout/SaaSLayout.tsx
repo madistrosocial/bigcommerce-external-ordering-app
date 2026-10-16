@@ -124,7 +124,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
         setGlobalSearchResults(results);
         setGlobalSearchOpen(true);
       } catch (error: any) {
-        if (error?.name !== "AbortError") setGlobalSearchResults({ customers: [], orders: [] });
+        if (error?.name !== "AbortError") setGlobalSearchResults({ customers: [], orders: [], products: [] });
       } finally {
         if (!controller.signal.aborted) setGlobalSearchLoading(false);
       }
@@ -544,10 +544,12 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
                     openSearchResult(`/crm/customers/${globalSearchResults.customers[0].id}`);
                   } else if (event.key === "Enter" && globalSearchResults?.orders[0]) {
                     openSearchResult(`/orders/bc/${globalSearchResults.orders[0].bigcommerce_order_id}`);
+                  } else if (event.key === "Enter" && globalSearchResults?.products[0]) {
+                    openSearchResult(`/product-360/products/${globalSearchResults.products[0].id}`);
                   }
                 }}
-                placeholder="Search customers or order IDs"
-                aria-label="Search customers or BigCommerce order IDs"
+                placeholder="Search customers, orders, products or SKUs"
+                aria-label="Search customers, BigCommerce order IDs, product names or SKUs"
                 data-testid="input-global-search"
                 className="min-w-0 flex-1 bg-transparent px-2 text-sm font-semibold text-slate-700 outline-none placeholder:text-slate-400"
               />
@@ -557,8 +559,8 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
                 {globalSearchLoading && (
                   <div className="px-3 py-4 text-center text-xs text-slate-500">Searching…</div>
                 )}
-                {!globalSearchLoading && globalSearchResults && globalSearchResults.customers.length === 0 && globalSearchResults.orders.length === 0 && (
-                  <div className="px-3 py-4 text-center text-xs text-slate-500">No customers or orders found.</div>
+                {!globalSearchLoading && globalSearchResults && globalSearchResults.customers.length === 0 && globalSearchResults.orders.length === 0 && globalSearchResults.products.length === 0 && (
+                  <div className="px-3 py-4 text-center text-xs text-slate-500">No customers, orders, or products found.</div>
                 )}
                 {!globalSearchLoading && globalSearchResults && globalSearchResults.customers.length > 0 && (
                   <div>
@@ -594,6 +596,25 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
                         <span className="min-w-0">
                           <span className="block text-xs font-semibold text-slate-700">Order #{order.bigcommerce_order_id}</span>
                           <span className="block truncate text-[11px] text-slate-500">{order.customer_name}{order.status ? ` · ${order.status}` : ""}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!globalSearchLoading && globalSearchResults && globalSearchResults.products.length > 0 && (
+                  <div className="mt-1 border-t border-slate-100 pt-1">
+                    <p className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Products</p>
+                    {globalSearchResults.products.map((product) => (
+                      <button
+                        key={`product-${product.id}`}
+                        onClick={() => openSearchResult(`/product-360/products/${product.id}`)}
+                        className="flex w-full items-center gap-2 rounded px-2 py-2 text-left hover:bg-blue-50"
+                        data-testid={`global-search-product-${product.id}`}
+                      >
+                        <Package className="h-4 w-4 shrink-0 text-violet-500" />
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-semibold text-slate-700">{product.name}</span>
+                          <span className="block truncate text-[11px] text-slate-500">SKU: {product.sku || "No SKU"} · BC {product.bigcommerce_id}</span>
                         </span>
                       </button>
                     ))}

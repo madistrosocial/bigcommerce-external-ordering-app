@@ -11187,7 +11187,7 @@ export async function registerRoutes(
   app.get("/api/search", requireAuth, async (req, res) => {
     try {
       const query = String(req.query.q ?? "").trim();
-      if (query.length < 2) return res.json({ customers: [], orders: [] });
+      if (query.length < 2) return res.json({ customers: [], orders: [], products: [] });
 
       const user = (req as any).authUser;
       const userId = Number(user.id);
@@ -11195,8 +11195,9 @@ export async function registerRoutes(
       const customerScope = await getCrmVisibilityScope(storage, userId, user.role, user.role !== "admin" ? perms : undefined);
 
       const hasOrdersView = user.role === "admin" || perms.includes("orders:view");
+      const hasProductsView = user.role === "admin" || perms.includes("product_360:view");
       const isOrderIdSearch = /^\d+$/.test(query);
-      const [customerResult, orderResult] = await Promise.all([
+      const [customerResult, orderResult, productResult] = await Promise.all([
         storage.getCrmCustomers({
           search: query,
           limit: 8,
@@ -11215,6 +11216,20 @@ export async function registerRoutes(
               salesChannel: hasOrdersView ? "allorders" : "salesapp",
             })
           : Promise.resolve({ orders: [] as any[], total: 0 }),
+        hasProductsView
+          ? db.select({
+              id: products.id,
+              bigcommerce_id: products.bigcommerce_id,
+              name: products.name,
+              sku: products.sku,
+            })
+              .from(products)
+              .where(sql`POSITION(LOWER(${query}) IN LOWER(${products.name})) > 0
+                OR POSITION(LOWER(${query}) IN LOWER(${products.sku})) > 0`)
+              .orderBy(sql`CASE WHEN LOWER(${products.sku}) = LOWER(${query}) THEN 0
+                WHEN LOWER(${products.name}) = LOWER(${query}) THEN 1 ELSE 2 END`, products.name)
+              .limit(8)
+          : Promise.resolve([] as any[]),
       ]);
 
       const formatAddress = (address: any) => {
@@ -11244,6 +11259,12 @@ export async function registerRoutes(
             total: order.total ?? null,
             date: order.date ?? null,
           })),
+        products: productResult.map((product: any) => ({
+          id: product.id,
+          bigcommerce_id: product.bigcommerce_id,
+          name: product.name,
+          sku: product.sku,
+        })),
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "Search failed" });

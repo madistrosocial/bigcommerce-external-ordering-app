@@ -1557,6 +1557,12 @@ export interface GlobalSearchResult {
     total: string | number | null;
     date: string | null;
   }>;
+  products: Array<{
+    id: number;
+    bigcommerce_id: number;
+    name: string;
+    sku: string;
+  }>;
 }
 
 export async function searchGlobal(query: string, signal?: AbortSignal): Promise<GlobalSearchResult> {
