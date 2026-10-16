@@ -37,6 +37,8 @@ export interface Product360Overview {
   brandOptions: string[];
   categoryOptions: string[];
   categoryPerformance: Record<string, unknown>[];
+  categoryPath: { id: number; name: string }[];
+  categoryHasChildren?: boolean;
   topCustomers: Record<string, unknown>[];
   categoryWarning?: string;
 }
@@ -127,21 +129,23 @@ export async function saveProduct360CatalogDetails(id: number, changes: Record<s
   return body as { success: boolean; product: Record<string, any> };
 }
 
-export function getProduct360Overview(query: { dateFrom?: string; dateTo?: string; brand?: string; category?: string } = {}) {
+export function getProduct360Overview(query: { dateFrom?: string; dateTo?: string; brand?: string; category?: string; categoryId?: number } = {}) {
   const params = new URLSearchParams();
   if (query.dateFrom) params.set("dateFrom", query.dateFrom);
   if (query.dateTo) params.set("dateTo", query.dateTo);
   if (query.brand) params.set("brand", query.brand);
   if (query.category) params.set("category", query.category);
+  if (query.categoryId) params.set("categoryId", String(query.categoryId));
   return product360Request<Product360Overview>(`/product-360/overview?${params.toString()}`);
 }
 
-export function getProduct360TopCustomers(query: { dateFrom?: string; dateTo?: string; brand?: string; category?: string; page?: number; limit?: number } = {}) {
+export function getProduct360TopCustomers(query: { dateFrom?: string; dateTo?: string; brand?: string; category?: string; categoryId?: number; page?: number; limit?: number } = {}) {
   const params = new URLSearchParams();
   if (query.dateFrom) params.set("dateFrom", query.dateFrom);
   if (query.dateTo) params.set("dateTo", query.dateTo);
   if (query.brand) params.set("brand", query.brand);
   if (query.category) params.set("category", query.category);
+  if (query.categoryId) params.set("categoryId", String(query.categoryId));
   params.set("page", String(query.page ?? 0));
   params.set("limit", String(query.limit ?? 25));
   return product360Request<Product360TopCustomersResponse>(`/product-360/top-customers?${params.toString()}`);

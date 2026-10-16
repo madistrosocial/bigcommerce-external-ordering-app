@@ -423,25 +423,30 @@ function OverviewContent({ data, focus }: { data: Product360Overview; focus?: st
   );
 }
 
-function DashboardOverviewContent({ data, focus, selectedCategory, brand, onCategorySelect }: {
+function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath, brand, onCategorySelect, onCategoryPathChange }: {
   data: Product360Overview;
   focus?: string;
   selectedCategory: string;
+  categoryPath: { id: number; name: string }[];
   brand: string;
-  onCategorySelect: (category: string) => void;
+  onCategorySelect: (category: { id: number; name: string }) => void;
+  onCategoryPathChange: (path: { id: number; name: string }[]) => void;
 }) {
   const fmt = useTimeService();
   const [categoryMetric, setCategoryMetric] = useState<"units" | "revenue">("revenue");
   const [customersDialogOpen, setCustomersDialogOpen] = useState(false);
   const [customerPage, setCustomerPage] = useState(0);
   const [, setLocation] = useLocation();
+  const drillCategoryId = categoryPath.at(-1)?.id;
+  const categoryDisplayName = categoryPath.at(-1)?.name || selectedCategory;
   const customersQuery = useQuery({
-    queryKey: ["product-360-top-customers", data.range.dateFrom, data.range.dateTo, brand, selectedCategory, customerPage],
+    queryKey: ["product-360-top-customers", data.range.dateFrom, data.range.dateTo, brand, selectedCategory, drillCategoryId, customerPage],
     queryFn: () => getProduct360TopCustomers({
       dateFrom: data.range.dateFrom,
       dateTo: data.range.dateTo,
       brand,
       category: selectedCategory,
+      categoryId: drillCategoryId,
       page: customerPage,
       limit: 25,
     }),
@@ -450,11 +455,11 @@ function DashboardOverviewContent({ data, focus, selectedCategory, brand, onCate
   });
   const metrics = data.metrics || {};
   const trend = data.trend.map((row) => ({ ...row, units: Number(row.units || 0), revenue: Number(row.revenue || 0), gross_profit: Number(row.gross_profit || 0) }));
-  const categoryRows = data.categoryPerformance
+  const categoryRows: Record<string, unknown>[] = data.categoryPerformance
     .map((row) => ({ ...row, units: Number(row.units || 0), revenue: Number(row.revenue || 0) }));
   const categoryData = categoryRows.filter((row) => Number(row[categoryMetric]) > 0);
   const categoryLegendData = categoryRows.filter((row) =>
-    MAIN_CATEGORY_LABELS.includes(String(row.label)) || Number(row[categoryMetric]) > 0
+    (Number(row.id) > 0 && Number(row[categoryMetric]) > 0) || MAIN_CATEGORY_LABELS.includes(String(row.label))
   );
   const brandData = data.brandPerformance.map((row) => ({ ...row, units: Number(row.units || 0), revenue: Number(row.revenue || 0) }));
   const inventory = data.inventoryStatus[0] || {};
@@ -493,8 +498,14 @@ function DashboardOverviewContent({ data, focus, selectedCategory, brand, onCate
         <DashboardPanel className="order-2" title="Sales & Revenue Trend" subtitle="Units, revenue, and gross profit over the selected range" action={<BarChart3 className="h-3.5 w-3.5 text-slate-400" />}>
           {trend.length === 0 ? <div className="flex h-[190px] items-center justify-center text-xs text-slate-400">No sales data for this period.</div> : <div className="h-[190px] px-1 pb-2 pt-3"><ResponsiveContainer width="100%" height="100%"><AreaChart data={trend}><defs><linearGradient id="product360RevenueDashboard" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3b82f6" stopOpacity={0.24} /><stop offset="95%" stopColor="#3b82f6" stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5eaf1" /><XAxis dataKey="label" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} /><YAxis yAxisId="left" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} /><YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} tickFormatter={(value) => `$${Math.round(value / 1000)}k`} /><Tooltip formatter={(value: number, name: string) => [name === "revenue" || name === "gross_profit" ? money(value) : number(value), name === "gross_profit" ? "Gross profit" : name === "revenue" ? "Revenue" : "Units"]} /><Area yAxisId="right" type="monotone" dataKey="revenue" stroke="#2563eb" fill="url(#product360RevenueDashboard)" strokeWidth={2} /><Area yAxisId="right" type="monotone" dataKey="gross_profit" stroke="#18b981" fill="none" strokeWidth={2} /><Area yAxisId="left" type="monotone" dataKey="units" stroke="#f2aa24" fill="none" strokeWidth={2} /></AreaChart></ResponsiveContainer></div>}
         </DashboardPanel>
-        <DashboardPanel className="order-1" title={categoryMetric === "revenue" ? "Top Categories by Revenue" : "Top Categories by Units"} subtitle={selectedCategory ? `Filtered to ${selectedCategory} · Main category contribution` : "Main category contribution"} action={<div className="flex rounded border border-slate-200 bg-slate-50 p-0.5">{(["revenue", "units"] as const).map((metric) => <button key={metric} type="button" onClick={() => setCategoryMetric(metric)} className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${categoryMetric === metric ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>{metric === "revenue" ? "$" : "Qty"}</button>)}</div>}>
-          {categoryData.length === 0 ? <div className="flex h-[190px] items-center justify-center text-xs text-slate-400">No category sales data.</div> : <div className="flex h-[190px] items-center gap-2 px-2 py-2"><div className="relative h-[150px] w-[52%] shrink-0"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={categoryData} dataKey={categoryMetric} nameKey="label" cx="50%" cy="50%" innerRadius={42} outerRadius={65} paddingAngle={2}>{categoryData.map((row, index) => { const label = String(row.label); const canFilter = MAIN_CATEGORY_LABELS.includes(label); return <Cell key={label || index} fill={productCategoryColor(label)} cursor={canFilter ? "pointer" : "default"} onClick={canFilter ? () => onCategorySelect(label) : undefined} />; })}</Pie><Tooltip formatter={(value: number) => [categoryMetric === "revenue" ? money(value) : `${number(value)} units`, categoryMetric === "revenue" ? "Revenue" : "Units sold"]} /></PieChart></ResponsiveContainer><div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"><span className="text-sm font-bold text-slate-800">{categoryMetric === "revenue" ? money(categoryTotal) : number(categoryTotal)}</span><span className="text-[9px] text-slate-400">{categoryMetric === "revenue" ? "Total Revenue" : "Total Units"}</span></div></div><div className="min-w-0 flex-1 space-y-1.5">{categoryLegendData.map((row) => { const label = String(row.label); const canFilter = MAIN_CATEGORY_LABELS.includes(label); return <button key={label} type="button" disabled={!canFilter} aria-pressed={selectedCategory === label} onClick={() => { if (canFilter) onCategorySelect(label); }} className={`flex w-full items-center justify-between gap-2 rounded px-1 text-left text-[9px] ${canFilter ? "cursor-pointer hover:bg-blue-50" : "cursor-default"} ${selectedCategory === label ? "bg-blue-50 font-semibold text-blue-800" : "text-slate-600"}`}><span className="flex min-w-0 items-center gap-1.5"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: productCategoryColor(label) }} /><span className="truncate">{label}</span></span><span className="font-semibold text-slate-500">{categoryTotal ? `${Math.round((Number(row[categoryMetric]) / categoryTotal) * 100)}%` : "0%"}</span></button>; })}</div></div>}
+        <DashboardPanel className="order-1" title={categoryMetric === "revenue" ? "Top Categories by Revenue" : "Top Categories by Units"} subtitle={categoryDisplayName ? `Filtered to ${categoryPath.map((item) => item.name).join(" › ") || categoryDisplayName}` : "Main category contribution"} action={<div className="flex rounded border border-slate-200 bg-slate-50 p-0.5">{(["revenue", "units"] as const).map((metric) => <button key={metric} type="button" onClick={() => setCategoryMetric(metric)} className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${categoryMetric === metric ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>{metric === "revenue" ? "$" : "Qty"}</button>)}</div>}>
+          <div className="flex flex-wrap items-center gap-1 px-2 pt-1">
+            <button type="button" className="text-[9px] font-semibold text-blue-700 hover:underline" onClick={() => onCategoryPathChange([])}>All categories</button>
+            {categoryPath.map((item, index) => <span key={item.id} className="text-[9px] text-slate-400">› <button type="button" className={`font-semibold hover:underline ${index === categoryPath.length - 1 ? "text-slate-700" : "text-blue-700"}`} onClick={() => onCategoryPathChange(categoryPath.slice(0, index + 1))}>{item.name}</button></span>)}
+          </div>
+          {categoryData.length === 0
+            ? <div className="flex h-[160px] items-center justify-center text-center text-xs text-slate-400">{drillCategoryId && !data.categoryHasChildren ? `No more sub-categories under ${categoryDisplayName}. Dashboard data is filtered to this category.` : "No category sales data."}</div>
+            : <div className="flex h-[160px] items-center gap-2 px-2 py-1"><div className="relative h-[140px] w-[52%] shrink-0"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={categoryData} dataKey={categoryMetric} nameKey="label" cx="50%" cy="50%" innerRadius={38} outerRadius={60} paddingAngle={2}>{categoryData.map((row, index) => { const label = String(row.label); const canDrill = Number(row.id) > 0; return <Cell key={String(row.id ?? label) + index} fill={productCategoryColor(label)} cursor={canDrill ? "pointer" : "default"} onClick={canDrill ? () => onCategorySelect({ id: Number(row.id), name: label }) : undefined} />; })}</Pie><Tooltip formatter={(value: number) => [categoryMetric === "revenue" ? money(value) : `${number(value)} units`, categoryMetric === "revenue" ? "Revenue" : "Units sold"]} /></PieChart></ResponsiveContainer><div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"><span className="text-sm font-bold text-slate-800">{categoryMetric === "revenue" ? money(categoryTotal) : number(categoryTotal)}</span><span className="text-[9px] text-slate-400">{categoryMetric === "revenue" ? "Total Revenue" : "Total Units"}</span></div></div><div className="min-w-0 flex-1 space-y-1.5">{categoryLegendData.map((row, index) => { const label = String(row.label); const canDrill = Number(row.id) > 0; return <button key={String(row.id ?? label) + index} type="button" disabled={!canDrill} onClick={() => { if (canDrill) onCategorySelect({ id: Number(row.id), name: label }); }} className={`flex w-full items-center justify-between gap-2 rounded px-1 text-left text-[9px] ${canDrill ? "cursor-pointer hover:bg-blue-50" : "cursor-default"} text-slate-600`}><span className="flex min-w-0 items-center gap-1.5"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: productCategoryColor(label) }} /><span className="truncate">{label}</span></span><span className="font-semibold text-slate-500">{categoryTotal ? `${Math.round((Number(row[categoryMetric]) / categoryTotal) * 100)}%` : "0%"}</span></button>; })}</div></div>}
         </DashboardPanel>
         <DashboardPanel className="order-3" title="Units Sold by Brand" subtitle="Top brands by units sold">
           {brandData.length === 0 ? <div className="flex h-[190px] items-center justify-center text-xs text-slate-400">No brand sales data.</div> : <div className="h-[190px] px-1 py-2"><ResponsiveContainer width="100%" height="100%"><BarChart data={brandData} layout="vertical" margin={{ left: 4, right: 8, top: 4, bottom: 4 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e5eaf1" /><XAxis type="number" hide /><YAxis type="category" dataKey="label" width={62} tick={{ fontSize: 9, fill: "#64748b" }} tickLine={false} axisLine={false} /><Tooltip formatter={(value: number) => [number(value), "Units sold"]} /><Bar dataKey="units" fill="#347be5" radius={[0, 3, 3, 0]} barSize={10} /></BarChart></ResponsiveContainer></div>}
@@ -526,7 +537,7 @@ function DashboardOverviewContent({ data, focus, selectedCategory, brand, onCate
         </DashboardPanel>
         <DashboardPanel
           title="Top Customers"
-          subtitle={selectedCategory ? `Highest revenue · ${selectedCategory}` : "Highest revenue in the selected range"}
+          subtitle={categoryDisplayName ? `Highest revenue · ${categoryDisplayName}` : "Highest revenue in the selected range"}
           action={<Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[9px] text-blue-700" onClick={() => { setCustomerPage(0); setCustomersDialogOpen(true); }}>View all <ChevronRight className="ml-0.5 h-3 w-3" /></Button>}
         >
           {data.topCustomers.length === 0
@@ -543,7 +554,7 @@ function DashboardOverviewContent({ data, focus, selectedCategory, brand, onCate
       <Dialog open={customersDialogOpen} onOpenChange={setCustomersDialogOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Top Customers{selectedCategory ? ` · ${selectedCategory}` : ""}</DialogTitle>
+            <DialogTitle>Top Customers{categoryDisplayName ? ` · ${categoryDisplayName}` : ""}</DialogTitle>
           </DialogHeader>
           <DialogDescription className="-mt-3 text-sm text-slate-500">
             Customer revenue from {data.range.dateFrom} to {data.range.dateTo}. {customersQuery.data ? `${number(customersQuery.data.total)} customers` : ""}
@@ -580,8 +591,10 @@ export function Product360OverviewPage() {
   const [to, setTo] = useState(() => fmt.dateOnly());
   const [brand, setBrand] = useState("");
   const [category, setCategory] = useState("");
+  const [categoryPath, setCategoryPath] = useState<{ id: number; name: string }[]>([]);
   const focus = location.split("/")[2] || "overview";
-  const query = useQuery({ queryKey: ["product-360-overview", from, to, brand, category], queryFn: () => getProduct360Overview({ dateFrom: from, dateTo: to, brand, category }) });
+  const categoryId = categoryPath.at(-1)?.id;
+  const query = useQuery({ queryKey: ["product-360-overview", from, to, brand, category, categoryId], queryFn: () => getProduct360Overview({ dateFrom: from, dateTo: to, brand, category, categoryId }) });
   const catalogSync = useMutation({
     mutationFn: syncProduct360Catalog,
     onSuccess: async () => {
@@ -592,10 +605,21 @@ export function Product360OverviewPage() {
   const brandOptions = query.data?.brandOptions || [];
   const categoryOptions = query.data?.categoryOptions || ["Disposables", "E-Liquid", "Hardware", "Smoke Shop"];
   return (
-    <PageFrame title="Product 360" description="Complete product intelligence for better decisions" actions={<div className="flex flex-wrap items-center justify-end gap-2"><DateRangeControls from={from} to={to} brand={brand} category={category} brandOptions={brandOptions} categoryOptions={categoryOptions} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); }} onBrandChange={setBrand} onCategoryChange={setCategory} onExport={() => query.data && exportProduct360Overview(query.data, from, to, brand, category)} />{currentUser?.role === "admin" && focus === "overview" && <Button variant="outline" size="sm" onClick={() => catalogSync.mutate()} disabled={catalogSync.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${catalogSync.isPending ? "animate-spin" : ""}`} />{catalogSync.isPending ? "Syncing catalog…" : "Temporary: sync catalog"}</Button>}</div>}>
+    <PageFrame title="Product 360" description="Complete product intelligence for better decisions" actions={<div className="flex flex-wrap items-center justify-end gap-2"><DateRangeControls from={from} to={to} brand={brand} category={category} brandOptions={brandOptions} categoryOptions={categoryOptions} onChange={(nextFrom, nextTo) => { setFrom(nextFrom); setTo(nextTo); }} onBrandChange={setBrand} onCategoryChange={(nextCategory) => { setCategory(nextCategory); setCategoryPath([]); }} onExport={() => query.data && exportProduct360Overview(query.data, from, to, brand, category)} />{currentUser?.role === "admin" && focus === "overview" && <Button variant="outline" size="sm" onClick={() => catalogSync.mutate()} disabled={catalogSync.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${catalogSync.isPending ? "animate-spin" : ""}`} />{catalogSync.isPending ? "Syncing catalog…" : "Temporary: sync catalog"}</Button>}</div>}>
       {catalogSync.data && <Card className="mb-4 border-blue-200 bg-blue-50 p-4 text-sm text-blue-950"><div className="font-semibold">Catalog sync complete</div><div className="mt-1">Fetched {catalogSync.data.productsFetched.toLocaleString()} products across {catalogSync.data.pagesCompleted} pages. {catalogSync.data.productsAdded.toLocaleString()} added; {catalogSync.data.productsUpdated.toLocaleString()} updated.</div><div className="mt-1">Products table storage: {formatStorage(catalogSync.data.storageAfterBytes)} total ({formatStorage(catalogSync.data.tableBytes)} table, {formatStorage(catalogSync.data.indexBytes)} indexes); change: {catalogSync.data.storageDeltaBytes >= 0 ? "+" : ""}{formatStorage(catalogSync.data.storageDeltaBytes)}.</div></Card>}
       {catalogSync.isError && <Card className="mb-4 border-red-200 bg-red-50 p-4 text-sm text-red-800">Catalog sync failed: {catalogSync.error.message}</Card>}
-      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : query.data ? <DashboardOverviewContent data={query.data} focus={focus} selectedCategory={category} brand={brand} onCategorySelect={(selected) => setCategory((current) => current === selected ? "" : selected)} /> : <EmptyState message="No Product 360 data is available." />}
+      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : query.data ? <DashboardOverviewContent
+        data={query.data}
+        focus={focus}
+        selectedCategory={category}
+        categoryPath={categoryPath}
+        brand={brand}
+        onCategorySelect={(selected) => {
+          setCategory("");
+          setCategoryPath((current) => [...current, selected]);
+        }}
+        onCategoryPathChange={setCategoryPath}
+      /> : <EmptyState message="No Product 360 data is available." />}
     </PageFrame>
   );
 }

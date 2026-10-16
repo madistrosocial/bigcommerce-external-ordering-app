@@ -265,6 +265,64 @@ function categoryIdsForMainCategory(label: string, categories: Product360Categor
   return Array.from(matchingIds);
 }
 
+function categoryDescendantIds(categoryId: number, categories: Product360Category[]): number[] {
+  const matching = new Set<number>([categoryId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const category of categories) {
+      if (matching.has(category.parent_id) && !matching.has(category.id)) {
+        matching.add(category.id);
+        changed = true;
+      }
+    }
+  }
+  return [...matching];
+}
+
+function normalizeCategoryId(value: unknown, categories: Product360Category[]): number | undefined {
+  const id = Math.trunc(Number(value));
+  return id > 0 && categories.some((category) => category.id === id) ? id : undefined;
+}
+
+function categoryRootName(categoryId: number, categories: Map<number, Product360Category>): string {
+  let current = categories.get(categoryId);
+  const visited = new Set<number>();
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    if (PRODUCT_360_MAIN_CATEGORIES.some((name) => categoryKey(name) === categoryKey(current!.name))) return current.name;
+    if (!current.parent_id || current.parent_id === current.id) break;
+    current = categories.get(current.parent_id);
+  }
+  return "Other / Uncategorized";
+}
+
+function categoryTrail(categoryId: number, categories: Map<number, Product360Category>): Product360Category[] {
+  const trail: Product360Category[] = [];
+  let current = categories.get(categoryId);
+  const visited = new Set<number>();
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    trail.unshift(current);
+    if (!current.parent_id || current.parent_id === current.id) break;
+    current = categories.get(current.parent_id);
+  }
+  const rootIndex = trail.findIndex((item) => PRODUCT_360_MAIN_CATEGORIES.some((name) => categoryKey(name) === categoryKey(item.name)));
+  return rootIndex >= 0 ? trail.slice(rootIndex) : [];
+}
+
+function directChildUnder(categoryId: number, parentId: number, categories: Map<number, Product360Category>): number | undefined {
+  let current = categories.get(categoryId);
+  let childId: number | undefined;
+  const visited = new Set<number>();
+  while (current && current.id !== parentId && !visited.has(current.id)) {
+    visited.add(current.id);
+    childId = current.id;
+    current = categories.get(current.parent_id);
+  }
+  return current?.id === parentId ? childId : undefined;
+}
+
 function normalizeRows(rows: Record<string, unknown>[]) {
   return rows.map((row) => {
     const normalized = { ...row };
@@ -283,21 +341,30 @@ export async function getProduct360Overview(input: {
   dateTo?: unknown;
   brand?: unknown;
   category?: unknown;
+  categoryId?: unknown;
   customerVisibility?: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY";
   visibilityUserId?: number;
 }) {
   const range = dateRange(input.dateFrom, input.dateTo);
   const categoryCatalog = await getProduct360CategoryCatalog();
+  const categoryMap = new Map(categoryCatalog.categories.map((item) => [item.id, item]));
   const brand = String(input.brand ?? "").trim().slice(0, 100);
   const category = PRODUCT_360_MAIN_CATEGORIES.find((label) => categoryKey(label) === categoryKey(input.category));
-  const categoryIds = category ? categoryIdsForMainCategory(category, categoryCatalog.categories) : undefined;
-  const categoryIndex = category ? PRODUCT_360_MAIN_CATEGORIES.indexOf(category) : -1;
+  const requestedCategoryId = normalizeCategoryId(input.categoryId, categoryCatalog.categories);
+  const drillRootName = requestedCategoryId ? categoryRootName(requestedCategoryId, categoryMap) : undefined;
+  const drillRoot = PRODUCT_360_MAIN_CATEGORIES.find((label) => categoryKey(label) === categoryKey(drillRootName));
+  const drillCategoryId = drillRoot ? requestedCategoryId : undefined;
+  const effectiveRoot = drillRoot || category;
+  const categoryIds = drillCategoryId
+    ? categoryDescendantIds(drillCategoryId, categoryCatalog.categories)
+    : effectiveRoot ? categoryIdsForMainCategory(effectiveRoot, categoryCatalog.categories) : undefined;
+  const categoryIndex = effectiveRoot ? PRODUCT_360_MAIN_CATEGORIES.indexOf(effectiveRoot) : -1;
   const categoryExcludeIds = categoryIndex > 0
     ? PRODUCT_360_MAIN_CATEGORIES.slice(0, categoryIndex).flatMap((label) => categoryIdsForMainCategory(label, categoryCatalog.categories))
     : [];
   const filters: Product360Filters = {
     brand: brand || undefined,
-    categoryIds: category ? (categoryIds?.length ? categoryIds : [0]) : undefined,
+    categoryIds: effectiveRoot ? (categoryIds?.length ? categoryIds : [0]) : undefined,
     categoryExcludeIds,
   };
   const base = productBaseCte(range, undefined, filters);
@@ -479,24 +546,60 @@ export async function getProduct360Overview(input: {
     `)),
   ]);
 
-  const categoryMap = new Map(categoryCatalog.categories.map((category) => [category.id, category]));
-  const categoryTotals = new Map(PRODUCT_360_MAIN_CATEGORIES.map((label) => [label, { label, units: 0, revenue: 0 }]));
-  let otherTotals = { label: "Other / Uncategorized", units: 0, revenue: 0 };
-  for (const row of categorySales.rows as Record<string, unknown>[]) {
-    const label = category || resolveMainCategory(parseCategoryIds(row.categories), categoryMap);
-    const target = label === "Other / Uncategorized" ? otherTotals : categoryTotals.get(label)!;
-    target.units += Number(row.units || 0);
-    target.revenue += Number(row.revenue || 0);
+  const categoryTrailRows = drillCategoryId ? categoryTrail(drillCategoryId, categoryMap) : [];
+  const categoryPath = drillCategoryId
+    ? categoryTrailRows.map(({ id, name }) => ({ id, name }))
+    : [];
+  let categoryPerformance: Record<string, unknown>[];
+  if (drillCategoryId) {
+    const children = categoryCatalog.categories.filter((item) => item.parent_id === drillCategoryId);
+    if (children.length === 0) {
+      categoryPerformance = [];
+    } else {
+      const totals = new Map(children.map((item) => [item.id, {
+        id: item.id,
+        label: item.name,
+        units: 0,
+        revenue: 0,
+        hasChildren: categoryCatalog.categories.some((candidate) => candidate.parent_id === item.id),
+      }]));
+      const directTotals = { id: null, label: "Directly assigned / Other", units: 0, revenue: 0, hasChildren: false };
+      for (const row of categorySales.rows as Record<string, unknown>[]) {
+        const assignedIds = parseCategoryIds(row.categories);
+        const childId = assignedIds.map((id) => directChildUnder(id, drillCategoryId!, categoryMap)).find((id) => id && totals.has(id));
+        const target = childId ? totals.get(childId)! : directTotals;
+        target.units += Number(row.units || 0);
+        target.revenue += Number(row.revenue || 0);
+      }
+      categoryPerformance = [...totals.values(), ...(directTotals.units || directTotals.revenue ? [directTotals] : [])];
+    }
+  } else {
+    const rootLabels = effectiveRoot ? [effectiveRoot] : PRODUCT_360_MAIN_CATEGORIES;
+    const rootTotals = new Map(rootLabels.map((label) => {
+      const id = categoryCatalog.categories.find((item) => categoryKey(item.name) === categoryKey(label))?.id;
+      return [label, {
+        id: id ?? null,
+        label,
+        units: 0,
+        revenue: 0,
+        hasChildren: id != null && categoryCatalog.categories.some((item) => item.parent_id === id),
+      }];
+    }));
+    let otherTotals = { id: null, label: "Other / Uncategorized", units: 0, revenue: 0, hasChildren: false };
+    for (const row of categorySales.rows as Record<string, unknown>[]) {
+      const label = effectiveRoot || resolveMainCategory(parseCategoryIds(row.categories), categoryMap);
+      const target = label === "Other / Uncategorized" ? otherTotals : rootTotals.get(label)!;
+      target.units += Number(row.units || 0);
+      target.revenue += Number(row.revenue || 0);
+    }
+    categoryPerformance = [...rootTotals.values(), ...(otherTotals.units || otherTotals.revenue ? [otherTotals] : [])];
   }
-  const categoryPerformance = [
-    ...Array.from(categoryTotals.values()),
-    ...(otherTotals.units || otherTotals.revenue ? [otherTotals] : []),
-  ];
   const topCustomers = await getProduct360TopCustomers({
     dateFrom: range.dateFrom,
     dateTo: range.dateTo,
     brand,
     category,
+    categoryId: drillCategoryId,
     customerVisibility: input.customerVisibility,
     visibilityUserId: input.visibilityUserId,
     limit: 5,
@@ -518,6 +621,8 @@ export async function getProduct360Overview(input: {
     brandOptions: (brandOptions.rows as Record<string, unknown>[]).map((row) => String(row.label || "")).filter(Boolean),
     categoryOptions: categoryCatalog.categories.length ? PRODUCT_360_MAIN_CATEGORIES : [],
     categoryPerformance,
+    categoryPath,
+    categoryHasChildren: drillCategoryId ? categoryCatalog.categories.some((item) => item.parent_id === drillCategoryId) : undefined,
     topCustomers: topCustomers.rows,
     categoryWarning: categoryCatalog.warning,
   };
@@ -554,6 +659,7 @@ export async function getProduct360TopCustomers(input: {
   dateTo?: unknown;
   brand?: unknown;
   category?: unknown;
+  categoryId?: unknown;
   customerVisibility?: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY";
   visibilityUserId?: number;
   page?: unknown;
@@ -561,16 +667,24 @@ export async function getProduct360TopCustomers(input: {
 }) {
   const range = dateRange(input.dateFrom, input.dateTo);
   const catalog = await getProduct360CategoryCatalog();
+  const categoryMap = new Map(catalog.categories.map((item) => [item.id, item]));
   const brand = String(input.brand ?? "").trim().slice(0, 100);
   const category = PRODUCT_360_MAIN_CATEGORIES.find((label) => categoryKey(label) === categoryKey(input.category));
-  const categoryIndex = category ? PRODUCT_360_MAIN_CATEGORIES.indexOf(category) : -1;
-  const categoryIds = category ? categoryIdsForMainCategory(category, catalog.categories) : [];
+  const requestedCategoryId = normalizeCategoryId(input.categoryId, catalog.categories);
+  const drillRootName = requestedCategoryId ? categoryRootName(requestedCategoryId, categoryMap) : undefined;
+  const drillRoot = PRODUCT_360_MAIN_CATEGORIES.find((label) => categoryKey(label) === categoryKey(drillRootName));
+  const drillCategoryId = drillRoot ? requestedCategoryId : undefined;
+  const effectiveRoot = drillRoot || category;
+  const categoryIndex = effectiveRoot ? PRODUCT_360_MAIN_CATEGORIES.indexOf(effectiveRoot) : -1;
+  const categoryIds = drillCategoryId
+    ? categoryDescendantIds(drillCategoryId, catalog.categories)
+    : effectiveRoot ? categoryIdsForMainCategory(effectiveRoot, catalog.categories) : [];
   const excludedIds = categoryIndex > 0
     ? PRODUCT_360_MAIN_CATEGORIES.slice(0, categoryIndex).flatMap((label) => categoryIdsForMainCategory(label, catalog.categories))
     : [];
   const lineFilter = lineItemProductFilter({
     brand: brand || undefined,
-    categoryIds: category ? (categoryIds.length ? categoryIds : [0]) : undefined,
+    categoryIds: effectiveRoot ? (categoryIds.length ? categoryIds : [0]) : undefined,
     categoryExcludeIds: excludedIds,
   });
   const visibility = customerVisibilitySql(input.customerVisibility || "ASSIGNED_ONLY", Number(input.visibilityUserId || 0));

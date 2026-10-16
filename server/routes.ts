@@ -2568,6 +2568,7 @@ export async function registerRoutes(
         dateTo: req.query.dateTo,
         brand: req.query.brand,
         category: req.query.category,
+        categoryId: req.query.categoryId,
         customerVisibility,
         visibilityUserId: Number(user?.id || 0),
       }));
@@ -2592,6 +2593,7 @@ export async function registerRoutes(
         dateTo: req.query.dateTo,
         brand: req.query.brand,
         category: req.query.category,
+        categoryId: req.query.categoryId,
         page: req.query.page,
         limit: req.query.limit,
         customerVisibility,
