@@ -9623,8 +9623,9 @@ export async function registerRoutes(
     return (crc ^ 0xFFFFFFFF) >>> 0;
   }
 
-  function buildXlsx(headers: string[], rows: string[][]): Buffer {
+  function buildXlsx(headers: string[], rows: string[][], sheetLabel = "Customers"): Buffer {
     const xe = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const sheetName = xe(sheetLabel.slice(0, 31) || "Data");
     const colLetter = (i: number) => i < 26 ? String.fromCharCode(65 + i) : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + (i % 26));
     const allRows = [headers, ...rows];
     const rowsXml = allRows.map((row, ri) =>
@@ -9634,7 +9635,7 @@ export async function registerRoutes(
     const files = new Map<string, string>([
       ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`],
       ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
-      ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Customers" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+      ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
       ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`],
       ["xl/worksheets/sheet1.xml", sheetXml],
     ]);
@@ -11681,6 +11682,48 @@ export async function registerRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  app.get("/api/crm/customers/:id/orders/export", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      const userId = user?.id as number;
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      if (user.role !== "admin" && !(await storage.getUserPermissionStrings(userId)).includes("crm:export")) {
+        return res.status(403).json({ error: "Forbidden: crm:export permission required" });
+      }
+      const id = Number.parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid customer ID" });
+      if (!await assertCrmCustomerAccess(storage, id, userId, user.role, res)) return;
+      const customer = await storage.getCrmCustomerById(id);
+      if (!customer) return res.status(404).json({ error: "Customer not found" });
+      const format = String(req.query.format ?? "csv");
+      if (format !== "csv" && format !== "xlsx") return res.status(400).json({ error: "Format must be csv or xlsx" });
+
+      const orders = await storage.getCrmOrdersByBcCustomerId(customer.bigcommerce_customer_id, 10000);
+      const headers = ["Order Number", "BigCommerce Order ID", "Date", "Status", "Payment Status", "Total", "Customer", "Email"];
+      const rows = orders.map((order) => [
+        String(order.order_number ?? ""),
+        String(order.bigcommerce_order_id),
+        order.order_date ? new Date(order.order_date).toISOString() : "",
+        String(order.status ?? ""),
+        String(order.payment_status ?? ""),
+        String(order.order_total ?? ""),
+        String(order.customer_name ?? ""),
+        String(order.customer_email ?? ""),
+      ]);
+      const dateSuffix = new Date().toISOString().slice(0, 10);
+      if (format === "xlsx") {
+        const buf = buildXlsx(headers, rows, "Orders");
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition", `attachment; filename="crm-customer-${id}-orders-${dateSuffix}.xlsx"`);
+        return res.send(buf);
+      }
+      const esc = (value: string) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="crm-customer-${id}-orders-${dateSuffix}.csv"`);
+      return res.send("\uFEFF" + [headers, ...rows].map((row) => row.map(esc).join(",")).join("\r\n"));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // GET /api/crm/customers/:id/top-products
   app.get("/api/crm/customers/:id/top-products", requireAuth, async (req, res) => {
     try {
@@ -11692,9 +11735,23 @@ export async function registerRoutes(
       if (!await assertCrmCustomerAccess(storage, id, userId, user.role, res)) return;
       const customer = await storage.getCrmCustomerById(id);
       if (!customer) return res.status(404).json({ error: "Customer not found" });
-      if (!customer.bigcommerce_customer_id) return res.json([]);
+      if (!customer.bigcommerce_customer_id) {
+        if (req.query.format) return res.status(400).json({ error: "Customer has no BigCommerce ID" });
+        return res.json({ rows: [], total: 0, page: 1, limit: 20 });
+      }
 
-      const result = await db.execute(sql`
+      const format = req.query.format == null ? "" : String(req.query.format);
+      if (format && format !== "csv" && format !== "xlsx") return res.status(400).json({ error: "Format must be csv or xlsx" });
+      if (format && user.role !== "admin" && !(await storage.getUserPermissionStrings(userId)).includes("crm:export")) {
+        return res.status(403).json({ error: "Forbidden: crm:export permission required" });
+      }
+      const pageValue = Number.parseInt(String(req.query.page ?? "1"), 10);
+      const limitValue = Number.parseInt(String(req.query.limit ?? "20"), 10);
+      const page = Number.isFinite(pageValue) ? Math.max(1, pageValue) : 1;
+      const limit = Number.isFinite(limitValue) ? Math.min(100, Math.max(1, limitValue)) : 20;
+      const offset = (page - 1) * limit;
+      const bcCustomerId = Number(customer.bigcommerce_customer_id);
+      const baseQuery = `
         SELECT
           li.bigcommerce_product_id AS product_id,
           p.id AS product360_id,
@@ -11708,12 +11765,53 @@ export async function registerRoutes(
           MAX(li.order_date) AS last_order_date
         FROM bc_order_line_items li
         LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
-        WHERE li.bigcommerce_customer_id = ${customer.bigcommerce_customer_id}
+        WHERE li.bigcommerce_customer_id = ${bcCustomerId}
+          AND li.bigcommerce_product_id IS NOT NULL
         GROUP BY li.bigcommerce_product_id, p.id, p.image
         ORDER BY SUM(li.quantity) DESC, COUNT(DISTINCT li.bigcommerce_order_id) DESC, MAX(li.order_date) DESC
-        LIMIT 25
-      `);
-      res.json(result.rows);
+      `;
+
+      if (format) {
+        const result = await db.execute(sql.raw(baseQuery));
+        const products = result.rows as Record<string, unknown>[];
+        const headers = ["Product", "BigCommerce Product ID", "SKU(s)", "Units Ordered", "Orders", "Total Spent", "Last Ordered"];
+        const rows = products.map((product) => [
+          String(product.product_name ?? ""),
+          String(product.product_id ?? ""),
+          Number(product.sku_count) > 1 ? `${product.sku_count} SKUs` : String(product.sku ?? ""),
+          String(product.units_ordered ?? "0"),
+          String(product.order_count ?? "0"),
+          String(product.total_spent ?? "0"),
+          product.last_order_date ? new Date(String(product.last_order_date)).toISOString() : "",
+        ]);
+        const dateSuffix = new Date().toISOString().slice(0, 10);
+        if (format === "xlsx") {
+          const buf = buildXlsx(headers, rows, "Top Products");
+          res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+          res.setHeader("Content-Disposition", `attachment; filename="crm-customer-${id}-top-products-${dateSuffix}.xlsx"`);
+          return res.send(buf);
+        }
+        const esc = (value: string) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="crm-customer-${id}-top-products-${dateSuffix}.csv"`);
+        return res.send("\uFEFF" + [headers, ...rows].map((row) => row.map(esc).join(",")).join("\r\n"));
+      }
+
+      const [countResult, result] = await Promise.all([
+        db.execute(sql`
+          SELECT COUNT(DISTINCT bigcommerce_product_id)::int AS total
+          FROM bc_order_line_items
+          WHERE bigcommerce_customer_id = ${bcCustomerId}
+            AND bigcommerce_product_id IS NOT NULL
+        `),
+        db.execute(sql.raw(`${baseQuery} LIMIT ${limit} OFFSET ${offset}`)),
+      ]);
+      res.json({
+        rows: result.rows,
+        total: Number((countResult.rows[0] as any)?.total ?? 0),
+        page,
+        limit,
+      });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

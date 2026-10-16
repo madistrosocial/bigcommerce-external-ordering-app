@@ -15,7 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   ArrowLeft, Building2, User, Mail, Phone, Hash, TrendingUp, ShoppingBag,
   Calendar, DollarSign, Users, Plus, Pencil, Trash2, MessageSquare, Package,
-  UserCheck, UserMinus, AlertTriangle, Clock, ChevronLeft, ChevronRight,
+  UserCheck, UserMinus, AlertTriangle, Clock, ChevronLeft, ChevronRight, Download,
   FileText, CreditCard, Edit3, RefreshCw, BookOpen, Save, CheckSquare,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -399,6 +399,8 @@ export default function CustomerProfile() {
   const canManageReactivation = isAdmin || hasPermission("crm", "manage_reactivation");
 
   const [activeTab, setActiveTab]           = useState<Tab>("overview");
+  const [topProductsPage, setTopProductsPage] = useState(1);
+  const [exportingCustomerData, setExportingCustomerData] = useState<string | null>(null);
   const [showAddNote, setShowAddNote]       = useState(false);
   const [showAddTodo, setShowAddTodo]       = useState(false);
   // Mark inactive modal
@@ -477,20 +479,57 @@ export default function CustomerProfile() {
     staleTime: 120_000,
   });
 
+  const topProductsPageSize = 20;
+  const requestedTopProductsPage = activeTab === "top-products" ? topProductsPage : 1;
   const {
-    data: topProducts = [],
+    data: topProductsResult,
     isLoading: loadingTopProducts,
     isError: topProductsError,
-  } = useQuery<any[]>({
-    queryKey: ["crm", "customer", id, "top-products"],
+  } = useQuery<{ rows: any[]; total: number; page: number; limit: number }>({
+    queryKey: ["crm", "customer", id, "top-products", requestedTopProductsPage, topProductsPageSize],
     queryFn: async () => {
-      const r = await fetch(`/api/crm/customers/${id}/top-products`, { headers: getAuthHeaders() });
+      const params = new URLSearchParams({ page: String(requestedTopProductsPage), limit: String(topProductsPageSize) });
+      const r = await fetch(`/api/crm/customers/${id}/top-products?${params}`, { headers: getAuthHeaders() });
       if (!r.ok) throw new Error("Failed to load top products");
       return r.json();
     },
-    enabled: !!id && activeTab === "top-products",
+    enabled: !!id && (activeTab === "top-products" || activeTab === "overview"),
     staleTime: 120_000,
   });
+  const topProducts = topProductsResult?.rows ?? [];
+  const topProductsTotal = topProductsResult?.total ?? 0;
+  const topProductsTotalPages = Math.max(1, Math.ceil(topProductsTotal / topProductsPageSize));
+
+  const canExportCustomerData = isAdmin || hasPermission("crm", "export");
+  const exportCustomerData = async (kind: "orders" | "top-products", format: "csv" | "xlsx") => {
+    const exportKey = `${kind}-${format}`;
+    setExportingCustomerData(exportKey);
+    try {
+      const endpoint = kind === "orders"
+        ? `/api/crm/customers/${id}/orders/export`
+        : `/api/crm/customers/${id}/top-products`;
+      const suffix = kind === "orders" ? "" : "?";
+      const query = kind === "orders"
+        ? `?format=${format}`
+        : `${suffix}format=${format}`;
+      const response = await fetch(`${endpoint}${query}`, { headers: getAuthHeaders() });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || "Export failed");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `customer-${id}-${kind}.${format}`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      toast({ title: "Export failed", description: error.message, variant: "destructive" });
+    } finally {
+      setExportingCustomerData(null);
+    }
+  };
 
   const { data: notes = [], isLoading: loadingNotes } = useQuery({
     queryKey: ["crm", "customer", id, "notes"],
@@ -1206,26 +1245,71 @@ export default function CustomerProfile() {
                 </div>
               </div>
 
-              {/* Recent Order History (latest 20) — replaces Customer Summary panel */}
-              <div className="border rounded-xl overflow-hidden">
-                <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                    <ShoppingBag className="h-4 w-4 text-slate-400" />Order History (Latest 20)
-                  </h2>
-                  <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-600" onClick={() => setActiveTab("orders")} data-testid="btn-view-all-orders">
-                    View All Orders →
-                  </Button>
+              {/* Recent order history and top products */}
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <div className="border rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                    <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                      <ShoppingBag className="h-4 w-4 text-slate-400" />Order History (Latest 20)
+                    </h2>
+                    <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-600" onClick={() => setActiveTab("orders")} data-testid="btn-view-all-orders">
+                      View All Orders →
+                    </Button>
+                  </div>
+                  <CustomerOrdersPanel
+                    crmCustomerId={id}
+                    limit={20}
+                    customerInfo={{
+                      name: customer.company || [customer.first_name, customer.last_name].filter(Boolean).join(" "),
+                      email: customer.email ?? null,
+                      company: customer.company ?? null,
+                      bigcommerceCustomerId: customer.bigcommerce_customer_id ?? null,
+                    }}
+                  />
                 </div>
-                <CustomerOrdersPanel
-                  crmCustomerId={id}
-                  limit={20}
-                  customerInfo={{
-                    name: customer.company || [customer.first_name, customer.last_name].filter(Boolean).join(" "),
-                    email: customer.email ?? null,
-                    company: customer.company ?? null,
-                    bigcommerceCustomerId: customer.bigcommerce_customer_id ?? null,
-                  }}
-                />
+                <div className="border rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 border-b bg-slate-50 px-4 py-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Package className="h-4 w-4 text-slate-400" />Top Products (Latest 20)</h2>
+                      <p className="mt-0.5 text-[11px] text-slate-400">Ranked by units ordered.</p>
+                    </div>
+                    <Button size="sm" variant="ghost" className="h-6 shrink-0 text-xs px-2 text-blue-600" onClick={() => { setTopProductsPage(1); setActiveTab("top-products"); }}>
+                      View All →
+                    </Button>
+                  </div>
+                  {loadingTopProducts ? (
+                    <div className="flex h-24 items-center justify-center text-sm text-slate-400">Loading products…</div>
+                  ) : topProductsError ? (
+                    <div className="flex h-24 items-center justify-center text-sm text-red-500">Could not load top products.</div>
+                  ) : topProducts.length === 0 ? (
+                    <div className="flex h-24 items-center justify-center text-sm text-slate-400">No synced product history.</div>
+                  ) : (
+                    <div className="max-h-[560px] divide-y overflow-y-auto">
+                      {topProducts.map((product: any) => (
+                        <div key={product.product_id} className="flex items-center gap-3 px-4 py-2.5">
+                          <button
+                            type="button"
+                            disabled={!product.product360_id}
+                            onClick={() => product.product360_id && setLocation(`/product-360/products/${product.product360_id}`)}
+                            className="h-9 w-9 shrink-0 overflow-hidden rounded bg-slate-100 disabled:cursor-default"
+                            aria-label={`Open ${product.product_name || `Product ${product.product_id}`} in Product 360`}
+                          >
+                            {product.product_image ? <img src={String(product.product_image)} alt="" className="h-full w-full object-cover" /> : <Package className="m-2.5 h-4 w-4 text-slate-400" />}
+                          </button>
+                          <div className="min-w-0 flex-1">
+                            {product.product360_id ? (
+                              <button type="button" onClick={() => setLocation(`/product-360/products/${product.product360_id}`)} className="block w-full truncate text-left text-xs font-medium text-blue-700 hover:underline">
+                                {product.product_name || `Product ${product.product_id}`}
+                              </button>
+                            ) : <p className="truncate text-xs font-medium text-slate-700">{product.product_name || `Product ${product.product_id}`}</p>}
+                            <p className="truncate text-[10px] text-slate-400">{Number(product.sku_count) > 1 ? `${Number(product.sku_count)} SKUs` : product.sku || "No SKU"}</p>
+                          </div>
+                          <span className="shrink-0 text-xs font-semibold text-slate-600">{Number(product.units_ordered || 0).toLocaleString()} units</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1233,8 +1317,18 @@ export default function CustomerProfile() {
           {/* ── ORDERS TAB ────────────────────────────────────────────────── */}
           {activeTab === "orders" && (
             <div>
-              <div className="px-4 py-3 border-b bg-slate-50">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-slate-50 px-4 py-3">
                 <h2 className="text-sm font-semibold text-slate-700">Order History</h2>
+                {canExportCustomerData && (
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => exportCustomerData("orders", "csv")} disabled={!!exportingCustomerData}>
+                      <Download className="h-3.5 w-3.5" />{exportingCustomerData === "orders-csv" ? "Exporting…" : "CSV"}
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => exportCustomerData("orders", "xlsx")} disabled={!!exportingCustomerData}>
+                      <Download className="h-3.5 w-3.5" />{exportingCustomerData === "orders-xlsx" ? "Exporting…" : "Excel"}
+                    </Button>
+                  </div>
+                )}
               </div>
               <CustomerOrdersPanel
                 crmCustomerId={id}
@@ -1251,9 +1345,21 @@ export default function CustomerProfile() {
           {/* ── TOP PRODUCTS TAB ───────────────────────────────────────────── */}
           {activeTab === "top-products" && (
             <div className="border rounded-xl overflow-hidden">
-              <div className="px-4 py-3 border-b bg-slate-50">
-                <h2 className="text-sm font-semibold text-slate-700">Top Products</h2>
-                <p className="mt-0.5 text-xs text-slate-500">Ranked by total units ordered from synced order history.</p>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50 px-4 py-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-700">Top Products</h2>
+                  <p className="mt-0.5 text-xs text-slate-500">Ranked by total units ordered from synced order history.</p>
+                </div>
+                {canExportCustomerData && (
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => exportCustomerData("top-products", "csv")} disabled={!!exportingCustomerData}>
+                      <Download className="h-3.5 w-3.5" />{exportingCustomerData === "top-products-csv" ? "Exporting…" : "CSV"}
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => exportCustomerData("top-products", "xlsx")} disabled={!!exportingCustomerData}>
+                      <Download className="h-3.5 w-3.5" />{exportingCustomerData === "top-products-xlsx" ? "Exporting…" : "Excel"}
+                    </Button>
+                  </div>
+                )}
               </div>
               {loadingTopProducts ? (
                 <div className="px-4 py-10 text-center text-sm text-slate-400">Loading top products…</div>
@@ -1262,17 +1368,18 @@ export default function CustomerProfile() {
               ) : topProducts.length === 0 ? (
                 <div className="px-4 py-10 text-center text-sm text-slate-400">No synced product purchase history found.</div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[620px] text-left">
-                    <thead className="border-b bg-white">
-                      <tr>
-                        {["Product", "SKU", "Units Ordered", "Orders", "Total Spent", "Last Ordered"].map((label) => (
-                          <th key={label} className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {topProducts.map((product: any) => (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[620px] text-left">
+                      <thead className="border-b bg-white">
+                        <tr>
+                          {["Product", "SKU", "Units Ordered", "Orders", "Total Spent", "Last Ordered"].map((label) => (
+                            <th key={label} className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {topProducts.map((product: any) => (
                         <tr key={product.product_id} className="hover:bg-slate-50">
                           <td className="px-4 py-3">
                             <div className="flex min-w-0 items-center gap-3">
@@ -1306,10 +1413,22 @@ export default function CustomerProfile() {
                           <td className="px-4 py-3 text-sm text-slate-600">{fmtCurrency(product.total_spent)}</td>
                           <td className="px-4 py-3 text-xs text-slate-500">{product.last_order_date ? fmt.date(product.last_order_date) : "—"}</td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-t bg-slate-50 px-4 py-2.5">
+                    <p className="text-xs text-slate-500">{topProductsTotal} products · Page {topProductsPage} of {topProductsTotalPages}</p>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" className="h-7 gap-1 px-2" onClick={() => setTopProductsPage((page) => Math.max(1, page - 1))} disabled={topProductsPage <= 1 || loadingTopProducts}>
+                        <ChevronLeft className="h-4 w-4" />Previous
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 gap-1 px-2" onClick={() => setTopProductsPage((page) => Math.min(topProductsTotalPages, page + 1))} disabled={topProductsPage >= topProductsTotalPages || loadingTopProducts}>
+                        Next<ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           )}
