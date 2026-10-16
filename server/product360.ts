@@ -585,7 +585,6 @@ export async function getProduct360Overview(input: {
     FROM customers_mirror cm
     WHERE ${stateExpression("cm")} IS NOT NULL
     ORDER BY state
-    LIMIT 100
   `));
 
   const categoryTrailRows = drillCategoryId ? categoryTrail(drillCategoryId, categoryMap) : [];
