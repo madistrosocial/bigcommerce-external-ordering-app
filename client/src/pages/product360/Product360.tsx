@@ -70,10 +70,15 @@ import { useStore } from "@/lib/store";
 
 const COLORS = ["#2563eb", "#14b8a6", "#f59e0b", "#8b5cf6", "#ef4444", "#64748b"];
 const MAIN_CATEGORY_LABELS = ["Disposables", "E-Liquid", "Hardware", "Smoke Shop"];
+const SUBCATEGORY_COLORS = ["#2563eb", "#14b8a6", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#6366f1", "#10b981", "#a855f7", "#0ea5e9"];
 
-function productCategoryColor(label: unknown): string {
-  const index = MAIN_CATEGORY_LABELS.indexOf(String(label ?? ""));
-  return COLORS[index >= 0 ? index : MAIN_CATEGORY_LABELS.length];
+function productCategoryColor(label: unknown, fallbackIndex = 0): string {
+  const name = String(label ?? "");
+  const index = MAIN_CATEGORY_LABELS.indexOf(name);
+  if (index >= 0) return COLORS[index];
+  if (name === "Other / Uncategorized" || name === "Directly assigned / Other") return COLORS[5];
+  if (fallbackIndex < SUBCATEGORY_COLORS.length) return SUBCATEGORY_COLORS[Math.max(0, fallbackIndex)];
+  return `hsl(${Math.round((fallbackIndex * 137.508) % 360)} 68% 46%)`;
 }
 
 function isoDaysAgo(days: number, timezone: string) {
@@ -627,9 +632,15 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
   const categoryRows: Record<string, unknown>[] = data.categoryPerformance
     .map((row) => ({ ...row, units: Number(row.units || 0), revenue: Number(row.revenue || 0) }));
   const categoryData = categoryRows.filter((row) => Number(row[categoryMetric]) > 0);
-  const categoryLegendData = categoryRows.filter((row) =>
-    (Number(row.id) > 0 && Number(row[categoryMetric]) > 0) || MAIN_CATEGORY_LABELS.includes(String(row.label))
-  );
+  const categoryLegendData = categoryRows
+    .filter((row) => (Number(row.id) > 0 && Number(row[categoryMetric]) > 0) || MAIN_CATEGORY_LABELS.includes(String(row.label)))
+    .sort((a, b) => Number(b[categoryMetric] || 0) - Number(a[categoryMetric] || 0));
+  const categoryColors = new Map(categoryRows.map((row, index) => [
+    String(row.id ?? row.label),
+    productCategoryColor(row.label, index),
+  ]));
+  const categoryColor = (row: Record<string, unknown>) =>
+    categoryColors.get(String(row.id ?? row.label)) || productCategoryColor(row.label);
   const brandData = data.brandPerformance.map((row) => ({ ...row, units: Number(row.units || 0), revenue: Number(row.revenue || 0) }));
   const inventory = data.inventoryStatus[0] || {};
   const inventoryData = [
@@ -674,7 +685,7 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
           </div>
           {categoryData.length === 0
             ? <div className="flex h-[160px] items-center justify-center text-center text-xs text-slate-400">{drillCategoryId && !data.categoryHasChildren ? `No more sub-categories under ${categoryDisplayName}. Dashboard data is filtered to this category.` : "No category sales data."}</div>
-            : <div className="flex h-[160px] items-center gap-2 px-2 py-1"><div className="relative h-[140px] w-[52%] shrink-0"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={categoryData} dataKey={categoryMetric} nameKey="label" cx="50%" cy="50%" innerRadius={38} outerRadius={60} paddingAngle={2}>{categoryData.map((row, index) => { const label = String(row.label); const canDrill = Number(row.id) > 0; return <Cell key={String(row.id ?? label) + index} fill={productCategoryColor(label)} cursor={canDrill ? "pointer" : "default"} onClick={canDrill ? () => onCategorySelect({ id: Number(row.id), name: label }) : undefined} />; })}</Pie><Tooltip formatter={(value: number) => [categoryMetric === "revenue" ? money(value) : `${number(value)} units`, categoryMetric === "revenue" ? "Revenue" : "Units sold"]} /></PieChart></ResponsiveContainer><div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"><span className="text-sm font-bold text-slate-800">{categoryMetric === "revenue" ? money(categoryTotal) : number(categoryTotal)}</span><span className="text-[9px] text-slate-400">{categoryMetric === "revenue" ? "Total Revenue" : "Total Units"}</span></div></div><div className="min-w-0 flex-1 space-y-1.5">{categoryLegendData.map((row, index) => { const label = String(row.label); const canDrill = Number(row.id) > 0; return <button key={String(row.id ?? label) + index} type="button" disabled={!canDrill} onClick={() => { if (canDrill) onCategorySelect({ id: Number(row.id), name: label }); }} className={`flex w-full items-center justify-between gap-2 rounded px-1 text-left text-[9px] ${canDrill ? "cursor-pointer hover:bg-blue-50" : "cursor-default"} text-slate-600`}><span className="flex min-w-0 items-center gap-1.5"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: productCategoryColor(label) }} /><span className="truncate">{label}</span></span><span className="font-semibold text-slate-500">{categoryTotal ? `${Math.round((Number(row[categoryMetric]) / categoryTotal) * 100)}%` : "0%"}</span></button>; })}</div></div>}
+            : <div className="flex h-[160px] items-center gap-2 px-2 py-1"><div className="relative h-[140px] w-[52%] shrink-0"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={categoryData} dataKey={categoryMetric} nameKey="label" cx="50%" cy="50%" innerRadius={38} outerRadius={60} paddingAngle={2}>{categoryData.map((row, index) => { const label = String(row.label); const canDrill = Number(row.id) > 0; return <Cell key={String(row.id ?? label) + index} fill={categoryColor(row)} cursor={canDrill ? "pointer" : "default"} onClick={canDrill ? () => onCategorySelect({ id: Number(row.id), name: label }) : undefined} />; })}</Pie><Tooltip formatter={(value: number) => [categoryMetric === "revenue" ? money(value) : `${number(value)} units`, categoryMetric === "revenue" ? "Revenue" : "Units sold"]} /></PieChart></ResponsiveContainer><div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"><span className="text-sm font-bold text-slate-800">{categoryMetric === "revenue" ? money(categoryTotal) : number(categoryTotal)}</span><span className="text-[9px] text-slate-400">{categoryMetric === "revenue" ? "Total Revenue" : "Total Units"}</span></div></div><div className="min-w-0 flex-1 space-y-1.5">{categoryLegendData.map((row, index) => { const label = String(row.label); const canDrill = Number(row.id) > 0; return <button key={String(row.id ?? label) + index} type="button" disabled={!canDrill} onClick={() => { if (canDrill) onCategorySelect({ id: Number(row.id), name: label }); }} className={`flex w-full items-center justify-between gap-2 rounded px-1 text-left text-[9px] ${canDrill ? "cursor-pointer hover:bg-blue-50" : "cursor-default"} text-slate-600`}><span className="flex min-w-0 items-center gap-1.5"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: categoryColor(row) }} /><span className="truncate">{label}</span></span><span className="font-semibold text-slate-500">{categoryTotal ? `${Math.round((Number(row[categoryMetric]) / categoryTotal) * 100)}%` : "0%"}</span></button>; })}</div></div>}
         </DashboardPanel>
         <DashboardPanel className="order-3" title="Units Sold by Brand" subtitle="Top brands by units sold">
           {brandData.length === 0 ? <div className="flex h-[190px] items-center justify-center text-xs text-slate-400">No brand sales data.</div> : <div className="h-[190px] px-1 py-2"><ResponsiveContainer width="100%" height="100%"><BarChart data={brandData} layout="vertical" margin={{ left: 4, right: 8, top: 4, bottom: 4 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e5eaf1" /><XAxis type="number" hide /><YAxis type="category" dataKey="label" width={62} tick={{ fontSize: 9, fill: "#64748b" }} tickLine={false} axisLine={false} /><Tooltip formatter={(value: number) => [number(value), "Units sold"]} /><Bar dataKey="units" fill="#347be5" radius={[0, 3, 3, 0]} barSize={10} /></BarChart></ResponsiveContainer></div>}
