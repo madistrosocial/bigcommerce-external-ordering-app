@@ -50,6 +50,7 @@ import RichTextEditor from "@/components/editor/RichTextEditor";
 import {
   getProduct360Detail,
   getProduct360Overview,
+  getProduct360BrandOptions,
   getProduct360TopCustomers,
   getProduct360DashboardList,
   getProduct360Products,
@@ -153,6 +154,8 @@ function DateRangeControls({
   brand = "",
   category = "",
   brandOptions = [],
+  brandOptionsLoading = false,
+  brandOptionsError = false,
   categoryOptions = [],
   onChange,
   rangePreset,
@@ -173,6 +176,8 @@ function DateRangeControls({
   brand?: string;
   category?: string;
   brandOptions?: string[];
+  brandOptionsLoading?: boolean;
+  brandOptionsError?: boolean;
   categoryOptions?: string[];
   onChange: (from: string, to: string) => void;
   rangePreset?: "7" | "30" | "90" | "365" | "all" | "custom";
@@ -234,10 +239,11 @@ function DateRangeControls({
         <span className="hidden text-xs text-slate-400 sm:inline">to</span>
         <Input type="date" className="h-9 w-full bg-white text-xs sm:w-[135px]" value={to} onChange={(e) => onChange(from, e.target.value)} />
       </>}
-      <select className="h-9 max-w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm sm:max-w-[150px]" value={brand} onChange={(event) => onBrandChange?.(event.target.value)}>
+      <select className="h-9 max-w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm sm:max-w-[150px]" value={brand} onChange={(event) => onBrandChange?.(event.target.value)} disabled={brandOptionsLoading || brandOptionsError} title={brandOptionsError ? "Could not load BigCommerce brands" : undefined}>
         <option value="">All Brands</option>
         {brandOptions.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
+      {brandOptionsError && <span className="text-[10px] text-red-600">Run Sync to load brands</span>}
       {onStateChange && <select className="h-9 max-w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm sm:max-w-[150px]" value={state} onChange={(event) => onStateChange(event.target.value)}>
         <option value="">All States</option>
         {stateOptions.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -836,18 +842,20 @@ export function Product360OverviewPage() {
   const focus = location.split("/")[2] || "overview";
   const categoryId = categoryPath.at(-1)?.id;
   const query = useQuery({ queryKey: ["product-360-overview", from, to, brand, state, category, categoryId], queryFn: () => getProduct360Overview({ dateFrom: from, dateTo: to, brand, state, category, categoryId }) });
+  const brandOptionsQuery = useQuery({ queryKey: ["product-360-bigcommerce-brands"], queryFn: getProduct360BrandOptions, staleTime: 60 * 60 * 1000 });
   const catalogSync = useMutation({
     mutationFn: syncProduct360Catalog,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["product-360-overview"] });
       await queryClient.invalidateQueries({ queryKey: ["product-360-products"] });
+      await queryClient.invalidateQueries({ queryKey: ["product-360-bigcommerce-brands"] });
     },
   });
-  const brandOptions = query.data?.brandOptions || [];
+  const brandOptions = brandOptionsQuery.data || [];
   const stateOptions = query.data?.stateOptions || [];
   const categoryOptions = query.data?.categoryOptions || ["Disposables", "E-Liquid", "Hardware", "Smoke Shop"];
   return (
-    <PageFrame title="Product 360" description="Complete product intelligence for better decisions" actions={<div className="flex flex-wrap items-center justify-end gap-2"><DateRangeControls from={from} to={to} rangePreset={rangePreset} dashboardFilters onRangePresetChange={(preset) => { setRangePreset(preset); if (preset !== "custom") { const today = fmt.dateOnly(); setTo(today); setFrom(preset === "all" ? "1900-01-01" : isoDaysAgo(Number(preset) - 1, fmt.tz)); } }} brand={brand} state={state} category={category} brandOptions={brandOptions} stateOptions={stateOptions} categoryOptions={categoryOptions} onChange={(nextFrom, nextTo) => { setRangePreset("custom"); setFrom(nextFrom); setTo(nextTo); }} onBrandChange={setBrand} onStateChange={setState} onCategoryChange={(nextCategory) => { setCategory(nextCategory); setCategoryPath([]); }} onExport={() => query.data && exportProduct360Overview(query.data, query.data.range.dateFrom, query.data.range.dateTo, brand, state, category)} />{currentUser?.role === "admin" && focus === "overview" && <Button variant="outline" size="sm" onClick={() => catalogSync.mutate()} disabled={catalogSync.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${catalogSync.isPending ? "animate-spin" : ""}`} />{catalogSync.isPending ? "Syncing catalog…" : "Temporary: sync catalog"}</Button>}</div>}>
+    <PageFrame title="Product 360" description="Complete product intelligence for better decisions" actions={<div className="flex flex-wrap items-center justify-end gap-2"><DateRangeControls from={from} to={to} rangePreset={rangePreset} dashboardFilters onRangePresetChange={(preset) => { setRangePreset(preset); if (preset !== "custom") { const today = fmt.dateOnly(); setTo(today); setFrom(preset === "all" ? "1900-01-01" : isoDaysAgo(Number(preset) - 1, fmt.tz)); } }} brand={brand} state={state} category={category} brandOptions={brandOptions} brandOptionsLoading={brandOptionsQuery.isLoading} brandOptionsError={brandOptionsQuery.isError} stateOptions={stateOptions} categoryOptions={categoryOptions} onChange={(nextFrom, nextTo) => { setRangePreset("custom"); setFrom(nextFrom); setTo(nextTo); }} onBrandChange={setBrand} onStateChange={setState} onCategoryChange={(nextCategory) => { setCategory(nextCategory); setCategoryPath([]); }} onExport={() => query.data && exportProduct360Overview(query.data, query.data.range.dateFrom, query.data.range.dateTo, brand, state, category)} />{currentUser?.role === "admin" && focus === "overview" && <Button variant="outline" size="sm" onClick={() => catalogSync.mutate()} disabled={catalogSync.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${catalogSync.isPending ? "animate-spin" : ""}`} />{catalogSync.isPending ? "Syncing…" : "Sync"}</Button>}</div>}>
       {catalogSync.data && <Card className="mb-4 border-blue-200 bg-blue-50 p-4 text-sm text-blue-950"><div className="font-semibold">Catalog sync complete</div><div className="mt-1">Fetched {catalogSync.data.productsFetched.toLocaleString()} products across {catalogSync.data.pagesCompleted} pages. {catalogSync.data.productsAdded.toLocaleString()} added; {catalogSync.data.productsUpdated.toLocaleString()} updated.</div><div className="mt-1">Products table storage: {formatStorage(catalogSync.data.storageAfterBytes)} total ({formatStorage(catalogSync.data.tableBytes)} table, {formatStorage(catalogSync.data.indexBytes)} indexes); change: {catalogSync.data.storageDeltaBytes >= 0 ? "+" : ""}{formatStorage(catalogSync.data.storageDeltaBytes)}.</div></Card>}
       {catalogSync.isError && <Card className="mb-4 border-red-200 bg-red-50 p-4 text-sm text-red-800">Catalog sync failed: {catalogSync.error.message}</Card>}
       {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : query.data ? <DashboardOverviewContent

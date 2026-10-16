@@ -2553,6 +2553,24 @@ export async function registerRoutes(
   // These endpoints aggregate the existing Product Master and BigCommerce
   // order-line mirror. They intentionally do not create a second product or
   // reporting database.
+  app.get("/api/product-360/brand-options", requirePermission("product_360", "view"), async (_req, res) => {
+    try {
+      const cachedBrands = await storage.getSetting("report_bc_brands_cache");
+      const brands = (cachedBrands?.value as { data?: unknown } | undefined)?.data;
+      if (!Array.isArray(brands)) {
+        return res.status(409).json({ error: "Brand catalog has not been synced yet. Run Sync to load BigCommerce brands." });
+      }
+      res.json({
+        brands: brands
+          .map((brand: any) => String(brand?.name ?? "").trim())
+          .filter(Boolean),
+      });
+    } catch (error: any) {
+      console.error("[Product 360] brand options failed:", error);
+      res.status(500).json({ error: "Unable to load synced BigCommerce brands" });
+    }
+  });
+
   app.get("/api/product-360/overview", requirePermission("product_360", "view"), async (req, res) => {
     try {
       const user = (req as any).authUser;

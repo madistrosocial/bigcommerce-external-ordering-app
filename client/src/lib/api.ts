@@ -34,7 +34,6 @@ export interface Product360Overview {
   salesVelocity: Record<string, unknown>[];
   replenishmentPriority: Record<string, unknown>[];
   recentActivity: Record<string, unknown>[];
-  brandOptions: string[];
   stateOptions: string[];
   categoryOptions: string[];
   categoryPerformance: Record<string, unknown>[];
@@ -147,6 +146,11 @@ export function getProduct360Overview(query: { dateFrom?: string; dateTo?: strin
   if (query.category) params.set("category", query.category);
   if (query.categoryId) params.set("categoryId", String(query.categoryId));
   return product360Request<Product360Overview>(`/product-360/overview?${params.toString()}`);
+}
+
+export async function getProduct360BrandOptions(): Promise<string[]> {
+  const response = await product360Request<{ brands: string[] }>("/product-360/brand-options");
+  return response.brands;
 }
 
 export function getProduct360TopCustomers(query: { dateFrom?: string; dateTo?: string; brand?: string; state?: string; category?: string; categoryId?: number; page?: number; limit?: number } = {}) {

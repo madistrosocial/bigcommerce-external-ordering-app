@@ -411,7 +411,7 @@ export async function getProduct360Overview(input: {
       : "",
   ].filter(Boolean);
   const activityFilter = activityConditions.length ? `WHERE ${activityConditions.join(" AND ")}` : "";
-  const [metrics, trend, fastSellers, profitDrivers, restockAlerts, slowMovers, brandPerformance, inventoryStatus, salesVelocity, replenishmentPriority, recentActivity, brandOptions, categorySales] = await Promise.all([
+  const [metrics, trend, fastSellers, profitDrivers, restockAlerts, slowMovers, brandPerformance, inventoryStatus, salesVelocity, replenishmentPriority, recentActivity, categorySales] = await Promise.all([
     db.execute(sql.raw(`
       SELECT
         COUNT(*)::int AS total_products,
@@ -563,12 +563,6 @@ export async function getProduct360Overview(input: {
       LIMIT 5
     `)),
     db.execute(sql.raw(`
-      SELECT DISTINCT COALESCE(NULLIF(TRIM(brand_name), ''), 'Unbranded') AS label
-      FROM products
-      ORDER BY label
-      LIMIT 200
-    `)),
-    db.execute(sql.raw(`
       SELECT p.categories,
         SUM(li.quantity)::numeric AS units,
         SUM(li.quantity * li.base_price)::numeric AS revenue
@@ -660,7 +654,6 @@ export async function getProduct360Overview(input: {
     salesVelocity: normalizeRows(salesVelocity.rows as Record<string, unknown>[]),
     replenishmentPriority: normalizeRows(replenishmentPriority.rows as Record<string, unknown>[]),
     recentActivity: normalizeRows(recentActivity.rows as Record<string, unknown>[]),
-    brandOptions: (brandOptions.rows as Record<string, unknown>[]).map((row) => String(row.label || "")).filter(Boolean),
     stateOptions: (stateOptionsResult.rows as Record<string, unknown>[]).map((row) => String(row.state || "")).filter(Boolean),
     categoryOptions: categoryCatalog.categories.length ? PRODUCT_360_MAIN_CATEGORIES : [],
     categoryPerformance,
