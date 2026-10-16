@@ -628,6 +628,77 @@ export async function getProduct360Overview(input: {
   };
 }
 
+export async function getProduct360DashboardList(input: {
+  kind?: unknown;
+  dateFrom?: unknown;
+  dateTo?: unknown;
+  brand?: unknown;
+  category?: unknown;
+  categoryId?: unknown;
+  page?: unknown;
+  limit?: unknown;
+}) {
+  const kind = String(input.kind || "");
+  const definitions: Record<string, { where: string; order: string }> = {
+    sales: { where: "sales_velocity > 0", order: "sales_velocity DESC, units_sold DESC" },
+    profit: { where: "gross_profit IS NOT NULL AND gross_profit > 0", order: "gross_profit DESC, revenue DESC" },
+    restock: { where: "sales_velocity > 0 AND days_of_stock <= 14", order: "days_of_stock ASC, sales_velocity DESC" },
+    slow: { where: "current_stock > 0 AND (sales_velocity < 1 OR last_sold IS NULL)", order: "current_stock DESC, sales_velocity ASC" },
+  };
+  const definition = definitions[kind];
+  if (!definition) throw new Error("Invalid Product 360 dashboard list");
+  const range = dateRange(input.dateFrom, input.dateTo);
+  const catalog = await getProduct360CategoryCatalog();
+  const categoryMap = new Map(catalog.categories.map((item) => [item.id, item]));
+  const brand = String(input.brand ?? "").trim().slice(0, 100);
+  const category = PRODUCT_360_MAIN_CATEGORIES.find((label) => categoryKey(label) === categoryKey(input.category));
+  const requestedCategoryId = normalizeCategoryId(input.categoryId, catalog.categories);
+  const drillRootName = requestedCategoryId ? categoryRootName(requestedCategoryId, categoryMap) : undefined;
+  const drillRoot = PRODUCT_360_MAIN_CATEGORIES.find((label) => categoryKey(label) === categoryKey(drillRootName));
+  const drillCategoryId = drillRoot ? requestedCategoryId : undefined;
+  const effectiveRoot = drillRoot || category;
+  const categoryIndex = effectiveRoot ? PRODUCT_360_MAIN_CATEGORIES.indexOf(effectiveRoot) : -1;
+  const categoryIds = drillCategoryId
+    ? categoryDescendantIds(drillCategoryId, catalog.categories)
+    : effectiveRoot ? categoryIdsForMainCategory(effectiveRoot, catalog.categories) : undefined;
+  const categoryExcludeIds = categoryIndex > 0
+    ? PRODUCT_360_MAIN_CATEGORIES.slice(0, categoryIndex).flatMap((label) => categoryIdsForMainCategory(label, catalog.categories))
+    : [];
+  const filters: Product360Filters = {
+    brand: brand || undefined,
+    categoryIds: effectiveRoot ? (categoryIds?.length ? categoryIds : [0]) : undefined,
+    categoryExcludeIds,
+  };
+  const base = productBaseCte(range, undefined, filters);
+  const page = Math.max(0, Math.trunc(Number(input.page) || 0));
+  const limit = Math.min(100, Math.max(1, Math.trunc(Number(input.limit) || 25)));
+  const result = await db.execute(sql.raw(`
+    WITH dashboard_products AS (${base}),
+    matching_products AS (
+      SELECT * FROM dashboard_products WHERE ${definition.where}
+    ),
+    totals AS (
+      SELECT COUNT(*)::int AS total FROM matching_products
+    )
+    SELECT product_page.*, totals.total AS total_count
+    FROM totals
+    LEFT JOIN (
+      SELECT * FROM matching_products
+      ORDER BY ${definition.order}
+      LIMIT ${limit} OFFSET ${page * limit}
+    ) product_page ON TRUE
+  `));
+  const rawRows = result.rows as Record<string, unknown>[];
+  const rows = normalizeRows(rawRows.filter((row) => row.id != null));
+  return {
+    range,
+    rows: rows.map(({ total_count: _total, ...row }) => row),
+    total: Number(rawRows[0]?.total_count ?? 0),
+    page,
+    limit,
+  };
+}
+
 function customerVisibilitySql(visibility: "ALL" | "ASSIGNED_AND_UNASSIGNED" | "ASSIGNED_ONLY", userId: number): string {
   if (visibility === "ALL") return "";
   const scopedUserId = Math.trunc(userId || 0);

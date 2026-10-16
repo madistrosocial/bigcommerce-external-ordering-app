@@ -51,6 +51,7 @@ import {
   getProduct360Detail,
   getProduct360Overview,
   getProduct360TopCustomers,
+  getProduct360DashboardList,
   getProduct360Products,
   getProduct360CatalogDetails,
   getProduct360Drafts,
@@ -372,6 +373,85 @@ function DashboardTable({ title, rows, kind, onViewAll }: { title: string; rows:
   );
 }
 
+function DashboardListDialog({
+  kind,
+  open,
+  onOpenChange,
+  filters,
+}: {
+  kind: "sales" | "profit" | "restock" | "slow";
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  filters: { dateFrom: string; dateTo: string; brand: string; category: string; categoryId?: number };
+}) {
+  const fmt = useTimeService();
+  const [, setLocation] = useLocation();
+  const [page, setPage] = useState(0);
+  const titles = {
+    sales: "Fastest Selling Products",
+    profit: "Top Profit Drivers",
+    restock: "Restock Alerts",
+    slow: "Slow Movers (High Inventory, Low Sales)",
+  };
+  const query = useQuery({
+    queryKey: ["product-360-dashboard-list", kind, filters.dateFrom, filters.dateTo, filters.brand, filters.category, filters.categoryId, page],
+    queryFn: () => getProduct360DashboardList({ kind, ...filters, page, limit: 25 }),
+    enabled: open,
+    placeholderData: (previous) => previous,
+  });
+  useEffect(() => setPage(0), [kind, filters.dateFrom, filters.dateTo, filters.brand, filters.category, filters.categoryId]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-5xl">
+        <DialogHeader><DialogTitle>{titles[kind]}</DialogTitle></DialogHeader>
+        <DialogDescription className="-mt-3 text-sm text-slate-500">
+          All matching products · {filters.dateFrom} to {filters.dateTo}{query.data ? ` · ${number(query.data.total)} products` : ""}
+        </DialogDescription>
+        {query.isLoading ? <div className="py-12 text-center text-sm text-slate-500">Loading products…</div>
+          : query.isError ? <div className="py-12 text-center text-sm text-red-600">Could not load this list. Close and try again.</div>
+            : query.data?.rows.length ? <>
+              <div className="max-h-[58vh] overflow-auto rounded-md border border-slate-200">
+                <table className="w-full min-w-[650px] text-left text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2.5">Product</th>
+                      {kind === "sales" && <><th className="px-3 py-2.5 text-right">Units sold</th><th className="px-3 py-2.5 text-right">Revenue</th><th className="px-3 py-2.5 text-right">Velocity</th></>}
+                      {kind === "profit" && <><th className="px-3 py-2.5 text-right">Gross profit</th><th className="px-3 py-2.5 text-right">Revenue</th><th className="px-3 py-2.5 text-right">Margin</th></>}
+                      {kind === "restock" && <><th className="px-3 py-2.5 text-right">Current stock</th><th className="px-3 py-2.5 text-right">Days of stock</th><th className="px-3 py-2.5">Status</th></>}
+                      {kind === "slow" && <><th className="px-3 py-2.5 text-right">Units sold</th><th className="px-3 py-2.5 text-right">Current stock</th><th className="px-3 py-2.5 text-right">Days of stock</th></>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {query.data.rows.map((row, index) => {
+                      const margin = Number(row.revenue) > 0 ? Number(row.gross_profit || 0) / Number(row.revenue) * 100 : 0;
+                      return <tr key={`${String(row.id)}-${index}`} className="hover:bg-slate-50">
+                        <td className="max-w-[280px] px-3 py-2.5">
+                          <button type="button" className="block max-w-full truncate text-left font-medium text-blue-700 hover:underline" onClick={() => row.id && setLocation(`/product-360/products/${row.id}`)}>{String(row.name || "Unnamed product")}</button>
+                          <span className="block truncate text-xs text-slate-400">{String(row.sku || "")}</span>
+                        </td>
+                        {kind === "sales" && <><td className="px-3 py-2.5 text-right">{number(row.units_sold)}</td><td className="px-3 py-2.5 text-right">{money(row.revenue)}</td><td className="px-3 py-2.5 text-right">{number(row.sales_velocity, 1)}/day</td></>}
+                        {kind === "profit" && <><td className="px-3 py-2.5 text-right">{money(row.gross_profit)}</td><td className="px-3 py-2.5 text-right">{money(row.revenue)}</td><td className="px-3 py-2.5 text-right">{margin.toFixed(1)}%</td></>}
+                        {kind === "restock" && <><td className="px-3 py-2.5 text-right">{number(row.current_stock)}</td><td className="px-3 py-2.5 text-right">{number(row.days_of_stock, 1)}</td><td className="px-3 py-2.5"><StatusBadge status={getStatus(row)} /></td></>}
+                        {kind === "slow" && <><td className="px-3 py-2.5 text-right">{number(row.units_sold)}</td><td className="px-3 py-2.5 text-right">{number(row.current_stock)}</td><td className="px-3 py-2.5 text-right">{number(row.days_of_stock, 1)}</td></>}
+                      </tr>;
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between text-sm text-slate-500">
+                <span>Page {page + 1} of {Math.max(1, Math.ceil(query.data.total / query.data.limit))}</span>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Previous</Button>
+                  <Button type="button" variant="outline" size="sm" disabled={(page + 1) * query.data.limit >= query.data.total} onClick={() => setPage((current) => current + 1)}>Next</Button>
+                </div>
+              </div>
+            </> : <div className="py-12 text-center text-sm text-slate-500">No products match this list.</div>}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function OverviewContent({ data, focus }: { data: Product360Overview; focus?: string }) {
   const [categoryMetric, setCategoryMetric] = useState<"units" | "revenue">("units");
   const metrics = data.metrics || {};
@@ -436,6 +516,7 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
   const [categoryMetric, setCategoryMetric] = useState<"units" | "revenue">("revenue");
   const [customersDialogOpen, setCustomersDialogOpen] = useState(false);
   const [customerPage, setCustomerPage] = useState(0);
+  const [dashboardListKind, setDashboardListKind] = useState<"sales" | "profit" | "restock" | "slow" | null>(null);
   const [, setLocation] = useLocation();
   const drillCategoryId = categoryPath.at(-1)?.id;
   const categoryDisplayName = categoryPath.at(-1)?.name || selectedCategory;
@@ -513,9 +594,9 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
       </div>
 
       <div className="mt-3 grid gap-3 xl:grid-cols-3">
-        <DashboardTable title="Fastest Selling Products" rows={data.fastSellers} kind="sales" onViewAll={() => setLocation("/product-360/products")} />
-        <DashboardTable title="Top Profit Drivers" rows={data.profitDrivers} kind="profit" onViewAll={() => setLocation("/product-360/profitability")} />
-        <DashboardTable title="Restock Alerts" rows={data.restockAlerts} kind="restock" onViewAll={() => setLocation("/product-360/replenishment")} />
+        <DashboardTable title="Fastest Selling Products" rows={data.fastSellers} kind="sales" onViewAll={() => setDashboardListKind("sales")} />
+        <DashboardTable title="Top Profit Drivers" rows={data.profitDrivers} kind="profit" onViewAll={() => setDashboardListKind("profit")} />
+        <DashboardTable title="Restock Alerts" rows={data.restockAlerts} kind="restock" onViewAll={() => setDashboardListKind("restock")} />
       </div>
 
       <div className="mt-3 grid gap-3 xl:grid-cols-[1fr_1fr_1.25fr]">
@@ -525,7 +606,7 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
         <DashboardPanel title="Products by Sales Velocity" subtitle="Products grouped by units per day">
           {velocityData.length === 0 ? <div className="flex h-[180px] items-center justify-center text-xs text-slate-400">No velocity data.</div> : <div className="h-[180px] px-2 py-2"><ResponsiveContainer width="100%" height="100%"><BarChart data={velocityData} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5eaf1" /><XAxis dataKey="label" tick={{ fontSize: 8 }} tickLine={false} axisLine={false} /><YAxis tick={{ fontSize: 8 }} tickLine={false} axisLine={false} /><Tooltip formatter={(value: number) => [number(value), "Products"]} /><Bar dataKey="products" fill="#2bb673" radius={[3, 3, 0, 0]} barSize={28} /></BarChart></ResponsiveContainer></div>}
         </DashboardPanel>
-        <DashboardTable title="Slow Movers (High Inventory, Low Sales)" rows={data.slowMovers} kind="slow" onViewAll={() => setLocation("/product-360/inventory")} />
+        <DashboardTable title="Slow Movers (High Inventory, Low Sales)" rows={data.slowMovers} kind="slow" onViewAll={() => setDashboardListKind("slow")} />
       </div>
 
       <div className="mt-3 grid gap-3 xl:grid-cols-[1.2fr_0.9fr_1.2fr]">
@@ -578,6 +659,18 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
               </> : <div className="py-12 text-center text-sm text-slate-500">No customer sales for this period.</div>}
         </DialogContent>
       </Dialog>
+      {dashboardListKind && <DashboardListDialog
+        kind={dashboardListKind}
+        open
+        onOpenChange={(open) => { if (!open) setDashboardListKind(null); }}
+        filters={{
+          dateFrom: data.range.dateFrom,
+          dateTo: data.range.dateTo,
+          brand,
+          category: selectedCategory,
+          categoryId: drillCategoryId,
+        }}
+      />}
     </>
   );
 }

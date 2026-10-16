@@ -28,7 +28,7 @@ import { db } from "../db";
 import { eq, sql } from "drizzle-orm";
 import { addSkuVaultInventory, removeSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, getSkuVaultTransactionReasons, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
 import { getMarketingSenderSettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
-import { getProduct360Overview, getProduct360Products, getProduct360Detail, getProduct360TopCustomers } from "./product360";
+import { getProduct360Overview, getProduct360Products, getProduct360Detail, getProduct360TopCustomers, getProduct360DashboardList } from "./product360";
 import {
   buildMissingBulkOrderCsv,
   customerNameFromOrderFormFileName,
@@ -2602,6 +2602,24 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[Product 360] top customers failed:", error);
       res.status(500).json({ error: "Unable to load Product 360 top customers" });
+    }
+  });
+
+  app.get("/api/product-360/dashboard-list", requirePermission("product_360", "view"), async (req, res) => {
+    try {
+      res.json(await getProduct360DashboardList({
+        kind: req.query.kind,
+        dateFrom: req.query.dateFrom,
+        dateTo: req.query.dateTo,
+        brand: req.query.brand,
+        category: req.query.category,
+        categoryId: req.query.categoryId,
+        page: req.query.page,
+        limit: req.query.limit,
+      }));
+    } catch (error: any) {
+      console.error("[Product 360] dashboard list failed:", error);
+      res.status(500).json({ error: "Unable to load Product 360 dashboard list" });
     }
   });
 

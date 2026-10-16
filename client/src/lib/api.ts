@@ -51,6 +51,14 @@ export interface Product360TopCustomersResponse {
   limit: number;
 }
 
+export interface Product360DashboardListResponse {
+  range: Product360Range;
+  rows: Record<string, unknown>[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export interface Product360ProductsResponse {
   range: Product360Range;
   rows: Record<string, unknown>[];
@@ -149,6 +157,27 @@ export function getProduct360TopCustomers(query: { dateFrom?: string; dateTo?: s
   params.set("page", String(query.page ?? 0));
   params.set("limit", String(query.limit ?? 25));
   return product360Request<Product360TopCustomersResponse>(`/product-360/top-customers?${params.toString()}`);
+}
+
+export function getProduct360DashboardList(query: {
+  kind: "sales" | "profit" | "restock" | "slow";
+  dateFrom?: string;
+  dateTo?: string;
+  brand?: string;
+  category?: string;
+  categoryId?: number;
+  page?: number;
+  limit?: number;
+}) {
+  const params = new URLSearchParams({ kind: query.kind });
+  if (query.dateFrom) params.set("dateFrom", query.dateFrom);
+  if (query.dateTo) params.set("dateTo", query.dateTo);
+  if (query.brand) params.set("brand", query.brand);
+  if (query.category) params.set("category", query.category);
+  if (query.categoryId) params.set("categoryId", String(query.categoryId));
+  params.set("page", String(query.page ?? 0));
+  params.set("limit", String(query.limit ?? 25));
+  return product360Request<Product360DashboardListResponse>(`/product-360/dashboard-list?${params.toString()}`);
 }
 
 export async function syncProduct360Catalog(): Promise<Product360CatalogSyncResult> {
