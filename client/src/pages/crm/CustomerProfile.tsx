@@ -1274,7 +1274,32 @@ export default function CustomerProfile() {
                     <tbody className="divide-y divide-slate-100">
                       {topProducts.map((product: any) => (
                         <tr key={product.product_id} className="hover:bg-slate-50">
-                          <td className="px-4 py-3 text-sm font-medium text-slate-700">{product.product_name || `Product ${product.product_id}`}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <button
+                                type="button"
+                                disabled={!product.product360_id}
+                                onClick={() => product.product360_id && setLocation(`/product-360/products/${product.product360_id}`)}
+                                className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-slate-100 disabled:cursor-default"
+                                aria-label={`Open ${product.product_name || `Product ${product.product_id}`} in Product 360`}
+                              >
+                                {product.product_image
+                                  ? <img src={String(product.product_image)} alt="" className="h-full w-full object-cover" />
+                                  : <Package className="m-2.5 h-5 w-5 text-slate-400" />}
+                              </button>
+                              {product.product360_id ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setLocation(`/product-360/products/${product.product360_id}`)}
+                                  className="min-w-0 text-left text-sm font-medium text-blue-700 hover:underline"
+                                >
+                                  {product.product_name || `Product ${product.product_id}`}
+                                </button>
+                              ) : (
+                                <span className="min-w-0 text-sm font-medium text-slate-700">{product.product_name || `Product ${product.product_id}`}</span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-4 py-3 text-xs text-slate-500">{Number(product.sku_count) > 1 ? `${Number(product.sku_count)} SKUs` : product.sku || "—"}</td>
                           <td className="px-4 py-3 text-sm text-slate-600">{Number(product.units_ordered || 0).toLocaleString()}</td>
                           <td className="px-4 py-3 text-sm text-slate-600">{Number(product.order_count || 0).toLocaleString()}</td>

@@ -11696,18 +11696,21 @@ export async function registerRoutes(
 
       const result = await db.execute(sql`
         SELECT
-          bigcommerce_product_id AS product_id,
-          MAX(NULLIF(TRIM(product_name), '')) AS product_name,
-          MAX(NULLIF(TRIM(sku), '')) AS sku,
-          COUNT(DISTINCT NULLIF(TRIM(sku), ''))::int AS sku_count,
-          SUM(quantity)::int AS units_ordered,
-          COUNT(DISTINCT bigcommerce_order_id)::int AS order_count,
-          SUM(quantity * base_price)::numeric AS total_spent,
-          MAX(order_date) AS last_order_date
-        FROM bc_order_line_items
-        WHERE bigcommerce_customer_id = ${customer.bigcommerce_customer_id}
-        GROUP BY bigcommerce_product_id
-        ORDER BY SUM(quantity) DESC, COUNT(DISTINCT bigcommerce_order_id) DESC, MAX(order_date) DESC
+          li.bigcommerce_product_id AS product_id,
+          p.id AS product360_id,
+          p.image AS product_image,
+          MAX(NULLIF(TRIM(li.product_name), '')) AS product_name,
+          MAX(NULLIF(TRIM(li.sku), '')) AS sku,
+          COUNT(DISTINCT NULLIF(TRIM(li.sku), ''))::int AS sku_count,
+          SUM(li.quantity)::int AS units_ordered,
+          COUNT(DISTINCT li.bigcommerce_order_id)::int AS order_count,
+          SUM(li.quantity * li.base_price)::numeric AS total_spent,
+          MAX(li.order_date) AS last_order_date
+        FROM bc_order_line_items li
+        LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+        WHERE li.bigcommerce_customer_id = ${customer.bigcommerce_customer_id}
+        GROUP BY li.bigcommerce_product_id, p.id, p.image
+        ORDER BY SUM(li.quantity) DESC, COUNT(DISTINCT li.bigcommerce_order_id) DESC, MAX(li.order_date) DESC
         LIMIT 25
       `);
       res.json(result.rows);
