@@ -872,7 +872,7 @@ export async function getProduct360Products(input: {
   };
   const sortBy = sortMap[String(input.sortBy)] || "bigcommerce_id";
   const searchCondition = search
-    ? `AND (name ILIKE ${quote(`%${search}%`)} ESCAPE '\\\\' OR sku ILIKE ${quote(`%${search}%`)} ESCAPE '\\\\' OR brand_name ILIKE ${quote(`%${search}%`)} ESCAPE '\\\\' OR bigcommerce_id::text ILIKE ${quote(`%${search}%`)} ESCAPE '\\\\' OR variants::text ILIKE ${quote(`%${search}%`)} ESCAPE '\\\\')`
+    ? `AND (name ILIKE ${quote(`%${search}%`)} ESCAPE E'\\\\' OR sku ILIKE ${quote(`%${search}%`)} ESCAPE E'\\\\' OR brand_name ILIKE ${quote(`%${search}%`)} ESCAPE E'\\\\' OR bigcommerce_id::text ILIKE ${quote(`%${search}%`)} ESCAPE E'\\\\' OR variants::text ILIKE ${quote(`%${search}%`)} ESCAPE E'\\\\')`
     : "";
   const stockCondition = stockStatus === "low"
     ? "AND current_stock <= 10"
