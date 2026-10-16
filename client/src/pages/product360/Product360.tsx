@@ -236,6 +236,21 @@ function exportProduct360Overview(data: Product360Overview, from: string, to: st
   URL.revokeObjectURL(url);
 }
 
+function downloadProduct360Csv(filename: string, headers: string[], rows: unknown[][]) {
+  const escapeCell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const csv = [headers, ...rows].map((row) => row.map(escapeCell).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function fileSlug(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
 function Product360Nav() {
   const [location, setLocation] = useLocation();
   const links = [
@@ -387,6 +402,8 @@ function DashboardListDialog({
   const fmt = useTimeService();
   const [, setLocation] = useLocation();
   const [page, setPage] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const titles = {
     sales: "Fastest Selling Products",
     profit: "Top Profit Drivers",
@@ -401,6 +418,41 @@ function DashboardListDialog({
   });
   useEffect(() => setPage(0), [kind, filters.dateFrom, filters.dateTo, filters.brand, filters.category, filters.categoryId]);
 
+  const exportAll = async () => {
+    setExporting(true);
+    setExportError("");
+    try {
+      const firstPage = await getProduct360DashboardList({ kind, ...filters, page: 0, limit: 100 });
+      const rows = [...firstPage.rows];
+      for (let nextPage = 1; nextPage * firstPage.limit < firstPage.total; nextPage += 1) {
+        const result = await getProduct360DashboardList({ kind, ...filters, page: nextPage, limit: 100 });
+        rows.push(...result.rows);
+      }
+      const headers = kind === "sales"
+        ? ["Product", "SKU", "Units sold", "Revenue", "Sales velocity (per day)"]
+        : kind === "profit"
+          ? ["Product", "SKU", "Gross profit", "Revenue", "Margin (%)"]
+          : kind === "restock"
+            ? ["Product", "SKU", "Current stock", "Days of stock", "Status"]
+            : ["Product", "SKU", "Units sold", "Current stock", "Days of stock"];
+      const csvRows = rows.map((row) => {
+        if (kind === "sales") return [row.name, row.sku, row.units_sold, row.revenue, row.sales_velocity];
+        if (kind === "profit") {
+          const revenue = Number(row.revenue);
+          const margin = revenue > 0 ? Number(row.gross_profit || 0) / revenue * 100 : 0;
+          return [row.name, row.sku, row.gross_profit, row.revenue, margin.toFixed(1)];
+        }
+        if (kind === "restock") return [row.name, row.sku, row.current_stock, row.days_of_stock, getStatus(row)];
+        return [row.name, row.sku, row.units_sold, row.current_stock, row.days_of_stock];
+      });
+      downloadProduct360Csv(`product-360-${fileSlug(titles[kind])}-${filters.dateFrom}-to-${filters.dateTo}.csv`, headers, csvRows);
+    } catch {
+      setExportError("Could not export this list. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl">
@@ -408,6 +460,12 @@ function DashboardListDialog({
         <DialogDescription className="-mt-3 text-sm text-slate-500">
           All matching products · {filters.dateFrom} to {filters.dateTo}{query.data ? ` · ${number(query.data.total)} products` : ""}
         </DialogDescription>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-red-600" role="status">{exportError}</span>
+          <Button type="button" variant="outline" size="sm" className="ml-auto gap-1.5" onClick={exportAll} disabled={exporting || query.isLoading || !query.data?.total}>
+            <Download className="h-3.5 w-3.5" />{exporting ? "Exporting…" : "Export CSV"}
+          </Button>
+        </div>
         {query.isLoading ? <div className="py-12 text-center text-sm text-slate-500">Loading products…</div>
           : query.isError ? <div className="py-12 text-center text-sm text-red-600">Could not load this list. Close and try again.</div>
             : query.data?.rows.length ? <>
@@ -516,6 +574,8 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
   const [categoryMetric, setCategoryMetric] = useState<"units" | "revenue">("revenue");
   const [customersDialogOpen, setCustomersDialogOpen] = useState(false);
   const [customerPage, setCustomerPage] = useState(0);
+  const [exportingCustomers, setExportingCustomers] = useState(false);
+  const [customerExportError, setCustomerExportError] = useState("");
   const [dashboardListKind, setDashboardListKind] = useState<"sales" | "profit" | "restock" | "slow" | null>(null);
   const [, setLocation] = useLocation();
   const drillCategoryId = categoryPath.at(-1)?.id;
@@ -534,6 +594,34 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
     enabled: customersDialogOpen,
     placeholderData: (previous) => previous,
   });
+  const exportAllCustomers = async () => {
+    setExportingCustomers(true);
+    setCustomerExportError("");
+    try {
+      const customerFilters = {
+        dateFrom: data.range.dateFrom,
+        dateTo: data.range.dateTo,
+        brand,
+        category: selectedCategory,
+        categoryId: drillCategoryId,
+      };
+      const firstPage = await getProduct360TopCustomers({ ...customerFilters, page: 0, limit: 100 });
+      const rows = [...firstPage.rows];
+      for (let nextPage = 1; nextPage * firstPage.limit < firstPage.total; nextPage += 1) {
+        const result = await getProduct360TopCustomers({ ...customerFilters, page: nextPage, limit: 100 });
+        rows.push(...result.rows);
+      }
+      downloadProduct360Csv(
+        `product-360-top-customers-${data.range.dateFrom}-to-${data.range.dateTo}.csv`,
+        ["Customer", "Revenue", "Units purchased", "Orders", "Last purchase"],
+        rows.map((row) => [row.customer, row.revenue, row.units_purchased, row.orders, row.last_purchase]),
+      );
+    } catch {
+      setCustomerExportError("Could not export customers. Please try again.");
+    } finally {
+      setExportingCustomers(false);
+    }
+  };
   const metrics = data.metrics || {};
   const trend = data.trend.map((row) => ({ ...row, units: Number(row.units || 0), revenue: Number(row.revenue || 0), gross_profit: Number(row.gross_profit || 0) }));
   const categoryRows: Record<string, unknown>[] = data.categoryPerformance
@@ -640,6 +728,12 @@ function DashboardOverviewContent({ data, focus, selectedCategory, categoryPath,
           <DialogDescription className="-mt-3 text-sm text-slate-500">
             Customer revenue from {data.range.dateFrom} to {data.range.dateTo}. {customersQuery.data ? `${number(customersQuery.data.total)} customers` : ""}
           </DialogDescription>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-red-600" role="status">{customerExportError}</span>
+            <Button type="button" variant="outline" size="sm" className="ml-auto gap-1.5" onClick={exportAllCustomers} disabled={exportingCustomers || customersQuery.isLoading || !customersQuery.data?.total}>
+              <Download className="h-3.5 w-3.5" />{exportingCustomers ? "Exporting…" : "Export CSV"}
+            </Button>
+          </div>
           {customersQuery.isLoading ? <div className="py-12 text-center text-sm text-slate-500">Loading customers…</div>
             : customersQuery.isError ? <div className="py-12 text-center text-sm text-red-600">Could not load customers. Close and try again.</div>
               : customersQuery.data?.rows.length ? <>
