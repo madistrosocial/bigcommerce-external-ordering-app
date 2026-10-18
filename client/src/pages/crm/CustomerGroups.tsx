@@ -12,7 +12,7 @@ import {
   getManagedCustomerGroups, searchBigCommerceCustomers, updateManagedCustomerGroup,
   type BigCommerceCategory, type BigCommerceCustomer, type ManagedCustomerGroup,
 } from "@/lib/api";
-import { ChevronRight, Loader2, Plus, RefreshCw, Search, Users, Pencil, ShieldCheck } from "lucide-react";
+import { ChevronRight, Loader2, Plus, RefreshCw, Search, Users, Pencil } from "lucide-react";
 
 type AccessType = "all" | "specific" | "none";
 
@@ -173,16 +173,11 @@ export default function CustomerGroupsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Customer Groups</h1>
-          <p className="mt-1 max-w-3xl text-sm text-slate-500">Manage BigCommerce groups, customer assignments, and native category visibility. Changes are saved to BigCommerce.</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button>
           {canManage && <Button size="sm" onClick={() => openEditor(null)}><Plus className="mr-2 h-4 w-4" />Create group</Button>}
         </div>
-      </div>
-      <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
-        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-        <p>Category visibility follows BigCommerce: access is set on a group and inherited by every customer assigned to it. “Specific categories” replaces that group’s category list.</p>
       </div>
       {error && <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
       {loading ? <div className="flex items-center justify-center py-20 text-sm text-slate-500"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading BigCommerce groups…</div> : (
