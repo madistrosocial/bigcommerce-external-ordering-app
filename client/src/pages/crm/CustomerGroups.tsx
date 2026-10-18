@@ -12,7 +12,7 @@ import {
   getManagedCustomerGroups, searchBigCommerceCustomers, updateManagedCustomerGroup,
   type BigCommerceCategory, type BigCommerceCustomer, type ManagedCustomerGroup,
 } from "@/lib/api";
-import { Loader2, Plus, RefreshCw, Search, Users, Pencil, ShieldCheck } from "lucide-react";
+import { ChevronRight, Loader2, Plus, RefreshCw, Search, Users, Pencil, ShieldCheck } from "lucide-react";
 
 type AccessType = "all" | "specific" | "none";
 
@@ -32,6 +32,7 @@ export default function CustomerGroupsPage() {
   const [selectedCategories, setSelectedCategories] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [openCategoryIds, setOpenCategoryIds] = useState<Set<number>>(new Set());
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerResults, setCustomerResults] = useState<BigCommerceCustomer[]>([]);
   const [customerLoading, setCustomerLoading] = useState(false);
@@ -74,21 +75,40 @@ export default function CustomerGroupsPage() {
     return () => { active = false; window.clearTimeout(timer); };
   }, [customerQuery, toast]);
 
-  const visibleCategories = useMemo(() => {
+  const categoryChildren = useMemo(() => {
+    const children = new Map<number, BigCommerceCategory[]>();
+    for (const category of categories) {
+      const parentId = category.parent_id || 0;
+      children.set(parentId, [...(children.get(parentId) || []), category]);
+    }
+    return children;
+  }, [categories]);
+  const matchingCategoryIds = useMemo(() => {
     const q = categoryFilter.trim().toLocaleLowerCase();
-    if (!q) return categories;
-    const included = new Set(categories.filter((category) => category.name.toLocaleLowerCase().includes(q)).map((category) => category.id));
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const category of categories) {
-        if (included.has(category.id) && category.parent_id && !included.has(category.parent_id)) {
-          included.add(category.parent_id); changed = true;
-        }
+    if (!q) return null;
+    const included = new Set<number>();
+    for (const category of categories) {
+      if (!category.name.toLocaleLowerCase().includes(q)) continue;
+      let current: BigCommerceCategory | undefined = category;
+      while (current && !included.has(current.id)) {
+        included.add(current.id);
+        current = categories.find((item) => item.id === current?.parent_id);
       }
     }
-    return categories.filter((category) => included.has(category.id));
+    return included;
   }, [categories, categoryFilter]);
+  useEffect(() => {
+    if (!categories.length || !selectedCategories.length) return;
+    const expanded = new Set(openCategoryIds);
+    for (const selectedId of selectedCategories) {
+      let current = categories.find((category) => category.id === selectedId);
+      while (current?.parent_id) {
+        expanded.add(current.parent_id);
+        current = categories.find((category) => category.id === current?.parent_id);
+      }
+    }
+    setOpenCategoryIds(expanded);
+  }, [categories, selectedCategories]);
 
   function openEditor(group: ManagedCustomerGroup | null) {
     setEditing(group);
@@ -131,12 +151,22 @@ export default function CustomerGroupsPage() {
     } finally { setSavingCustomer(null); }
   }
 
-  const parentMap = new Map(categories.map((category) => [category.id, category]));
-  function categoryDepth(category: BigCommerceCategory) {
-    let depth = 0; let parent = parentMap.get(category.parent_id); const seen = new Set<number>();
-    while (parent && !seen.has(parent.id)) { seen.add(parent.id); depth++; parent = parentMap.get(parent.parent_id); }
-    return Math.min(depth, 5);
-  }
+  const categoryNode = (category: BigCommerceCategory, depth = 0): React.ReactNode => {
+    if (matchingCategoryIds && !matchingCategoryIds.has(category.id)) return null;
+    const children = (categoryChildren.get(category.id) || []).filter((child) => !matchingCategoryIds || matchingCategoryIds.has(child.id));
+    const expanded = !!matchingCategoryIds || openCategoryIds.has(category.id);
+    return <div key={category.id}>
+      <div className="flex items-center gap-1 rounded py-1.5 pr-2 hover:bg-slate-50" style={{ paddingLeft: 8 + depth * 18 }}>
+        {children.length > 0
+          ? <button type="button" aria-label={`${expanded ? "Collapse" : "Expand"} ${category.name}`} aria-expanded={expanded} onClick={() => setOpenCategoryIds((current) => { const next = new Set(current); if (next.has(category.id)) next.delete(category.id); else next.add(category.id); return next; })} className="rounded p-0.5 text-slate-400 hover:bg-slate-200"><ChevronRight className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-90" : ""}`} /></button>
+          : <span className="w-5" />}
+        <input type="checkbox" aria-label={`Allow ${category.name}`} checked={selectedCategories.includes(category.id)} onChange={(event) => setSelectedCategories((ids) => event.target.checked ? [...new Set([...ids, category.id])] : ids.filter((id) => id !== category.id))} />
+        <span className="text-xs text-slate-700">{category.name}</span>
+        {!category.is_visible && <span className="ml-auto text-[10px] text-slate-400">Hidden on storefront</span>}
+      </div>
+      {expanded && children.map((child) => categoryNode(child, depth + 1))}
+    </div>;
+  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 p-4 md:p-6">
@@ -221,7 +251,7 @@ export default function CustomerGroupsPage() {
                 <SelectContent><SelectItem value="all">All categories</SelectItem><SelectItem value="specific">Specific categories</SelectItem><SelectItem value="none">No categories</SelectItem></SelectContent>
               </Select>
             </div>
-            {accessType === "specific" && <div className="space-y-2"><Input placeholder="Filter categories…" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} /><div className="max-h-72 divide-y overflow-y-auto rounded-md border">{visibleCategories.map((category) => <label key={category.id} className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50" style={{ paddingLeft: `${12 + categoryDepth(category) * 16}px` }}><input type="checkbox" checked={selectedCategories.includes(category.id)} onChange={(e) => setSelectedCategories((ids) => e.target.checked ? [...new Set([...ids, category.id])] : ids.filter((id) => id !== category.id))} /><span className="flex-1">{category.name}</span>{!category.is_visible && <span className="text-[10px] text-slate-400">Hidden on storefront</span>}</label>)}</div><p className="text-xs text-slate-500">{selectedCategories.length} categories selected. BigCommerce saves this list to the group.</p></div>}
+            {accessType === "specific" && <div className="space-y-2"><Input placeholder="Search categories" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} /><p className="text-[10px] text-slate-500">Expand a category to browse its subcategories.</p><div className="max-h-[min(24rem,60vh)] overflow-y-auto rounded-md border border-slate-200 py-2">{(categoryChildren.get(0) || []).map((category) => categoryNode(category))}</div><p className="text-xs text-slate-500">{selectedCategories.length} categories selected. BigCommerce saves this list to the group.</p></div>}
             {editing?.is_default && <p className="rounded bg-amber-50 p-2 text-xs text-amber-800">This is the store’s default customer group. Changes to category access affect new customers assigned to this group.</p>}
             {editing?.is_group_for_guests && <p className="rounded bg-amber-50 p-2 text-xs text-amber-800">This group is used for guest shoppers; category access changes apply to guests.</p>}
           </div>
