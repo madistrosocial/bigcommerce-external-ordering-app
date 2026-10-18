@@ -7,6 +7,7 @@ import {
   payslips,
   payrollRuns,
   products,
+  customersMirror,
   type InsertProduct,
   type InsertOrder,
   type InsertPriceHistoryCache,
@@ -8236,6 +8237,149 @@ export async function registerRoutes(
     }
   });
 
+  // Customer group management uses BigCommerce as the source of truth. Group
+  // category access is native BigCommerce visibility, not an app-side overlay.
+  app.get("/api/customer-groups/manage/groups", requirePermission("customer_groups", "view"), async (_req, res) => {
+    try {
+      const { storeHash, token } = await getBcConfig();
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      const rows: any[] = [];
+      for (let page = 1; ; page++) {
+        const response = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customer_groups?limit=250&page=${page}`, {
+          headers: { "X-Auth-Token": String(token), Accept: "application/json" },
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) return res.status(502).json({ error: payload?.title || payload?.message || `BigCommerce returned ${response.status}` });
+        if (!Array.isArray(payload) || payload.length === 0) break;
+        rows.push(...payload);
+        if (payload.length < 250) break;
+      }
+      res.json(rows.map((group: any) => ({
+        id: Number(group.id),
+        name: String(group.name || ""),
+        is_default: Boolean(group.is_default),
+        is_group_for_guests: Boolean(group.is_group_for_guests),
+        category_access: {
+          type: ["all", "specific", "none"].includes(group.category_access?.type) ? group.category_access.type : "all",
+          categories: Array.isArray(group.category_access?.categories) ? group.category_access.categories.map(Number).filter(Number.isSafeInteger) : [],
+        },
+      })));
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Unable to load BigCommerce customer groups" });
+    }
+  });
+
+  app.get("/api/customer-groups/manage/categories", requirePermission("customer_groups", "view"), async (_req, res) => {
+    try {
+      const { storeHash, token } = await getBcConfig();
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      const rows: any[] = [];
+      for (let page = 1; ; page++) {
+        const response = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/categories?limit=250&page=${page}`, {
+          headers: { "X-Auth-Token": String(token), Accept: "application/json" },
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) return res.status(502).json({ error: payload?.title || payload?.message || `BigCommerce returned ${response.status}` });
+        if (!Array.isArray(payload?.data) || payload.data.length === 0) break;
+        rows.push(...payload.data);
+        if (page >= Number(payload.meta?.pagination?.total_pages || page) || payload.data.length < 250) break;
+      }
+      res.json(rows.map((category: any) => ({
+        id: Number(category.id),
+        name: String(category.name || ""),
+        parent_id: Number(category.parent_id || 0),
+        is_visible: Boolean(category.is_visible),
+      })));
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Unable to load BigCommerce categories" });
+    }
+  });
+
+  app.post("/api/customer-groups/manage/groups", requirePermission("customer_groups", "manage"), async (req, res) => {
+    try {
+      const { storeHash, token } = await getBcConfig();
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      const name = String(req.body?.name || "").trim();
+      const accessType = String(req.body?.category_access?.type || "");
+      const categoryIds = Array.isArray(req.body?.category_access?.categories)
+        ? req.body.category_access.categories.map(Number).filter((id: number) => Number.isSafeInteger(id) && id > 0)
+        : [];
+      if (!name || name.length > 250) return res.status(400).json({ error: "Enter a customer group name (up to 250 characters)." });
+      if (!["all", "specific", "none"].includes(accessType)) return res.status(400).json({ error: "Choose a valid category access setting." });
+      if (accessType === "specific" && categoryIds.length === 0) return res.status(400).json({ error: "Select at least one category for specific access." });
+      const response = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customer_groups`, {
+        method: "POST",
+        headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ name, category_access: { type: accessType, ...(accessType === "specific" ? { categories: [...new Set(categoryIds)] } : {}) } }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) return res.status(502).json({ error: payload?.title || payload?.message || `BigCommerce returned ${response.status}` });
+      res.status(201).json(payload);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Unable to create customer group" });
+    }
+  });
+
+  app.put("/api/customer-groups/manage/groups/:id", requirePermission("customer_groups", "manage"), async (req, res) => {
+    try {
+      const groupId = Number(req.params.id);
+      if (!Number.isSafeInteger(groupId) || groupId <= 0) return res.status(400).json({ error: "Invalid customer group ID." });
+      const { storeHash, token } = await getBcConfig();
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      const name = String(req.body?.name || "").trim();
+      const accessType = String(req.body?.category_access?.type || "");
+      const categoryIds = Array.isArray(req.body?.category_access?.categories)
+        ? req.body.category_access.categories.map(Number).filter((id: number) => Number.isSafeInteger(id) && id > 0)
+        : [];
+      if (!name || name.length > 250) return res.status(400).json({ error: "Enter a customer group name (up to 250 characters)." });
+      if (!["all", "specific", "none"].includes(accessType)) return res.status(400).json({ error: "Choose a valid category access setting." });
+      if (accessType === "specific" && categoryIds.length === 0) return res.status(400).json({ error: "Select at least one category for specific access." });
+      // Deliberately omit discount_rules so a category edit cannot overwrite them.
+      const response = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customer_groups/${groupId}`, {
+        method: "PUT",
+        headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ name, category_access: { type: accessType, ...(accessType === "specific" ? { categories: [...new Set(categoryIds)] } : {}) } }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok && response.status !== 207) return res.status(response.status === 404 ? 404 : 502).json({ error: payload?.title || payload?.message || `BigCommerce returned ${response.status}` });
+      res.json({ ...payload, warning: response.status === 207 ? payload?.message || "The group updated, but BigCommerce reported a partial discount update." : undefined });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Unable to update customer group" });
+    }
+  });
+
+  app.put("/api/customer-groups/manage/customers/:id/group", requirePermission("customer_groups", "manage"), async (req, res) => {
+    try {
+      const customerId = Number(req.params.id);
+      const groupId = Number(req.body?.customer_group_id);
+      if (!Number.isSafeInteger(customerId) || customerId <= 0 || !Number.isSafeInteger(groupId) || groupId <= 0) {
+        return res.status(400).json({ error: "Choose a valid customer and customer group." });
+      }
+      const { storeHash, token } = await getBcConfig();
+      if (!storeHash || !token) return res.status(400).json({ error: "BigCommerce credentials not configured" });
+      const [customerResponse, groupResponse] = await Promise.all([
+        fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${customerId}`, { headers: { "X-Auth-Token": String(token), Accept: "application/json" } }),
+        fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customer_groups/${groupId}`, { headers: { "X-Auth-Token": String(token), Accept: "application/json" } }),
+      ]);
+      if (!customerResponse.ok) return res.status(customerResponse.status === 404 ? 404 : 502).json({ error: `BigCommerce customer lookup failed (${customerResponse.status}).` });
+      if (!groupResponse.ok) return res.status(groupResponse.status === 404 ? 404 : 502).json({ error: `BigCommerce customer group lookup failed (${groupResponse.status}).` });
+      const group = await groupResponse.json();
+      const response = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/customers/${customerId}`, {
+        method: "PUT",
+        headers: { "X-Auth-Token": String(token), "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ customer_group_id: groupId }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) return res.status(502).json({ error: payload?.title || payload?.message || `BigCommerce returned ${response.status}` });
+      await db.update(customersMirror)
+        .set({ customer_group_id: groupId, customer_group_name: String(group.name || ""), updated_at: new Date() })
+        .where(eq(customersMirror.bigcommerce_customer_id, customerId));
+      res.json({ customer_id: customerId, customer_group_id: groupId, customer_group_name: String(group.name || "") });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Unable to update customer group assignment" });
+    }
+  });
+
   app.post("/api/bigcommerce/customer-groups/test", requireAdmin, async (req, res) => {
     try {
       const groupId = Number(req.body?.id);
@@ -10809,6 +10953,8 @@ export async function registerRoutes(
       { module: "customers_submit_docs", action: "view", description: "Customers: access the Submit Docs form" },
       { module: "customer_signups", action: "view", description: "Customers: view own customer signups" },
       { module: "customer_signups", action: "view_all", description: "Customers: view all customer signups" },
+      { module: "customer_groups", action: "view", description: "Customers: view BigCommerce customer groups and category access" },
+      { module: "customer_groups", action: "manage", description: "Customers: create and edit BigCommerce customer groups and assignments" },
     ];
     try {
       const existing = await storage.getAllPermissions();

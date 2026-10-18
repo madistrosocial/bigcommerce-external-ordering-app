@@ -50,6 +50,7 @@ import ShipStationExportPage from "@/pages/admin/ShipStationExport";
 import CRMSettings from "@/pages/admin/CRMSettings";
 import EmailTemplates from "@/pages/admin/EmailTemplates";
 import CRMCustomers from "@/pages/crm/Customers";
+import CustomerGroupsPage from "@/pages/crm/CustomerGroups";
 import CustomerProfile from "@/pages/crm/CustomerProfile";
 import CRMReactivation from "@/pages/crm/Reactivation";
 import CRMNotes from "@/pages/crm/CRMNotes";
@@ -380,6 +381,9 @@ function Router() {
       {/* ── Customer routes ── */}
       <Route path="/customers/create">
         {() => <ProtectedRoute component={CreateCustomer} />}
+      </Route>
+      <Route path="/customers/groups">
+        {() => <PermissionRoute component={CustomerGroupsPage} module="customer_groups" />}
       </Route>
       <Route path="/customers/submit-docs">
         {() => <PermissionRoute component={SubmitDocs} module="customers_submit_docs" />}

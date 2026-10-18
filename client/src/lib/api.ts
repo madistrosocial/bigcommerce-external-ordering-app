@@ -1443,6 +1443,40 @@ export interface BigCommerceCustomerGroup {
   name: string;
 }
 
+export interface ManagedCustomerGroup extends BigCommerceCustomerGroup {
+  is_default: boolean;
+  is_group_for_guests: boolean;
+  category_access: { type: "all" | "specific" | "none"; categories: number[] };
+}
+
+export interface BigCommerceCategory {
+  id: number;
+  name: string;
+  parent_id: number;
+  is_visible: boolean;
+}
+
+async function customerGroupsRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}/customer-groups/manage${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...getAuthHeaders(), ...(init?.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Customer group request failed");
+  return data;
+}
+
+export const getManagedCustomerGroups = () => customerGroupsRequest<ManagedCustomerGroup[]>("/groups");
+export const getCustomerGroupCategories = () => customerGroupsRequest<BigCommerceCategory[]>("/categories");
+export const createManagedCustomerGroup = (body: Pick<ManagedCustomerGroup, "name" | "category_access">) =>
+  customerGroupsRequest<ManagedCustomerGroup>("/groups", { method: "POST", body: JSON.stringify(body) });
+export const updateManagedCustomerGroup = (id: number, body: Pick<ManagedCustomerGroup, "name" | "category_access">) =>
+  customerGroupsRequest<ManagedCustomerGroup>(`/groups/${id}`, { method: "PUT", body: JSON.stringify(body) });
+export const assignCustomerToGroup = (customerId: number, groupId: number) =>
+  customerGroupsRequest<{ customer_id: number; customer_group_id: number; customer_group_name: string }>(
+    `/customers/${customerId}/group`, { method: "PUT", body: JSON.stringify({ customer_group_id: groupId }) },
+  );
+
 export interface CustomerSignup {
   id: number;
   bigcommerce_customer_id: number;

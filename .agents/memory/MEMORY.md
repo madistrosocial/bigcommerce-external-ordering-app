@@ -70,3 +70,4 @@
 - [Company timezone display](company-timezone-display.md) — use the configured IANA timezone for app timestamps and local-day boundaries; preserve date-only values and Payroll's separate timezone.
 - [Attendance spreadsheet scope](attendance-spreadsheet-scope.md) — use the workbook as a feature reference only; never import its records or synchronize it.
 - [CRM rep avatar thumbnails](crm-rep-avatar-thumbnails.md) — fetch cached 32px thumbnails through the shared users lookup; avoid repeating full data URLs on customer rows.
+- [BigCommerce customer-group visibility](customer-groups-bigcommerce.md) — keep category visibility group-based and native to BigCommerce; customers inherit access from their assigned group.

@@ -58,6 +58,7 @@ export const MODULES = [
   { key: "customers_create",   label: "CRM › Create BC Customer" },
   { key: "customers_submit_docs", label: "Customers › Submit Docs" },
   { key: "customer_signups",   label: "Customers › Signup List" },
+  { key: "customer_groups",    label: "Customers › Customer Groups" },
   { key: "inventory_push",     label: "Inventory › Push Inventory" },
   { key: "inventory_remove",   label: "Inventory › Remove Inventory" },
   { key: "inventory_audit",    label: "Inventory › Audit Queue" },
@@ -81,6 +82,7 @@ export const MODULES = [
 ];
 
 export const CRM_ACTION_PERMS = [
+  { module: "customer_groups", action: "manage", label: "Manage Customer Groups", description: "Can create and edit BigCommerce customer groups, category visibility, and customer assignments." },
   { module: "crm", action: "view_all",           label: "View All Customers",        description: "Can see all customers. Without this, only assigned customers are visible." },
   { module: "crm", action: "assign_rep",         label: "Assign Sales Rep",          description: "Can assign or remove a sales rep from a customer." },
   { module: "crm", action: "export",             label: "Export CRM Data",           description: "Can export the customer list to CSV or Excel." },
