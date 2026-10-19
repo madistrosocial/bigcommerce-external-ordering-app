@@ -1,4 +1,5 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
+import rateLimit from "express-rate-limit";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import {
@@ -111,6 +112,21 @@ import {
 import { calculateAttendanceDayPay } from "./attendance-pay-calculation";
 import { registerAttendancePayrollRoutes } from "./attendance-payroll";
 import { lookupActivityLogLocation, normalizeClientIp } from "./activity-log-location";
+
+const loginRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many sign-in attempts. Try again later." },
+});
+const passwordResetRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many password reset attempts. Try again later." },
+});
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
 const DEFAULT_INVOICE_TEMPLATE = `<!DOCTYPE html>
@@ -3752,7 +3768,7 @@ export async function registerRoutes(
   });
 
   // Login endpoint
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", loginRateLimit, async (req, res) => {
     try {
       const { username, password } = req.body;
 
@@ -3936,7 +3952,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/auth/password-reset/request", async (req, res) => {
+  app.post("/api/auth/password-reset/request", passwordResetRateLimit, async (req, res) => {
     const username = typeof req.body?.username === "string" ? req.body.username.trim().toLowerCase() : "";
     if (!isEmailAddress(username)) {
       return res.json({ success: true });
@@ -3967,7 +3983,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/auth/password-reset", async (req, res) => {
+  app.post("/api/auth/password-reset", passwordResetRateLimit, async (req, res) => {
     try {
       const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
       const password = typeof req.body?.password === "string" ? req.body.password : "";

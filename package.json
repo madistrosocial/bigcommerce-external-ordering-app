@@ -66,7 +66,7 @@
     "@types/nodemailer": "^8.0.0",
     "@types/ssh2-sftp-client": "^9.0.6",
     "@vitejs/plugin-react": "^5.0.4",
-    "basic-ftp": "^6.0.1",
+    "basic-ftp": "^6.2.1",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -75,12 +75,13 @@
     "date-fns": "^3.6.0",
     "dexie": "^4.2.1",
     "dexie-react-hooks": "^4.2.0",
-    "drizzle-orm": "^0.39.3",
+    "drizzle-orm": "^0.45.2",
     "drizzle-zod": "^0.7.0",
     "embla-carousel-react": "^8.6.0",
     "esbuild": "^0.25.0",
     "exceljs": "^4.4.0",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.7.1",
     "express-session": "^1.18.1",
     "framer-motion": "^12.23.24",
     "html2canvas": "^1.4.1",
@@ -95,6 +96,7 @@
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
     "pg": "^8.16.3",
+    "proxy-addr": "^2.0.8",
     "react": "^19.2.0",
     "react-day-picker": "^9.11.1",
     "react-dom": "^19.2.0",
@@ -131,7 +133,7 @@
     "@types/ws": "^8.5.13",
     "autoprefixer": "^10.4.21",
     "drizzle-kit": "^0.31.4",
-    "postcss": "^8.5.6"
+    "postcss": "^8.5.23"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"

@@ -30,6 +30,24 @@ app.use(
 
 app.use(express.urlencoded({ limit: BODY_LIMIT, extended: false }));
 
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+
+  const originalJson = res.json.bind(res);
+  res.json = ((body: any, ...args: any[]) => {
+    if (res.statusCode >= 500) {
+      return originalJson({ error: "Internal server error" }, ...args);
+    }
+    return originalJson(body, ...args);
+  }) as typeof res.json;
+  next();
+});
+
 //ADD THIS HERE
 app.use((req, _res, next) => {
   if (req.path === "/api/orders") {
@@ -52,23 +70,11 @@ export function log(message: string, source = "express") {
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
+      log(`${req.method} ${path} ${res.statusCode} in ${duration}ms`);
     }
   });
 
@@ -80,15 +86,9 @@ app.use((req, res, next) => {
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    console.error("[express] unhandled request error", {
-      status,
-      message,
-      stack: err?.stack,
-    });
+    console.error("[express] unhandled request error", { status });
     if (res.headersSent) return next(err);
-    res.status(status).json({ message });
+    res.status(status).json({ error: status >= 500 ? "Internal server error" : "Request failed" });
   });
 
   // importantly only setup vite in development and after
