@@ -1,3 +1,6 @@
+// This is the app's only ExcelJS entry point: uploaded workbooks are read with
+// xlsx.load(). ExcelJS's UUID use is v4-only for write-time conditional-format
+// metadata; the audited v3/v5/v6 caller-buffer APIs are not reached here.
 import ExcelJS from "exceljs";
 import {
   BULK_ORDER_CSV_MAX_ROWS,

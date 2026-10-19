@@ -43,6 +43,7 @@ import {
   decodeBulkOrderWorkbookBase64,
   parseBulkOrderWorkbook,
 } from "./bulk-order-workbook";
+import { buildXlsx } from "./xlsx-export";
 import {
   clearZohoCampaignsCredentials,
   getZohoCampaignsCredentialStatus,
@@ -9799,62 +9800,6 @@ export async function registerRoutes(
   // ═══════════════════════════════════════════════════════════════════════════
   // CRM — Customer Mirror Routes
   // ═══════════════════════════════════════════════════════════════════════════
-
-  // ─── Minimal XLSX generator (ZIP/OOXML, no external deps) ──────────────────
-  function crmCrc32(buf: Buffer): number {
-    const t = new Uint32Array(256);
-    for (let i = 0; i < 256; i++) { let c = i; for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[i] = c; }
-    let crc = 0xFFFFFFFF;
-    for (let i = 0; i < buf.length; i++) crc = t[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8);
-    return (crc ^ 0xFFFFFFFF) >>> 0;
-  }
-
-  function buildXlsx(headers: string[], rows: string[][], sheetLabel = "Customers"): Buffer {
-    const xe = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-    const sheetName = xe(sheetLabel.slice(0, 31) || "Data");
-    const colLetter = (i: number) => i < 26 ? String.fromCharCode(65 + i) : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + (i % 26));
-    const allRows = [headers, ...rows];
-    const rowsXml = allRows.map((row, ri) =>
-      `<row r="${ri + 1}">${row.map((cell, ci) => `<c r="${colLetter(ci)}${ri + 1}" t="inlineStr"><is><t>${xe(cell)}</t></is></c>`).join("")}</row>`
-    ).join("");
-    const sheetXml = `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rowsXml}</sheetData></worksheet>`;
-    const files = new Map<string, string>([
-      ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`],
-      ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
-      ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
-      ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`],
-      ["xl/worksheets/sheet1.xml", sheetXml],
-    ]);
-    const localParts: Buffer[] = [];
-    const centralParts: Buffer[] = [];
-    let offset = 0;
-    let count = 0;
-    for (const [name, content] of files) {
-      const nb = Buffer.from(name, "utf8");
-      const db2 = Buffer.from(content, "utf8");
-      const crc = crmCrc32(db2);
-      const lh = Buffer.allocUnsafe(30 + nb.length);
-      lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0, 6); lh.writeUInt16LE(0, 8);
-      lh.writeUInt16LE(0, 10); lh.writeUInt16LE(0, 12); lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(db2.length, 18);
-      lh.writeUInt32LE(db2.length, 22); lh.writeUInt16LE(nb.length, 26); lh.writeUInt16LE(0, 28); nb.copy(lh, 30);
-      localParts.push(lh, db2);
-      const cd = Buffer.allocUnsafe(46 + nb.length);
-      cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(0, 8);
-      cd.writeUInt16LE(0, 10); cd.writeUInt16LE(0, 12); cd.writeUInt16LE(0, 14); cd.writeUInt32LE(crc, 16);
-      cd.writeUInt32LE(db2.length, 20); cd.writeUInt32LE(db2.length, 24); cd.writeUInt16LE(nb.length, 28);
-      cd.writeUInt16LE(0, 30); cd.writeUInt16LE(0, 32); cd.writeUInt16LE(0, 34); cd.writeUInt16LE(0, 36);
-      cd.writeUInt32LE(0, 38); cd.writeUInt32LE(offset, 42); nb.copy(cd, 46);
-      centralParts.push(cd);
-      offset += 30 + nb.length + db2.length;
-      count++;
-    }
-    const cdBuf = Buffer.concat(centralParts);
-    const eocd = Buffer.allocUnsafe(22);
-    eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(0, 4); eocd.writeUInt16LE(0, 6);
-    eocd.writeUInt16LE(count, 8); eocd.writeUInt16LE(count, 10);
-    eocd.writeUInt32LE(cdBuf.length, 12); eocd.writeUInt32LE(offset, 16); eocd.writeUInt16LE(0, 20);
-    return Buffer.concat([...localParts, cdBuf, eocd]);
-  }
 
   // Printable customer order form matching the supplied workbook layout.
   // This intentionally stays self-contained so email attachments do not need

@@ -17,6 +17,7 @@
     "verify:kole-variant-sync": "tsx script/verify-kole-variant-sync.ts",
     "verify:security-controls": "tsx script/verify-security-controls.ts",
     "verify:email-editor-compat": "tsx script/verify-email-editor-compat.ts",
+    "verify:xlsx-uuid-boundary": "tsx script/verify-xlsx-uuid-boundary.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
