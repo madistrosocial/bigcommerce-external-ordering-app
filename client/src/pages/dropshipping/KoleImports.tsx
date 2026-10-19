@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,19 @@ import { CheckCircle2, Eye, EyeOff, KeyRound, Loader2, Plug, RefreshCw, Save, Up
 import { toPublicVendorMessage, toPublicVendorName } from "@/lib/vendor-display";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTimeService } from "@/hooks/useTimeService";
+
+function importSourceLabel(log?: api.DropshipSyncLog) {
+  const source = log?.detail?.source;
+  if (source === "uploaded_csv") return "Uploaded CSV";
+  if (source === "csv_feed") return "URL feed";
+  return log ? "Vendor catalog import" : "URL feed or uploaded CSV";
+}
+
+function formatImportDate(log: api.DropshipSyncLog | undefined, fmt: ReturnType<typeof useTimeService>) {
+  const value = log?.completed_at || log?.started_at;
+  if (!value) return "No successful import yet";
+  return fmt.dateTime(value);
+}
 
 export default function KoleImportsPage() {
   const fmt = useTimeService();
@@ -32,6 +45,16 @@ export default function KoleImportsPage() {
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [testMessage, setTestMessage] = useState<string | null>(null);
+  const { data: catalogSummary, isLoading: isCatalogSummaryLoading } = useQuery({
+    queryKey: ["dropship-products", "vendor-summary"],
+    queryFn: () => api.getKoleProducts({ page: 1, limit: 1 }),
+  });
+  const {
+    data: syncLogs = [],
+    isLoading: isSyncLogsLoading,
+    isError: isSyncLogsError,
+  } = useQuery({ queryKey: ["dropship-sync-logs"], queryFn: api.getKoleSyncLogs });
+  const latestSuccessfulImport = syncLogs.find((log) => log.status === "completed");
   const syncFeed = useMutation({
     mutationFn: api.syncKoleCatalog,
     onSuccess: (result) => {
@@ -174,6 +197,29 @@ export default function KoleImportsPage() {
           </div>
         </CardContent>
       </Card>}
+
+      <div className="grid grid-cols-2 gap-3">
+        <Card>
+          <CardContent className="p-3">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500">Catalog products</p>
+            <p className="text-xl font-bold text-slate-800">{isCatalogSummaryLoading ? "Loading…" : catalogSummary ? catalogSummary.total.toLocaleString() : "—"}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3">
+            <p className="text-[10px] uppercase tracking-wide text-slate-500">Last successful import</p>
+            <p
+              className="mt-1 text-sm font-semibold leading-5 text-slate-800"
+              title={(latestSuccessfulImport?.completed_at || latestSuccessfulImport?.started_at) ?? undefined}
+            >
+              {isSyncLogsLoading ? "Loading…" : isSyncLogsError ? "Import history unavailable" : formatImportDate(latestSuccessfulImport, fmt)}
+            </p>
+            <p className="text-[10px] text-slate-400">
+              {isSyncLogsError ? "Could not load import history" : importSourceLabel(latestSuccessfulImport)}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card className="shadow-sm">
         <CardHeader className="pb-3">

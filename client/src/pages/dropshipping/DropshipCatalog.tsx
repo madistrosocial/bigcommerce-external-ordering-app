@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useTimeService } from "@/hooks/useTimeService";
 import * as api from "@/lib/api";
 import { toPublicVendorMessage } from "@/lib/vendor-display";
 import { getKoleExtendedCost } from "@shared/kole-pricing";
@@ -83,19 +82,6 @@ function extendedSupplierCost(product: api.DropshipProduct) {
   return getKoleExtendedCost(product.raw_data, product.cost);
 }
 
-function importSourceLabel(log?: api.DropshipSyncLog) {
-  const source = log?.detail?.source;
-  if (source === "uploaded_csv") return "Uploaded CSV";
-  if (source === "csv_feed") return "URL feed";
-  return log ? "Vendor catalog import" : "URL feed or uploaded CSV";
-}
-
-function formatImportDate(log: api.DropshipSyncLog | undefined, fmt: ReturnType<typeof useTimeService>) {
-  const value = log?.completed_at || log?.started_at;
-  if (!value) return "No successful import yet";
-  return fmt.dateTime(value);
-}
-
 function suggestedRetailPrice(product: api.DropshipProduct) {
   const cost = extendedSupplierCost(product);
   if (cost === null) return "";
@@ -126,19 +112,12 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function DropshipCatalogPage() {
-  const fmt = useTimeService();
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
   const canManageDropshipping = hasPermission("dropshipping_catalog", "manage");
   const canSyncVendor = hasPermission("dropshipping_vendor", "sync");
   const queryClient = useQueryClient();
   const { data: connection } = useQuery({ queryKey: ["dropship-connection"], queryFn: api.getKoleConnection });
-  const {
-    data: syncLogs = [],
-    isLoading: isSyncLogsLoading,
-    isError: isSyncLogsError,
-  } = useQuery({ queryKey: ["dropship-sync-logs"], queryFn: api.getKoleSyncLogs });
-  const latestSuccessfulImport = syncLogs.find((log) => log.status === "completed");
   const { data: mappingBrandSetting } = useQuery({ queryKey: ["kole-mapping-brand"], queryFn: api.getKoleMappingBrand });
   const [mappingBrandName, setMappingBrandName] = useState<string | null>(null);
   const [mappingResult, setMappingResult] = useState<api.KoleProductMappingResult | null>(null);
@@ -361,22 +340,7 @@ export default function DropshipCatalogPage() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Catalog products</p><p className="text-xl font-bold text-slate-800">{data?.total ?? "—"}</p></CardContent></Card>
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[10px] uppercase tracking-wide text-slate-500">Last successful import</p>
-            <p
-              className="mt-1 text-sm font-semibold leading-5 text-slate-800"
-              title={(latestSuccessfulImport?.completed_at || latestSuccessfulImport?.started_at) ?? undefined}
-            >
-              {isSyncLogsLoading ? "Loading…" : isSyncLogsError ? "Import history unavailable" : formatImportDate(latestSuccessfulImport, fmt)}
-            </p>
-            <p className="text-[10px] text-slate-400">
-              {isSyncLogsError ? "Could not load import history" : importSourceLabel(latestSuccessfulImport)}
-            </p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 gap-3">
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Current page</p><p className="text-xl font-bold text-slate-800">{page} / {totalPages}</p></CardContent></Card>
         <Card><CardContent className="p-3"><p className="text-[10px] uppercase tracking-wide text-slate-500">Selected</p><p className="text-xl font-bold text-indigo-600">{selected.size}</p></CardContent></Card>
       </div>
