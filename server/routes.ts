@@ -10029,6 +10029,28 @@ export async function registerRoutes(
   // GET /api/crm/status
   app.get("/api/crm/status", requireAuth, async (_req, res) => {
     try {
+      const productStatsResult = await db.execute(sql`
+        SELECT COUNT(*)::int AS product_count,
+          (
+            SELECT COUNT(DISTINCT sku)::int
+            FROM (
+              SELECT NULLIF(BTRIM(p.sku), '') AS sku
+              FROM public.products p
+              WHERE p.catalog_synced_at IS NOT NULL
+              UNION
+              SELECT NULLIF(BTRIM(v.value->>'sku'), '') AS sku
+              FROM public.products p
+              CROSS JOIN LATERAL jsonb_array_elements(
+                CASE WHEN jsonb_typeof(p.variants) = 'array' THEN p.variants ELSE '[]'::jsonb END
+              ) AS v(value)
+              WHERE p.catalog_synced_at IS NOT NULL
+            ) AS catalog_skus
+            WHERE sku IS NOT NULL
+          ) AS sku_count
+        FROM public.products p
+        WHERE p.catalog_synced_at IS NOT NULL
+      `);
+      const productStats = productStatsResult.rows[0] as { product_count: number; sku_count: number } | undefined;
      const [customer_count, order_count, line_item_count, lastCustSync, lastOrderSync, lastStatsRecalc,
               lastCustIncSync, lastOrdIncSync, autoCustomers, autoOrders,
               lastLineItemsSync, lastLineItemsIncSync, autoLineItems,
@@ -10054,6 +10076,8 @@ export async function registerRoutes(
         customer_count,
         order_count,
         line_item_count,
+        product_count: Number(productStats?.product_count || 0),
+        sku_count: Number(productStats?.sku_count || 0),
         last_customer_sync: lastCustSync?.value ?? null,
         last_order_sync: lastOrderSync?.value ?? null,
         last_stats_recalc: lastStatsRecalc?.value ?? null,

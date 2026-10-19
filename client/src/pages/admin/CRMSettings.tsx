@@ -83,6 +83,7 @@ export default function CRMSettings() {
       if (!r.ok) throw new Error("Failed to fetch CRM status");
       return r.json() as Promise<{
         customer_count: number; order_count: number; line_item_count: number;
+        product_count: number; sku_count: number;
         last_customer_sync: string | null; last_order_sync: string | null;
         last_stats_recalc: string | null;
         last_customer_incremental_sync: string | null;
@@ -491,7 +492,7 @@ export default function CRMSettings() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center gap-3">
@@ -501,6 +502,24 @@ export default function CRMSettings() {
                 <p className="text-xs text-slate-500">Mirrored Customers</p>
               </div>
             </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-start gap-2">
+              <div className="mt-1 shrink-0 rounded-lg bg-amber-100 p-2"><Package className="h-5 w-5 text-amber-700" /></div>
+              <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-xl font-bold text-slate-800">{isLoading ? "—" : (status?.product_count ?? 0).toLocaleString()}</p>
+                  <p className="text-[11px] leading-tight text-slate-500">Products</p>
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-xl font-bold text-slate-800">{isLoading ? "—" : (status?.sku_count ?? 0).toLocaleString()}</p>
+                  <p className="text-[11px] leading-tight text-slate-500">SKUs</p>
+                </div>
+              </div>
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">Synced Products</p>
           </CardContent>
         </Card>
         <Card>
