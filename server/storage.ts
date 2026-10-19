@@ -5603,8 +5603,8 @@ export class DatabaseStorage implements IStorage {
   async getSyncedBcOrderIds(dateFrom?: string, dateTo?: string): Promise<Set<number>> {
     let q = `SELECT DISTINCT bigcommerce_order_id FROM bc_order_line_items`;
     const conditions: string[] = [];
-    if (dateFrom) conditions.push(`order_date >= '${dateFrom}'::date`);
-    if (dateTo) conditions.push(`order_date < '${dateTo}'::date + interval '1 day'`);
+    if (dateFrom) conditions.push(`order_date >= '${dateFrom.replace(/'/g, "''")}'::date`);
+    if (dateTo) conditions.push(`order_date < '${dateTo.replace(/'/g, "''")}'::date + interval '1 day'`);
     if (conditions.length) q += ` WHERE ${conditions.join(" AND ")}`;
     const result = await db.execute(sql.raw(q));
     const ids = new Set<number>();
@@ -5665,9 +5665,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getProductsByCategoryId(categoryId: number): Promise<Product[]> {
-    const result = await db.execute(
-      sql.raw(`SELECT * FROM products WHERE categories @> '${categoryId}'::jsonb`)
-    );
+    if (!Number.isSafeInteger(categoryId) || categoryId < 0) return [];
+    const result = await db.execute(sql`
+      SELECT * FROM products WHERE categories @> ${JSON.stringify(categoryId)}::jsonb
+    `);
     return result.rows as Product[];
   }
 
@@ -5686,16 +5687,16 @@ export class DatabaseStorage implements IStorage {
     const offset = page * limit;
 
     const dateFromCond = dateFrom
-      ? `AND li.order_date >= '${dateFrom}'::date`
+      ? `AND li.order_date >= '${dateFrom.replace(/'/g, "''")}'::date`
       : "";
     const dateToCond = dateTo
-      ? `AND li.order_date < '${dateTo}'::date + interval '1 day'`
+      ? `AND li.order_date < '${dateTo.replace(/'/g, "''")}'::date + interval '1 day'`
       : "";
     const productCond =
       bcProductIds === undefined
         ? ""
         : bcProductIds.length > 0
-          ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
+          ? `AND li.bigcommerce_product_id IN (${bcProductIds.filter(id => Number.isSafeInteger(id) && id > 0).join(",") || "0"})`
           : "AND 1=0";
     // SKU-level filter (for variant-specific searches)
     const skuCond = skuFilter
@@ -5780,16 +5781,16 @@ export class DatabaseStorage implements IStorage {
   }): Promise<Array<{ bc_product_id: number; variant_id: number | null; sku: string | null }>> {
     const { dateFrom, dateTo, bcProductIds, skuFilter, bcStatusFilter } = opts;
     const dateFromCond = dateFrom
-      ? `AND li.order_date >= '${dateFrom}'::date`
+      ? `AND li.order_date >= '${dateFrom.replace(/'/g, "''")}'::date`
       : "";
     const dateToCond = dateTo
-      ? `AND li.order_date < '${dateTo}'::date + interval '1 day'`
+      ? `AND li.order_date < '${dateTo.replace(/'/g, "''")}'::date + interval '1 day'`
       : "";
     const productCond =
       bcProductIds === undefined
         ? ""
         : bcProductIds.length > 0
-          ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
+          ? `AND li.bigcommerce_product_id IN (${bcProductIds.filter(id => Number.isSafeInteger(id) && id > 0).join(",") || "0"})`
           : "AND 1=0";
     const skuCond = skuFilter
       ? `AND li.sku = '${skuFilter.replace(/'/g, "''")}'`
@@ -5925,13 +5926,13 @@ export class DatabaseStorage implements IStorage {
   }): Promise<{ totalProducts: number; totalVariants: number; totalQtySold: number; totalSaleAmount: number; totalCurrentStock: number }> {
     const { dateFrom, dateTo, bcProductIds, skuFilter, bcStatusFilter } = opts;
 
-    const dateFromCond = dateFrom ? `AND li.order_date >= '${dateFrom}'::date` : "";
-    const dateToCond = dateTo ? `AND li.order_date < '${dateTo}'::date + interval '1 day'` : "";
+    const dateFromCond = dateFrom ? `AND li.order_date >= '${dateFrom.replace(/'/g, "''")}'::date` : "";
+    const dateToCond = dateTo ? `AND li.order_date < '${dateTo.replace(/'/g, "''")}'::date + interval '1 day'` : "";
     const productCond =
       bcProductIds === undefined
         ? ""
         : bcProductIds.length > 0
-          ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
+          ? `AND li.bigcommerce_product_id IN (${bcProductIds.filter(id => Number.isSafeInteger(id) && id > 0).join(",") || "0"})`
           : "AND 1=0";
     const skuCond = skuFilter
       ? `AND li.sku = '${skuFilter.replace(/'/g, "''")}'`

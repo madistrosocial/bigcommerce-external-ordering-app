@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { securityHeadersAndErrorRedaction } from "./security";
 
 const app = express();
 const httpServer = createServer(app);
@@ -30,23 +31,7 @@ app.use(
 
 app.use(express.urlencoded({ limit: BODY_LIMIT, extended: false }));
 
-app.use((req, res, next) => {
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  if (process.env.NODE_ENV === "production") {
-    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-  }
-
-  const originalJson = res.json.bind(res);
-  res.json = ((body: any, ...args: any[]) => {
-    if (res.statusCode >= 500) {
-      return originalJson({ error: "Internal server error" }, ...args);
-    }
-    return originalJson(body, ...args);
-  }) as typeof res.json;
-  next();
-});
+app.use(securityHeadersAndErrorRedaction);
 
 //ADD THIS HERE
 app.use((req, _res, next) => {
