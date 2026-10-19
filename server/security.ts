@@ -26,9 +26,11 @@ export const loginRateLimit = rateLimit({
   message: { error: "Too many sign-in attempts. Try again later." },
 });
 
+export const PASSWORD_RESET_RATE_LIMIT = 5;
+
 export const passwordResetRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000,
-  limit: 5,
+  limit: PASSWORD_RESET_RATE_LIMIT,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many password reset attempts. Try again later." },

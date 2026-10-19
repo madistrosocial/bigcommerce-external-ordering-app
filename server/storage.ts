@@ -13,6 +13,7 @@ import { userActivityLogs } from "@shared/schema";
 import type { InsertUserActivityLog, UserActivityLog } from "@shared/schema";
 import sharp from "sharp";
 import { createHash } from "node:crypto";
+import { buildSalesReportWhere } from "./sales-report-filters";
 
 const crmUserAvatarThumbCache = new Map<number, { sourceHash: string; dataUrl: string }>();
 
@@ -5685,28 +5686,7 @@ export class DatabaseStorage implements IStorage {
   }): Promise<{ rows: Record<string, unknown>[]; total: number }> {
     const { dateFrom, dateTo, bcProductIds, skuFilter, bcStatusFilter, page, limit, sortBy, sortDir } = opts;
     const offset = page * limit;
-
-    const dateFromCond = dateFrom
-      ? `AND li.order_date >= '${dateFrom.replace(/'/g, "''")}'::date`
-      : "";
-    const dateToCond = dateTo
-      ? `AND li.order_date < '${dateTo.replace(/'/g, "''")}'::date + interval '1 day'`
-      : "";
-    const productCond =
-      bcProductIds === undefined
-        ? ""
-        : bcProductIds.length > 0
-          ? `AND li.bigcommerce_product_id IN (${bcProductIds.filter(id => Number.isSafeInteger(id) && id > 0).join(",") || "0"})`
-          : "AND 1=0";
-    // SKU-level filter (for variant-specific searches)
-    const skuCond = skuFilter
-      ? `AND li.sku = '${skuFilter.replace(/'/g, "''")}'`
-      : "";
-    // BC status filter: empty/undefined = all statuses; otherwise include any selected status.
-    const statusValues = (bcStatusFilter ?? []).map(status => `'${status.replace(/'/g, "''")}'`);
-    const statusCond = statusValues.length
-      ? `AND COALESCE(com.status, '') IN (${statusValues.join(", ")})`
-      : "";
+    const whereCond = buildSalesReportWhere({ dateFrom, dateTo, bcProductIds, skuFilter, bcStatusFilter });
 
     const sortColMap: Record<string, string> = {
       qty_sold: "qty_sold",
@@ -5718,28 +5698,19 @@ export class DatabaseStorage implements IStorage {
     const sortCol = sortColMap[sortBy] ?? "qty_sold";
     const dir = sortDir === "asc" ? "ASC" : "DESC";
 
-    const baseFrom = `
-      FROM bc_order_line_items li
-      LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
-      LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
-      WHERE 1=1
-      ${statusCond}
-      ${dateFromCond}
-      ${dateToCond}
-      ${productCond}
-      ${skuCond}
-    `;
-
     const [countRes, dataRes] = await Promise.all([
-      db.execute(sql.raw(`
+      db.execute(sql`
         SELECT COUNT(*)::int AS total
         FROM (
           SELECT li.bigcommerce_product_id, li.variant_id, li.sku
-          ${baseFrom}
+          FROM bc_order_line_items li
+          LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+          LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
+          ${whereCond}
           GROUP BY li.bigcommerce_product_id, li.variant_id, li.sku, li.variant_label
         ) sub
-      `)),
-      db.execute(sql.raw(`
+      `),
+      db.execute(sql`
         SELECT
           li.bigcommerce_product_id AS bc_product_id,
           COALESCE(p.name, li.product_name) AS product_name,
@@ -5759,11 +5730,14 @@ export class DatabaseStorage implements IStorage {
             p.stock_level,
             0
           ) AS current_stock
-        ${baseFrom}
+        FROM bc_order_line_items li
+        LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
+        LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
+        ${whereCond}
         GROUP BY li.bigcommerce_product_id, COALESCE(p.name, li.product_name), COALESCE(p.brand_name, ''), li.variant_id, li.variant_label, li.sku, p.stock_level, p.variants
-        ORDER BY ${sortCol} ${dir}
+        ORDER BY ${sql.raw(`${sortCol} ${dir}`)}
         LIMIT ${limit} OFFSET ${offset}
-      `)),
+      `),
     ]);
 
     return {
@@ -5779,42 +5753,17 @@ export class DatabaseStorage implements IStorage {
     skuFilter?: string;
     bcStatusFilter?: string[];
   }): Promise<Array<{ bc_product_id: number; variant_id: number | null; sku: string | null }>> {
-    const { dateFrom, dateTo, bcProductIds, skuFilter, bcStatusFilter } = opts;
-    const dateFromCond = dateFrom
-      ? `AND li.order_date >= '${dateFrom.replace(/'/g, "''")}'::date`
-      : "";
-    const dateToCond = dateTo
-      ? `AND li.order_date < '${dateTo.replace(/'/g, "''")}'::date + interval '1 day'`
-      : "";
-    const productCond =
-      bcProductIds === undefined
-        ? ""
-        : bcProductIds.length > 0
-          ? `AND li.bigcommerce_product_id IN (${bcProductIds.filter(id => Number.isSafeInteger(id) && id > 0).join(",") || "0"})`
-          : "AND 1=0";
-    const skuCond = skuFilter
-      ? `AND li.sku = '${skuFilter.replace(/'/g, "''")}'`
-      : "";
-    const statusValues = (bcStatusFilter ?? []).map(status => `'${status.replace(/'/g, "''")}'`);
-    const statusCond = statusValues.length
-      ? `AND COALESCE(com.status, '') IN (${statusValues.join(", ")})`
-      : "";
-
-    const result = await db.execute(sql.raw(`
+    const whereCond = buildSalesReportWhere(opts);
+    const result = await db.execute(sql`
       SELECT
         li.bigcommerce_product_id AS bc_product_id,
         li.variant_id,
         MAX(NULLIF(li.sku, '')) AS sku
       FROM bc_order_line_items li
       LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
-      WHERE 1=1
-      ${statusCond}
-      ${dateFromCond}
-      ${dateToCond}
-      ${productCond}
-      ${skuCond}
+      ${whereCond}
       GROUP BY li.bigcommerce_product_id, li.variant_id
-    `));
+    `);
     return (result.rows as any[]).map(row => ({
       bc_product_id: Number(row.bc_product_id),
       variant_id: row.variant_id == null ? null : Number(row.variant_id),
@@ -5833,28 +5782,9 @@ export class DatabaseStorage implements IStorage {
     sortBy: string;
     sortDir: string;
   }): Promise<{ rows: Record<string, unknown>[]; total: number }> {
-    const { dateFrom, dateTo, bcProductIds, skuFilter, bcStatusFilter, page, limit, sortBy, sortDir } = opts;
+    const { page, limit, sortBy, sortDir } = opts;
     const offset = page * limit;
-
-    const dateFromCond = dateFrom
-      ? `AND li.order_date >= '${dateFrom}'::date`
-      : "";
-    const dateToCond = dateTo
-      ? `AND li.order_date < '${dateTo}'::date + interval '1 day'`
-      : "";
-    const productCond =
-      bcProductIds === undefined
-        ? ""
-        : bcProductIds.length > 0
-          ? `AND li.bigcommerce_product_id IN (${bcProductIds.join(",")})`
-          : "AND 1=0";
-    const skuCond = skuFilter
-      ? `AND li.sku = '${skuFilter.replace(/'/g, "''")}'`
-      : "";
-    const statusValues = (bcStatusFilter ?? []).map(status => `'${status.replace(/'/g, "''")}'`);
-    const statusCond = statusValues.length
-      ? `AND COALESCE(com.status, '') IN (${statusValues.join(", ")})`
-      : "";
+    const whereCond = buildSalesReportWhere(opts);
 
     const sortColMap: Record<string, string> = {
       order_date: "li.order_date",
@@ -5867,24 +5797,15 @@ export class DatabaseStorage implements IStorage {
     const sortCol = sortColMap[sortBy] ?? "li.order_date";
     const dir = sortDir === "asc" ? "ASC" : "DESC";
 
-    const whereCond = `
-      WHERE 1=1
-      ${statusCond}
-      ${dateFromCond}
-      ${dateToCond}
-      ${productCond}
-      ${skuCond}
-    `;
-
     const [countRes, dataRes] = await Promise.all([
-      db.execute(sql.raw(`
+      db.execute(sql`
         SELECT COUNT(*)::int AS total
         FROM bc_order_line_items li
         LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
         ${whereCond}
-      `)),
-      db.execute(sql.raw(`
+      `),
+      db.execute(sql`
         SELECT
           li.bigcommerce_product_id AS bc_product_id,
           COALESCE(p.name, li.product_name) AS product_name,
@@ -5906,9 +5827,9 @@ export class DatabaseStorage implements IStorage {
         LEFT JOIN products p ON p.bigcommerce_id = li.bigcommerce_product_id
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
         ${whereCond}
-        ORDER BY ${sortCol} ${dir}
+        ORDER BY ${sql.raw(`${sortCol} ${dir}`)}
         LIMIT ${limit} OFFSET ${offset}
-      `)),
+      `),
     ]);
 
     return {
@@ -5924,37 +5845,16 @@ export class DatabaseStorage implements IStorage {
     skuFilter?: string;
     bcStatusFilter?: string[];
   }): Promise<{ totalProducts: number; totalVariants: number; totalQtySold: number; totalSaleAmount: number; totalCurrentStock: number }> {
-    const { dateFrom, dateTo, bcProductIds, skuFilter, bcStatusFilter } = opts;
-
-    const dateFromCond = dateFrom ? `AND li.order_date >= '${dateFrom.replace(/'/g, "''")}'::date` : "";
-    const dateToCond = dateTo ? `AND li.order_date < '${dateTo.replace(/'/g, "''")}'::date + interval '1 day'` : "";
-    const productCond =
-      bcProductIds === undefined
-        ? ""
-        : bcProductIds.length > 0
-          ? `AND li.bigcommerce_product_id IN (${bcProductIds.filter(id => Number.isSafeInteger(id) && id > 0).join(",") || "0"})`
-          : "AND 1=0";
-    const skuCond = skuFilter
-      ? `AND li.sku = '${skuFilter.replace(/'/g, "''")}'`
-      : "";
-    const statusValues = (bcStatusFilter ?? []).map(status => `'${status.replace(/'/g, "''")}'`);
-    const statusCond = statusValues.length
-      ? `AND COALESCE(com.status, '') IN (${statusValues.join(", ")})`
-      : "";
+    const whereCond = buildSalesReportWhere(opts);
 
     // Two-phase approach: aggregate qty/counts from line items (fast with index),
     // then compute stock only for the distinct product/variant set (avoids per-row JSONB expansion)
-    const res = await db.execute(sql.raw(`
+    const res = await db.execute(sql`
       WITH filtered_li AS (
          SELECT li.bigcommerce_product_id, li.variant_id, li.sku, li.quantity, li.base_price
         FROM bc_order_line_items li
         LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
-        WHERE 1=1
-        ${statusCond}
-        ${dateFromCond}
-        ${dateToCond}
-        ${productCond}
-        ${skuCond}
+        ${whereCond}
       ),
       agg AS (
         SELECT
@@ -5985,7 +5885,7 @@ export class DatabaseStorage implements IStorage {
         LEFT JOIN products p ON p.bigcommerce_id = dpv.bigcommerce_product_id
       )
       SELECT agg.*, stock.total_current_stock FROM agg, stock
-    `));
+    `);
 
     const row = res.rows[0] as any;
     return {

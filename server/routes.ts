@@ -17,6 +17,7 @@ import {
 } from "@shared/schema";
 import { getKoleExtendedCost } from "@shared/kole-pricing";
 import { resolveBigCommerceOrderLinePrice } from "./sales-report-pricing";
+import { parseSalesReportIds, validateSalesReportFilters } from "./sales-report-filters";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import nodemailer from "nodemailer";
@@ -13985,7 +13986,7 @@ export async function registerRoutes(
   }): Promise<number[] | undefined> {
     const { brandId, categoryIdsRaw, bcProductIdsRaw } = opts;
     const hasBrand = !!(brandId && brandId !== "");
-    const catIds = (categoryIdsRaw ?? "").split(",").map(Number).filter(Boolean);
+    const catIds = parseSalesReportIds(categoryIdsRaw);
     const hasCategory = catIds.length > 0;
     const hasIndividual = !!bcProductIdsRaw;
 
@@ -13995,7 +13996,7 @@ export async function registerRoutes(
     let catSet: Set<number> | null = null;
 
     if (hasBrand) {
-      brandSet = await fetchBcProductIdsByBrand(parseInt(brandId!));
+      brandSet = await fetchBcProductIdsByBrand(Number(brandId));
     }
 
     if (hasCategory) {
@@ -14021,7 +14022,7 @@ export async function registerRoutes(
 
     // Add individually-selected products (only when not selectAll)
     if (hasIndividual) {
-      bcProductIdsRaw!.split(",").map(Number).filter(Boolean).forEach(id => resolved.add(id));
+      parseSalesReportIds(bcProductIdsRaw).forEach(id => resolved.add(id));
     }
 
     return [...resolved];
@@ -14088,7 +14089,7 @@ export async function registerRoutes(
   }
 
   // GET /api/reports/sales — BC-mirror-based Sales Report
-  app.get("/api/reports/sales", requirePermission("reporting_sales"), async (req, res) => {
+  app.get("/api/reports/sales", requirePermission("reporting_sales"), validateSalesReportFilters, async (req, res) => {
     try {
        const {
         view = "summary",
@@ -14145,7 +14146,7 @@ export async function registerRoutes(
   });
 
   // GET /api/reports/sales/stats — aggregate stats for the report sidebar
-  app.get("/api/reports/sales/stats", requirePermission("reporting_sales"), async (req, res) => {
+  app.get("/api/reports/sales/stats", requirePermission("reporting_sales"), validateSalesReportFilters, async (req, res) => {
     try {
        const { dateFrom, dateTo, brandId, categoryIds: categoryIdsRaw, bcProductIds: raw, skuFilter, bcStatusFilter } = req.query as Record<string, string>;
        const bcStatusFilters = String(bcStatusFilter ?? "")
