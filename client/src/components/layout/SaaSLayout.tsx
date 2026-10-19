@@ -316,7 +316,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     { label: "Price Tiers", path: "/admin/price-tiers", icon: Layers },
     { label: "Invoice Settings", path: "/admin/invoice", icon: Receipt },
     { label: "ShipStation Export", path: "/admin/shipstation", icon: Ship },
-    { label: "CRM Settings", path: "/admin/crm", icon: ContactRound },
+    { label: "Data Sync", path: "/admin/crm", icon: ContactRound },
     { label: "Email Templates", path: "/admin/email-templates", icon: Mail },
     ...(role === "admin" ? [{ label: "System Activity", path: "/syslog", icon: Activity }] : []),
   ];

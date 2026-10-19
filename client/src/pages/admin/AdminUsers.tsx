@@ -77,7 +77,7 @@ export const MODULES = [
   { key: "crm_customers",      label: "CRM › Customers" },
   { key: "crm_reactivation",   label: "CRM › Reactivation Opportunities" },
   { key: "crm_notes",          label: "CRM › Customer Notes" },
-  { key: "crm_settings",       label: "CRM › CRM Settings" },
+  { key: "crm_settings",       label: "CRM › Data Sync" },
   { key: "admin",              label: "Admin / Settings" },
 ];
 

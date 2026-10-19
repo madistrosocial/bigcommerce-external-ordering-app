@@ -350,8 +350,8 @@ function EmptyState({ hasParams, noData }: { hasParams: boolean; noData?: boolea
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center px-4">
         <RefreshCw className="h-12 w-12 text-slate-300 mb-4" />
-        <p className="text-slate-500 font-medium">No line items data — run Sync Order Line Items from CRM Settings first.</p>
-        <p className="text-slate-400 text-sm mt-1">Go to Admin → CRM Settings → Sync Order Line Items and click Full Sync.</p>
+        <p className="text-slate-500 font-medium">No line items data — run Sync Order Line Items from Data Sync first.</p>
+        <p className="text-slate-400 text-sm mt-1">Go to Admin → Data Sync → Sync Order Line Items and click Full Sync.</p>
       </div>
     );
   }

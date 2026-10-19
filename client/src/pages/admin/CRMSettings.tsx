@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
-  RefreshCw, Users, ShoppingBag, Database, Clock, BarChart2, Info,
+  RefreshCw, Users, ShoppingBag, Database, Clock, BarChart2, Info, Package,
   HeartPulse, Save, Zap, Trash2, PlayCircle, StopCircle, List, Plus,
   GripVertical, ChevronUp, ChevronDown,
 } from "lucide-react";
@@ -53,6 +53,11 @@ export default function CRMSettings() {
   const [togglingAutoCustomers, setTogglingAutoCustomers] = useState(false);
   const [togglingAutoOrders, setTogglingAutoOrders] = useState(false);
   const [togglingAutoLineItems, setTogglingAutoLineItems] = useState(false);
+  const [syncingProducts, setSyncingProducts] = useState(false);
+  const [incSyncingProducts, setIncSyncingProducts] = useState(false);
+  const [resettingProducts, setResettingProducts] = useState<"idle" | "confirm">("idle");
+  const [togglingAutoProducts, setTogglingAutoProducts] = useState(false);
+  const [productLog, setProductLog] = useState<string | null>(null);
 
   const [recalculating, setRecalculating] = useState(false);
   const [savingThresholds, setSavingThresholds] = useState(false);
@@ -86,6 +91,9 @@ export default function CRMSettings() {
         last_line_items_sync: string | null;
         last_line_items_incremental_sync: string | null;
         auto_sync_line_items: boolean;
+        last_product_sync: string | null;
+        last_product_incremental_sync: string | null;
+        auto_sync_products: boolean;
       }>;
     },
     refetchInterval: 10_000,
@@ -226,6 +234,8 @@ export default function CRMSettings() {
   const incSyncCustomers = () => runSync("/api/crm/sync/customers/incremental", "POST", setIncSyncingCustomers, setCustomerLog, "Incremental Customer Sync");
   const incSyncOrders    = () => runSync("/api/crm/sync/orders/incremental", "POST", setIncSyncingOrders, setOrderLog, "Incremental Order Sync");
   const incSyncLineItems = () => runSync("/api/crm/sync/line-items/incremental", "POST", setIncSyncingLineItems, setLineItemLog, "Incremental Line Items Sync");
+  const syncProducts = () => runSync("/api/product-360/catalog-sync", "POST", setSyncingProducts, setProductLog, "Full Product Catalog Sync");
+  const incSyncProducts = () => runSync("/api/product-360/catalog-sync/incremental", "POST", setIncSyncingProducts, setProductLog, "Incremental Product Catalog Sync");
 
   const auditLineItemPrices = async () => {
     setAuditingPrices(true);
@@ -255,6 +265,11 @@ export default function CRMSettings() {
     if (resettingLineItems === "idle") { setResettingLineItems("confirm"); return; }
     setResettingLineItems("idle");
     await runSync("/api/crm/sync/line-items/reset", "DELETE", setSyncingLineItems, setLineItemLog, "Line Items Reset");
+  };
+  const resetProducts = async () => {
+    if (resettingProducts === "idle") { setResettingProducts("confirm"); return; }
+    setResettingProducts("idle");
+    await runSync("/api/product-360/catalog-sync/reset", "DELETE", setSyncingProducts, setProductLog, "Product Catalog Reset");
   };
 
   const toggleAutoCustomers = async () => {
@@ -306,6 +321,23 @@ export default function CRMSettings() {
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally { setTogglingAutoLineItems(false); }
+  };
+  const toggleAutoProducts = async () => {
+    setTogglingAutoProducts(true);
+    try {
+      const next = !status?.auto_sync_products;
+      const r = await fetch("/api/product-360/catalog-sync/auto", {
+        method: "POST",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Failed to toggle product auto-sync");
+      toast({ title: next ? "Product Auto-Sync Enabled" : "Product Auto-Sync Disabled", description: next ? "Incremental product sync will run every 15 minutes." : "Product auto-sync stopped." });
+      qc.invalidateQueries({ queryKey: ["crm", "status"] });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setTogglingAutoProducts(false); }
   };
 
   const recalculateStats = async () => {
@@ -363,7 +395,7 @@ export default function CRMSettings() {
     icon: Icon, iconBg, title, description,
     lastFull, lastIncremental, log, autoEnabled,
     busyFull, busyInc, busyAuto,
-    onFull, onInc, onAuto, onReset, resetState,
+    onFull, onInc, onAuto, onReset, resetState, resetMessage,
     testPrefix,
   }: {
     icon: React.ElementType; iconBg: string; title: string; description: string;
@@ -372,6 +404,7 @@ export default function CRMSettings() {
     busyFull: boolean; busyInc: boolean; busyAuto: boolean;
     onFull: () => void; onInc: () => void; onAuto: () => void;
     onReset: () => void; resetState: "idle" | "confirm";
+    resetMessage?: string;
     testPrefix: string;
   }) => (
     <div className="p-4 border rounded-lg space-y-3">
@@ -444,7 +477,7 @@ export default function CRMSettings() {
       </div>
       {resetState === "confirm" && (
         <p className="text-[11px] text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">
-          ⚠ This will erase all local {title.toLowerCase()} data. Click "Confirm Reset?" again to proceed, or click elsewhere to cancel.
+          ⚠ {resetMessage || `This will erase all local ${title.toLowerCase()} data. Click "Confirm Reset?" again to proceed.`}
         </p>
       )}
     </div>
@@ -453,12 +486,12 @@ export default function CRMSettings() {
   return (
     <div className="p-4 md:p-6 max-w-3xl mx-auto space-y-6">
       <div>
-        <h1 className="text-xl font-bold text-slate-800">CRM Settings</h1>
-        <p className="text-sm text-slate-500 mt-1">Sync BigCommerce data into the local CRM mirror tables.</p>
+        <h1 className="text-xl font-bold text-slate-800">Data Sync</h1>
+        <p className="text-sm text-slate-500 mt-1">Manage local BigCommerce data mirrors and CRM sync settings.</p>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center gap-3">
@@ -644,6 +677,19 @@ export default function CRMSettings() {
             onFull={syncLineItems} onInc={incSyncLineItems} onAuto={toggleAutoLineItems}
             onReset={resetLineItems} resetState={resettingLineItems}
             testPrefix="line-items"
+          />
+          <SyncCard
+            icon={Package} iconBg="bg-amber-100 text-amber-700"
+            title="Sync Products" description="Mirror BigCommerce catalog products locally for Product 360."
+            lastFull={status?.last_product_sync ?? null}
+            lastIncremental={status?.last_product_incremental_sync ?? null}
+            log={productLog}
+            autoEnabled={status?.auto_sync_products ?? false}
+            busyFull={syncingProducts} busyInc={incSyncingProducts} busyAuto={togglingAutoProducts}
+            onFull={syncProducts} onInc={incSyncProducts} onAuto={toggleAutoProducts}
+            onReset={resetProducts} resetState={resettingProducts}
+            resetMessage="This clears Product 360 catalog sync metadata and timestamps. Product records and POS pin/promotion data are preserved."
+            testPrefix="products"
           />
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">

@@ -26,7 +26,7 @@ import SftpClient from "ssh2-sftp-client";
 import { Readable } from "stream";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { db } from "../db";
-import { eq, sql } from "drizzle-orm";
+import { eq, isNotNull, sql } from "drizzle-orm";
 import { addSkuVaultInventory, removeSkuVaultInventory, setSkuVaultInventory, getSkuVaultInventory, resolveSkuLocation, getSkuVaultTransactionReasons, testSkuVaultConnection, getLiveSkuQuantities, type SkuVaultConfig } from "./skuvault";
 import { getMarketingSenderSettings, normalizeMarketingSenderSettings, processMarketingCampaign, processMarketingQueue, sanitizeMarketingEditorHtml, sendMarketingTestEmail, verifyMarketingClickToken, verifyMarketingUnsubscribeToken } from "./marketing";
 import { getProduct360Overview, getProduct360Products, getProduct360Detail, getProduct360TopCustomers, getProduct360DashboardList } from "./product360";
@@ -2645,9 +2645,9 @@ export async function registerRoutes(
     }
   });
 
-  // Temporary admin-only full catalog sync for Product 360 storage sizing.
-  // This upserts BigCommerce-owned fields and deliberately preserves POS flags.
-  app.post("/api/product-360/catalog-sync", requireAdmin, async (_req, res) => {
+  // Full and incremental catalog sync share one implementation for manual and scheduled runs.
+  let productCatalogSyncHandler: ((req: any, res: any) => Promise<void>) | null = null;
+  productCatalogSyncHandler = async (req, res) => {
     let pagesCompleted = 0;
     let productsFetched = 0;
     try {
@@ -2663,9 +2663,16 @@ export async function registerRoutes(
       `));
       const before = beforeResult.rows[0] as Record<string, unknown>;
       const syncedAt = new Date();
+      const mode = req.body?.mode === "incremental" ? "incremental" : "full";
+      const lastSync = await storage.getSetting("product_360_catalog_last_sync");
+      const since = mode === "incremental" && lastSync?.value
+        ? new Date(new Date(String(lastSync.value)).getTime() - 120_000).toISOString()
+        : null;
 
       for (let page = 1; ; page++) {
-        const url = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products?limit=250&page=${page}&include=variants,primary_image,custom_fields`;
+        const params = new URLSearchParams({ limit: "250", page: String(page), include: "variants,primary_image,custom_fields" });
+        if (since) params.set("date_modified:min", since);
+        const url = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products?${params}`;
         const response = await fetchBigCommerceWithRetry(url, { headers });
         if (!response.ok) {
           throw new Error(`BigCommerce product page ${page} failed (${response.status}).`);
@@ -2773,7 +2780,10 @@ export async function registerRoutes(
       const after = afterResult.rows[0] as Record<string, unknown>;
       const beforeCount = Number(before.products || 0);
       const afterCount = Number(after.products || 0);
+      await storage.setSetting("product_360_catalog_last_sync", syncedAt.toISOString());
+      await storage.setSetting(mode === "full" ? "product_360_catalog_last_full_sync" : "product_360_catalog_last_incremental_sync", syncedAt.toISOString());
       res.json({
+        mode,
         pagesCompleted,
         productsFetched,
         productsInDatabase: afterCount,
@@ -2793,6 +2803,31 @@ export async function registerRoutes(
         productsFetched,
       });
     }
+  };
+  app.post("/api/product-360/catalog-sync", requireAdmin, productCatalogSyncHandler);
+  app.post("/api/product-360/catalog-sync/incremental", requireAdmin, (req, res) => {
+    req.body = { ...req.body, mode: "incremental" };
+    return productCatalogSyncHandler!(req, res);
+  });
+  app.post("/api/product-360/catalog-sync/auto", requireAdmin, async (req, res) => {
+    const enabled = req.body?.enabled === true;
+    await storage.setSetting("product_360_catalog_auto_sync", enabled);
+    res.json({ success: true, enabled });
+  });
+  app.delete("/api/product-360/catalog-sync/reset", requireAdmin, async (_req, res) => {
+    try {
+      await db.update(products).set({
+        catalog_synced_at: null, catalog_data: {},
+        inventory_tracking: "none", bc_availability: null, bc_is_visible: null,
+        bc_created_at: null, bc_updated_at: null,
+      }).where(isNotNull(products.catalog_synced_at));
+      await Promise.all([
+        storage.setSetting("product_360_catalog_last_sync", null),
+        storage.setSetting("product_360_catalog_last_full_sync", null),
+        storage.setSetting("product_360_catalog_last_incremental_sync", null),
+      ]);
+      res.json({ success: true, message: "Product catalog sync metadata cleared; product records and POS flags preserved." });
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
 
   app.get("/api/product-360/products", requirePermission("product_360", "view"), async (req, res) => {
@@ -9994,9 +10029,10 @@ export async function registerRoutes(
   // GET /api/crm/status
   app.get("/api/crm/status", requireAuth, async (_req, res) => {
     try {
-      const [customer_count, order_count, line_item_count, lastCustSync, lastOrderSync, lastStatsRecalc,
-             lastCustIncSync, lastOrdIncSync, autoCustomers, autoOrders,
-             lastLineItemsSync, lastLineItemsIncSync, autoLineItems] = await Promise.all([
+     const [customer_count, order_count, line_item_count, lastCustSync, lastOrderSync, lastStatsRecalc,
+              lastCustIncSync, lastOrdIncSync, autoCustomers, autoOrders,
+              lastLineItemsSync, lastLineItemsIncSync, autoLineItems,
+              lastProductSync, lastProductIncSync, autoProducts] = await Promise.all([
         storage.getCrmCustomerCount(),
         storage.getCrmOrderCount(),
         storage.getBcOrderLineItemsCount(),
@@ -10010,6 +10046,9 @@ export async function registerRoutes(
         storage.getSetting("crm_last_line_items_sync"),
         storage.getSetting("crm_last_line_items_incremental_sync"),
         storage.getSetting("crm_auto_sync_line_items"),
+        storage.getSetting("product_360_catalog_last_full_sync"),
+        storage.getSetting("product_360_catalog_last_incremental_sync"),
+        storage.getSetting("product_360_catalog_auto_sync"),
       ]);
       res.json({
         customer_count,
@@ -10025,6 +10064,9 @@ export async function registerRoutes(
         last_line_items_sync: lastLineItemsSync?.value ?? null,
         last_line_items_incremental_sync: lastLineItemsIncSync?.value ?? null,
         auto_sync_line_items: autoLineItems?.value === true || autoLineItems?.value === "true",
+        last_product_sync: lastProductSync?.value ?? null,
+        last_product_incremental_sync: lastProductIncSync?.value ?? null,
+        auto_sync_products: autoProducts?.value === true || autoProducts?.value === "true",
       });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -10709,6 +10751,23 @@ export async function registerRoutes(
     try {
       const { storeHash, token } = await getBcConfig();
       if (!storeHash || !token) return;
+
+      const autoProducts = await storage.getSetting("product_360_catalog_auto_sync");
+      if ((autoProducts?.value === true || autoProducts?.value === "true") && productCatalogSyncHandler) {
+        try {
+          const result: { status?: number; body?: any } = {};
+          await productCatalogSyncHandler(
+            { body: { mode: "incremental" } },
+            {
+              json: (body: any) => { result.body = body; },
+              status: (code: number) => { result.status = code; return { json: (body: any) => { result.body = body; } }; },
+            },
+          );
+          if (result.status || result.body?.error) console.error("[Auto-sync] Product catalog error:", result.body?.error);
+        } catch (error: any) {
+          console.error("[Auto-sync] Product catalog error:", error?.message || error);
+        }
+      }
 
       const [autoC, autoO, autoLI] = await Promise.all([
         storage.getSetting("crm_auto_sync_customers"),
