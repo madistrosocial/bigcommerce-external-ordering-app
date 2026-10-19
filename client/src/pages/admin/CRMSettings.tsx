@@ -508,18 +508,17 @@ export default function CRMSettings() {
           <CardContent className="pt-4 pb-4">
             <div className="flex items-start gap-2">
               <div className="mt-1 shrink-0 rounded-lg bg-amber-100 p-2"><Package className="h-5 w-5 text-amber-700" /></div>
-              <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-xl font-bold text-slate-800">{isLoading ? "—" : (status?.product_count ?? 0).toLocaleString()}</p>
-                  <p className="text-[11px] leading-tight text-slate-500">Products</p>
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex min-w-0 items-baseline gap-1.5">
+                  <p className="shrink-0 text-lg font-bold leading-tight text-slate-800 sm:text-xl">{isLoading ? "—" : (status?.product_count ?? 0).toLocaleString()}</p>
+                  <p className="truncate text-[11px] leading-tight text-slate-500">Products</p>
                 </div>
-                <div className="min-w-0">
-                  <p className="truncate text-xl font-bold text-slate-800">{isLoading ? "—" : (status?.sku_count ?? 0).toLocaleString()}</p>
-                  <p className="text-[11px] leading-tight text-slate-500">SKUs</p>
+                <div className="flex min-w-0 items-baseline gap-1.5">
+                  <p className="shrink-0 text-lg font-bold leading-tight text-slate-800 sm:text-xl">{isLoading ? "—" : (status?.sku_count ?? 0).toLocaleString()}</p>
+                  <p className="truncate text-[11px] leading-tight text-slate-500">SKUs</p>
                 </div>
               </div>
             </div>
-            <p className="mt-1 text-[11px] text-slate-500">Synced Products</p>
           </CardContent>
         </Card>
         <Card>
