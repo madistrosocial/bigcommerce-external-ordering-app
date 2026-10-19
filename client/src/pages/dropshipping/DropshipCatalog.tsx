@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -15,10 +15,9 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChevronLeft, ChevronRight, Eye, Filter, Link2, Loader2, Package, Plus, RefreshCw, Search, Upload, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, Filter, Link2, Loader2, Package, Plus, Search, X } from "lucide-react";
 
 const PAGE_SIZE = 50;
-const MAX_CSV_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 function formatCost(value: string | null | undefined) {
   if (!value) return "—";
@@ -160,8 +159,6 @@ export default function DropshipCatalogPage() {
   const [draftCategoryIds, setDraftCategoryIds] = useState<Record<number, string>>({});
   const [bulkDraftCategoryId, setBulkDraftCategoryId] = useState("");
   const [draftDialogOpen, setDraftDialogOpen] = useState(false);
-  const [draggingCsv, setDraggingCsv] = useState(false);
-  const csvInputRef = useRef<HTMLInputElement>(null);
   const displayName = connection?.displayName || "Vendor Catalog";
 
   const params = useMemo(() => ({ page, limit: PAGE_SIZE, search: appliedSearch, category, subcategory, inStock: stockOnly, closeout: closeoutOnly, imported: importedOnly, status }), [page, appliedSearch, category, subcategory, stockOnly, closeoutOnly, importedOnly, status]);
@@ -186,33 +183,6 @@ export default function DropshipCatalogPage() {
       .sort((a, b) => a.label.localeCompare(b.label)),
     [bcCategories],
   );
-
-  const sync = useMutation({
-    mutationFn: api.syncKoleCatalog,
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
-      queryClient.invalidateQueries({ queryKey: ["dropship-sync-logs"] });
-      setSelected(new Set());
-      setSelectedProducts(new Map());
-      toast({ title: "Catalog sync completed", description: `${result.productsProcessed} products processed · ${result.productsCreated} new · ${result.productsUpdated} updated` });
-    },
-    onError: (mutationError: any) => toast({ title: "Catalog sync failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
-  });
-
-  const uploadCsv = useMutation({
-    mutationFn: api.uploadKoleCsv,
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
-      queryClient.invalidateQueries({ queryKey: ["dropship-sync-logs"] });
-      setSelected(new Set());
-      setSelectedProducts(new Map());
-      toast({
-        title: "CSV imported into Vendor Catalog",
-        description: `${result.productsProcessed} products processed · ${result.productsCreated} new · ${result.productsUpdated} updated. No BigCommerce products were created.`,
-      });
-    },
-    onError: (mutationError: any) => toast({ title: "CSV upload failed", description: toPublicVendorMessage(mutationError.message), variant: "destructive" }),
-  });
 
   const runSkuMapping = useMutation({
     mutationFn: api.mapExistingKoleProducts,
@@ -337,21 +307,6 @@ export default function DropshipCatalogPage() {
   const clearFilters = () => {
     setSearch(""); setAppliedSearch(""); setCategory(""); setSubcategory(""); setStockOnly(false); setCloseoutOnly(false); setImportedOnly(false); setStatus(""); setPage(1);
   };
-  const startCsvUpload = (file?: File) => {
-    if (!canSyncVendor) return;
-    if (!file) return;
-    if (sync.isPending || uploadCsv.isPending) return;
-    if (!file.size) {
-      toast({ title: "CSV upload failed", description: "The selected file is empty.", variant: "destructive" });
-      return;
-    }
-    if (file.size > MAX_CSV_UPLOAD_BYTES) {
-      toast({ title: "CSV upload failed", description: "Choose a CSV file no larger than 50 MB.", variant: "destructive" });
-      return;
-    }
-    uploadCsv.mutate(file);
-  };
-
   return (
     <div className="px-4 md:px-6 py-5 space-y-4">
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
@@ -359,54 +314,11 @@ export default function DropshipCatalogPage() {
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Package className="h-5 w-5 text-indigo-600" /> Product Catalog</h1>
         </div>
         <div className="flex gap-2">
-          {canSyncVendor && (
-            <input
-              ref={csvInputRef}
-              type="file"
-              accept=".csv,text/csv,text/plain,application/octet-stream"
-              className="hidden"
-              onChange={(event) => {
-                startCsvUpload(event.target.files?.[0]);
-                event.target.value = "";
-              }}
-            />
-          )}
           {canManageDropshipping && selected.size > 0 && <Button variant="outline" size="sm" onClick={queueSelected} disabled={updateStatus.isPending}><Plus className="h-4 w-4 mr-1.5" />Queue {selected.size}</Button>}
           {canManageDropshipping && selected.size > 0 && <Button size="sm" onClick={() => openDraftDialog(Array.from(selectedProducts.values()))} disabled={createDrafts.isPending}><Plus className="h-4 w-4 mr-1.5" />Create {selected.size} Draft{selected.size === 1 ? "" : "s"}</Button>}
-          {canSyncVendor && (
-            <>
-              <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()} disabled={sync.isPending || uploadCsv.isPending}>
-                {uploadCsv.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Upload className="h-4 w-4 mr-1.5" />}
-                {uploadCsv.isPending ? "Uploading CSV…" : "Upload CSV"}
-              </Button>
-              <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending || uploadCsv.isPending}><RefreshCw className={`h-4 w-4 mr-1.5 ${sync.isPending ? "animate-spin" : ""}`} />Sync CSV Feed</Button>
-            </>
-          )}
         </div>
       </div>
 
-      {canSyncVendor && <Card className={`border-dashed transition-colors ${draggingCsv ? "border-indigo-500 bg-indigo-50/60" : "border-slate-300"}`}>
-        <CardContent
-          className="p-3 flex items-center gap-3"
-          onDragEnter={(event) => { event.preventDefault(); setDraggingCsv(true); }}
-          onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
-          onDragLeave={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingCsv(false);
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            setDraggingCsv(false);
-            startCsvUpload(event.dataTransfer.files?.[0]);
-          }}
-          aria-label="CSV upload drop area"
-        >
-          <Upload className={`h-5 w-5 shrink-0 ${draggingCsv ? "text-indigo-600" : "text-slate-400"}`} />
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-slate-700">Drop a downloaded vendor CSV feed here, or choose Upload CSV.</p>
-            <p className="text-xs text-slate-500">Manual import · up to 50 MB · updates the Vendor Catalog only; it does not create BigCommerce products.</p>
-          </div>
-        </CardContent>
-      </Card>}
 
       <Card>
         <CardContent className="p-4 space-y-3">
@@ -429,8 +341,6 @@ export default function DropshipCatalogPage() {
                 ||
                 runSkuMapping.isPending
                 || !String(mappingBrandName ?? mappingBrandSetting?.brandName ?? "KCDS").trim()
-                || sync.isPending
-                || uploadCsv.isPending
                 || createDrafts.isPending
               }
             >
@@ -502,7 +412,7 @@ export default function DropshipCatalogPage() {
       </Card>
 
       <Card className="shadow-sm overflow-hidden">
-        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {toPublicVendorMessage((error as Error).message)}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters.{canSyncVendor ? " Run Sync CSV Feed or upload a downloaded CSV to populate the catalog." : ""}</div> : (
+        {isLoading ? <div className="py-16 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div> : error ? <div className="p-6 text-sm text-red-600">Unable to load the catalog: {toPublicVendorMessage((error as Error).message)}</div> : rows.length === 0 ? <div className="py-16 text-center text-sm text-slate-500">No vendor products match these filters.{canSyncVendor ? " Sync or upload the CSV feed from Vendor Catalog to populate this list." : ""}</div> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200"><tr className="text-left text-[11px] uppercase tracking-wide text-slate-500">

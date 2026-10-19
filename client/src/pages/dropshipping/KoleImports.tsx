@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, Eye, EyeOff, KeyRound, Loader2, Plug, RefreshCw, Save, XCircle } from "lucide-react";
+import { CheckCircle2, Eye, EyeOff, KeyRound, Loader2, Plug, RefreshCw, Save, Upload, XCircle } from "lucide-react";
 import { toPublicVendorMessage, toPublicVendorName } from "@/lib/vendor-display";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTimeService } from "@/hooks/useTimeService";
@@ -16,6 +17,10 @@ export default function KoleImportsPage() {
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
   const canManageVendor = hasPermission("dropshipping_vendor", "manage");
+  const canSyncVendor = hasPermission("dropshipping_vendor", "sync");
+  const queryClient = useQueryClient();
+  const csvInputRef = useRef<HTMLInputElement>(null);
+  const [draggingCsv, setDraggingCsv] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -27,6 +32,30 @@ export default function KoleImportsPage() {
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [testMessage, setTestMessage] = useState<string | null>(null);
+  const syncFeed = useMutation({
+    mutationFn: api.syncKoleCatalog,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
+      queryClient.invalidateQueries({ queryKey: ["dropship-sync-logs"] });
+      toast({ title: "Catalog sync completed", description: `${result.productsProcessed} products processed · ${result.productsCreated} new · ${result.productsUpdated} updated` });
+    },
+    onError: (error: any) => toast({ title: "Catalog sync failed", description: toPublicVendorMessage(error.message), variant: "destructive" }),
+  });
+  const uploadCsv = useMutation({
+    mutationFn: api.uploadKoleCsv,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["dropship-products"] });
+      queryClient.invalidateQueries({ queryKey: ["dropship-sync-logs"] });
+      toast({ title: "CSV imported into Vendor Catalog", description: `${result.productsProcessed} products processed · ${result.productsCreated} new · ${result.productsUpdated} updated. No BigCommerce products were created.` });
+    },
+    onError: (error: any) => toast({ title: "CSV upload failed", description: toPublicVendorMessage(error.message), variant: "destructive" }),
+  });
+  const startCsvUpload = (file?: File) => {
+    if (!canSyncVendor || !file || syncFeed.isPending || uploadCsv.isPending) return;
+    if (!file.size) return toast({ title: "CSV upload failed", description: "The selected file is empty.", variant: "destructive" });
+    if (file.size > 50 * 1024 * 1024) return toast({ title: "CSV upload failed", description: "Choose a CSV file no larger than 50 MB.", variant: "destructive" });
+    uploadCsv.mutate(file);
+  };
 
   const load = async () => {
     try {
@@ -105,6 +134,46 @@ export default function KoleImportsPage() {
           <Badge className="w-fit bg-green-100 text-green-700 border-0"><CheckCircle2 className="h-3.5 w-3.5 mr-1" />Feed active</Badge>
         </CardContent>
       </Card>
+
+      {canSyncVendor && <Card className="shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold">Vendor Catalog Import</CardTitle>
+          <CardDescription>Sync the public vendor CSV feed or import a downloaded CSV. Imports update the Vendor Catalog only; they do not create BigCommerce products.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv,text/csv,text/plain,application/octet-stream"
+            className="hidden"
+            onChange={(event) => { startCsvUpload(event.target.files?.[0]); event.target.value = ""; }}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()} disabled={syncFeed.isPending || uploadCsv.isPending}>
+              {uploadCsv.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Upload className="mr-1.5 h-4 w-4" />}
+              {uploadCsv.isPending ? "Uploading CSV…" : "Upload CSV"}
+            </Button>
+            <Button size="sm" onClick={() => syncFeed.mutate()} disabled={syncFeed.isPending || uploadCsv.isPending}>
+              <RefreshCw className={`mr-1.5 h-4 w-4 ${syncFeed.isPending ? "animate-spin" : ""}`} />
+              {syncFeed.isPending ? "Syncing…" : "Sync CSV Feed"}
+            </Button>
+          </div>
+          <div
+            className={`flex items-center gap-3 rounded-lg border border-dashed p-3 transition-colors ${draggingCsv ? "border-indigo-500 bg-indigo-50/60" : "border-slate-300"}`}
+            onDragEnter={(event) => { event.preventDefault(); setDraggingCsv(true); }}
+            onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
+            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingCsv(false); }}
+            onDrop={(event) => { event.preventDefault(); setDraggingCsv(false); startCsvUpload(event.dataTransfer.files?.[0]); }}
+            aria-label="CSV upload drop area"
+          >
+            <Upload className={`h-5 w-5 shrink-0 ${draggingCsv ? "text-indigo-600" : "text-slate-400"}`} />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-700">Drop a downloaded vendor CSV here, or choose Upload CSV.</p>
+              <p className="text-xs text-slate-500">Manual import · up to 50 MB</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>}
 
       <Card className="shadow-sm">
         <CardHeader className="pb-3">
