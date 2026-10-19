@@ -150,7 +150,6 @@ export default function KoleImportsPage() {
       <Card className="shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold">Current Catalog Feed</CardTitle>
-          <CardDescription>This public CSV feed is used by Sync CSV Feed. Vendor API credentials are not required.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <span className="text-sm text-slate-600">Public CSV feed</span>
@@ -161,7 +160,6 @@ export default function KoleImportsPage() {
       {canSyncVendor && <Card className="shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold">Vendor Catalog Import</CardTitle>
-          <CardDescription>Sync the public vendor CSV feed or import a downloaded CSV. Imports update the Vendor Catalog only; they do not create BigCommerce products.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <input
