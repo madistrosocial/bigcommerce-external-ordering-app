@@ -1108,6 +1108,8 @@ export async function registerRoutes(
       host: smtpHost,
       port: smtpPort,
       secure: smtpPort === 465,
+      disableFileAccess: true,
+      disableUrlAccess: true,
       auth: { user: smtpUser, pass: smtpPass },
       connectionTimeout: 15000,
       greetingTimeout: 10000,
@@ -7524,6 +7526,7 @@ export async function registerRoutes(
 
       const transporter = nodemailer.createTransport({
         host: smtpHost, port: smtpPort, secure: smtpPort === 465,
+        disableFileAccess: true, disableUrlAccess: true,
         auth: { user: smtpUser, pass: smtpPass },
         connectionTimeout: 15000, greetingTimeout: 10000, socketTimeout: 20000,
       });
@@ -7553,6 +7556,7 @@ export async function registerRoutes(
 
       const transporter = nodemailer.createTransport({
         host: smtpHost, port: smtpPort, secure: smtpPort === 465,
+        disableFileAccess: true, disableUrlAccess: true,
         auth: { user: smtpUser, pass: smtpPass },
         connectionTimeout: 15000, greetingTimeout: 10000, socketTimeout: 20000,
       });
@@ -9107,6 +9111,8 @@ export async function registerRoutes(
       host: smtpHost,
       port: smtpPort,
       secure: smtpPort === 465,
+      disableFileAccess: true,
+      disableUrlAccess: true,
       auth: { user: smtpUser, pass: smtpPass },
       connectionTimeout: 15000,
       greetingTimeout: 10000,
@@ -15365,6 +15371,7 @@ export async function registerRoutes(
       if (!smtpFrom) return res.status(400).json({ error: "No Marketing sender email is configured. Add one in Marketing settings before sending." });
       const transporter = nodemailer.createTransport({
         host: smtpHost, port: smtpPort, secure: smtpPort === 465,
+        disableFileAccess: true, disableUrlAccess: true,
         auth: { user: smtpUser, pass: smtpPass },
         connectionTimeout: 15000, greetingTimeout: 10000, socketTimeout: 20000,
       });

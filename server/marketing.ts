@@ -31,6 +31,8 @@ function smtpTransport(settings: any) {
     host,
     port,
     secure: port === 465,
+    disableFileAccess: true,
+    disableUrlAccess: true,
     auth: { user, pass },
   });
 }
