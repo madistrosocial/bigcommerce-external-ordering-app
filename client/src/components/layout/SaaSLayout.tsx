@@ -227,6 +227,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(hasPermission("tools_bc_link") ? [{ label: "BC Product Link", path: "/tools/bc-product-link" }] : []),
     ...(hasPermission("tools_bc_link_logs") ? [{ label: "Product Link Logs", path: "/tools/bc-product-link-logs" }] : []),
     ...(hasPermission("promo_sku_tracker") ? [{ label: "Promo SKU Tracker", path: "/tools/promo-sku-tracker" }] : []),
+    ...(hasPermission("promo_automation") ? [{ label: "Promo Automation", path: "/tools/promo-automation" }] : []),
   ];
 
   const dropshippingChildren: NavLeaf[] = [

@@ -45,6 +45,7 @@ import BCProductLink from "@/pages/tools/BCProductLink";
 import BCProductLinkLogs from "@/pages/tools/BCProductLinkLogs";
 import ImageEditor from "@/pages/tools/ImageEditor";
 import PromoSkuTracker from "@/pages/tools/PromoSkuTracker";
+import PromoAutomation from "@/pages/tools/PromoAutomation";
 import InvoicePrintPage from "@/pages/InvoicePrintPage";
 import ShipStationExportPage from "@/pages/admin/ShipStationExport";
 import CRMSettings from "@/pages/admin/CRMSettings";
@@ -451,6 +452,9 @@ function Router() {
       </Route>
       <Route path="/tools/promo-sku-tracker">
         {() => <ProtectedRoute component={PromoSkuTracker} />}
+      </Route>
+      <Route path="/tools/promo-automation">
+        {() => <PermissionRoute component={PromoAutomation} module="promo_automation" />}
       </Route>
 
       {/* ── Dropshipping ── */}

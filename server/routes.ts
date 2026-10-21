@@ -8670,6 +8670,115 @@ export async function registerRoutes(
   });
 
   // ===== TOOLS: IMAGE EDITOR =====
+  const promoAutomationCreateSchema = z.object({
+    name: z.string().trim().min(1).max(100),
+    discountType: z.enum(["percentage", "fixed"]),
+    amount: z.number().finite().positive().max(1000000),
+    minimumSpend: z.number().finite().positive().max(1000000).optional(),
+    startDate: z.string().datetime().optional(),
+    endDate: z.string().datetime().optional(),
+  }).strict();
+
+  app.get("/api/tools/promo-automation", requirePermission("promo_automation"), async (_req, res) => {
+    try {
+      const { storeHash, headers } = await getBcCreds();
+      if (!/^[a-z0-9]+$/i.test(storeHash)) {
+        return res.status(503).json({ error: "The BigCommerce store configuration is invalid." });
+      }
+      const promotions: any[] = [];
+      for (let page = 1; page <= 1000; page += 1) {
+        const response = await fetch(
+          `https://api.bigcommerce.com/stores/${storeHash}/v3/promotions?limit=250&page=${page}`,
+          { headers },
+        );
+        if (!response.ok) {
+          console.error("[Promo Automation] BigCommerce list failed:", response.status);
+          return res.status(response.status === 401 || response.status === 403 ? 403 : 502).json({
+            error: response.status === 401 || response.status === 403
+              ? "BigCommerce denied access. Check the API account's Marketing read scope."
+              : "BigCommerce could not load promotions.",
+          });
+        }
+        const payload = await response.json();
+        const rows = Array.isArray(payload?.data) ? payload.data : null;
+        if (!rows) return res.status(502).json({ error: "BigCommerce returned an invalid promotions response." });
+        promotions.push(...rows);
+        if (rows.length < 250) return res.json({ promotions });
+      }
+      return res.status(502).json({ error: "The promotion list exceeded the supported page limit." });
+    } catch (error: any) {
+      if (String(error?.message || "").includes("credentials not configured")) {
+        return res.status(503).json({ error: "BigCommerce is not configured." });
+      }
+      console.error("[Promo Automation] Unable to load promotions:", error?.message || "unknown error");
+      return res.status(502).json({ error: "Could not connect to BigCommerce to load promotions." });
+    }
+  });
+
+  app.post("/api/tools/promo-automation", requirePermission("promo_automation", "manage"), async (req, res) => {
+    const parsed = promoAutomationCreateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Check the promotion name, discount, amount, and schedule." });
+    }
+    const input = parsed.data;
+    if (input.discountType === "percentage" && input.amount > 100) {
+      return res.status(400).json({ error: "Percentage discounts cannot exceed 100%." });
+    }
+    if (input.startDate && input.endDate && Date.parse(input.endDate) <= Date.parse(input.startDate)) {
+      return res.status(400).json({ error: "The end date must be later than the start date." });
+    }
+
+    try {
+      const { storeHash, headers } = await getBcCreds();
+      if (!/^[a-z0-9]+$/i.test(storeHash)) {
+        return res.status(503).json({ error: "The BigCommerce store configuration is invalid." });
+      }
+      const discount = input.discountType === "percentage"
+        ? { percentage_amount: String(input.amount) }
+        : { fixed_amount: String(input.amount) };
+      const rule: Record<string, unknown> = {
+        action: { cart_value: { discount } },
+        apply_once: true,
+        stop: false,
+      };
+      if (input.minimumSpend !== undefined) {
+        rule.condition = { cart: { minimum_spend: String(input.minimumSpend) } };
+      }
+      const promotionPayload: Record<string, unknown> = {
+        name: input.name,
+        redemption_type: "AUTOMATIC",
+        status: "ENABLED",
+        rules: [rule],
+        stop: false,
+      };
+      if (input.startDate) promotionPayload.start_date = input.startDate;
+      if (input.endDate) promotionPayload.end_date = input.endDate;
+
+      const response = await fetch(
+        `https://api.bigcommerce.com/stores/${storeHash}/v3/promotions`,
+        { method: "POST", headers, body: JSON.stringify(promotionPayload) },
+      );
+      if (!response.ok) {
+        const details = await response.json().catch(() => ({}));
+        const providerMessage = String(details?.title || details?.errors?.[0]?.message || "");
+        console.error("[Promo Automation] BigCommerce create failed:", response.status, providerMessage.slice(0, 200));
+        const clientError = response.status === 400 || response.status === 422;
+        return res.status(response.status === 401 || response.status === 403 ? 403 : clientError ? 400 : 502).json({
+          error: response.status === 401 || response.status === 403
+            ? "BigCommerce denied access. Check the API account's Marketing modify scope."
+            : providerMessage.slice(0, 200) || "BigCommerce rejected the promotion. Review the settings and try again.",
+        });
+      }
+      return res.status(201).json(await response.json());
+    } catch (error: any) {
+      if (String(error?.message || "").includes("credentials not configured")) {
+        return res.status(503).json({ error: "BigCommerce is not configured." });
+      }
+      console.error("[Promo Automation] Unable to create promotion:", error?.message || "unknown error");
+      return res.status(502).json({ error: "Could not connect to BigCommerce to create the promotion." });
+    }
+  });
+
   const imageEditorGenerationUsage = new Map<number, { windowStartedAt: number; count: number }>();
   const imageEditorGenerationSchema = z.object({
     generalDirection: z.string().trim().min(3).max(1500),

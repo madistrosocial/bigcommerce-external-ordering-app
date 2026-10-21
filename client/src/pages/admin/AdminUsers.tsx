@@ -72,6 +72,7 @@ export const MODULES = [
   { key: "tools_bc_link",      label: "Tools › BC Product Link" },
   { key: "tools_bc_link_logs", label: "Tools › Product Link Logs" },
   { key: "promo_sku_tracker",  label: "Tools › Promo SKU Tracker" },
+  { key: "promo_automation",  label: "Tools › Promo Automation" },
   { key: "attendance",         label: "Attendance Module" },
   { key: "payroll",            label: "Payroll Management" },
   { key: "crm_customers",      label: "CRM › Customers" },
@@ -79,6 +80,10 @@ export const MODULES = [
   { key: "crm_notes",          label: "CRM › Customer Notes" },
   { key: "crm_settings",       label: "CRM › Data Sync" },
   { key: "admin",              label: "Admin / Settings" },
+];
+
+export const TOOLS_ACTION_PERMS = [
+  { module: "promo_automation", action: "manage", label: "Create Automatic Promotions", description: "Can create enabled automatic promotions in BigCommerce." },
 ];
 
 export const CRM_ACTION_PERMS = [
@@ -439,6 +444,38 @@ function UserDetail({
           <p className="px-4 py-2 text-[11px] text-slate-400 border-t bg-slate-50">
             Toggles here grant/revoke direct permissions for this user only. Group permissions (G) must be managed via User Groups.
           </p>
+        </div>
+
+        {/* Tools action permissions */}
+        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Lock className="h-3.5 w-3.5 text-slate-500" />
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Tools Permissions</span>
+            </div>
+            {groupId !== "none" && <span className="text-[10px] text-blue-600 flex items-center gap-1"><UsersRound className="h-3 w-3" /> (G) = from group</span>}
+          </div>
+          <div className="divide-y">
+            {TOOLS_ACTION_PERMS.map(p => {
+              const perm = permMap.get(`${p.module}:${p.action}`);
+              const permId = perm?.id ?? null;
+              const directEnabled = perm ? userHasPerm(user, perm.id) : false;
+              const fromGroup = !directEnabled && perm ? groupPerms.has(perm.id) : false;
+              const effectiveEnabled = directEnabled || fromGroup;
+              const toggleKey = `tools-${p.module}-${p.action}`;
+              return (
+                <div key={toggleKey} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex-1 min-w-0 pr-4">
+                    <p className="text-sm text-slate-700">{p.label}{fromGroup && <span className="ml-2 text-[10px] text-blue-500 font-medium">(G)</span>}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">{p.description}</p>
+                  </div>
+                  {permId === null ? <span className="text-[10px] text-slate-400 italic">N/A</span>
+                    : busyKey === `${user.id}-${toggleKey}` ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                    : <Switch checked={effectiveEnabled} disabled={fromGroup} onCheckedChange={v => onToggleModule(user.id, toggleKey, v, permId)} data-testid={`toggle-${p.module}-${p.action}-${user.id}`} />}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Dropshipping permissions */}
@@ -802,6 +839,15 @@ export default function AdminUsersPage() {
     if (!missing.length) return;
     Promise.all(
       missing.map((m) => createPermission({ module: m.key, action: "view", description: `Access ${m.label} module` }).catch(() => {})),
+    ).then(() => queryClient.invalidateQueries({ queryKey: ["permissions"] }));
+  }, [permsLoading, permissions.length]);
+
+  useEffect(() => {
+    if (permsLoading) return;
+    const missing = TOOLS_ACTION_PERMS.filter(p => !permMap.has(`${p.module}:${p.action}`));
+    if (!missing.length) return;
+    Promise.all(
+      missing.map(p => createPermission({ module: p.module, action: p.action, description: p.description }).catch(() => {})),
     ).then(() => queryClient.invalidateQueries({ queryKey: ["permissions"] }));
   }, [permsLoading, permissions.length]);
 
