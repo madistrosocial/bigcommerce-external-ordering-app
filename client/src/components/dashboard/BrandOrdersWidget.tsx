@@ -174,7 +174,7 @@ export function BrandOrdersWidget({
         )
       ) : (
         <>
-          <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+          <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {brands.map((brand) => (
               <Card key={brand.id} className="overflow-hidden border-slate-200 shadow-sm transition-shadow hover:shadow-md">
                 <CardContent className="p-4">
@@ -248,20 +248,20 @@ export function BrandOrdersWidget({
                       <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">Loading matching orders…</p>
                     ) : metricOrders.length > 0 ? (
                       <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200">
-                        <table className={`w-full table-fixed text-left text-[10px] ${canViewOrders ? "min-w-[650px]" : "min-w-[430px]"}`}>
+                        <table className={`w-full table-fixed text-left text-[10px] ${canViewOrders ? "min-w-[450px]" : "min-w-[300px]"}`}>
                           <thead className="bg-slate-50 text-[9px] uppercase tracking-wide text-slate-500">
                             <tr>
-                              <th className="w-[68px] px-2 py-2 font-semibold">Order #</th>
-                              {canViewOrders && <th className="w-[145px] px-2 py-2 font-semibold">Customer</th>}
-                              <th className="w-[145px] px-2 py-2 font-semibold">Status</th>
-                              <th className="w-[145px] px-2 py-2 font-semibold">Tracking Number</th>
-                              {canViewOrders && <th className="w-[82px] px-2 py-2 text-right font-semibold">Total</th>}
+                              <th className="w-[55px] px-1.5 py-2 font-semibold">Order #</th>
+                              {canViewOrders && <th className="w-[95px] px-1.5 py-2 font-semibold">Customer</th>}
+                              <th className="w-[108px] px-1.5 py-2 font-semibold">Status</th>
+                              <th className="w-[115px] px-1.5 py-2 font-semibold">Tracking Number</th>
+                              {canViewOrders && <th className="w-[58px] px-1.5 py-2 text-right font-semibold">Total</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {metricOrders.map((order) => (
                               <tr key={order.bigcommerce_order_id} className="align-top hover:bg-blue-50/40">
-                                <td className="whitespace-nowrap px-2 py-2">
+                                <td className="whitespace-nowrap px-1.5 py-2">
                                   {canViewOrders && onOrderClick ? (
                                     <button
                                       type="button"
@@ -275,7 +275,7 @@ export function BrandOrdersWidget({
                                     <span className="font-semibold text-slate-700">#{order.order_number}</span>
                                   )}
                                 </td>
-                                {canViewOrders && <td className="max-w-[150px] px-2 py-2">
+                                {canViewOrders && <td className="max-w-[95px] px-1.5 py-2">
                                   {order.crm_customer_id ? (
                                     <Link
                                       href={`/crm/customers/${order.crm_customer_id}`}
@@ -293,7 +293,7 @@ export function BrandOrdersWidget({
                                     <span className="mt-0.5 block truncate text-slate-400">{order.customer_email || "Email unavailable"}</span>
                                   )}
                                 </td>}
-                                <td className="px-2 py-2">
+                                <td className="px-1.5 py-2">
                                   <select
                                     aria-label={`Dropship status for order ${order.order_number}`}
                                     className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[10px] text-slate-800 disabled:bg-slate-50"
@@ -310,12 +310,12 @@ export function BrandOrdersWidget({
                                     <option>Shipped</option>
                                   </select>
                                 </td>
-                                <td className="px-2 py-2">
+                                <td className="px-1.5 py-2">
                                   <input
                                     aria-label={`Tracking number for order ${order.order_number}`}
                                     className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[10px] text-slate-800 placeholder:text-slate-400 disabled:bg-slate-50"
                                     defaultValue={order.tracking_number || ""}
-                                    placeholder="Enter tracking number"
+                                    placeholder="Tracking number"
                                     maxLength={200}
                                     disabled={!canManageTracking || !onSaveTracking}
                                     onBlur={(event) => {
@@ -330,7 +330,7 @@ export function BrandOrdersWidget({
                                     }}
                                   />
                                 </td>
-                                {canViewOrders && <td className="whitespace-nowrap px-2 py-2 text-right font-semibold tabular-nums text-slate-800">
+                                {canViewOrders && <td className="whitespace-nowrap px-1.5 py-2 text-right font-semibold tabular-nums text-slate-800">
                                   {formatOrderTotal(order.order_total)}
                                 </td>}
                               </tr>
