@@ -7891,10 +7891,13 @@ export async function registerRoutes(
         LEFT JOIN orders o ON o.bigcommerce_order_id = li.bigcommerce_order_id
         LEFT JOIN customers_mirror cm ON cm.bigcommerce_customer_id = COALESCE(com.bigcommerce_customer_id, o.bigcommerce_customer_id, li.bigcommerce_customer_id)
         LEFT JOIN dropship_order_tracking tracking ON tracking.bigcommerce_order_id = li.bigcommerce_order_id
-        WHERE li.bigcommerce_product_id = ANY(${productIds}::int[])
+        WHERE li.bigcommerce_product_id IN (
+          SELECT product_id::int
+          FROM jsonb_array_elements_text(${JSON.stringify(productIds)}::jsonb) AS product_ids(product_id)
+        )
           ${periodFilter}
         GROUP BY li.bigcommerce_order_id, com.order_number, com.customer_name, com.customer_email,
-          com.order_total, o.customer_name, o.customer_email, o.bigcommerce_customer_id, o.total,
+          com.order_date, com.order_total, o.customer_name, o.customer_email, o.bigcommerce_customer_id, o.date, o.total,
           cm.id, tracking.status, tracking.tracking_number
         ORDER BY COALESCE(com.order_date, o.date, MAX(li.order_date)) DESC NULLS LAST, li.bigcommerce_order_id DESC
       `);
