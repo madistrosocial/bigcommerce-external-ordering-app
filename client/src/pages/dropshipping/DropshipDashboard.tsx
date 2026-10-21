@@ -22,6 +22,10 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
   const [manageOpen, setManageOpen] = useState(false);
   const [brandSearch, setBrandSearch] = useState("");
   const [draftBrandIds, setDraftBrandIds] = useState<number[]>([]);
+  const [selectedMetrics, setSelectedMetrics] = useState<Record<number, BrandOrdersMetricKey>>({});
+  const [ordersByBrand, setOrdersByBrand] = useState<Record<number, api.DropshipDashboardOrder[]>>({});
+  const [loadingOrderBrands, setLoadingOrderBrands] = useState<number[]>([]);
+  const canManageTracking = hasPermission("dropshipping_catalog", "manage");
 
   const dashboardQuery = useQuery({
     queryKey: ["dropship-dashboard"],
@@ -71,33 +75,44 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
       : [...current, brandId]);
   };
 
-  const openSalesHistory = (brand: api.DropshipDashboardBrand, metric: BrandOrdersMetricKey) => {
-    if (!canViewOrders) {
+  const loadBrandOrders = async (brand: api.DropshipDashboardBrand, metric: BrandOrdersMetricKey) => {
+    setSelectedMetrics((current) => ({ ...current, [brand.id]: metric }));
+    setLoadingOrderBrands((current) => current.includes(brand.id) ? current : [...current, brand.id]);
+    try {
+      const rows = await api.getDropshipDashboardOrders(brand.id, metric);
+      setOrdersByBrand((current) => ({ ...current, [brand.id]: rows }));
+    } catch (error) {
       toast({
-        title: "Orders access required",
-        description: "Your account can view brand totals but does not have permission to open BigCommerce order details. Ask an administrator for Orders → View access.",
+        title: "Could not load matching orders",
+        description: error instanceof Error ? error.message : "Try again.",
         variant: "destructive",
       });
-      return;
+    } finally {
+      setLoadingOrderBrands((current) => current.filter((id) => id !== brand.id));
     }
-    const dates = dashboardQuery.data?.dates;
-    const params = new URLSearchParams({
-      salesChannel: "allorders",
-      brandId: String(brand.id),
-      brandName: brand.name,
-    });
-    if (dates && metric === "today") {
-      params.set("dateFrom", dates.today);
-      params.set("dateTo", dates.today);
-    } else if (dates && metric === "yesterday") {
-      params.set("dateFrom", dates.yesterday);
-      params.set("dateTo", dates.yesterday);
-    } else if (dates && metric === "thisMonth") {
-      params.set("dateFrom", dates.monthStart);
-      params.set("dateTo", dates.today);
-    }
-    setLocation(`/orders/list?${params.toString()}`);
   };
+
+  const saveTracking = useMutation({
+    mutationFn: ({ orderId, status, trackingNumber }: {
+      orderId: number;
+      status: "Sent to vendor" | "Awaiting Shipment" | "Shipped";
+      trackingNumber: string;
+    }) => api.saveDropshipOrderTracking(orderId, { status, trackingNumber }),
+    onSuccess: (_result, variables) => {
+      setOrdersByBrand((current) => Object.fromEntries(pinnedBrands.map((brand) => [
+        brand.id,
+        (current[brand.id] ?? brand.ordersToday ?? []).map((order) => order.bigcommerce_order_id === variables.orderId
+          ? { ...order, dropship_status: variables.status, tracking_number: variables.trackingNumber }
+          : order),
+      ])));
+      toast({ title: "Order tracking updated" });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not update order tracking",
+      description: error.message,
+      variant: "destructive",
+    }),
+  });
 
   const removeBrand = (brandId: number) => {
     savePins.mutate(pinnedBrands.filter((brand) => brand.id !== brandId).map((brand) => brand.id));
@@ -112,7 +127,11 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
         titleIcon={<PackageOpen className="h-5 w-5 text-blue-600" />}
         titleLevel={embedded ? "h2" : "h1"}
         brands={pinnedBrands}
+        selectedMetrics={selectedMetrics}
+        ordersByBrand={ordersByBrand}
+        loadingOrderBrands={loadingOrderBrands}
         canViewOrders={canViewOrders}
+        canManageTracking={canManageTracking}
         loading={dashboardQuery.isLoading}
         error={dashboardQuery.isError ? `Unable to load the dropship dashboard: ${(dashboardQuery.error as Error).message}` : null}
         today={embedded ? undefined : dashboardQuery.data?.dates.today}
@@ -129,7 +148,8 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
         onManageBrands={openManage}
         onRetry={() => dashboardQuery.refetch()}
         onRemoveBrand={removeBrand}
-        onMetricClick={openSalesHistory}
+        onMetricClick={loadBrandOrders}
+        onSaveTracking={(orderId, status, trackingNumber) => saveTracking.mutate({ orderId, status, trackingNumber })}
         onOrderClick={(order) => setLocation(`/orders/bc/${order.bigcommerce_order_id}`)}
         footer={!embedded && dashboardQuery.data?.dataFreshness && (
           <div className={`rounded-xl border px-4 py-3 text-xs ${dashboardQuery.data.dataFreshness.autoSyncEnabled && dashboardQuery.data.dataFreshness.lineItemCount > 0 ? "border-emerald-100 bg-emerald-50/60 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>

@@ -352,6 +352,8 @@ export interface DropshipDashboardOrder {
   customer_email: string | null;
   crm_customer_id: number | null;
   order_total: string | null;
+  dropship_status?: "Sent to vendor" | "Awaiting Shipment" | "Shipped" | null;
+  tracking_number?: string | null;
 }
 
 export interface DropshipDashboard {
@@ -611,6 +613,21 @@ export function deleteKoleProductSyncLogo() {
 
 export function getDropshipDashboard() {
   return dropshipRequest<DropshipDashboard>("/dropshipping/dashboard");
+}
+
+export function getDropshipDashboardOrders(brandId: number, metric: "today" | "yesterday" | "thisMonth" | "total") {
+  const params = new URLSearchParams({ brandId: String(brandId), metric });
+  return dropshipRequest<DropshipDashboardOrder[]>(`/dropshipping/dashboard/orders?${params}`);
+}
+
+export function saveDropshipOrderTracking(orderId: number, data: {
+  status: "Sent to vendor" | "Awaiting Shipment" | "Shipped";
+  trackingNumber: string;
+}) {
+  return dropshipRequest<{ success: true }>(`/dropshipping/dashboard/orders/${orderId}/tracking`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
 }
 
 export function getDropshipDashboardBrands() {

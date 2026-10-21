@@ -52,6 +52,8 @@ export interface DropshipDashboardOrder {
   customer_email: string | null;
   crm_customer_id: number | null;
   order_total: string | null;
+  dropship_status: "Sent to vendor" | "Awaiting Shipment" | "Shipped" | null;
+  tracking_number: string | null;
 }
 
 const MARKETING_US_STATE_NAMES: Record<string, string> = {
@@ -1086,7 +1088,9 @@ export class DatabaseStorage implements IStorage {
           COALESCE(com.customer_email, o.customer_email, MAX(li.customer_email)) AS customer_email,
           cm.id AS crm_customer_id,
           COALESCE(com.order_date, o.date, MAX(li.order_date)) AS order_date,
-          COALESCE(com.order_total, o.total)::text AS order_total
+          COALESCE(com.order_total, o.total)::text AS order_total,
+          tracking.status AS dropship_status,
+          tracking.tracking_number AS tracking_number
         FROM brand_products bp
         INNER JOIN bc_order_line_items li
           ON li.bigcommerce_product_id = bp.product_id
@@ -1096,6 +1100,8 @@ export class DatabaseStorage implements IStorage {
           ON o.bigcommerce_order_id = li.bigcommerce_order_id
         LEFT JOIN customers_mirror cm
           ON cm.bigcommerce_customer_id = COALESCE(com.bigcommerce_customer_id, o.bigcommerce_customer_id, li.bigcommerce_customer_id)
+        LEFT JOIN dropship_order_tracking tracking
+          ON tracking.bigcommerce_order_id = li.bigcommerce_order_id
         WHERE li.order_date >= ${dateRanges.todayStart}
           AND li.order_date < ${dateRanges.tomorrowStart}
         GROUP BY
@@ -1103,7 +1109,7 @@ export class DatabaseStorage implements IStorage {
           com.order_number, com.customer_name, com.customer_email,
           com.order_date, com.order_total,
           o.customer_name, o.customer_email, o.bigcommerce_customer_id, o.date, o.total,
-          cm.id
+          cm.id, tracking.status, tracking.tracking_number
       ),
       ranked_orders AS (
         SELECT
@@ -1121,9 +1127,10 @@ export class DatabaseStorage implements IStorage {
         customer_name AS "customerName",
         customer_email AS "customerEmail",
         crm_customer_id AS "crmCustomerId",
-        order_total AS "orderTotal"
+        order_total AS "orderTotal",
+        dropship_status AS "dropshipStatus",
+        tracking_number AS "trackingNumber"
       FROM ranked_orders
-      WHERE order_rank <= 10
       ORDER BY brand_id, order_rank
     `);
 
@@ -1151,6 +1158,8 @@ export class DatabaseStorage implements IStorage {
         customer_email: row.customerEmail ?? null,
         crm_customer_id: row.crmCustomerId == null ? null : Number(row.crmCustomerId),
         order_total: row.orderTotal == null ? null : String(row.orderTotal),
+        dropship_status: row.dropshipStatus ?? null,
+        tracking_number: row.trackingNumber ?? "",
       });
     }
 

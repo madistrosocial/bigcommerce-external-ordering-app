@@ -7825,11 +7825,117 @@ export async function registerRoutes(
 
   // Pinned BigCommerce brands are stored per user; the underlying statistics
   // use synced BigCommerce order lines joined to the current local product catalog.
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS dropship_order_tracking (
+      bigcommerce_order_id integer PRIMARY KEY,
+      status text NOT NULL DEFAULT 'Sent to vendor'
+        CHECK (status IN ('Sent to vendor', 'Awaiting Shipment', 'Shipped')),
+      tracking_number text NOT NULL DEFAULT '',
+      updated_by_user_id integer REFERENCES users(id) ON DELETE SET NULL,
+      updated_at timestamp NOT NULL DEFAULT NOW()
+    )
+  `));
+
   app.get("/api/dropshipping/dashboard/brands", requirePermission("dropshipping_dashboard", "view"), async (_req, res) => {
     try {
       res.json(await getCachedBcBrandOptions());
     } catch (error: any) {
       res.status(502).json({ error: error.message || "Unable to load BigCommerce brands." });
+    }
+  });
+
+  app.get("/api/dropshipping/dashboard/orders", requirePermission("dropshipping_dashboard", "view"), async (req, res) => {
+    try {
+      const authUser = (req as any).authUser;
+      const canViewOrderDetails = authUser.role === "admin"
+        || (await storage.getUserPermissionStrings(authUser.id)).includes("orders:view");
+
+      const parsed = z.object({
+        brandId: z.coerce.number().int().positive(),
+        metric: z.enum(["today", "yesterday", "thisMonth", "total"]),
+      }).safeParse(req.query);
+      if (!parsed.success) return res.status(400).json({ error: "Choose a valid brand and order period." });
+
+      const { brandId, metric } = parsed.data;
+      const timezone = await getCompanyTimezone(storage);
+      const todayDate = dateOnlyInTimeZone(new Date(), timezone);
+      const yesterdayDate = shiftDateOnly(todayDate, -1);
+      const tomorrowDate = shiftDateOnly(todayDate, 1);
+      const toStart = (date: string) => {
+        const result = parseDateTimeLocal(`${date}T00:00`, timezone);
+        if (!result) throw new Error("Unable to calculate the dashboard date range.");
+        return result;
+      };
+      const productIds = [...await fetchBcProductIdsByBrand(brandId)];
+      if (productIds.length === 0) return res.json([]);
+
+      const periodFilter = metric === "today"
+        ? sql`AND li.order_date >= ${toStart(todayDate)} AND li.order_date < ${toStart(tomorrowDate)}`
+        : metric === "yesterday"
+          ? sql`AND li.order_date >= ${toStart(yesterdayDate)} AND li.order_date < ${toStart(todayDate)}`
+          : metric === "thisMonth"
+            ? sql`AND li.order_date >= ${toStart(`${todayDate.slice(0, 7)}-01`)} AND li.order_date < ${toStart(tomorrowDate)}`
+            : sql``;
+      const orderRows = await db.execute(sql`
+        SELECT
+          li.bigcommerce_order_id AS bigcommerce_order_id,
+          COALESCE(com.order_number, li.bigcommerce_order_id)::int AS order_number,
+          COALESCE(com.customer_name, o.customer_name, MAX(li.customer_name)) AS customer_name,
+          COALESCE(com.customer_email, o.customer_email, MAX(li.customer_email)) AS customer_email,
+          cm.id AS crm_customer_id,
+          COALESCE(com.order_total, o.total)::text AS order_total,
+          tracking.status AS dropship_status,
+          tracking.tracking_number AS tracking_number
+        FROM bc_order_line_items li
+        LEFT JOIN customer_orders_mirror com ON com.bigcommerce_order_id = li.bigcommerce_order_id
+        LEFT JOIN orders o ON o.bigcommerce_order_id = li.bigcommerce_order_id
+        LEFT JOIN customers_mirror cm ON cm.bigcommerce_customer_id = COALESCE(com.bigcommerce_customer_id, o.bigcommerce_customer_id, li.bigcommerce_customer_id)
+        LEFT JOIN dropship_order_tracking tracking ON tracking.bigcommerce_order_id = li.bigcommerce_order_id
+        WHERE li.bigcommerce_product_id = ANY(${productIds}::int[])
+          ${periodFilter}
+        GROUP BY li.bigcommerce_order_id, com.order_number, com.customer_name, com.customer_email,
+          com.order_total, o.customer_name, o.customer_email, o.bigcommerce_customer_id, o.total,
+          cm.id, tracking.status, tracking.tracking_number
+        ORDER BY COALESCE(com.order_date, o.date, MAX(li.order_date)) DESC NULLS LAST, li.bigcommerce_order_id DESC
+      `);
+      res.json((orderRows.rows as any[]).map((row) => ({
+        bigcommerce_order_id: Number(row.bigcommerce_order_id),
+        order_number: Number(row.order_number),
+        customer_name: canViewOrderDetails ? row.customer_name ?? null : null,
+        customer_email: canViewOrderDetails ? row.customer_email ?? null : null,
+        crm_customer_id: canViewOrderDetails && row.crm_customer_id != null ? Number(row.crm_customer_id) : null,
+        order_total: canViewOrderDetails ? row.order_total ?? null : null,
+        dropship_status: row.dropship_status ?? null,
+        tracking_number: row.tracking_number ?? "",
+      })));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Unable to load dropship orders." });
+    }
+  });
+
+  app.put("/api/dropshipping/dashboard/orders/:orderId/tracking", requirePermission("dropshipping_catalog", "manage"), async (req, res) => {
+    const parsed = z.object({
+      status: z.enum(["Sent to vendor", "Awaiting Shipment", "Shipped"]),
+      trackingNumber: z.string().trim().max(200),
+    }).safeParse(req.body);
+    const orderId = Number(req.params.orderId);
+    if (!Number.isInteger(orderId) || orderId <= 0 || !parsed.success) {
+      return res.status(400).json({ error: "Provide a valid order, status, and tracking number." });
+    }
+    try {
+      const authUser = (req as any).authUser;
+      await db.execute(sql`
+        INSERT INTO dropship_order_tracking (bigcommerce_order_id, status, tracking_number, updated_by_user_id, updated_at)
+        VALUES (${orderId}, ${parsed.data.status}, ${parsed.data.trackingNumber}, ${authUser.id}, NOW())
+        ON CONFLICT (bigcommerce_order_id) DO UPDATE SET
+          status = EXCLUDED.status,
+          tracking_number = EXCLUDED.tracking_number,
+          updated_by_user_id = EXCLUDED.updated_by_user_id,
+          updated_at = NOW()
+      `);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Unable to save order tracking." });
     }
   });
 

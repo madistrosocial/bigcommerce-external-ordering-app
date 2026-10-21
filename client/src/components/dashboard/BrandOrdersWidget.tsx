@@ -15,6 +15,8 @@ export interface BrandOrdersWidgetOrder {
   customer_email: string | null;
   crm_customer_id: number | null;
   order_total: string | null;
+  dropship_status?: "Sent to vendor" | "Awaiting Shipment" | "Shipped" | null;
+  tracking_number?: string | null;
 }
 
 export interface BrandOrdersWidgetBrand {
@@ -32,7 +34,11 @@ export interface BrandOrdersWidgetProps {
   description?: string;
   titleIcon?: ReactNode;
   brands: BrandOrdersWidgetBrand[];
+  selectedMetrics?: Record<number, BrandOrdersMetricKey>;
+  ordersByBrand?: Record<number, BrandOrdersWidgetOrder[]>;
+  loadingOrderBrands?: number[];
   canViewOrders: boolean;
+  canManageTracking?: boolean;
   loading?: boolean;
   error?: string | null;
   today?: string | null;
@@ -55,6 +61,7 @@ export interface BrandOrdersWidgetProps {
   onRemoveBrand?: (brandId: number) => void;
   onMetricClick?: (brand: BrandOrdersWidgetBrand, metric: BrandOrdersMetricKey) => void;
   onOrderClick?: (order: BrandOrdersWidgetOrder) => void;
+  onSaveTracking?: (orderId: number, status: "Sent to vendor" | "Awaiting Shipment" | "Shipped", trackingNumber: string) => void;
 }
 
 const metricLabels: Record<BrandOrdersMetricKey, { title: string; caption: string }> = {
@@ -84,7 +91,11 @@ export function BrandOrdersWidget({
   description,
   titleIcon,
   brands,
+  selectedMetrics = {},
+  ordersByBrand = {},
+  loadingOrderBrands = [],
   canViewOrders,
+  canManageTracking = false,
   loading = false,
   error = null,
   today = null,
@@ -107,6 +118,7 @@ export function BrandOrdersWidget({
   onRemoveBrand,
   onMetricClick,
   onOrderClick,
+  onSaveTracking,
 }: BrandOrdersWidgetProps) {
   const fmt = useTimeService();
   const dateTimezone = timezone || fmt.tz;
@@ -205,7 +217,8 @@ export function BrandOrdersWidget({
                         disabled={!onMetricClick}
                         aria-disabled={!canViewOrders}
                         title={!canViewOrders ? "Orders → View permission is required to open matching orders" : undefined}
-                        className="group rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-left transition hover:border-blue-300 hover:bg-blue-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-default disabled:hover:border-slate-200 disabled:hover:bg-slate-50/70"
+                          className={`group rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-default ${(selectedMetrics[brand.id] ?? "today") === key ? "border-blue-400 bg-blue-50/70" : "border-slate-200 bg-slate-50/70 hover:border-blue-300 hover:bg-blue-50/70"} disabled:hover:border-slate-200 disabled:hover:bg-slate-50/70`}
+                          aria-pressed={(selectedMetrics[brand.id] ?? "today") === key}
                         aria-label={`Open ${metricLabels[key].title.toLowerCase()} orders for ${brand.name}`}
                       >
                         <span className="flex items-center justify-between gap-1">
@@ -219,33 +232,37 @@ export function BrandOrdersWidget({
                   </div>
 
                   <div className="mt-4 border-t border-slate-100 pt-3">
+                    {(() => {
+                      const metric = selectedMetrics[brand.id] ?? "today";
+                      const metricOrders = ordersByBrand[brand.id] ?? brand.ordersToday ?? [];
+                      const isLoading = loadingOrderBrands.includes(brand.id);
+                      return (
+                        <>
                     <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-xs font-semibold text-slate-800">Today’s orders</h3>
-                      {canViewOrders && (
-                        <span className="text-[10px] text-slate-400">
-                          Top {Math.min(10, brand.today)}{brand.today > 10 ? ` of ${brand.today}` : ""}
-                        </span>
-                      )}
+                      <h3 className="text-xs font-semibold text-slate-800">{metricLabels[metric].title}</h3>
+                      <span className="text-[10px] text-slate-400">
+                        {isLoading ? "Loading…" : `${metricOrders.length} orders`}
+                      </span>
                     </div>
-                    {!canViewOrders ? (
-                      <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                        Customer order details require Orders → View permission.
-                      </p>
-                    ) : brand.ordersToday && brand.ordersToday.length > 0 ? (
+                    {isLoading ? (
+                      <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">Loading matching orders…</p>
+                    ) : metricOrders.length > 0 ? (
                       <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200">
-                        <table className="w-full min-w-[285px] table-fixed text-left text-[10px]">
+                        <table className={`w-full table-fixed text-left text-[10px] ${canViewOrders ? "min-w-[650px]" : "min-w-[430px]"}`}>
                           <thead className="bg-slate-50 text-[9px] uppercase tracking-wide text-slate-500">
                             <tr>
                               <th className="w-[68px] px-2 py-2 font-semibold">Order #</th>
-                              <th className="px-2 py-2 font-semibold">Customer</th>
-                              <th className="w-[82px] px-2 py-2 text-right font-semibold">Total</th>
+                              {canViewOrders && <th className="w-[145px] px-2 py-2 font-semibold">Customer</th>}
+                              <th className="w-[145px] px-2 py-2 font-semibold">Status</th>
+                              <th className="w-[145px] px-2 py-2 font-semibold">Tracking Number</th>
+                              {canViewOrders && <th className="w-[82px] px-2 py-2 text-right font-semibold">Total</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {brand.ordersToday.map((order) => (
+                            {metricOrders.map((order) => (
                               <tr key={order.bigcommerce_order_id} className="align-top hover:bg-blue-50/40">
                                 <td className="whitespace-nowrap px-2 py-2">
-                                  {onOrderClick ? (
+                                  {canViewOrders && onOrderClick ? (
                                     <button
                                       type="button"
                                       className="font-semibold text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
@@ -258,7 +275,7 @@ export function BrandOrdersWidget({
                                     <span className="font-semibold text-slate-700">#{order.order_number}</span>
                                   )}
                                 </td>
-                                <td className="max-w-[150px] px-2 py-2">
+                                {canViewOrders && <td className="max-w-[150px] px-2 py-2">
                                   {order.crm_customer_id ? (
                                     <Link
                                       href={`/crm/customers/${order.crm_customer_id}`}
@@ -275,24 +292,64 @@ export function BrandOrdersWidget({
                                   {order.customer_name && (
                                     <span className="mt-0.5 block truncate text-slate-400">{order.customer_email || "Email unavailable"}</span>
                                   )}
+                                </td>}
+                                <td className="px-2 py-2">
+                                  <select
+                                    aria-label={`Dropship status for order ${order.order_number}`}
+                                    className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[10px] text-slate-800 disabled:bg-slate-50"
+                                    value={order.dropship_status || "Sent to vendor"}
+                                    disabled={!canManageTracking || !onSaveTracking}
+                                    onChange={(event) => onSaveTracking?.(
+                                      order.bigcommerce_order_id,
+                                      event.target.value as "Sent to vendor" | "Awaiting Shipment" | "Shipped",
+                                      order.tracking_number || "",
+                                    )}
+                                  >
+                                    <option>Sent to vendor</option>
+                                    <option>Awaiting Shipment</option>
+                                    <option>Shipped</option>
+                                  </select>
                                 </td>
-                                <td className="whitespace-nowrap px-2 py-2 text-right font-semibold tabular-nums text-slate-800">
+                                <td className="px-2 py-2">
+                                  <input
+                                    aria-label={`Tracking number for order ${order.order_number}`}
+                                    className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[10px] text-slate-800 placeholder:text-slate-400 disabled:bg-slate-50"
+                                    defaultValue={order.tracking_number || ""}
+                                    placeholder="Enter tracking number"
+                                    maxLength={200}
+                                    disabled={!canManageTracking || !onSaveTracking}
+                                    onBlur={(event) => {
+                                      const trackingNumber = event.currentTarget.value.trim();
+                                      if (trackingNumber !== (order.tracking_number || "")) {
+                                        onSaveTracking?.(
+                                          order.bigcommerce_order_id,
+                                          order.dropship_status || "Sent to vendor",
+                                          trackingNumber,
+                                        );
+                                      }
+                                    }}
+                                  />
+                                </td>
+                                {canViewOrders && <td className="whitespace-nowrap px-2 py-2 text-right font-semibold tabular-nums text-slate-800">
                                   {formatOrderTotal(order.order_total)}
-                                </td>
+                                </td>}
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       </div>
-                    ) : brand.today > 0 ? (
+                    ) : brand[metric] > 0 ? (
                       <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        Order details for today are not available in the synced order records yet.
+                        Order details for this period are not available in the synced order records yet.
                       </p>
                     ) : (
                       <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                        No orders today.
+                        No orders for this period.
                       </p>
                     )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </CardContent>
               </Card>
