@@ -48,6 +48,7 @@ export const users = pgTable("users", {
   attendance_home_latitude: decimal("attendance_home_latitude", { precision: 10, scale: 7 }),
   attendance_home_longitude: decimal("attendance_home_longitude", { precision: 10, scale: 7 }),
   attendance_home_set_at: timestamp("attendance_home_set_at"),
+  attendance_tracking_enabled: boolean("attendance_tracking_enabled").notNull().default(true),
 });
 
 export const products = pgTable("products", {

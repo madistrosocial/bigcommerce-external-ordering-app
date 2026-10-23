@@ -8,6 +8,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useLocation } from "wouter";
 import PayslipDocument, { type PayslipDocumentData } from "@/components/payroll/PayslipDocument";
 import { getAuthHeaders } from "@/lib/api";
@@ -518,12 +519,30 @@ function EmployeePayEditor({ employee, onRefresh, readOnly = false }: { employee
       apiJson(`/api/attendance/payroll/admin/pay-items/${id}`, jsonInit("PATCH", { is_active })),
     onSuccess: onRefresh,
   });
+  const updateTracking = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiJson(`/api/attendance/payroll/admin/employees/${employee.id}/tracking`, jsonInit("PATCH", { enabled })),
+    onSuccess: onRefresh,
+  });
   return (
     <div className="rounded-lg border border-slate-200 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div><p className="font-semibold text-slate-900">{employee.name || employee.username}</p><p className="text-xs text-slate-500">{employee.username}{employee.is_enabled ? "" : " · account disabled"}</p></div>
-        {profile ? <Badge className="border-0 bg-emerald-100 text-emerald-700">Pay profile set</Badge> : <Badge className="border-0 bg-amber-100 text-amber-800">Needs rate</Badge>}
+        <div className="flex flex-wrap items-center gap-3">
+          {profile ? <Badge className="border-0 bg-emerald-100 text-emerald-700">Pay profile set</Badge> : <Badge className="border-0 bg-amber-100 text-amber-800">Needs rate</Badge>}
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+            <span>{employee.attendance_tracking_enabled ? "Tracking on" : "Tracking off"}</span>
+            <Switch
+              checked={employee.attendance_tracking_enabled}
+              disabled={readOnly || updateTracking.isPending}
+              onCheckedChange={(enabled) => updateTracking.mutate(enabled)}
+              aria-label={`${employee.attendance_tracking_enabled ? "Disable" : "Enable"} attendance and payroll tracking for ${employee.name || employee.username}`}
+            />
+          </label>
+        </div>
       </div>
+      {!employee.attendance_tracking_enabled && <p className="mt-2 rounded-md bg-amber-50 px-2.5 py-2 text-xs text-amber-800">Hidden from attendance logs, attendance reports, and new payroll runs. Existing records are retained.</p>}
+      {updateTracking.error && <p role="alert" className="mt-2 text-xs text-rose-600">{updateTracking.error.message}</p>}
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <div><Label>Hourly rate</Label><Input disabled={readOnly} className="mt-1" type="number" min="0.01" step="0.01" value={hourlyRate} onChange={event => setHourlyRate(event.target.value)} /></div>
         <div><Label>Currency (ISO)</Label><Input disabled={readOnly} className="mt-1 uppercase" maxLength={3} value={currency} onChange={event => setCurrency(event.target.value.toUpperCase())} /></div>

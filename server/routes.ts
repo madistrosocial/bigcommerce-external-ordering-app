@@ -13197,7 +13197,7 @@ export async function registerRoutes(
       ]);
       const attendanceUsers = (await Promise.all(
         users
-          .filter(user => user.is_enabled)
+          .filter(user => user.is_enabled && user.attendance_tracking_enabled)
           .map(async user => {
             if (user.role === "admin") return user;
             const permissions = await storage.getUserPermissionStrings(user.id);
@@ -13307,8 +13307,10 @@ export async function registerRoutes(
       if (!canViewAll && attendance.user_id !== user.id) {
         return res.status(404).json({ error: "Attendance record not found." });
       }
+      const attendanceEmployee = await storage.getUser(attendance.user_id);
+      if (!attendanceEmployee?.attendance_tracking_enabled) return res.status(404).json({ error: "Attendance record not found." });
       const [employee, checkpoints, audit, dailyNote, breakMap] = await Promise.all([
-        storage.getUser(attendance.user_id),
+        Promise.resolve(attendanceEmployee),
         canViewLocations ? storage.getAttendanceCheckpoints(attendance.id) : Promise.resolve([]),
         storage.getAttendanceAuditHistory(attendance.id),
         storage.getAttendanceDailyNote(attendance.user_id, attendance.work_date),

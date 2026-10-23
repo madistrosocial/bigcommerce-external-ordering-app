@@ -3391,6 +3391,7 @@ export class DatabaseStorage implements IStorage {
 
   async getAttendanceRecords(opts: { from?: string; to?: string; userId?: number; status?: string; startMethod?: string; reviewStatus?: string; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }> {
     const conditions: any[] = [];
+    conditions.push(eq(users.attendance_tracking_enabled, true));
     if (opts.from) conditions.push(gte(attendanceSessions.work_date, opts.from));
     if (opts.to) conditions.push(lte(attendanceSessions.work_date, opts.to));
     if (opts.userId) conditions.push(eq(attendanceSessions.user_id, opts.userId));
@@ -3430,7 +3431,9 @@ export class DatabaseStorage implements IStorage {
         .orderBy(desc(attendanceSessions.work_date), desc(attendanceSessions.time_in))
          .limit(Math.min(Math.max(opts.limit ?? 100, 1), 5000))
         .offset(Math.max(opts.offset ?? 0, 0)),
-      db.select({ count: sql<number>`count(*)` }).from(attendanceSessions).where(where),
+      db.select({ count: sql<number>`count(*)` }).from(attendanceSessions)
+        .innerJoin(users, eq(users.id, attendanceSessions.user_id))
+        .where(where),
     ]);
     const attendanceRows = rows.map(row => ({
         ...row.attendance,
@@ -3539,6 +3542,7 @@ export class DatabaseStorage implements IStorage {
 
   async getAttendanceExceptions(opts: { status?: string; from?: string; to?: string; userId?: number; limit?: number; offset?: number }): Promise<{ rows: any[]; total: number }> {
     const conditions: any[] = [];
+    conditions.push(eq(users.attendance_tracking_enabled, true));
     if (opts.status && opts.status !== "all") conditions.push(eq(attendanceExceptions.status, opts.status));
     if (opts.from) conditions.push(gte(attendanceExceptions.detected_at, new Date(`${opts.from}T00:00:00Z`)));
     if (opts.to) {
@@ -3565,7 +3569,9 @@ export class DatabaseStorage implements IStorage {
         .orderBy(desc(attendanceExceptions.detected_at))
         .limit(Math.min(Math.max(opts.limit ?? 100, 1), 500))
         .offset(Math.max(opts.offset ?? 0, 0)),
-      db.select({ count: sql<number>`count(*)` }).from(attendanceExceptions).where(where),
+      db.select({ count: sql<number>`count(*)` }).from(attendanceExceptions)
+        .innerJoin(users, eq(users.id, attendanceExceptions.user_id))
+        .where(where),
     ]);
     return {
       rows: rows.map(row => ({

@@ -131,10 +131,10 @@ async function buildDraftPayslips(
     username: users.username,
     company_role: users.company_role,
   }).from(users)
-    .where(eq(users.role_id, run.role_id))
+    .where(and(eq(users.role_id, run.role_id), eq(users.attendance_tracking_enabled, true)))
     .orderBy(asc(users.name));
 
-  if (!groupMembers.length) throw new PayrollRequestError(400, "This user group has no employees assigned.");
+  if (!groupMembers.length) throw new PayrollRequestError(400, "This user group has no employees with attendance and payroll tracking enabled.");
   const employeeIds = groupMembers.map((employee: any) => employee.id);
   const [profiles, payItems, sessions, leaveRequests] = await Promise.all([
     tx.select().from(employeePayProfiles).where(inArray(employeePayProfiles.user_id, employeeIds)),
@@ -628,6 +628,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
         .where(and(
           eq(attendanceOvertimeRequests.status, "pending"),
           ne(attendanceOvertimeRequests.user_id, requestUser(req).id),
+          eq(users.attendance_tracking_enabled, true),
         ))
         .orderBy(asc(attendanceOvertimeRequests.created_at));
       if (!rows.length) return res.json({ rows: [] });
@@ -875,6 +876,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
         name: users.name,
         username: users.username,
         is_enabled: users.is_enabled,
+        attendance_tracking_enabled: users.attendance_tracking_enabled,
       }).from(users).where(eq(users.role_id, roleId)).orderBy(asc(users.name));
       const ids = employees.map((employee) => employee.id);
       if (!ids.length) return res.json({ employees: [] });
@@ -898,6 +900,38 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
       });
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? "Could not load pay profiles." });
+    }
+  });
+
+  app.patch("/api/attendance/payroll/admin/employees/:userId/tracking", canManagePayroll, async (req, res) => {
+    const userId = Number(req.params.userId);
+    const parsed = z.object({ enabled: z.boolean() }).safeParse(req.body);
+    if (!Number.isInteger(userId) || userId <= 0) return res.status(400).json({ error: "Invalid employee." });
+    if (!parsed.success) return res.status(400).json({ error: "Choose whether tracking is enabled or disabled." });
+    try {
+      const [employee] = await db.select({
+        id: users.id,
+        attendance_tracking_enabled: users.attendance_tracking_enabled,
+      }).from(users).where(eq(users.id, userId)).limit(1);
+      if (!employee) return res.status(404).json({ error: "Employee not found." });
+      const [updated] = await db.update(users)
+        .set({ attendance_tracking_enabled: parsed.data.enabled })
+        .where(eq(users.id, userId))
+        .returning({ id: users.id, attendance_tracking_enabled: users.attendance_tracking_enabled });
+      if (employee.attendance_tracking_enabled !== parsed.data.enabled) {
+        await writePayrollAudit(
+          db,
+          requestUser(req).id,
+          "employee_tracking",
+          userId,
+          parsed.data.enabled ? "tracking_enabled" : "tracking_disabled",
+          { attendance_tracking_enabled: employee.attendance_tracking_enabled },
+          { attendance_tracking_enabled: parsed.data.enabled },
+        );
+      }
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message ?? "Could not update employee tracking." });
     }
   });
 
@@ -1090,6 +1124,14 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
         const oldSlips = await tx.select({ id: payslips.id, user_id: payslips.user_id }).from(payslips)
           .where(eq(payslips.payroll_run_id, id));
         const oldSlipUserById = new Map(oldSlips.map((slip: any) => [slip.id, slip.user_id]));
+        const enabledEmployees = oldSlips.length
+          ? await tx.select({ id: users.id }).from(users).where(and(
+            inArray(users.id, oldSlips.map((slip: any) => slip.user_id)),
+            eq(users.attendance_tracking_enabled, true),
+          ))
+          : [];
+        const enabledEmployeeIds = new Set(enabledEmployees.map((employee: any) => employee.id));
+        const slipsToRebuild = oldSlips.filter((slip: any) => enabledEmployeeIds.has(slip.user_id));
         const preservedEarningsByUser = new Map<number, { commission: number; incentives: number }>();
         if (oldSlips.length) {
           const oldManualLines = await tx.select().from(payslipLineItems).where(and(
@@ -1104,7 +1146,9 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
             if (line.line_type === "incentive") earnings.incentives += Number(line.amount);
             preservedEarningsByUser.set(userId, earnings);
           }
-          await tx.delete(payslips).where(eq(payslips.payroll_run_id, id));
+          if (slipsToRebuild.length) {
+            await tx.delete(payslips).where(inArray(payslips.id, slipsToRebuild.map((slip: any) => slip.id)));
+          }
         }
         const [refreshedRun] = await tx.update(payrollRuns).set({ snapshot_updated_at: new Date() })
           .where(eq(payrollRuns.id, id)).returning();

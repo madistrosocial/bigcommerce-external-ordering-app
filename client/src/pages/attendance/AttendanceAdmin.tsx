@@ -607,8 +607,11 @@ function Logs() {
   if (to) params.set("to", to);
   if (scopedUserId) params.set("userId", scopedUserId);
   const query = useQuery({ queryKey: ["attendance", "logs", status, startMethod, reviewStatus, from, to, scopedUserId, canViewAll], queryFn: () => apiJson(`/api/attendance/admin/logs?${params}`), enabled: Boolean(from && to && from <= to && !permissionsLoading && scopedUserId) });
-  const queriedTeamMembers = canViewAll ? (usersQuery.data ?? []).filter((user: any) => user.is_enabled) : [];
-  const teamMembers = currentUser && canViewAll && !queriedTeamMembers.some((user: any) => String(user.id) === signedInUserId)
+  const queriedTeamMembers = canViewAll
+    ? (usersQuery.data ?? []).filter((user: any) => user.is_enabled && user.attendance_tracking_enabled)
+    : [];
+  const currentUserTrackingEnabled = (usersQuery.data ?? []).find((user: any) => String(user.id) === signedInUserId)?.attendance_tracking_enabled !== false;
+  const teamMembers = currentUser && currentUserTrackingEnabled && canViewAll && !queriedTeamMembers.some((user: any) => String(user.id) === signedInUserId)
     ? [currentUser, ...queriedTeamMembers]
     : queriedTeamMembers;
   const selectedMember = canViewAll
