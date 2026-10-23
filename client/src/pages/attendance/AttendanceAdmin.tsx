@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { getAuthHeaders } from "@/lib/api";
 import { useTimeService } from "@/hooks/useTimeService";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -286,7 +286,7 @@ function AdminShell({ activeTab, children }: { activeTab: string; children: Reac
 
   return (
     <div className="min-h-full bg-slate-50 px-4 py-5 md:px-6">
-      <div className={activeTab === "reports" ? "w-full" : "mx-auto max-w-7xl"}>
+      <div className={activeTab === "reports" || activeTab === "logs" ? "w-full" : "mx-auto max-w-7xl"}>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="flex items-center gap-2"><Clock3 className="h-5 w-5 text-red-600" /><h1 className="text-xl font-bold text-slate-900">Attendance</h1></div>
@@ -516,6 +516,31 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   </CardContent></Card>;
 }
 
+function DailyNoteViewer({ note, date, employee }: { note: string; date: string; employee: string }) {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className="mt-1 block max-w-full truncate text-left text-[11px] text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900"
+          aria-label={`Read full attendance note for ${employee} on ${date}`}
+        >
+          Note: {note}
+        </button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Daily attendance note</DialogTitle>
+          <DialogDescription>{employee} · {date}</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-sm leading-6 text-slate-700">
+          <p className="whitespace-pre-wrap break-words">{note}</p>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function Logs() {
   const [location] = useLocation();
   const currentUser = useStore(s => s.currentUser);
@@ -740,7 +765,6 @@ function Logs() {
                   const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, selectedMember ? selectedUserId : "");
                   const holiday = holidayMap.get(date);
                   const names = dateRecords.map((row: any) => row.employee_name || row.employee_username).filter(Boolean);
-                   const notes = dateRecords.map((row: any) => row.daily_note).filter(Boolean);
                    const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
                    const memberTotalSeconds = memberRecords.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
                    const displayHours = noAttendance ? "—" : selectedMember ? hours(memberTotalSeconds) : hours(summary?.totalSeconds);
@@ -752,7 +776,7 @@ function Logs() {
                      <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_out") : formatDailyTime(dateRecords, "time_out")}</td>
                      <td className="max-w-[320px] px-4 py-3 text-[11px] text-slate-500">{selectedMember ? formatDailyBreaks(memberRecords) : formatDailyBreaks(dateRecords)}</td>
                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</td>
-                       <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? <><span>{record.start_method === "warehouse" ? "Warehouse" : record.start_method === "offsite" ? "Off-site" : "Route start"} · {record.status}</span>{record.daily_note && <span className="mt-1 block truncate text-[11px] text-blue-700" title={record.daily_note}>Note: {record.daily_note}</span>}</> : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "" : "Not expected") : (names.length ? <><span>{names.slice(0, 3).join(", ")}{names.length > 3 ? ` +${names.length - 3}` : ""}</span>{notes.length > 0 && <span className="mt-1 block truncate text-[11px] text-blue-700" title={notes.join(" | ")}>Notes available: {notes.length}</span>}</> : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "" : "Not expected")}</td>
+                        <td className="max-w-[280px] px-4 py-3 text-slate-500">{selectedMember ? (record ? <><span>{record.start_method === "warehouse" ? "Warehouse" : record.start_method === "offsite" ? "Off-site" : "Route start"} · {record.status}</span>{record.daily_note && <DailyNoteViewer note={record.daily_note} date={date} employee={selectedMember.name || selectedMember.username || "Employee"} />}</> : statusKey === "absent" ? "No attendance log recorded" : statusKey === "not_started" ? "No attendance log yet" : statusKey === "upcoming" ? "" : "Not expected") : (names.length ? <><span>{names.slice(0, 3).join(", ")}{names.length > 3 ? ` +${names.length - 3}` : ""}</span>{dateRecords.filter((item: any) => item.daily_note).map((item: any) => <DailyNoteViewer key={`${item.id}-note`} note={item.daily_note} date={date} employee={item.employee_name || item.employee_username || "Employee"} />)}</> : statusKey === "absent" ? "No team member logged time" : statusKey === "not_started" ? "No team member logged time yet" : statusKey === "upcoming" ? "" : "Not expected")}</td>
                       <td className="min-w-[190px] px-2 py-2 align-top text-right">{canReviewAttendance || canManageAttendance || canAuditAttendance || canViewAttendanceLocations ? <div className="flex flex-col items-end gap-2">{actions.map(({ attendance, label }: any) => <AttendanceLogActions key={attendance.id} attendance={attendance} canViewAll={canViewAll} label={label} onViewLog={() => setSelectedId(Number(attendance.id))} />)}</div> : "—"}</td>
                      </tr>;
                 })}
@@ -781,7 +805,8 @@ function Logs() {
                        <div><span className="block text-slate-500">Time out</span><span className="font-medium text-slate-700">{selectedMember ? formatDailyTime(memberRecords, "time_out") : formatDailyTime(summary?.records ?? [], "time_out")}</span></div>
                      <div><span className="block text-slate-500">Hours</span><span className="font-semibold text-slate-700">{statusKey === "holiday" || statusKey === "weekend" ? "—" : displayHours}</span></div>
                    </div>
-                     {(selectedMember ? memberRecords.some((row: any) => row.breaks?.length) : summary?.records?.some((row: any) => row.breaks?.length)) ? <p className="mt-2 text-[11px] text-slate-500"><span className="font-medium text-slate-600">Breaks: </span>{selectedMember ? formatDailyBreaks(memberRecords) : formatDailyBreaks(summary?.records ?? [])}</p> : null}
+                      {(selectedMember ? memberRecords.some((row: any) => row.breaks?.length) : summary?.records?.some((row: any) => row.breaks?.length)) ? <p className="mt-2 text-[11px] text-slate-500"><span className="font-medium text-slate-600">Breaks: </span>{selectedMember ? formatDailyBreaks(memberRecords) : formatDailyBreaks(summary?.records ?? [])}</p> : null}
+                      {(selectedMember ? memberRecords : summary?.records ?? []).filter((row: any) => row.daily_note).map((row: any) => <DailyNoteViewer key={`${row.id}-note`} note={row.daily_note} date={date} employee={row.employee_name || row.employee_username || selectedMember?.name || "Employee"} />)}
                      {actions.length > 0 && (canReviewAttendance || canManageAttendance || canAuditAttendance || canViewAttendanceLocations) && <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">{actions.map(({ attendance, label }: any) => <AttendanceLogActions key={attendance.id} attendance={attendance} canViewAll={canViewAll} label={label} onViewLog={() => setSelectedId(Number(attendance.id))} />)}</div>}
                </div>;
              })}
