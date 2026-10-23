@@ -736,9 +736,35 @@ function Logs() {
         ["Business days", String(businessDates.length), "Weekdays in selected range", "text-slate-600"],
       ].map(([label, value, hint, color]) => <Card key={label} className="min-w-[166px] shrink-0 rounded-xl border-slate-200 shadow-sm lg:min-w-0"><CardContent className="p-4"><p className={`text-xl font-bold ${color}`}>{value}</p><p className="mt-1 text-xs font-semibold text-slate-700">{label}</p>{hint && <p className="mt-1 text-[10px] leading-4 text-slate-400">{hint}</p>}</CardContent></Card>)}
     </div>
-    <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[11px] text-slate-500">
-      <span className="font-semibold text-slate-700">{selectedMember?.name || selectedMember?.username || "My attendance"}</span>
-      <span>{from && to ? `${shortDate(from)} – ${shortDate(to)}` : "Choose a valid date range"}</span>
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[11px] text-slate-500">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="font-semibold text-slate-700">{selectedMember?.name || selectedMember?.username || "My attendance"}</span>
+        <span>{from && to ? `${shortDate(from)} – ${shortDate(to)}` : "Choose a valid date range"}</span>
+      </div>
+      <div className="ml-auto flex items-center gap-3">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1 px-2 text-xs"
+          onClick={() => { setSelectedId(null); setFocusDate(""); setMonth(value => shiftMonth(value, -1)); }}
+          aria-label="View previous month"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" /><span className="hidden sm:inline">Previous</span>
+        </Button>
+        <div className="min-w-[88px] text-center">
+          <p className="text-xs font-semibold text-slate-700">{monthLabel(month)}</p>
+          {month !== currentMonthKey() && <Button variant="link" size="sm" className="h-5 p-0 text-[11px] text-red-600" onClick={() => { setSelectedId(null); setFocusDate(""); setMonth(currentMonthKey()); }}>Current month</Button>}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1 px-2 text-xs"
+          onClick={() => { setSelectedId(null); setFocusDate(""); setMonth(value => shiftMonth(value, 1)); }}
+          aria-label="View next month"
+        >
+          <span className="hidden sm:inline">Next</span><ChevronRight className="h-3.5 w-3.5" />
+        </Button>
+      </div>
     </div>
     {reviewStatus === "needs_review" && <div role="status" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
       Completed sessions marked <strong>Needs review</strong> are highlighted below. Open a flagged record and clear its review flag after verification.
@@ -813,30 +839,6 @@ function Logs() {
            </div>
            </>
          )}
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1 text-xs"
-            onClick={() => { setSelectedId(null); setFocusDate(""); setMonth(value => shiftMonth(value, -1)); }}
-            aria-label="View previous month"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />Previous month
-          </Button>
-          <div className="text-center">
-            <p className="text-xs font-semibold text-slate-700">{monthLabel(month)}</p>
-            {month !== currentMonthKey() && <Button variant="link" size="sm" className="h-5 p-0 text-[11px] text-red-600" onClick={() => { setSelectedId(null); setFocusDate(""); setMonth(currentMonthKey()); }}>Return to current month</Button>}
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1 text-xs"
-            onClick={() => { setSelectedId(null); setFocusDate(""); setMonth(value => shiftMonth(value, 1)); }}
-            aria-label="View next month"
-          >
-            Next month<ChevronRight className="h-3.5 w-3.5" />
-          </Button>
-        </div>
       </CardContent>
     </Card>
   </AdminShell>;
