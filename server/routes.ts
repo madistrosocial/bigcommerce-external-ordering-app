@@ -3856,11 +3856,17 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid activity type" });
       }
       const search = String(req.query.search ?? "").trim().slice(0, 100);
+      const rawUserId = req.query.userId;
+      const userId = rawUserId === undefined || rawUserId === "" ? undefined : Number(rawUserId);
+      if (userId !== undefined && (!Number.isInteger(userId) || userId <= 0)) {
+        return res.status(400).json({ error: "Invalid user" });
+      }
       const result = await storage.getUserActivityLogs({
         limit,
         offset: page * limit,
         search: search || undefined,
         eventType: eventType || undefined,
+        userId,
       });
       res.json({ ...result, page, limit });
     } catch {
@@ -7608,6 +7614,7 @@ export async function registerRoutes(
         allUsers.map((u) => ({
           id: u.id,
           name: u.name,
+          username: u.username,
           role: u.role,
           is_enabled: u.is_enabled,
           group_name: u.role_id ? (roleMap.get(u.role_id) ?? null) : null,

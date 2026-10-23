@@ -1181,12 +1181,14 @@ export async function getSyslogActivity(opts: {
   limit?: number;
   search?: string;
   eventType?: UserActivityEventType;
+  userId?: number;
 }): Promise<UserActivityLogPage> {
   const params = new URLSearchParams();
   if (opts.page !== undefined) params.set("page", String(opts.page));
   if (opts.limit !== undefined) params.set("limit", String(opts.limit));
   if (opts.search) params.set("search", opts.search);
   if (opts.eventType) params.set("eventType", opts.eventType);
+  if (opts.userId !== undefined) params.set("userId", String(opts.userId));
   const res = await fetch(`${API_BASE}/syslog?${params.toString()}`, {
     headers: getAuthHeaders(),
     cache: "no-store",
@@ -2364,6 +2366,7 @@ export async function getAllOrders(): Promise<Order[]> {
 export interface UserSummary {
   id: number;
   name: string;
+  username?: string;
   role: string;
   is_enabled: boolean;
   group_name: string | null;

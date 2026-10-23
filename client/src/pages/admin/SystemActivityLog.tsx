@@ -27,15 +27,23 @@ export default function SystemActivityLogPage() {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [eventType, setEventType] = useState<"all" | api.UserActivityEventType>("all");
+  const [userId, setUserId] = useState("all");
   const [page, setPage] = useState(0);
 
+  const usersQuery = useQuery({
+    queryKey: ["users-summary"],
+    queryFn: api.getUsersSummary,
+    staleTime: 5 * 60_000,
+  });
+
   const { data, isLoading, isFetching, error, refetch } = useQuery({
-    queryKey: ["syslog-activity", page, appliedSearch, eventType],
+    queryKey: ["syslog-activity", page, appliedSearch, eventType, userId],
     queryFn: () => api.getSyslogActivity({
       page,
       limit: PAGE_SIZE,
       search: appliedSearch || undefined,
       eventType: eventType === "all" ? undefined : eventType,
+      userId: userId === "all" ? undefined : Number(userId),
     }),
     staleTime: 0,
     refetchInterval: 30_000,
@@ -58,6 +66,7 @@ export default function SystemActivityLogPage() {
     setSearch("");
     setAppliedSearch("");
     setEventType("all");
+    setUserId("all");
     setPage(0);
   };
 
@@ -121,10 +130,31 @@ export default function SystemActivityLogPage() {
                 <SelectItem value="api_action">API actions</SelectItem>
               </SelectContent>
             </Select>
+            <Select
+              value={userId}
+              onValueChange={(value) => {
+                setUserId(value);
+                setPage(0);
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-52" data-testid="select-syslog-user">
+                <SelectValue placeholder="All users" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All users</SelectItem>
+                {(usersQuery.data ?? []).map((user) => (
+                  <SelectItem key={user.id} value={String(user.id)}>
+                    {user.username
+                      ? `${user.name || `User ${user.id}`} (${user.username})`
+                      : user.name || `User ${user.id}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button type="submit" disabled={isFetching && !data} data-testid="button-search-syslog">
               Search
             </Button>
-            {(appliedSearch || eventType !== "all") && (
+            {(appliedSearch || eventType !== "all" || userId !== "all") && (
               <Button type="button" variant="ghost" onClick={clearFilters}>
                 Clear
               </Button>

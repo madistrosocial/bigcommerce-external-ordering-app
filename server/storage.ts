@@ -311,7 +311,7 @@ export interface IStorage {
     id: number,
     location: Pick<InsertUserActivityLog, "location_city" | "location_region" | "location_country">,
   ): Promise<void>;
-  getUserActivityLogs(opts: { limit: number; offset: number; search?: string; eventType?: string }): Promise<{ rows: UserActivityLog[]; total: number }>;
+  getUserActivityLogs(opts: { limit: number; offset: number; search?: string; eventType?: string; userId?: number }): Promise<{ rows: UserActivityLog[]; total: number }>;
   // CRM Table resets
   truncateCrmCustomers(): Promise<void>;
   truncateCrmOrders(): Promise<void>;
@@ -3777,9 +3777,11 @@ export class DatabaseStorage implements IStorage {
     offset: number;
     search?: string;
     eventType?: string;
+    userId?: number;
   }): Promise<{ rows: UserActivityLog[]; total: number }> {
     const conditions: any[] = [];
     if (opts.eventType) conditions.push(eq(userActivityLogs.event_type, opts.eventType));
+    if (opts.userId !== undefined) conditions.push(eq(userActivityLogs.user_id, opts.userId));
     const search = opts.search?.trim();
     if (search) {
       const pattern = `%${search}%`;
