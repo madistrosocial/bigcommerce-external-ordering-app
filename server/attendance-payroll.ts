@@ -65,14 +65,30 @@ function resolvePayslipHourlyRate(slip: any, lines: any[], fallbackRate: unknown
   return rate.toFixed(4);
 }
 
-async function getAttendancePayBreakdowns(sessions: any[], now = new Date()) {
+export async function getAttendancePayBreakdowns(sessions: any[], now = new Date()) {
   if (!sessions.length) return new Map();
-  const [timeZone, breaksByAttendance] = await Promise.all([
+  const userIds = [...new Set(sessions.map(session => Number(session.user_id)).filter(Number.isInteger))];
+  const [timeZone, breaksByAttendance, groupSettings] = await Promise.all([
     getCompanyTimezone(storage),
     storage.getAttendanceBreakIntervals(sessions.map(session => session.id)),
+    userIds.length
+      ? db.select({
+        user_id: users.id,
+        count_from_clock_in: attendancePayrollGroupSchedules.count_from_clock_in,
+        deduct_fixed_break_hour: attendancePayrollGroupSchedules.deduct_fixed_break_hour,
+      }).from(users)
+        .leftJoin(attendancePayrollGroupSchedules, eq(attendancePayrollGroupSchedules.role_id, users.role_id))
+        .where(inArray(users.id, userIds))
+      : Promise.resolve([]),
   ]);
+  const settingsByUser = new Map(groupSettings.map(settings => [settings.user_id, settings]));
   return calculateAttendanceDayPay(
-    sessions.map(session => ({ ...session, breaks: breaksByAttendance[session.id] ?? [] })),
+    sessions.map(session => ({
+      ...session,
+      count_from_clock_in: settingsByUser.get(Number(session.user_id))?.count_from_clock_in ?? false,
+      deduct_fixed_break_hour: settingsByUser.get(Number(session.user_id))?.deduct_fixed_break_hour ?? false,
+      breaks: breaksByAttendance[session.id] ?? [],
+    })),
     timeZone,
     now,
   );
@@ -828,6 +844,8 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
       semimonthly_first_payday: z.coerce.number().int().min(1).max(31),
       semimonthly_second_payday: z.coerce.number().int().min(1).max(31),
       timezone: z.string().refine(validTimezone, "Enter a valid timezone."),
+      count_from_clock_in: z.boolean().default(false),
+      deduct_fixed_break_hour: z.boolean().default(false),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the payroll schedule." });
@@ -850,6 +868,8 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
         semimonthly_first_payday: parsed.data.semimonthly_first_payday,
         semimonthly_second_payday: parsed.data.semimonthly_second_payday,
         timezone: parsed.data.timezone,
+        count_from_clock_in: parsed.data.count_from_clock_in,
+        deduct_fixed_break_hour: parsed.data.deduct_fixed_break_hour,
         updated_by: actor.id,
         updated_at: new Date(),
       };

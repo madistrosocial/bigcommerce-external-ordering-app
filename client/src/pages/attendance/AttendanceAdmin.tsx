@@ -325,7 +325,7 @@ function EmployeeRow({ row, onClick, fmt }: { row: any; onClick?: () => void; fm
       <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-xs">
         <div><span className="block text-slate-400">Time in</span><span className="font-medium text-slate-700">{row.time_in ? fmt.dateTime(row.time_in) : "—"}</span></div>
         <div><span className="block text-slate-400">Time out</span><span className="font-medium text-slate-700">{row.time_out ? fmt.dateTime(row.time_out) : "—"}</span></div>
-        <div><span className="block text-slate-400">Total hours</span><span className="font-medium text-slate-700">{hours(row.total_seconds)}</span></div>
+         <div><span className="block text-slate-400">Total hours</span><span className="font-medium text-slate-700">{hours(row.worked_seconds ?? row.total_seconds)}</span></div>
       </div>
       {row.breaks?.length > 0 && <div className="mt-2 border-t border-slate-100 pt-2 text-[11px] text-slate-500"><span className="font-medium text-slate-600">Breaks: </span>{row.breaks.map((breakItem: any, index: number) => <span key={`${breakItem.break_started_at}-${index}`}>{index > 0 ? "; " : ""}{fmt.dateTime(breakItem.break_started_at)} → {breakItem.break_ended_at ? fmt.dateTime(breakItem.break_ended_at) : "In progress"}</span>)}</div>}
     </button>
@@ -476,7 +476,7 @@ function LogDetail({ id, onClose }: { id: number; onClose: () => void }) {
   if (!data) return null;
   const { attendance, dailyNote, employee, audit = [] } = data;
   return <Card className="rounded-xl border-slate-200 shadow-sm"><CardHeader className="flex flex-row items-start justify-between gap-3 pb-3"><div><CardTitle className="text-sm">{employee?.name ?? "Employee"} · {attendance.work_date}</CardTitle><div className="mt-2 flex flex-wrap items-center gap-2">{statusBadge(attendance.status)}{statusBadge(attendance.review_status ?? "approved")}</div></div><Button variant="ghost" size="sm" onClick={onClose}>Close</Button></CardHeader><CardContent className="space-y-5">
-     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Time In", attendance.time_in ? fmt.dateTime(attendance.time_in) : "—"], ["Time Out", attendance.time_out ? fmt.dateTime(attendance.time_out) : "—"], ["Total Hours", hours(attendance.total_seconds)], ["Start Method", attendance.start_method === "warehouse" ? "Warehouse" : attendance.start_method === "offsite" ? "Off-site" : "Driving"]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] text-slate-400">{label}</p><p className="mt-1 text-xs font-semibold capitalize text-slate-700">{value}</p></div>)}</div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[["Time In", attendance.time_in ? fmt.dateTime(attendance.time_in) : "—"], ["Time Out", attendance.time_out ? fmt.dateTime(attendance.time_out) : "—"], ["Total Hours", hours(attendance.worked_seconds ?? attendance.total_seconds)], ["Start Method", attendance.start_method === "warehouse" ? "Warehouse" : attendance.start_method === "offsite" ? "Off-site" : "Driving"]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] text-slate-400">{label}</p><p className="mt-1 text-xs font-semibold capitalize text-slate-700">{value}</p></div>)}</div>
       {attendance.breaks?.length > 0 && <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Break intervals</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{attendance.breaks.map((breakItem: any, index: number) => <div key={`${breakItem.break_started_at}-${index}`} className="rounded-lg bg-white p-2 text-xs"><p className="font-medium text-slate-700">Break {index + 1}</p><p className="mt-1 text-slate-500">Start · {fmt.dateTime(breakItem.break_started_at)}</p><p className="text-slate-500">End · {breakItem.break_ended_at ? fmt.dateTime(breakItem.break_ended_at) : "In progress"}</p></div>)}</div></div>}
       {dailyNote && <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-blue-800">Daily attendance note</p><p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{dailyNote}</p></div>}
       {canViewLocations && <div className="grid gap-3 md:grid-cols-2">
@@ -625,7 +625,7 @@ function Logs() {
     for (const row of rows) {
       const current = map.get(row.work_date) ?? { date: row.work_date, records: [], totalSeconds: 0, loggedCount: 0 };
       current.records.push(row);
-      current.totalSeconds += Number(row.total_seconds ?? 0);
+      current.totalSeconds += Number(row.worked_seconds ?? row.total_seconds ?? 0);
       current.loggedCount += 1;
       map.set(row.work_date, current);
     }
@@ -666,7 +666,7 @@ function Logs() {
   const today = dateOnly(new Date());
   const elapsedBusinessDates = businessDates.filter(date => date < today);
   const elapsedWorkedRows = workedRows.filter((row: any) => row.work_date < today);
-  const totalSeconds = workedRows.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
+   const totalSeconds = workedRows.reduce((sum: number, row: any) => sum + Number(row.worked_seconds ?? row.total_seconds ?? 0), 0);
   const expectedSeconds = elapsedBusinessDates.length * expectedUserCount * EXPECTED_DAILY_SECONDS;
   const daysWorked = new Set(workedRows.map((row: any) => `${row.user_id}:${row.work_date}`)).size;
   const elapsedDaysWorked = new Set(elapsedWorkedRows.map((row: any) => `${row.user_id}:${row.work_date}`)).size;
@@ -795,7 +795,7 @@ function Logs() {
                   const holiday = holidayMap.get(date);
                   const names = dateRecords.map((row: any) => row.employee_name || row.employee_username).filter(Boolean);
                    const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
-                   const memberTotalSeconds = memberRecords.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
+                    const memberTotalSeconds = memberRecords.reduce((sum: number, row: any) => sum + Number(row.worked_seconds ?? row.total_seconds ?? 0), 0);
                    const displayHours = noAttendance ? "—" : selectedMember ? hours(memberTotalSeconds) : hours(summary?.totalSeconds);
                       return <tr key={`attendance-row-${date}`} className={`border-b border-slate-100 last:border-0 ${focusDate === date && needsReviewDate ? "outline outline-2 outline-inset outline-orange-400" : ""} ${needsReviewDate ? "bg-orange-50" : statusKey === "weekend" ? "bg-slate-50/80" : statusKey === "holiday" ? "bg-amber-50/40" : "bg-white"}`}>
                      <td className="whitespace-nowrap px-4 py-3"><span className="font-semibold text-slate-800">{shortDate(date)}</span><span className="ml-2 text-[10px] text-slate-400">{date}</span>{needsReviewDate && <span className="ml-2 inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[9px] font-semibold text-orange-800">Needs review</span>}</td>
@@ -825,7 +825,7 @@ function Logs() {
                 const statusKey = ledgerStatus(date, holidayMap, selectedMember ? record : summary, selectedMember ? selectedUserId : "");
                const holiday = holidayMap.get(date);
                 const noAttendance = statusKey === "absent" || statusKey === "not_started" || statusKey === "upcoming";
-                const memberTotalSeconds = memberRecords.reduce((sum: number, row: any) => sum + Number(row.total_seconds ?? 0), 0);
+                 const memberTotalSeconds = memberRecords.reduce((sum: number, row: any) => sum + Number(row.worked_seconds ?? row.total_seconds ?? 0), 0);
                 const displayHours = noAttendance ? "—" : selectedMember ? hours(memberTotalSeconds) : hours(summary?.totalSeconds);
                 return <div key={date} className={`rounded-xl border p-3 ${focusDate === date && needsReviewDate ? "border-orange-400 bg-orange-50 ring-2 ring-orange-200" : needsReviewDate ? "border-orange-200 bg-orange-50/70" : "border-slate-100 bg-white"}`}>
                   <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{shortDate(date)} <span className="font-normal text-slate-400">{weekday(date)}</span></p><p className="mt-1 text-[11px] text-slate-400">{date}{holiday ? ` · ${holiday}` : ""}</p>{needsReviewDate && <span className="mt-2 inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-800">Needs review</span>}</div><span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass[statusKey]}`}>{statusLabel[statusKey]}</span></div>

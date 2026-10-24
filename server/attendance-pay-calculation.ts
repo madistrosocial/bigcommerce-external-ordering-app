@@ -14,6 +14,8 @@ type BreakInterval = {
 export type AttendancePaySession = {
   id: number;
   user_id?: number | string | null;
+  count_from_clock_in?: boolean;
+  deduct_fixed_break_hour?: boolean;
   work_date: string;
   time_in?: Date | string | null;
   time_out?: Date | string | null;
@@ -137,8 +139,14 @@ function normalizeSession(session: AttendancePaySession, scheduleStart: number, 
     return { session, timeIn, end, breaks: [], workSegments: [], fallbackWorkedSeconds };
   }
 
-  const breaks = breakIntervalsForSession(session, timeIn, end, nowMs, scheduleStart);
-  const countedStart = Math.max(scheduleStart, timeIn);
+  let breaks = breakIntervalsForSession(session, timeIn, end, nowMs, scheduleStart);
+  if (session.deduct_fixed_break_hour && breaks.length) {
+    const firstBreak = breaks[0];
+    const fixedDuration = Math.min(INCLUDED_BREAK_SECONDS * 1000, end - timeIn);
+    const fixedStart = Math.min(firstBreak.start, end - fixedDuration);
+    breaks = [{ start: fixedStart, end: fixedStart + fixedDuration }];
+  }
+  const countedStart = session.count_from_clock_in ? timeIn : Math.max(scheduleStart, timeIn);
   const workSegments = countedStart < end
     ? subtractBreaks(countedStart, end, breaks, session.id)
     : [];

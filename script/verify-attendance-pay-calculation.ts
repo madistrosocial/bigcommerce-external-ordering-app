@@ -97,3 +97,25 @@ function breakdown(sessions: ReturnType<typeof session>[]) {
   assert.equal(first.paidSeconds + second.paidSeconds, 7 * 60 * 60);
   assert.equal(first.overtimeSeconds + second.overtimeSeconds, 0);
 }
+
+{
+  const scheduledStart = session(10, "08:30", "18:00", [["12:00", "13:00"]]);
+  const clockInStart = { ...scheduledStart, id: 11, user_id: 43, count_from_clock_in: true };
+  const [scheduledPay, clockInPay] = breakdown([scheduledStart, clockInStart]);
+  assert.equal(scheduledPay.workedSeconds, 8 * 60 * 60);
+  assert.equal(clockInPay.workedSeconds, 8.5 * 60 * 60);
+}
+
+{
+  const actualBreak = session(12, "09:00", "18:00", [["12:00", "12:30"]]);
+  const fixedBreak = { ...actualBreak, id: 13, user_id: 43, deduct_fixed_break_hour: true };
+  const [actualPay, fixedPay] = breakdown([actualBreak, fixedBreak]);
+  assert.equal(actualPay.workedSeconds, 8.5 * 60 * 60);
+  assert.equal(fixedPay.workedSeconds, 8 * 60 * 60);
+}
+
+{
+  const fixedBreak = { ...session(14, "09:00", "19:00", [["12:00", "13:30"]]), deduct_fixed_break_hour: true };
+  const [pay] = breakdown([fixedBreak]);
+  assert.equal(pay.workedSeconds, 9 * 60 * 60);
+}

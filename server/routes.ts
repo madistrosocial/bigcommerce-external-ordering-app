@@ -110,8 +110,7 @@ import {
   parseAccuracy,
   parseCoordinate,
 } from "./attendance";
-import { calculateAttendanceDayPay } from "./attendance-pay-calculation";
-import { registerAttendancePayrollRoutes } from "./attendance-payroll";
+import { getAttendancePayBreakdowns, registerAttendancePayrollRoutes } from "./attendance-payroll";
 import { lookupActivityLogLocation, normalizeClientIp } from "./activity-log-location";
 import { loginRateLimit, passwordResetRateLimit } from "./security";
 
@@ -12687,21 +12686,31 @@ export async function registerRoutes(
       const overdueSessions = (await storage.getOpenAttendanceSessionsForUser(user.id))
         .filter(session => session.work_date < workDate);
       const active = todaySessions.find(session => session.status === "active" || session.status === "on_break") ?? null;
-      const todayTotalSeconds = todaySessions.reduce((total, session) => {
-        if (session.status === "active" && session.time_in) {
-          return total + Math.max(0, Math.floor((now.getTime() - new Date(session.time_in).getTime()) / 1000) - Number(session.break_seconds ?? 0));
-        }
-        return total + Math.max(0, Number(session.total_seconds) || 0);
-      }, 0);
+      const [todayPay, history, dailyReport] = await Promise.all([
+        getAttendancePayBreakdowns(todaySessions, now),
+        storage.getAttendanceHistoryForUser(user.id, 30),
+        storage.getAttendanceDailyReport(user.id, workDate),
+      ]);
+      const todayTotalSeconds = todaySessions.reduce(
+        (total, session) => total + (todayPay.get(session.id)?.workedSeconds ?? 0),
+        0,
+      );
+      const todaySessionsWithWorkedTime = todaySessions.map(session => ({
+        ...session,
+        worked_seconds: todayPay.get(session.id)?.workedSeconds ?? 0,
+      }));
+      const historyPay = await getAttendancePayBreakdowns(history);
+      const historyWithWorkedTime = history.map(session => ({
+        ...session,
+        worked_seconds: historyPay.get(session.id)?.workedSeconds ?? 0,
+      }));
       const firstSession = todaySessions.find(session => session.session_number === 1) ?? todaySessions[0];
       const secondSessionApproved = Boolean(firstSession?.second_session_approved);
-      const history = await storage.getAttendanceHistoryForUser(user.id, 30);
-      const dailyReport = await storage.getAttendanceDailyReport(user.id, workDate);
       res.json({
         active,
         overdueSessions,
-        history,
-        todaySessions,
+        history: historyWithWorkedTime,
+        todaySessions: todaySessionsWithWorkedTime,
         todayTotalSeconds,
         todayAsOf: now.toISOString(),
         dailyNote: dailyReport?.note ?? "",
@@ -12717,7 +12726,12 @@ export async function registerRoutes(
   app.get("/api/attendance/history", requirePermission("attendance", "view_own"), async (req, res) => {
     try {
       const user = (req as any).authUser;
-      res.json(await storage.getAttendanceHistoryForUser(user.id, 100));
+      const history = await storage.getAttendanceHistoryForUser(user.id, 100);
+      const payByAttendance = await getAttendancePayBreakdowns(history);
+      res.json(history.map(session => ({
+        ...session,
+        worked_seconds: payByAttendance.get(session.id)?.workedSeconds ?? 0,
+      })));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -13195,6 +13209,7 @@ export async function registerRoutes(
         storage.getAllUsers(),
         storage.getAttendanceExceptions({ status: "open", from, to, limit: 50, offset: 0 }),
       ]);
+      const payByAttendance = await getAttendancePayBreakdowns(recordResult.rows);
       const attendanceUsers = (await Promise.all(
         users
           .filter(user => user.is_enabled && user.attendance_tracking_enabled)
@@ -13207,7 +13222,10 @@ export async function registerRoutes(
       const attendanceUserIds = new Set(attendanceUsers.map(user => user.id));
       const activeCount = recordResult.rows.filter(row => row.status === "active" || row.status === "on_break").length;
       const loggedIn = new Set(recordResult.rows.filter(row => attendanceUserIds.has(row.user_id)).map(row => row.user_id));
-      const totalSeconds = recordResult.rows.reduce((sum, row) => sum + Number(row.total_seconds ?? 0), 0);
+      const totalSeconds = recordResult.rows.reduce(
+        (sum, row) => sum + (payByAttendance.get(row.id)?.workedSeconds ?? 0),
+        0,
+      );
       const missingTimeOutRows = recordResult.rows.filter(row => row.time_in && !row.time_out && row.work_date < today);
       const reviewRows = recordResult.rows.filter(row => row.review_status === "needs_review");
       const attention = [
@@ -13283,12 +13301,16 @@ export async function registerRoutes(
         limit: q.limit ? Number(q.limit) : 100,
         offset: q.offset ? Number(q.offset) : 0,
       });
-      const rows = canViewLocations ? result.rows : result.rows.map(row => ({
+      const payByAttendance = await getAttendancePayBreakdowns(result.rows);
+      const rows = result.rows.map(row => ({
         ...row,
-        time_in_latitude: null,
-        time_in_longitude: null,
-        time_out_latitude: null,
-        time_out_longitude: null,
+        worked_seconds: payByAttendance.get(row.id)?.workedSeconds ?? 0,
+        ...(!canViewLocations ? {
+          time_in_latitude: null,
+          time_in_longitude: null,
+          time_out_latitude: null,
+          time_out_longitude: null,
+        } : {}),
       }));
       res.json({ ...result, rows, can_view_all: canViewAll, can_view_locations: canViewLocations });
     } catch (e: any) {
@@ -13309,15 +13331,17 @@ export async function registerRoutes(
       }
       const attendanceEmployee = await storage.getUser(attendance.user_id);
       if (!attendanceEmployee?.attendance_tracking_enabled) return res.status(404).json({ error: "Attendance record not found." });
-      const [employee, checkpoints, audit, dailyNote, breakMap] = await Promise.all([
+      const [employee, checkpoints, audit, dailyNote, breakMap, payByAttendance] = await Promise.all([
         Promise.resolve(attendanceEmployee),
         canViewLocations ? storage.getAttendanceCheckpoints(attendance.id) : Promise.resolve([]),
         storage.getAttendanceAuditHistory(attendance.id),
         storage.getAttendanceDailyNote(attendance.user_id, attendance.work_date),
         storage.getAttendanceBreakIntervals([attendance.id]),
+        getAttendancePayBreakdowns([attendance]),
       ]);
       const attendanceDetails = {
         ...attendance,
+        worked_seconds: payByAttendance.get(attendance.id)?.workedSeconds ?? 0,
         ...(!canViewLocations ? {
           time_in_latitude: null,
           time_in_longitude: null,
@@ -13457,10 +13481,10 @@ export async function registerRoutes(
         to = to || period.end;
       }
       const result = await storage.getAttendanceRecords({ from, to, limit: 5000, offset: 0 });
-      const companyTimezone = await getCompanyTimezone(storage);
-      const payByAttendance = calculateAttendanceDayPay(result.rows, companyTimezone);
+      const payByAttendance = await getAttendancePayBreakdowns(result.rows);
       const reportRecords = result.rows.map(row => ({
         ...row,
+        worked_seconds: payByAttendance.get(row.id)?.workedSeconds ?? 0,
         paid_seconds: payByAttendance.get(row.id)?.paidSeconds ?? 0,
         overtime_seconds: payByAttendance.get(row.id)?.overtimeSeconds ?? 0,
       }));
@@ -13491,7 +13515,7 @@ export async function registerRoutes(
           missing: 0,
           review: 0,
         };
-        const seconds = Number(row.total_seconds ?? 0);
+        const seconds = Number(row.worked_seconds ?? 0);
         current.total_seconds += seconds;
         current.days += 1;
         if (!row.time_out) current.missing += 1;

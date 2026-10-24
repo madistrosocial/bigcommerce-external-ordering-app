@@ -440,6 +440,8 @@ function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSa
   const [firstDay, setFirstDay] = useState(String(current?.semimonthly_first_payday ?? 15));
   const [secondDay, setSecondDay] = useState(String(current?.semimonthly_second_payday ?? 30));
   const [timezone, setTimezone] = useState(current?.timezone ?? "UTC");
+  const [countFromClockIn, setCountFromClockIn] = useState(current?.count_from_clock_in ?? false);
+  const [deductFixedBreakHour, setDeductFixedBreakHour] = useState(current?.deduct_fixed_break_hour ?? false);
   const save = useMutation({
     mutationFn: () => apiJson(`/api/attendance/payroll/admin/groups/${group.id}/schedule`, jsonInit("PUT", {
       cadence,
@@ -447,6 +449,8 @@ function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSa
       semimonthly_first_payday: Number(firstDay),
       semimonthly_second_payday: Number(secondDay),
       timezone,
+      count_from_clock_in: countFromClockIn,
+      deduct_fixed_break_hour: deductFixedBreakHour,
     })),
     onSuccess: onSaved,
   });
@@ -456,6 +460,8 @@ function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSa
     setFirstDay(String(current?.semimonthly_first_payday ?? 15));
     setSecondDay(String(current?.semimonthly_second_payday ?? 30));
     setTimezone(current?.timezone ?? "UTC");
+    setCountFromClockIn(current?.count_from_clock_in ?? false);
+    setDeductFixedBreakHour(current?.deduct_fixed_break_hour ?? false);
   }, [group.id, current?.updated_at]);
   return (
     <div className="rounded-lg border border-slate-200 p-3">
@@ -471,8 +477,18 @@ function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSa
         <div><Label>Payroll timezone</Label><Input disabled={readOnly} className="mt-1.5" value={timezone} onChange={event => setTimezone(event.target.value)} placeholder="America/New_York" /></div>
         {!readOnly && <div className="flex items-end"><Button type="button" variant="outline" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Settings2 className="mr-2 h-4 w-4" />}Save schedule</Button></div>}
       </div>
-      {cadence === "semimonthly_15_30" && <p className="mt-2 text-xs text-slate-500">Enter the actual pay date for each run. For February or a short month, choose the payday explicitly when creating the run.</p>}
+      <div className="mt-4 grid gap-3 border-t border-slate-100 pt-3 md:grid-cols-2">
+        <label className="flex items-start justify-between gap-4 rounded-md border border-slate-200 bg-white p-3">
+          <span><span className="block text-sm font-medium text-slate-800">Count from clock-in</span><span className="mt-1 block text-xs text-slate-500">Off: count from the later of 9:00 AM or actual clock-in.</span></span>
+          <Switch checked={countFromClockIn} disabled={readOnly} onCheckedChange={setCountFromClockIn} aria-label={`Count ${group.name} work hours from clock-in`} />
+        </label>
+        <label className="flex items-start justify-between gap-4 rounded-md border border-slate-200 bg-white p-3">
+          <span><span className="block text-sm font-medium text-slate-800">Deduct a fixed 1-hour break</span><span className="mt-1 block text-xs text-slate-500">On: deduct 1 hour once when a break is recorded. Off: deduct actual break time.</span></span>
+          <Switch checked={deductFixedBreakHour} disabled={readOnly} onCheckedChange={setDeductFixedBreakHour} aria-label={`Deduct a fixed one-hour break for ${group.name}`} />
+        </label>
+      </div>
       {!readOnly && save.error && <p role="alert" className="mt-2 text-sm text-rose-600">{save.error.message}</p>}
+      {cadence === "semimonthly_15_30" && <p className="mt-2 text-xs text-slate-500">Enter the actual pay date for each run. For February or a short month, choose the payday explicitly when creating the run.</p>}
     </div>
   );
 }

@@ -602,6 +602,8 @@ export const attendancePayrollGroupSchedules = pgTable("attendance_payroll_group
   semimonthly_first_payday: integer("semimonthly_first_payday").notNull().default(15),
   semimonthly_second_payday: integer("semimonthly_second_payday").notNull().default(30),
   timezone: text("timezone").notNull().default("UTC"),
+  count_from_clock_in: boolean("count_from_clock_in").notNull().default(false),
+  deduct_fixed_break_hour: boolean("deduct_fixed_break_hour").notNull().default(false),
   updated_by: integer("updated_by").references(() => users.id),
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),

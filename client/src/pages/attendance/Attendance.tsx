@@ -197,7 +197,7 @@ function HistoryList({ rows, fmt }: { rows: any[]; fmt: ReturnType<typeof useTim
             ? "completed"
             : sessions[0]?.status;
         const totalSeconds = sessions.reduce(
-          (total, session) => total + Math.max(0, Number(session.total_seconds) || 0),
+          (total, session) => total + Math.max(0, Number(session.worked_seconds ?? session.total_seconds) || 0),
           0,
         );
         const dailyNote = sessions.find(session => session.daily_note)?.daily_note;
@@ -218,7 +218,7 @@ function HistoryList({ rows, fmt }: { rows: any[]; fmt: ReturnType<typeof useTim
                 <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                   <div><span className="block text-slate-400">Time in</span><span className="font-medium text-slate-700">{sessions[0].time_in ? fmt.dateTime(sessions[0].time_in) : "—"}</span></div>
                   <div><span className="block text-slate-400">Time out</span><span className="font-medium text-slate-700">{sessions[0].time_out ? fmt.dateTime(sessions[0].time_out) : "—"}</span></div>
-                  <div><span className="block text-slate-400">Total</span><span className="font-medium text-slate-700">{formatDuration(sessions[0].total_seconds)}</span></div>
+                  <div><span className="block text-slate-400">Total</span><span className="font-medium text-slate-700">{formatDuration(sessions[0].worked_seconds ?? sessions[0].total_seconds)}</span></div>
                 </div>
                 <p className="mt-2 text-xs text-slate-500">Start method · {sessions[0].start_method === "warehouse" ? "Warehouse" : sessions[0].start_method === "offsite" ? "Off-site" : "Route start"}</p>
                 {sessions[0].breaks?.length > 0 && <div className="mt-3 border-t border-slate-100 pt-3 text-xs"><p className="text-slate-400">Breaks</p>{sessions[0].breaks.map((breakItem: BreakInterval, index: number) => <p key={`${breakItem.break_started_at}-${index}`} className="mt-1 font-medium text-slate-600">{fmt.dateTime(breakItem.break_started_at)} → {breakItem.break_ended_at ? fmt.dateTime(breakItem.break_ended_at) : "In progress"}</p>)}</div>}
@@ -230,7 +230,7 @@ function HistoryList({ rows, fmt }: { rows: any[]; fmt: ReturnType<typeof useTim
                     <div key={session.id} className="rounded-xl bg-slate-50 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-xs font-semibold text-slate-700">Session {session.session_number ?? index + 1}</p>
-                        <span className="text-xs font-medium text-slate-700">{formatDuration(session.total_seconds)}</span>
+                        <span className="text-xs font-medium text-slate-700">{formatDuration(session.worked_seconds ?? session.total_seconds)}</span>
                       </div>
                       <p className="mt-1 text-xs text-slate-500">{session.start_method === "warehouse" ? "Started at warehouse" : session.start_method === "offsite" ? "Started off-site" : "Started while driving"}</p>
                       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
@@ -563,7 +563,7 @@ export default function AttendancePage() {
             </div>}
             {todaySessions.length > 0 && <Card className="mt-5 rounded-2xl border-slate-200 shadow-sm"><CardContent className="p-4">
               <div className="flex items-center justify-between"><span className="text-xs text-slate-500">Worked today</span><span className="text-lg font-bold text-slate-800">{formatDuration(todayTotalSeconds)}</span></div>
-             <div className="mt-3 space-y-2">{todaySessions.map((session: any) => <div key={session.id} className="flex items-center justify-between text-xs"><span className="text-slate-500">Session {session.session_number ?? 1} · {session.time_in ? fmt.dateTime(session.time_in) : "—"}{session.time_out ? ` – ${fmt.dateTime(session.time_out)}` : " · Active"}</span><span className="font-medium text-slate-700">{formatDuration(session.total_seconds)}</span></div>)}</div>
+             <div className="mt-3 space-y-2">{todaySessions.map((session: any) => <div key={session.id} className="flex items-center justify-between text-xs"><span className="text-slate-500">Session {session.session_number ?? 1} · {session.time_in ? fmt.dateTime(session.time_in) : "—"}{session.time_out ? ` – ${fmt.dateTime(session.time_out)}` : " · Active"}</span><span className="font-medium text-slate-700">{formatDuration(session.worked_seconds ?? session.total_seconds)}</span></div>)}</div>
             </CardContent></Card>}
             {homeLocationQuery.isError ? (
               <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
