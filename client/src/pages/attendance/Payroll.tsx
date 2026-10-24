@@ -645,6 +645,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const [selectedRunEmployeeId, setSelectedRunEmployeeId] = useState("");
   const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
   const [reviewError, setReviewError] = useState("");
+  const [showTrackingDisabled, setShowTrackingDisabled] = useState(false);
   const me = useQuery({ queryKey: ["attendance-payroll-me"], queryFn: () => apiJson("/api/attendance/payroll/me"), enabled: isEmployeePage });
   const eligible = useQuery({ queryKey: ["attendance-overtime-eligible"], queryFn: () => apiJson("/api/attendance/payroll/overtime/eligible"), enabled: isEmployeePage });
   const claims = useQuery({ queryKey: ["attendance-overtime-mine"], queryFn: () => apiJson("/api/attendance/payroll/overtime/mine"), enabled: isEmployeePage });
@@ -747,6 +748,9 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
       setSelectedRunEmployeeId(String(runSlips[0]?.id ?? ""));
     }
   }, [selectedRunId, runSlips, selectedRunEmployeeId]);
+  useEffect(() => {
+    setShowTrackingDisabled(false);
+  }, [roleId]);
   const finalizeError = finalizeRun.error as PayrollApiError | null;
   const openAttendanceSessions = finalizeError?.code === "active_attendance_sessions"
     ? finalizeError.openAttendanceSessions ?? []
@@ -858,8 +862,22 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
             <div className="max-w-sm"><Label>Existing user group</Label><select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={roleId} onChange={event => setRoleId(event.target.value)}><option value="">Choose a group</option>{(config.data?.groups ?? []).map((group: any) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></div>
             {employees.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
             {employees.error && <p role="alert" className="text-sm text-rose-600">{employees.error.message}</p>}
-            {roleId && !employees.isLoading && !employees.data?.employees?.length && <EmptyState>No employees are assigned to this group.</EmptyState>}
-            <div className="space-y-3">{(employees.data?.employees ?? []).map((employee: any) => <EmployeePayEditor key={employee.id} employee={employee} onRefresh={refresh} readOnly={!canManage} />)}</div>
+            {(() => {
+              const allEmployees = employees.data?.employees ?? [];
+              const disabledEmployees = allEmployees.filter((employee: any) => !employee.attendance_tracking_enabled);
+              const visibleEmployees = showTrackingDisabled
+                ? allEmployees
+                : allEmployees.filter((employee: any) => employee.attendance_tracking_enabled);
+              return <>
+                {roleId && !employees.isLoading && !allEmployees.length && <EmptyState>No employees are assigned to this group.</EmptyState>}
+                {roleId && disabledEmployees.length > 0 && <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                  <span>Show tracking-disabled employees ({disabledEmployees.length})</span>
+                  <Switch checked={showTrackingDisabled} onCheckedChange={setShowTrackingDisabled} aria-label="Show tracking-disabled employees" />
+                </label>}
+                {roleId && !employees.isLoading && allEmployees.length > 0 && !visibleEmployees.length && <EmptyState>No employees in this group have tracking enabled.</EmptyState>}
+                <div className="space-y-3">{visibleEmployees.map((employee: any) => <EmployeePayEditor key={employee.id} employee={employee} onRefresh={refresh} readOnly={!canManage} />)}</div>
+              </>;
+            })()}
           </CardContent>
         </Card>
       </div>}
