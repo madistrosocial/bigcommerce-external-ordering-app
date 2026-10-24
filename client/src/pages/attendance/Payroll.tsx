@@ -479,11 +479,11 @@ function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSa
       </div>
       <div className="mt-4 grid gap-3 border-t border-slate-100 pt-3 md:grid-cols-2">
         <label className="flex items-start justify-between gap-4 rounded-md border border-slate-200 bg-white p-3">
-          <span><span className="block text-sm font-medium text-slate-800">Count from clock-in</span><span className="mt-1 block text-xs text-slate-500">Off: count from the later of 9:00 AM or actual clock-in.</span></span>
+          <span className="text-sm font-medium text-slate-800">Count from clock-in</span>
           <Switch checked={countFromClockIn} disabled={readOnly} onCheckedChange={setCountFromClockIn} aria-label={`Count ${group.name} work hours from clock-in`} />
         </label>
         <label className="flex items-start justify-between gap-4 rounded-md border border-slate-200 bg-white p-3">
-          <span><span className="block text-sm font-medium text-slate-800">Deduct a fixed 1-hour break</span><span className="mt-1 block text-xs text-slate-500">On: deduct 1 hour once when a break is recorded. Off: deduct actual break time.</span></span>
+          <span className="text-sm font-medium text-slate-800">Deduct a fixed 1-hour break</span>
           <Switch checked={deductFixedBreakHour} disabled={readOnly} onCheckedChange={setDeductFixedBreakHour} aria-label={`Deduct a fixed one-hour break for ${group.name}`} />
         </label>
       </div>
