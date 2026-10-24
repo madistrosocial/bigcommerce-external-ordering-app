@@ -33,6 +33,7 @@
 - [Attendance overnight session recovery](attendance-overdue-session.md) — require employees to close an open prior-day session before starting today; show the daily report only after today's time-in.
 - [Stale session recovery](stale-session-recovery.md) — invalid saved auth must fail safely and expose a cache-clearing force-logout path.
 - [Attendance review and audit](attendance-review-audit.md) — completion state stays separate from manager approval; corrections preserve reasoned old/new history.
+- [Attendance tracking eligibility](attendance-tracking-eligibility.md) — tracking is user-level across roles; every account needs a toggle, while logs list enabled tracked users only.
 - [Attendance location maps](attendance-location-maps.md) — admin views use validated Google Maps links; employee APIs keep raw coordinates hidden.
 - [Activity-log IP geolocation](activity-log-ip-geolocation.md) — use FreeIPAPI’s no-key HTTPS endpoint with caching and conservative rate limiting for approximate location.
 - [Draft invoice safety](draft-invoice-safety.md) — draft PDFs must stay visibly non-final and never expose staff notes or SMTP credentials.

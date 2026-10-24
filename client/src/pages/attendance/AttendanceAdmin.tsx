@@ -597,10 +597,7 @@ function Logs() {
     setFrom(range.from);
     setTo(range.to);
   }, [month]);
-  useEffect(() => {
-    if (!userId && signedInUserId) setUserId(signedInUserId);
-  }, [signedInUserId, userId]);
-  const scopedUserId = canViewAll ? userId || signedInUserId : signedInUserId;
+  const scopedUserId = canViewAll ? userId : signedInUserId;
   const usersQuery = useQuery({
     queryKey: ["attendance", "team-members"],
     queryFn: () => apiJson("/api/users"),
@@ -617,8 +614,19 @@ function Logs() {
     ? (usersQuery.data ?? []).filter((user: any) => user.is_enabled && user.attendance_tracking_enabled)
     : [];
   const teamMembers = queriedTeamMembers;
+  useEffect(() => {
+    if (!canViewAll || usersQuery.isLoading || !usersQuery.data) return;
+    const eligibleUsers = usersQuery.data.filter((user: any) => user.is_enabled && user.attendance_tracking_enabled);
+    const requestedId = userId || signedInUserId;
+    if (eligibleUsers.some((user: any) => String(user.id) === requestedId)) {
+      if (!userId && requestedId) setUserId(requestedId);
+      return;
+    }
+    const signedInUser = eligibleUsers.find((user: any) => String(user.id) === signedInUserId);
+    setUserId(String(signedInUser?.id ?? eligibleUsers[0]?.id ?? ""));
+  }, [canViewAll, usersQuery.data, usersQuery.isLoading, userId, signedInUserId]);
   const selectedMember = canViewAll
-    ? teamMembers.find((user: any) => String(user.id) === scopedUserId) ?? (scopedUserId === signedInUserId ? currentUser : undefined)
+    ? teamMembers.find((user: any) => String(user.id) === scopedUserId)
     : currentUser;
   const dates = useMemo(() => from && to && from <= to ? datesBetween(from, to) : [], [from, to]);
   const holidayMap = useMemo(() => from && to && from <= to ? getUsHolidayMap(from, to) : new Map<string, string>(), [from, to]);

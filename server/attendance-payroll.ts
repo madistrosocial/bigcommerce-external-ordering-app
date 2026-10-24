@@ -888,8 +888,11 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
   });
 
   app.get("/api/attendance/payroll/admin/employees", canViewPayroll, async (req, res) => {
-    const roleId = Number(req.query.roleId);
-    if (!Number.isInteger(roleId) || roleId <= 0) return res.status(400).json({ error: "Choose a valid user group." });
+    const roleIdParam = req.query.roleId;
+    const roleId = roleIdParam === undefined ? null : Number(roleIdParam);
+    if (roleId !== null && (!Number.isInteger(roleId) || roleId <= 0)) {
+      return res.status(400).json({ error: "Choose a valid user group." });
+    }
     try {
       const employees = await db.select({
         id: users.id,
@@ -897,7 +900,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
         username: users.username,
         is_enabled: users.is_enabled,
         attendance_tracking_enabled: users.attendance_tracking_enabled,
-      }).from(users).where(eq(users.role_id, roleId)).orderBy(asc(users.name));
+      }).from(users).where(and(roleId ? eq(users.role_id, roleId) : undefined)).orderBy(asc(users.name));
       const ids = employees.map((employee) => employee.id);
       if (!ids.length) return res.json({ employees: [] });
       const [profiles, items] = await Promise.all([
