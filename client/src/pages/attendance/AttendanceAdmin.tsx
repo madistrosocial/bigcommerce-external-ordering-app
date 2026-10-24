@@ -601,7 +601,13 @@ function Logs() {
     if (!userId && signedInUserId) setUserId(signedInUserId);
   }, [signedInUserId, userId]);
   const scopedUserId = canViewAll ? userId || signedInUserId : signedInUserId;
-  const usersQuery = useQuery({ queryKey: ["attendance", "team-members"], queryFn: () => apiJson("/api/users"), enabled: canViewAll && !permissionsLoading });
+  const usersQuery = useQuery({
+    queryKey: ["attendance", "team-members"],
+    queryFn: () => apiJson("/api/users"),
+    enabled: canViewAll && !permissionsLoading,
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
   const params = new URLSearchParams({ status, startMethod, reviewStatus, limit: "500" });
   if (from) params.set("from", from);
   if (to) params.set("to", to);
@@ -610,10 +616,7 @@ function Logs() {
   const queriedTeamMembers = canViewAll
     ? (usersQuery.data ?? []).filter((user: any) => user.is_enabled && user.attendance_tracking_enabled)
     : [];
-  const currentUserTrackingEnabled = (usersQuery.data ?? []).find((user: any) => String(user.id) === signedInUserId)?.attendance_tracking_enabled !== false;
-  const teamMembers = currentUser && currentUserTrackingEnabled && canViewAll && !queriedTeamMembers.some((user: any) => String(user.id) === signedInUserId)
-    ? [currentUser, ...queriedTeamMembers]
-    : queriedTeamMembers;
+  const teamMembers = queriedTeamMembers;
   const selectedMember = canViewAll
     ? teamMembers.find((user: any) => String(user.id) === scopedUserId) ?? (scopedUserId === signedInUserId ? currentUser : undefined)
     : currentUser;

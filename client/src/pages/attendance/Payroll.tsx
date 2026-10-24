@@ -675,6 +675,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
     void queryClient.invalidateQueries({ queryKey: ["attendance-payroll-me"] });
     void queryClient.invalidateQueries({ queryKey: ["attendance-payroll-employees"] });
     void queryClient.invalidateQueries({ queryKey: ["attendance-payroll-config"] });
+    void queryClient.invalidateQueries({ queryKey: ["attendance", "team-members"] });
     void queryClient.invalidateQueries({ queryKey: ["attendance-payroll-runs"] });
     void queryClient.invalidateQueries({ queryKey: ["attendance-payroll-run"] });
     void queryClient.invalidateQueries({ queryKey: ["attendance-overtime-eligible"] });
