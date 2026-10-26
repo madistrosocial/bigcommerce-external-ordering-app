@@ -539,6 +539,36 @@ export default function CRMCustomers() {
           <div className="min-w-0">
             <h1 className="text-lg font-bold text-slate-800">Customers</h1>
           </div>
+          <div className="md:hidden flex items-center gap-2 shrink-0">
+            {canExport && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="icon" variant="outline" className="h-9 w-9 rounded-xl bg-white" aria-label="Export customers" data-testid="btn-mobile-export">
+                    <FileSpreadsheet className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem className="gap-2" onClick={() => handleExport("csv")} disabled={exporting === "csv"}>
+                    <FileText className="h-4 w-4" />{exporting === "csv" ? "Exporting CSV…" : "Export CSV"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="gap-2" onClick={() => handleExport("xlsx")} disabled={exporting === "xlsx"}>
+                    <FileSpreadsheet className="h-4 w-4" />{exporting === "xlsx" ? "Exporting Excel…" : "Export Excel"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <Button
+              size="icon"
+              variant={showFilters ? "default" : "outline"}
+              className="relative h-9 w-9 rounded-xl bg-white"
+              onClick={() => setShowFilters(v => !v)}
+              aria-label="Toggle customer filters"
+              data-testid="btn-toggle-filters-mobile"
+            >
+              <Filter className="h-4 w-4" />
+              {hasAnyFilter && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-white bg-blue-500" />}
+            </Button>
+          </div>
           <div className="hidden md:flex items-center gap-1.5 flex-nowrap shrink-0">
             <Popover open={showColMenu} onOpenChange={setShowColMenu}>
               <PopoverTrigger asChild>
@@ -598,48 +628,8 @@ export default function CRMCustomers() {
         </div>
       </div>
 
-      {/* Mobile search, filters, health shortcuts and sort. Desktop controls remain unchanged. */}
-      <div className="md:hidden border-b border-slate-200 bg-slate-50/70 px-3 py-3 space-y-3 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="relative min-w-0 flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <Input
-              data-testid="input-crm-search-mobile"
-              value={search}
-              onChange={e => debounce(e.target.value)}
-              placeholder="Search customers"
-              className="h-10 rounded-xl border-slate-200 bg-white pl-9 text-sm shadow-sm"
-            />
-          </div>
-          {canExport && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="icon" variant="outline" className="h-10 w-10 shrink-0 rounded-xl bg-white" aria-label="Export customers" data-testid="btn-mobile-export">
-                  <FileSpreadsheet className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem className="gap-2" onClick={() => handleExport("csv")} disabled={exporting === "csv"}>
-                  <FileText className="h-4 w-4" />{exporting === "csv" ? "Exporting CSV…" : "Export CSV"}
-                </DropdownMenuItem>
-                <DropdownMenuItem className="gap-2" onClick={() => handleExport("xlsx")} disabled={exporting === "xlsx"}>
-                  <FileSpreadsheet className="h-4 w-4" />{exporting === "xlsx" ? "Exporting Excel…" : "Export Excel"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          <Button
-            size="icon"
-            variant={showFilters ? "default" : "outline"}
-            className="relative h-10 w-10 shrink-0 rounded-xl bg-white"
-            onClick={() => setShowFilters(v => !v)}
-            aria-label="Toggle customer filters"
-            data-testid="btn-toggle-filters-mobile"
-          >
-            <Filter className="h-4 w-4" />
-            {hasAnyFilter && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-white bg-blue-500" />}
-          </Button>
-        </div>
+      {/* Mobile health shortcuts and sort. Search stays inside the collapsible filter panel. */}
+      <div className="md:hidden border-b border-slate-200 bg-slate-50/70 px-3 py-3 shrink-0">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="Filter by customer health">
             {HEALTH_CARDS.map(card => {
@@ -718,14 +708,14 @@ export default function CRMCustomers() {
           <div className="bg-slate-50 border rounded-xl p-3 space-y-2.5">
 
             {/* Search */}
-            <div className="relative hidden md:block">
+            <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
               <Input
                 data-testid="input-crm-search"
                 value={search}
                 onChange={e => debounce(e.target.value)}
                 placeholder="Search company, customer name, email, phone…"
-                className="pl-8 h-8 text-sm w-full"
+                className="pl-8 h-9 md:h-8 text-sm w-full"
               />
             </div>
 
