@@ -7,4 +7,4 @@ Payroll groups can count from actual clock-in or the later of actual clock-in an
 
 **Why:** Employees in different payroll groups follow different time-credit and lunch deduction policies; raw clock records must remain intact while derived attendance and payroll hours follow the group setting.
 
-**How to apply:** Keep raw session timestamps and stored seconds unchanged. Apply the group policy in the shared derived-hours calculation used by attendance views, reports, overtime eligibility, and payroll. Existing groups default to scheduled-start counting and actual break duration.
+**How to apply:** Keep raw session timestamps and stored seconds unchanged. Apply the group policy in the shared derived-hours calculation used by attendance views, reports, overtime eligibility, and payroll. Since attendance results are cached, saving a group policy must invalidate attendance views as well as payroll queries. Existing groups default to scheduled-start counting and actual break duration.
