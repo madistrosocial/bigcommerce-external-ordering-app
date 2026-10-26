@@ -18,7 +18,7 @@ import {
   Search, FileText, FileSpreadsheet, ArrowUp, ArrowDown, ArrowUpDown,
   ChevronLeft, ChevronRight, User, Settings2, X, Users, AlertTriangle,
   TrendingUp, HeartPulse, Activity, Phone, Mail, Filter, UserX, UserCheck,
-  MoreHorizontal,
+  MoreHorizontal, MapPin,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTimeService } from "@/hooks/useTimeService";
@@ -515,15 +515,15 @@ export default function CRMCustomers() {
                   key={card.key || "total"}
                   data-testid={`metric-${card.label.toLowerCase().replace(" ", "-")}`}
                   onClick={() => toggleHealthFilter(card.key)}
-                  className={`flex flex-col sm:flex-row items-center sm:justify-between rounded-lg border px-1.5 py-1.5 sm:px-4 sm:py-3 text-left transition-all cursor-pointer w-full gap-0.5 sm:gap-0 ${isActive ? card.active : card.inactive}`}
+                  className={`flex flex-row items-center justify-between rounded-lg border px-1.5 py-2 sm:px-4 sm:py-3 text-left transition-all cursor-pointer w-full gap-0 sm:gap-0 ${isActive ? card.active : card.inactive}`}
                 >
                   <div className="flex items-center gap-1 sm:gap-2 min-w-0">
-                    <Icon className={`h-3.5 w-3.5 sm:h-5 sm:w-5 shrink-0 ${isActive ? card.activeLabelCls : card.iconCls}`} />
-                    <span className={`text-[10px] sm:text-sm font-semibold leading-tight ${isActive ? card.activeLabelCls : card.labelCls}`}>
+                    <Icon className={`hidden sm:block h-5 w-5 shrink-0 ${isActive ? card.activeLabelCls : card.iconCls}`} />
+                    <span className={`text-[9px] sm:text-sm font-semibold leading-tight truncate ${isActive ? card.activeLabelCls : card.labelCls}`}>
                       {card.label}
                     </span>
                   </div>
-                  <span className={`text-base sm:text-3xl font-bold leading-none sm:ml-2 tabular-nums ${isActive ? card.activeCountCls : card.countCls}`}>
+                  <span className={`text-sm sm:text-3xl font-bold leading-none sm:ml-2 tabular-nums ${isActive ? card.activeCountCls : card.countCls}`}>
                     {count.toLocaleString()}
                   </span>
                 </button>
@@ -539,7 +539,7 @@ export default function CRMCustomers() {
           <div className="min-w-0">
             <h1 className="text-lg font-bold text-slate-800">Customers</h1>
           </div>
-          <div className="flex items-center gap-1.5 flex-nowrap shrink-0">
+          <div className="hidden md:flex items-center gap-1.5 flex-nowrap shrink-0">
             <Popover open={showColMenu} onOpenChange={setShowColMenu}>
               <PopoverTrigger asChild>
                 <Button size="sm" variant="outline" className="h-8 text-xs gap-1" data-testid="btn-columns">
@@ -598,13 +598,127 @@ export default function CRMCustomers() {
         </div>
       </div>
 
+      {/* Mobile search, filters, health shortcuts and sort. Desktop controls remain unchanged. */}
+      <div className="md:hidden border-b border-slate-200 bg-slate-50/70 px-3 py-3 space-y-3 shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input
+              data-testid="input-crm-search-mobile"
+              value={search}
+              onChange={e => debounce(e.target.value)}
+              placeholder="Search customers"
+              className="h-10 rounded-xl border-slate-200 bg-white pl-9 text-sm shadow-sm"
+            />
+          </div>
+          {canExport && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="icon" variant="outline" className="h-10 w-10 shrink-0 rounded-xl bg-white" aria-label="Export customers" data-testid="btn-mobile-export">
+                  <FileSpreadsheet className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem className="gap-2" onClick={() => handleExport("csv")} disabled={exporting === "csv"}>
+                  <FileText className="h-4 w-4" />{exporting === "csv" ? "Exporting CSV…" : "Export CSV"}
+                </DropdownMenuItem>
+                <DropdownMenuItem className="gap-2" onClick={() => handleExport("xlsx")} disabled={exporting === "xlsx"}>
+                  <FileSpreadsheet className="h-4 w-4" />{exporting === "xlsx" ? "Exporting Excel…" : "Export Excel"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <Button
+            size="icon"
+            variant={showFilters ? "default" : "outline"}
+            className="relative h-10 w-10 shrink-0 rounded-xl bg-white"
+            onClick={() => setShowFilters(v => !v)}
+            aria-label="Toggle customer filters"
+            data-testid="btn-toggle-filters-mobile"
+          >
+            <Filter className="h-4 w-4" />
+            {hasAnyFilter && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-white bg-blue-500" />}
+          </Button>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="Filter by customer health">
+            {HEALTH_CARDS.map(card => {
+              const selected = healthFilter === card.key;
+              const count = metrics?.[card.metricKey] ?? 0;
+              const chipTone = card.key === "" ? "border-slate-200 text-slate-600" :
+                card.key === "Healthy" ? "border-green-200 text-green-700" :
+                card.key === "Watch" ? "border-yellow-200 text-yellow-700" :
+                card.key === "At Risk" ? "border-orange-200 text-orange-700" :
+                "border-red-200 text-red-700";
+              const activeTone = card.key === "" ? "border-slate-700 bg-slate-800 text-white" :
+                card.key === "Healthy" ? "border-green-600 bg-green-600 text-white" :
+                card.key === "Watch" ? "border-yellow-500 bg-yellow-500 text-white" :
+                card.key === "At Risk" ? "border-orange-500 bg-orange-500 text-white" :
+                "border-red-500 bg-red-500 text-white";
+              return (
+                <button
+                  key={`mobile-health-${card.key || "total"}`}
+                  onClick={() => toggleHealthFilter(card.key)}
+                  className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-colors ${selected ? activeTone : `bg-white ${chipTone}`}`}
+                  aria-pressed={selected}
+                  data-testid={`mobile-health-${card.label.toLowerCase().replace(" ", "-")}`}
+                >
+                  {card.label}<span className={`tabular-nums ${selected ? "opacity-80" : "opacity-65"}`}>{count.toLocaleString()}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Select
+              value={sortBy}
+              onValueChange={value => {
+                setSortBy(value as SortField);
+                setSortDir("desc");
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-8 w-[104px] shrink-0 gap-1 rounded-lg border-slate-200 bg-white px-2 text-[11px] font-medium" aria-label="Sort customers">
+                <ArrowUpDown className="h-3 w-3 shrink-0 text-slate-400" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="last_order_date">Last order</SelectItem>
+                <SelectItem value="company">Company</SelectItem>
+                <SelectItem value="first_name">Contact</SelectItem>
+                <SelectItem value="city">City</SelectItem>
+                <SelectItem value="state">State</SelectItem>
+                <SelectItem value="customer_group_name">Group</SelectItem>
+                <SelectItem value="customer_type">Customer type</SelectItem>
+                <SelectItem value="address_type">Address type</SelectItem>
+                <SelectItem value="primary_rep_name">Primary rep</SelectItem>
+                <SelectItem value="secondary_rep_name">Secondary rep</SelectItem>
+                <SelectItem value="lifetime_orders">Orders</SelectItem>
+                <SelectItem value="lifetime_revenue">Revenue</SelectItem>
+                <SelectItem value="days_since_order">Days since order</SelectItem>
+                <SelectItem value="last_follow_up">Last action</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8 rounded-lg border-slate-200 bg-white"
+              onClick={() => { setSortDir(direction => direction === "asc" ? "desc" : "asc"); setPage(1); }}
+              aria-label={`Sort ${sortDir === "asc" ? "ascending" : "descending"}`}
+              title={`Sort ${sortDir === "asc" ? "ascending" : "descending"}`}
+            >
+              {sortDir === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+        </div>
+      </div>
+
       {/* ── Filter drawer ─────────────────────────────────────────────────────── */}
       {showFilters && (
         <div className="border-b bg-white px-4 pb-3 pt-2 shrink-0">
           <div className="bg-slate-50 border rounded-xl p-3 space-y-2.5">
 
             {/* Search */}
-            <div className="relative">
+            <div className="relative hidden md:block">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
               <Input
                 data-testid="input-crm-search"
@@ -776,8 +890,86 @@ export default function CRMCustomers() {
             <p className="text-xs mt-1">Try adjusting your search or filters.</p>
           </div>
         ) : (
+          <>
+          <div className="md:hidden space-y-2.5 bg-slate-50 px-3 py-3">
+            {customers.map(c => {
+              const days = daysSince(c.last_order_date);
+              const stateVal = (c.shipping_address as any)?.state || (c.billing_address as any)?.state || null;
+              const cityVal = (c.shipping_address as any)?.city || (c.billing_address as any)?.city || null;
+              const personName = [c.first_name, c.last_name].filter(Boolean).join(" ");
+              const initials = (c.company || personName || "?").split(/\s+/).slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
+              const health = c.account_health as string | null;
+              const healthStyle = health === "Healthy" ? "bg-green-50 text-green-700 border-green-200" :
+                health === "Watch" ? "bg-yellow-50 text-yellow-700 border-yellow-200" :
+                health === "At Risk" ? "bg-orange-50 text-orange-700 border-orange-200" :
+                health === "Lost" ? "bg-red-50 text-red-700 border-red-200" :
+                "bg-slate-50 text-slate-500 border-slate-200";
+              return (
+                <article
+                  key={`mobile-${c.id}`}
+                  data-testid={`card-customer-${c.id}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setLocation(`/crm/customers/${c.id}`)}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLocation(`/crm/customers/${c.id}`); } }}
+                  className="cursor-pointer rounded-2xl border border-slate-200/90 bg-white p-3 shadow-[0_2px_8px_rgba(15,23,42,0.045)] transition-colors active:bg-slate-50"
+                >
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,0.68fr)] gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-start gap-2.5">
+                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold ${getCustomerAvatarColor(c.id)}`}>{initials}</div>
+                        <div className="min-w-0 flex-1 pt-0.5">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <h2 className="truncate text-[13px] font-bold leading-tight text-slate-900">{c.company || personName || "—"}</h2>
+                            {c.inactive_at && <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">Inactive</span>}
+                            {c.account_type && c.account_type !== "customer" && <span className="rounded-full bg-cyan-50 px-1.5 py-0.5 text-[9px] font-bold capitalize text-cyan-700">{c.account_type}</span>}
+                          </div>
+                          {personName && <p className="mt-0.5 truncate text-[11px] text-slate-500">{personName}</p>}
+                          {(cityVal || stateVal) && <p className="mt-1 flex items-center gap-1 truncate text-[10px] text-slate-400"><MapPin className="h-3 w-3 shrink-0" />{[cityVal, stateVal].filter(Boolean).join(", ")}</p>}
+                        </div>
+                      </div>
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1">
+                        <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${healthStyle}`}>{health || "Health n/a"}</span>
+                        <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700">{(c.lifetime_orders ?? 0).toLocaleString()} orders</span>
+                      </div>
+                    </div>
+                    <div className="flex min-w-0 flex-col border-l border-slate-100 pl-3">
+                      <p className="text-[9px] text-slate-400">Total Revenue</p>
+                      <p className="truncate text-[13px] font-bold tabular-nums leading-tight text-slate-900">{fmtCurrency(c.lifetime_revenue)}</p>
+                      <p className="mt-1.5 text-[9px] text-slate-400">Last Order</p>
+                      <p className="truncate text-[10px] font-medium leading-tight text-slate-700">{c.last_order_date ? fmt.date(c.last_order_date) : "—"}</p>
+                      <div className="mt-auto flex items-center gap-1.5 pt-2">
+                        {c.phone && <a href={`tel:${c.phone}`} onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} aria-label={`Call ${c.company || personName}`} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"><Phone className="h-3.5 w-3.5" /></a>}
+                        {c.email && <a href={`mailto:${c.email}`} onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} aria-label={`Email ${c.company || personName}`} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"><Mail className="h-3.5 w-3.5" /></a>}
+                        {canManageInactive && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50" onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} aria-label="Customer actions">
+                                <MoreHorizontal className="h-3.5 w-3.5" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44" onClick={e => e.stopPropagation()}>
+                              {c.inactive_at ? (
+                                <DropdownMenuItem className="gap-2 text-green-700 focus:text-green-700 focus:bg-green-50 cursor-pointer" onClick={e => { e.stopPropagation(); handleRestore(c); }}>
+                                  <UserCheck className="h-3.5 w-3.5" /> Restore Active
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem className="gap-2 text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer" onClick={e => { e.stopPropagation(); setMarkInactiveCustomer(c); }}>
+                                  <UserX className="h-3.5 w-3.5" /> Deactivate
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
           <table
-            className="text-[10px] sm:text-sm border-collapse [&_td]:px-1 [&_td]:py-0.5 sm:[&_td]:px-3 sm:[&_td]:py-2.5"
+            className="hidden md:table text-[10px] sm:text-sm border-collapse [&_td]:px-1 [&_td]:py-0.5 sm:[&_td]:px-3 sm:[&_td]:py-2.5"
             style={{ tableLayout: "fixed", width: "max-content", minWidth: "100%" }}
           >
             <colgroup>
@@ -998,6 +1190,7 @@ export default function CRMCustomers() {
               })}
             </tbody>
           </table>
+          </>
         )}
       </div>
 
