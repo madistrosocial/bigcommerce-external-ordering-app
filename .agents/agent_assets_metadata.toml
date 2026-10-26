@@ -84,3 +84,17 @@ mtime_ms = 1790484761784
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/b06fbc6d-c13a-472e-9299-e584e2455f04/f1341d56-209b-4154-99e8-b72ba101ebb9"
 storage_version_token = "1790484775437612"
 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[[outputs]]
+id = "N0IoBiEXwKQy-Sn8RAfHE"
+uri = "file://database-upgrade-2026-10-09-to-2026-10-26.sql"
+type = "unspecified"
+title = "DBeaver SQL update for staging and live"
+description = "Idempotent PostgreSQL update from the last saved 2026-10-09 schema baseline to the 2026-10-26 app schema. Run on staging first, verify, then live."
+logical_id = "181c1231-6a07-485b-89d3-cdf52a24dfc6"
+content_hash = "sha256:488b6ba4a4c83207dd6f22466b62ba7616daef5c7380f27f1b13777267a77f19"
+size = 5883
+mtime_ms = 1793007230543
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:24ab45eb-0c50-4232-a991-f8948a5ff2ec/181c1231-6a07-485b-89d3-cdf52a24dfc6/c0315f80-9ee2-4143-a84a-41f70823f3b0"
+storage_version_token = "1793007240168904"
+content_type = "application/octet-stream"
