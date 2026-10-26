@@ -42,6 +42,7 @@
 - [Kole feed draft pricing](kole-feed-draft-pricing.md) — selected drafts use an editable 20%-over-MOQ price suggestion and require a real BigCommerce category.
 - [Kole CSV import safety](kole-csv-import-safety.md) — stream batches and track seen SKUs in a transaction-scoped table; never retain a whole feed in Node memory.
 - [Dropship brand dashboard counts](dropship-brand-dashboard-counts.md) — resolve BigCommerce brand products directly; count distinct synced line-item orders, not just locally pinned products.
+- [Shared dropship dashboard pins](dropship-shared-brand-pins.md) — brand pins are global for dashboard viewers; keep every read and write permission-gated and migrate old personal pins.
 - [Dropship dashboard order privacy](dropship-dashboard-order-privacy.md) — keep customer and order details server-gated by Orders → View while leaving brand summary counts available.
 - [Dropshipping display labels](dropshipping-display-labels.md) — keep provider names/domains out of labels, errors, sync logs, and other staff-facing copy.
 - [ShipStation dropship automation](shipstation-dropship-automation.md) — product tags can flow to order tags, but shipment splitting needs separate product or routing configuration.

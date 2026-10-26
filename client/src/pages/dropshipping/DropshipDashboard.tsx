@@ -123,7 +123,7 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
       <BrandOrdersWidget
         className={embedded ? "min-w-0" : "px-4 py-5 md:px-6"}
         title={embedded ? "Dropship Brand Monitor" : "Dropship Dashboard"}
-        description={embedded ? undefined : "Monitor BigCommerce orders by the brands you pin here."}
+        description={embedded ? undefined : "Monitor BigCommerce orders by brands shared on this dashboard."}
         titleIcon={<PackageOpen className="h-5 w-5 text-blue-600" />}
         titleLevel={embedded ? "h2" : "h1"}
         brands={pinnedBrands}
@@ -136,13 +136,13 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
         error={dashboardQuery.isError ? `Unable to load the dropship dashboard: ${(dashboardQuery.error as Error).message}` : null}
         today={embedded ? undefined : dashboardQuery.data?.dates.today}
         timezone={dashboardQuery.data?.timezone}
-        manageButtonLabel={embedded ? "Pin brands" : "Add brands to dashboard"}
+        manageButtonLabel={embedded ? "Manage shared brands" : "Manage dashboard brands"}
         manageButtonIconOnly={embedded}
         manageButtonLoading={brandsQuery.isLoading}
         removeDisabled={savePins.isPending}
         hideEmptyState={embedded}
         emptyTitle="Choose brands to monitor"
-        emptyDescription="Pin one or more BigCommerce brands to see their order counts and open matching orders in Sales History."
+        emptyDescription="Add BigCommerce brands to the shared monitor to see their order counts and open matching orders in Sales History."
         infoText={embedded ? undefined : "Counts include distinct BigCommerce orders with synced order lines linked to products currently assigned to each brand."}
         brandSubtitle={(brand) => `BigCommerce brand · ID ${brand.id}`}
         onManageBrands={openManage}
@@ -166,9 +166,9 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
       <Dialog open={manageOpen} onOpenChange={setManageOpen}>
         <DialogContent className="max-h-[85vh] max-w-xl">
           <DialogHeader>
-            <DialogTitle>Choose dashboard brands</DialogTitle>
+            <DialogTitle>Manage shared dashboard brands</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-slate-500">Select any number of BigCommerce brands. Your selection is saved to your user account.</p>
+          <p className="text-sm text-slate-500">Changes are shared with everyone who has permission to view the Dropship Dashboard.</p>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input value={brandSearch} onChange={(event) => setBrandSearch(event.target.value)} className="pl-9" placeholder="Search brands…" />

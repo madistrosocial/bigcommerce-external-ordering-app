@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import {
   insertProductSchema,
   insertOrderSchema,
+  settings,
   payslips,
   payrollRuns,
   products,
@@ -7948,11 +7949,38 @@ export async function registerRoutes(
     }
   });
 
+  const sharedDropshipDashboardPinsKey = "dropship_dashboard_pins_shared";
+  async function getSharedDropshipDashboardPins(): Promise<Array<{ id: number; name: string }>> {
+    const sharedSetting = await storage.getSetting(sharedDropshipDashboardPinsKey);
+    if (Array.isArray(sharedSetting?.value)) return sharedSetting.value;
+
+    // Preserve existing user pins by combining them when moving to the shared dashboard list.
+    const users = await storage.getAllUsers();
+    const legacySettings = await Promise.all(
+      users.map((user) => storage.getSetting(`dropship_dashboard_pins_${user.id}`)),
+    );
+    const pinsById = new Map<number, { id: number; name: string }>();
+    for (const setting of legacySettings) {
+      if (!Array.isArray(setting?.value)) continue;
+      for (const pin of setting.value) {
+        const id = Number((pin as any)?.id);
+        if (!Number.isInteger(id) || id <= 0 || pinsById.has(id)) continue;
+        const name = typeof (pin as any)?.name === "string" ? (pin as any).name : `Brand ${id}`;
+        pinsById.set(id, { id, name });
+      }
+    }
+    const migratedPins = [...pinsById.values()];
+    await db.insert(settings)
+      .values({ key: sharedDropshipDashboardPinsKey, value: migratedPins })
+      .onConflictDoNothing({ target: settings.key });
+    const savedSharedSetting = await storage.getSetting(sharedDropshipDashboardPinsKey);
+    return Array.isArray(savedSharedSetting?.value) ? savedSharedSetting.value : migratedPins;
+  }
+
   app.get("/api/dropshipping/dashboard", requirePermission("dropshipping_dashboard", "view"), async (req, res) => {
     try {
       const authUser = (req as any).authUser;
-      const setting = await storage.getSetting(`dropship_dashboard_pins_${authUser.id}`);
-      const savedPins = Array.isArray(setting?.value) ? setting.value : [];
+      const savedPins = await getSharedDropshipDashboardPins();
       const brands = await getCachedBcBrandOptions();
       const brandsById = new Map(brands.map((brand) => [brand.id, brand]));
       const pins: Array<{ id: number; name: string }> = [];
@@ -8044,9 +8072,8 @@ export async function registerRoutes(
         return res.status(400).json({ error: "One or more selected brands are no longer available in BigCommerce. Refresh and try again." });
       }
 
-      const authUser = (req as any).authUser;
       const pinnedBrands = brandIds.map((id) => brandsById.get(id)!);
-      await storage.setSetting(`dropship_dashboard_pins_${authUser.id}`, pinnedBrands);
+      await storage.setSetting(sharedDropshipDashboardPinsKey, pinnedBrands);
       res.json({ pinnedBrands });
     } catch (error: any) {
       res.status(502).json({ error: error.message || "Unable to save dashboard brands." });

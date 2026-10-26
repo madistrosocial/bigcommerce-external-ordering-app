@@ -18,7 +18,7 @@ export const DROPSHIPPING_PERMISSION_GROUPS: DropshippingPermissionGroup[] = [
         module: "dropshipping_dashboard",
         action: "view",
         label: "View Dashboard",
-        description: "Can view Dropshipping brand performance and save personal dashboard pins.",
+        description: "Can view Dropshipping brand performance and manage shared dashboard pins.",
       },
     ],
   },
