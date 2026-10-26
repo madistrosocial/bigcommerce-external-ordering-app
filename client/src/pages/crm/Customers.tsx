@@ -515,15 +515,15 @@ export default function CRMCustomers() {
                   key={card.key || "total"}
                   data-testid={`metric-${card.label.toLowerCase().replace(" ", "-")}`}
                   onClick={() => toggleHealthFilter(card.key)}
-                  className={`flex flex-row items-center justify-between rounded-lg border px-1.5 py-2 sm:px-4 sm:py-3 text-left transition-all cursor-pointer w-full gap-0 sm:gap-0 ${isActive ? card.active : card.inactive}`}
+                  className={`flex flex-col sm:flex-row items-center sm:justify-between rounded-lg border px-1.5 py-1.5 sm:px-4 sm:py-3 text-left transition-all cursor-pointer w-full gap-0.5 sm:gap-0 ${isActive ? card.active : card.inactive}`}
                 >
                   <div className="flex items-center gap-1 sm:gap-2 min-w-0">
-                    <Icon className={`hidden sm:block h-5 w-5 shrink-0 ${isActive ? card.activeLabelCls : card.iconCls}`} />
-                    <span className={`text-[9px] sm:text-sm font-semibold leading-tight truncate ${isActive ? card.activeLabelCls : card.labelCls}`}>
+                    <Icon className={`h-3.5 w-3.5 sm:h-5 sm:w-5 shrink-0 ${isActive ? card.activeLabelCls : card.iconCls}`} />
+                    <span className={`text-[10px] sm:text-sm font-semibold leading-tight ${isActive ? card.activeLabelCls : card.labelCls}`}>
                       {card.label}
                     </span>
                   </div>
-                  <span className={`text-sm sm:text-3xl font-bold leading-none sm:ml-2 tabular-nums ${isActive ? card.activeCountCls : card.countCls}`}>
+                  <span className={`text-base sm:text-3xl font-bold leading-none sm:ml-2 tabular-nums ${isActive ? card.activeCountCls : card.countCls}`}>
                     {count.toLocaleString()}
                   </span>
                 </button>
