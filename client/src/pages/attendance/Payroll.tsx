@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Banknote, CalendarDays, Check, ChevronDown, CircleDollarSign, Clock3, Download, FileText, Loader2, Mail, RefreshCw, Send, Settings2, Trash2, UserRound, X } from "lucide-react";
+import { Banknote, CalendarDays, Check, ChevronDown, CircleDollarSign, Clock3, Coffee, Download, FileText, Loader2, Mail, RefreshCw, Send, Settings2, Trash2, UserRound, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import PayslipDocument, { type PayslipDocumentData } from "@/components/payroll/
 import { getAuthHeaders } from "@/lib/api";
 import { generatePdfBase64FromElement } from "@/lib/payslip-renderer";
 import { usePermissions } from "@/hooks/usePermissions";
+import "./payroll-management.css";
 
 type OpenAttendanceSession = {
   id: number;
@@ -440,7 +441,7 @@ function SummaryMetric({ label, value, strong = false }: { label: string; value:
   return <div className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</p><p className={`mt-1 tabular-nums ${strong ? "text-lg font-bold text-slate-900" : "font-semibold text-slate-700"}`}>{value}</p></div>;
 }
 
-function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSaved: () => void; readOnly?: boolean }) {
+function ScheduleEditor({ group, onSaved, readOnly = false, tone = "violet" }: { group: any; onSaved: () => void; readOnly?: boolean; tone?: "violet" | "mint" | "amber" }) {
   const current = group.schedule;
   const normalizeCadence = (value?: string) => value === "semimonthly" || value === "semimonthly_15_30" ? "semimonthly" : "biweekly";
   const [cadence, setCadence] = useState(normalizeCadence(current?.cadence));
@@ -472,12 +473,16 @@ function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSa
     setDeductFixedBreakHour(current?.deduct_fixed_break_hour ?? false);
   }, [group.id, current?.updated_at]);
   return (
-    <div className="rounded-lg border border-slate-200 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div><p className="font-semibold text-slate-900">{group.name}</p><p className="text-xs text-slate-500">{current ? `Current: ${normalizeCadence(current.cadence) === "biweekly" ? "Every 2 weeks" : "Twice monthly"}` : "No payroll schedule assigned"}</p></div>
-        <Badge variant="outline">{group.description || "Existing user group"}</Badge>
+    <div className={`schedule-card schedule-card--${tone}`}>
+      <div className="schedule-card__head">
+        <div className="schedule-card__identity">
+          <span className="schedule-card__icon"><UserRound className="h-[18px] w-[18px]" /></span>
+          <div><p className="font-semibold text-slate-900">{group.name}</p><p className="text-xs text-slate-500">{current ? `Current: ${normalizeCadence(current.cadence) === "biweekly" ? "Every 2 weeks" : "Twice monthly"}` : "No payroll schedule assigned"}</p></div>
+        </div>
+        <Badge variant="outline" className="schedule-card__badge">{group.description || "Existing user group"}</Badge>
       </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <div className="schedule-card__body">
+      <div className="schedule-card__fields">
         <div><Label>Pay cadence</Label><select disabled={readOnly} className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm disabled:bg-slate-50 disabled:text-slate-500" value={cadence} onChange={event => setCadence(event.target.value)}><option value="biweekly">Every 2 weeks</option><option value="semimonthly">Twice monthly</option></select></div>
         {cadence === "biweekly"
           ? <div><Label>Previous payday / anchor</Label><Input disabled={readOnly} required type="date" className="mt-1.5" value={anchor} onChange={event => setAnchor(event.target.value)} /><p className="mt-1 text-xs text-slate-500">The next period starts on this date. Its payday is 14 days later; paydays then repeat every 14 days.</p></div>
@@ -485,18 +490,19 @@ function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSa
         <div><Label>Payroll timezone</Label><Input disabled={readOnly} className="mt-1.5" value={timezone} onChange={event => setTimezone(event.target.value)} placeholder="America/New_York" /></div>
         {!readOnly && <div className="flex items-end"><Button type="button" variant="outline" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Settings2 className="mr-2 h-4 w-4" />}Save schedule</Button></div>}
       </div>
-      <div className="mt-4 grid gap-3 border-t border-slate-100 pt-3 md:grid-cols-2">
-        <label className="flex items-start justify-between gap-4 rounded-md border border-slate-200 bg-white p-3">
-          <span className="text-sm font-medium text-slate-800">Count from clock-in</span>
+      <div className="schedule-card__options">
+        <label className="schedule-card__option">
+          <span className="schedule-card__option-icon"><Clock3 /></span><span className="text-sm font-medium text-slate-800">Count from clock-in</span>
           <Switch checked={countFromClockIn} disabled={readOnly} onCheckedChange={setCountFromClockIn} aria-label={`Count ${group.name} work hours from clock-in`} />
         </label>
-        <label className="flex items-start justify-between gap-4 rounded-md border border-slate-200 bg-white p-3">
-          <span className="text-sm font-medium text-slate-800">Deduct a fixed 1-hour break</span>
+        <label className="schedule-card__option">
+          <span className="schedule-card__option-icon"><Coffee /></span><span className="text-sm font-medium text-slate-800">Deduct a fixed 1-hour break</span>
           <Switch checked={deductFixedBreakHour} disabled={readOnly} onCheckedChange={setDeductFixedBreakHour} aria-label={`Deduct a fixed one-hour break for ${group.name}`} />
         </label>
       </div>
       {!readOnly && save.error && <p role="alert" className="mt-2 text-sm text-rose-600">{save.error.message}</p>}
       {cadence === "semimonthly" && <p className="mt-2 text-xs text-slate-500">Set the two recurring calendar days. Short months use their last calendar day when a configured day does not exist.</p>}
+      </div>
     </div>
   );
 }
@@ -774,8 +780,8 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
       : "Payroll Management";
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5 px-4 py-5 md:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className={`mx-auto max-w-7xl space-y-5 px-4 py-5 md:px-6 ${mode === "management" ? "payroll-management-page" : ""}`}>
+      <div className="payroll-page-heading flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-700"><Banknote className="h-5 w-5" /></div>
           <div><h1 className="text-xl font-bold text-slate-900">{isEmployeePage ? "My Pay & Overtime" : managementTitle}</h1><p className="text-sm text-slate-500">{isEmployeePage ? "View your pay information and submit overtime claims." : canManage ? "Manage employee pay, schedules, payroll runs, and overtime reviews." : canViewPayroll ? "View employee pay, schedules, payroll runs, and overtime reviews." : "Review employee overtime claims."}</p></div>
@@ -816,7 +822,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
         </Card>
       </section>}
 
-      {canReviewOvertime && <Card className="border-slate-200 shadow-sm">
+      {canReviewOvertime && <Card className="payroll-overtime-queue border-slate-200 shadow-sm">
         <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Clock3 className="h-4 w-4 text-amber-600" />Overtime review queue</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           {reviewError && <p role="alert" className="text-sm text-rose-600">{reviewError}</p>}
@@ -840,21 +846,17 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
         <EmployeePayslipList payslips={ownPayslips} company={invoiceRenderSettings.data} />
       </section>}
 
-      {mode === "management" && canViewPayroll && <nav aria-label="Payroll management sections" className="flex flex-wrap gap-2 border-t border-slate-200 pt-5">
-        <Button type="button" variant={section === "overview" ? "default" : "outline"} onClick={() => setLocation("/payroll")}>Payroll Management</Button>
-        <Button type="button" variant={section === "schedules" ? "default" : "outline"} onClick={() => setLocation("/payroll/schedules")}><CalendarDays className="mr-2 h-4 w-4" />Schedules</Button>
-        <Button type="button" variant={section === "employee-rates" ? "default" : "outline"} onClick={() => setLocation("/payroll/employee-rates")}><UserRound className="mr-2 h-4 w-4" />Rates</Button>
+      {mode === "management" && canViewPayroll && <nav aria-label="Payroll management sections" className="payroll-tabs flex flex-wrap gap-2 border-t border-slate-200 pt-5">
+        <Button type="button" variant={section === "overview" ? "default" : "outline"} className={section === "overview" ? "payroll-tab-active" : "payroll-tab-inactive"} onClick={() => setLocation("/payroll")}>Payroll Management</Button>
+        <Button type="button" variant={section === "schedules" ? "default" : "outline"} className={section === "schedules" ? "payroll-tab-active" : "payroll-tab-inactive"} onClick={() => setLocation("/payroll/schedules")}><CalendarDays className="mr-2 h-4 w-4" />Schedules</Button>
+        <Button type="button" variant={section === "employee-rates" ? "default" : "outline"} className={section === "employee-rates" ? "payroll-tab-active" : "payroll-tab-inactive"} onClick={() => setLocation("/payroll/employee-rates")}><UserRound className="mr-2 h-4 w-4" />Rates</Button>
       </nav>}
 
-      {mode === "management" && canViewPayroll && section === "schedules" && <div className="space-y-5">
+      {mode === "management" && canViewPayroll && section === "schedules" && <div className="payroll-schedules space-y-5">
         {config.error && <p role="alert" className="text-sm text-rose-600">{config.error.message}</p>}
-        <Card className="border-slate-200 shadow-sm">
-          <CardHeader><CardTitle className="text-base">Existing user-group schedules</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            {config.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
-            {(config.data?.groups ?? []).map((group: any) => <ScheduleEditor key={group.id} group={group} onSaved={refresh} readOnly={!canManage} />)}
-          </CardContent>
-        </Card>
+        <h2 className="payroll-section-title">Existing user-group schedules</h2>
+        {config.isLoading && <div className="space-y-3" aria-label="Loading schedules"><div className="payroll-schedule-skeleton" /><div className="payroll-schedule-skeleton" /></div>}
+        <div className="space-y-3">{(config.data?.groups ?? []).map((group: any, index: number) => <ScheduleEditor key={group.id} group={group} onSaved={refresh} readOnly={!canManage} tone={(["violet", "mint", "amber"] as const)[index % 3]} />)}</div>
         {!config.isLoading && config.data?.groups?.length === 0 && <p className="text-sm text-slate-500">Create or assign the existing user groups in Admin before setting payroll schedules.</p>}
       </div>}
 
