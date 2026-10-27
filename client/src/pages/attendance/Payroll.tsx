@@ -165,17 +165,23 @@ function PayStatement({
   const manualAmount = (type: string) => (slip.lines ?? [])
     .filter((line: any) => line.line_type === type)
     .reduce((sum: number, line: any) => sum + Number(line.amount || 0), 0);
+  const currentPaypalFee = () => (slip.lines ?? [])
+    .filter((line: any) => line.line_type === "deduction" && line.source_type === "paypal_transfer_fee")
+    .reduce((sum: number, line: any) => sum + Math.abs(Number(line.amount || 0)), 0);
   const [commission, setCommission] = useState("0.00");
   const [incentives, setIncentives] = useState("0.00");
+  const [paypalFee, setPaypalFee] = useState("0.00");
   const isFinalized = slip.run?.status === "finalized";
   useEffect(() => {
     setCommission(manualAmount("commission").toFixed(2));
     setIncentives(manualAmount("incentive").toFixed(2));
+    setPaypalFee(currentPaypalFee().toFixed(2));
   }, [slip.id, slip.lines]);
   const saveEarnings = useMutation({
     mutationFn: () => apiJson(`/api/attendance/payroll/admin/payslips/${slip.id}/earnings`, jsonInit("PATCH", {
       commission: Number(commission),
       incentives: Number(incentives),
+      paypalFee: Number(paypalFee),
     })),
     onSuccess: onEarningsSaved,
   });
@@ -280,10 +286,12 @@ function PayStatement({
         </CardHeader>
         <CardContent className="max-w-full overflow-x-auto pt-0">
           {canEditEarnings && <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <p className="mb-3 text-sm font-semibold text-slate-800">Additional earnings for this employee and period</p>
-            <div className="grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
+            <p className="mb-1 text-sm font-semibold text-slate-800">Adjust this employee’s pay for the period</p>
+            <p className="mb-3 text-xs text-slate-500">Enter the quoted PayPal transfer fee to subtract it from net pay.</p>
+            <div className="grid items-end gap-3 sm:grid-cols-[1fr_1fr_1fr_auto]">
               <div><Label htmlFor={`commission-${slip.id}`}>Commission</Label><Input id={`commission-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={commission} onChange={event => setCommission(event.target.value)} /></div>
               <div><Label htmlFor={`incentives-${slip.id}`}>Incentives</Label><Input id={`incentives-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={incentives} onChange={event => setIncentives(event.target.value)} /></div>
+              <div><Label htmlFor={`paypal-fee-${slip.id}`}>PayPal fee (quoted)</Label><Input id={`paypal-fee-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={paypalFee} onChange={event => setPaypalFee(event.target.value)} /></div>
               <Button type="button" disabled={saveEarnings.isPending} onClick={() => saveEarnings.mutate()}>{saveEarnings.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Save amounts</Button>
             </div>
             {saveEarnings.error && <p role="alert" className="mt-2 text-sm text-rose-600">{saveEarnings.error.message}</p>}

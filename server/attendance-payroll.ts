@@ -142,7 +142,7 @@ async function writePayrollAudit(
 async function buildDraftPayslips(
   tx: any,
   run: any,
-  preservedEarningsByUser = new Map<number, { commission: number; incentives: number }>(),
+  preservedEarningsByUser = new Map<number, { commission: number; incentives: number; paypalFee: number }>(),
 ) {
   const groupMembers = await tx.select({
     id: users.id,
@@ -372,11 +372,12 @@ async function buildDraftPayslips(
       });
     }
 
-    const manualEarnings = preservedEarningsByUser.get(employee.id) ?? { commission: 0, incentives: 0 };
+    const manualEarnings = preservedEarningsByUser.get(employee.id) ?? { commission: 0, incentives: 0, paypalFee: 0 };
     const commission = roundMoney(Number(manualEarnings.commission) || 0);
     const incentives = roundMoney(Number(manualEarnings.incentives) || 0);
-    if (!Number.isFinite(commission) || commission < 0 || !Number.isFinite(incentives) || incentives < 0) {
-      throw new PayrollRequestError(400, `Manual earnings for ${employee.name} have an invalid amount.`);
+    const paypalFee = roundMoney(Number(manualEarnings.paypalFee) || 0);
+    if (!Number.isFinite(commission) || commission < 0 || !Number.isFinite(incentives) || incentives < 0 || !Number.isFinite(paypalFee) || paypalFee < 0) {
+      throw new PayrollRequestError(400, `Manual payroll amounts for ${employee.name} have an invalid amount.`);
     }
     gross += commission + incentives;
     if (commission > 0) lines.push({
@@ -399,6 +400,19 @@ async function buildDraftPayslips(
       source_id: employee.id,
       source_date: run.period_start,
     });
+    if (paypalFee > 0) {
+      deductions += paypalFee;
+      lines.push({
+        line_type: "deduction",
+        description: "PayPal Transfer Fee",
+        units: "1.00",
+        rate: asMoney(paypalFee),
+        amount: asMoney(-paypalFee),
+        source_type: "paypal_transfer_fee",
+        source_id: employee.id,
+        source_date: run.period_start,
+      });
+    }
 
     gross = roundMoney(gross);
     deductions = roundMoney(deductions);
@@ -1189,18 +1203,21 @@ export function registerAttendancePayrollRoutes(
           : [];
         const enabledEmployeeIds = new Set(enabledEmployees.map((employee: any) => employee.id));
         const slipsToRebuild = oldSlips.filter((slip: any) => enabledEmployeeIds.has(slip.user_id));
-        const preservedEarningsByUser = new Map<number, { commission: number; incentives: number }>();
+        const preservedEarningsByUser = new Map<number, { commission: number; incentives: number; paypalFee: number }>();
         if (oldSlips.length) {
           const oldManualLines = await tx.select().from(payslipLineItems).where(and(
             inArray(payslipLineItems.payslip_id, oldSlips.map((slip: any) => slip.id)),
-            inArray(payslipLineItems.line_type, ["commission", "incentive"]),
+            inArray(payslipLineItems.line_type, ["commission", "incentive", "deduction"]),
           ));
           for (const line of oldManualLines) {
             const userId = oldSlipUserById.get(line.payslip_id);
             if (!userId) continue;
-            const earnings = preservedEarningsByUser.get(userId) ?? { commission: 0, incentives: 0 };
+            const earnings = preservedEarningsByUser.get(userId) ?? { commission: 0, incentives: 0, paypalFee: 0 };
             if (line.line_type === "commission") earnings.commission += Number(line.amount);
             if (line.line_type === "incentive") earnings.incentives += Number(line.amount);
+            if (line.line_type === "deduction" && line.source_type === "paypal_transfer_fee") {
+              earnings.paypalFee += Math.abs(Number(line.amount));
+            }
             preservedEarningsByUser.set(userId, earnings);
           }
           if (slipsToRebuild.length) {
@@ -1227,8 +1244,9 @@ export function registerAttendancePayrollRoutes(
     const parsed = z.object({
       commission: z.coerce.number().finite().min(0).max(999999999999.99),
       incentives: z.coerce.number().finite().min(0).max(999999999999.99),
+      paypalFee: z.coerce.number().finite().min(0).max(999999999999.99).optional(),
     }).safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Enter valid non-negative amounts for commission and incentives." });
+    if (!parsed.success) return res.status(400).json({ error: "Enter valid non-negative amounts for commission, incentives, and the PayPal fee." });
     try {
       const result = await db.transaction(async (tx) => {
         const [record] = await tx.select({
@@ -1242,30 +1260,37 @@ export function registerAttendancePayrollRoutes(
         if (!record) throw new PayrollRequestError(404, "Payslip not found.");
         if (record.run_status !== "draft") throw new PayrollRequestError(409, "Earnings can only be changed on a draft payroll run.");
 
-        const oldLines = await tx.select().from(payslipLineItems).where(and(
-          eq(payslipLineItems.payslip_id, id),
-          inArray(payslipLineItems.line_type, ["commission", "incentive"]),
-        ));
+        const oldLines = await tx.select().from(payslipLineItems).where(eq(payslipLineItems.payslip_id, id));
         const oldCommission = roundMoney(oldLines
           .filter((line: any) => line.line_type === "commission")
           .reduce((sum: number, line: any) => sum + Number(line.amount), 0));
         const oldIncentives = roundMoney(oldLines
           .filter((line: any) => line.line_type === "incentive")
           .reduce((sum: number, line: any) => sum + Number(line.amount), 0));
+        const oldPaypalFee = roundMoney(oldLines
+          .filter((line: any) => line.line_type === "deduction" && line.source_type === "paypal_transfer_fee")
+          .reduce((sum: number, line: any) => sum + Math.abs(Number(line.amount)), 0));
         const commission = roundMoney(parsed.data.commission);
         const incentives = roundMoney(parsed.data.incentives);
+        const paypalFee = parsed.data.paypalFee === undefined ? oldPaypalFee : roundMoney(parsed.data.paypalFee);
         const gross = roundMoney(Number(record.slip.gross_amount) - oldCommission - oldIncentives + commission + incentives);
-        const net = roundMoney(gross - Number(record.slip.deductions_amount));
-        if (net < 0) throw new PayrollRequestError(400, "These earnings would leave the payslip with negative net pay.");
+        const deductions = roundMoney(Number(record.slip.deductions_amount) - oldPaypalFee + paypalFee);
+        const net = roundMoney(gross - deductions);
+        if (net < 0) throw new PayrollRequestError(400, "These amounts would leave the payslip with negative net pay.");
 
         const [updated] = await tx.update(payslips).set({
           gross_amount: asMoney(gross),
+          deductions_amount: asMoney(deductions),
           net_amount: asMoney(net),
         }).where(eq(payslips.id, id)).returning();
-        await tx.delete(payslipLineItems).where(and(
-          eq(payslipLineItems.payslip_id, id),
-          inArray(payslipLineItems.line_type, ["commission", "incentive"]),
-        ));
+        const oldManualLineIds = oldLines
+          .filter((line: any) => line.line_type === "commission"
+            || line.line_type === "incentive"
+            || (line.line_type === "deduction" && line.source_type === "paypal_transfer_fee"))
+          .map((line: any) => line.id);
+        if (oldManualLineIds.length) {
+          await tx.delete(payslipLineItems).where(inArray(payslipLineItems.id, oldManualLineIds));
+        }
         const manualLines: any[] = [];
         if (commission > 0) manualLines.push({
           payslip_id: id,
@@ -1289,6 +1314,17 @@ export function registerAttendancePayrollRoutes(
           source_id: record.slip.user_id,
           source_date: record.period_start,
         });
+        if (paypalFee > 0) manualLines.push({
+          payslip_id: id,
+          line_type: "deduction",
+          description: "PayPal Transfer Fee",
+          units: "1.00",
+          rate: asMoney(paypalFee),
+          amount: asMoney(-paypalFee),
+          source_type: "paypal_transfer_fee",
+          source_id: record.slip.user_id,
+          source_date: record.period_start,
+        });
         if (manualLines.length) await tx.insert(payslipLineItems).values(manualLines);
         await writePayrollAudit(
           tx,
@@ -1296,8 +1332,8 @@ export function registerAttendancePayrollRoutes(
           "payslip",
           id,
           "manual_earnings_updated",
-          { commission: asMoney(oldCommission), incentives: asMoney(oldIncentives) },
-          { commission: asMoney(commission), incentives: asMoney(incentives) },
+          { commission: asMoney(oldCommission), incentives: asMoney(oldIncentives), paypal_fee: asMoney(oldPaypalFee) },
+          { commission: asMoney(commission), incentives: asMoney(incentives), paypal_fee: asMoney(paypalFee) },
         );
         return updated;
       });
