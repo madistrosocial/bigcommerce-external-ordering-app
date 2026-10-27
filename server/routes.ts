@@ -728,6 +728,7 @@ export async function registerRoutes(
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data text;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS company_role text NOT NULL DEFAULT '';
     ALTER TABLE IF EXISTS payslips ADD COLUMN IF NOT EXISTS position_snapshot text NOT NULL DEFAULT '';
+    ALTER TABLE IF EXISTS payroll_runs ADD COLUMN IF NOT EXISTS usd_to_php_rate numeric(12,4) NOT NULL DEFAULT 0;
     UPDATE payslips AS p
     SET position_snapshot = BTRIM(u.company_role)
     FROM users AS u

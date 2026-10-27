@@ -648,6 +648,7 @@ export const payrollRuns = pgTable("payroll_runs", {
   period_start: text("period_start").notNull(),
   period_end: text("period_end").notNull(),
   payday: text("payday").notNull(),
+  usd_to_php_rate: decimal("usd_to_php_rate", { precision: 12, scale: 4 }).notNull().default("0"),
   status: text("status").notNull().default("draft"), // draft | finalized
   snapshot_updated_at: timestamp("snapshot_updated_at").notNull().defaultNow(),
   created_by: integer("created_by").notNull().references(() => users.id),

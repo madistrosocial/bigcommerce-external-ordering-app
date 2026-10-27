@@ -1115,9 +1115,10 @@ export function registerAttendancePayrollRoutes(
   app.post("/api/attendance/payroll/admin/runs", canManagePayroll, async (req, res) => {
     const schema = z.object({
       role_id: z.coerce.number().int().positive(),
+      usd_to_php_rate: z.coerce.number().finite().gt(0).max(99999999.9999),
     });
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Choose a user group." });
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Choose a user group and enter a valid USD to PHP rate." });
     try {
       const [group] = await db.select({
         id: roles.id,
@@ -1155,6 +1156,7 @@ export function registerAttendancePayrollRoutes(
           period_start: nextPeriod.period_start,
           period_end: nextPeriod.period_end,
           payday: nextPeriod.payday,
+          usd_to_php_rate: parsed.data.usd_to_php_rate.toFixed(4),
           created_by: actor.id,
         }).returning();
         await buildDraftPayslips(tx, run);

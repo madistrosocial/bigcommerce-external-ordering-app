@@ -19,6 +19,7 @@ export interface PayslipRunSnapshot {
   period_end: string;
   payday: string;
   status: string;
+  usd_to_php_rate?: PayslipAmount;
 }
 
 export interface PayslipDocumentData {
@@ -74,6 +75,11 @@ function formatMoney(value: PayslipAmount, currency: string): string {
 
 function formatPeso(value: number): string {
   return `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatConversionRate(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "Not set";
+  return `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} per US$1`;
 }
 
 function formatHours(value: PayslipAmount): string {
@@ -146,9 +152,13 @@ export default function PayslipDocument({ payslip, branding }: PayslipDocumentPr
     .map((line) => line.source_date)
     .filter((date): date is string => Boolean(date))).size;
   const totalPaidHours = roundMoney(regularHours + overtimeHours);
-  const conversionRate = 0;
+  const conversionRate = numberValue(payslip.run?.usd_to_php_rate);
   const netPay = numberValue(payslip.net_amount);
-  const netTakeHomePhp = roundMoney(netPay * conversionRate);
+  const netTakeHomePhp = currency === "PHP"
+    ? netPay
+    : currency === "USD" && conversionRate > 0
+      ? roundMoney(netPay * conversionRate)
+      : null;
   const contactDetails = [
     branding.company_address,
     branding.company_phone,
@@ -231,11 +241,11 @@ export default function PayslipDocument({ payslip, branding }: PayslipDocumentPr
         <section className="payslip-net" aria-label="Net pay and conversion">
           <div className="payslip-rows">
             <PayslipRow label={`NET PAY (${currency})`} value={formatMoney(netPay, currency)} strong testId="payslip-net" />
-            <PayslipRow label="Current Conversion Rate" value={formatPeso(conversionRate)} />
+            <PayslipRow label="Current Conversion Rate" value={formatConversionRate(conversionRate)} />
           </div>
           <div className="payslip-take-home">
             <span>NET TAKE-HOME (PHP)</span>
-            <strong data-testid="payslip-net-php">{formatPeso(netTakeHomePhp)}</strong>
+            <strong data-testid="payslip-net-php">{netTakeHomePhp === null ? "—" : formatPeso(netTakeHomePhp)}</strong>
           </div>
         </section>
       </main>

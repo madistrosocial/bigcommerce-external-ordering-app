@@ -662,6 +662,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
     && hasPermission("attendance", "view_all")
     && hasPermission("attendance", "manage");
   const [runRoleId, setRunRoleId] = useState("");
+  const [usdToPhpRate, setUsdToPhpRate] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [selectedRunEmployeeId, setSelectedRunEmployeeId] = useState("");
   const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
@@ -719,8 +720,10 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const createRun = useMutation({
     mutationFn: () => apiJson("/api/attendance/payroll/admin/runs", jsonInit("POST", {
       role_id: Number(runRoleId),
+      usd_to_php_rate: Number(usdToPhpRate),
     })),
     onSuccess: result => {
+      setUsdToPhpRate("");
       setSelectedRunId(result.run.id);
       refresh();
     },
@@ -896,8 +899,24 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
                 <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Cutoff end</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.period_end)}</p></div>
                 <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Payday</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.payday)}</p></div>
               </> : <p className="text-sm text-amber-700 md:col-span-3">Configure this group’s payday anchor or twice-monthly paydays before creating a run.</p>}
+              <div className="md:col-span-2">
+                <Label htmlFor="payroll-usd-to-php-rate">USD to PHP rate (₱ per US$1)</Label>
+                <Input
+                  id="payroll-usd-to-php-rate"
+                  className="mt-1.5"
+                  type="number"
+                  min="0.0001"
+                  max="99999999.9999"
+                  step="0.0001"
+                  placeholder="Enter current rate"
+                  required
+                  value={usdToPhpRate}
+                  onChange={event => setUsdToPhpRate(event.target.value)}
+                />
+                <p className="mt-1 text-xs text-slate-500">Saved with this payroll run and used on its payslips.</p>
+              </div>
               <div className="md:col-span-4 flex flex-wrap items-center gap-3">
-                <Button type="submit" disabled={createRun.isPending || !nextPayrollPeriod}>{createRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}Build draft payroll</Button>
+                <Button type="submit" disabled={createRun.isPending || !nextPayrollPeriod || !Number.isFinite(Number(usdToPhpRate)) || Number(usdToPhpRate) <= 0}>{createRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}Build draft payroll</Button>
                 {createRun.error && !createReviewSessions.length && <span role="alert" className="text-sm text-rose-600">{createRun.error.message}</span>}
               </div>
               {createReviewSessions.length > 0 && <div className="md:col-span-4"><AttendanceReviewBlockerList sessions={createReviewSessions} canReviewAttendance={canReviewAttendance} /></div>}
