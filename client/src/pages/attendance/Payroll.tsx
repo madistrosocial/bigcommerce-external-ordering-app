@@ -507,7 +507,7 @@ function ScheduleEditor({ group, onSaved, readOnly = false, tone = "violet" }: {
   );
 }
 
-function EmployeePayEditor({ employee, onRefresh, readOnly = false }: { employee: any; onRefresh: () => void; readOnly?: boolean }) {
+function EmployeePayEditor({ employee, onRefresh, readOnly = false, tone = "violet" }: { employee: any; onRefresh: () => void; readOnly?: boolean; tone?: "violet" | "mint" | "amber" }) {
   const profile = employee.profile;
   const [hourlyRate, setHourlyRate] = useState(profile?.hourly_rate ?? "");
   const [currency, setCurrency] = useState(profile?.currency ?? "USD");
@@ -555,10 +555,13 @@ function EmployeePayEditor({ employee, onRefresh, readOnly = false }: { employee
     onSuccess: onRefresh,
   });
   return (
-    <div className="rounded-lg border border-slate-200 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div><p className="font-semibold text-slate-900">{employee.name || employee.username}</p><p className="text-xs text-slate-500">{employee.username}{employee.is_enabled ? "" : " · account disabled"}</p></div>
-        <div className="flex flex-wrap items-center gap-3">
+    <div className={`schedule-card schedule-card--${tone} employee-rate-card`}>
+      <div className="schedule-card__head employee-rate-card__head">
+        <div className="schedule-card__identity">
+          <span className="schedule-card__icon"><UserRound className="h-[18px] w-[18px]" /></span>
+          <div><p className="font-semibold text-slate-900">{employee.name || employee.username}</p><p className="text-xs text-slate-500">{employee.username}{employee.is_enabled ? "" : " · account disabled"}</p></div>
+        </div>
+        <div className="employee-rate-card__controls">
           {profile ? <Badge className="border-0 bg-emerald-100 text-emerald-700">Pay profile set</Badge> : <Badge className="border-0 bg-amber-100 text-amber-800">Needs rate</Badge>}
           <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
             <span>{employee.attendance_tracking_enabled ? "Tracking on" : "Tracking off"}</span>
@@ -571,6 +574,7 @@ function EmployeePayEditor({ employee, onRefresh, readOnly = false }: { employee
           </label>
         </div>
       </div>
+      <div className="schedule-card__body employee-rate-card__body">
       {!employee.attendance_tracking_enabled && <p className="mt-2 rounded-md bg-amber-50 px-2.5 py-2 text-xs text-amber-800">Hidden from attendance logs, attendance reports, and new payroll runs. Existing records are retained.</p>}
       {updateTracking.error && <p role="alert" className="mt-2 text-xs text-rose-600">{updateTracking.error.message}</p>}
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -599,6 +603,7 @@ function EmployeePayEditor({ employee, onRefresh, readOnly = false }: { employee
           <Button size="sm" type="submit" variant="outline" disabled={!profile || addItem.isPending}>{addItem.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add item"}</Button>
         </form>}
         {!readOnly && addItem.error && <p role="alert" className="mt-2 text-xs text-rose-600">{addItem.error.message}</p>}
+      </div>
       </div>
     </div>
   );
@@ -869,7 +874,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
             {employees.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
             {employees.error && <p role="alert" className="text-sm text-rose-600">{employees.error.message}</p>}
             {!employees.isLoading && !employees.data?.employees?.length && <EmptyState>No user accounts found.</EmptyState>}
-            <div className="space-y-3">{(employees.data?.employees ?? []).map((employee: any) => <EmployeePayEditor key={employee.id} employee={employee} onRefresh={refresh} readOnly={!canManage} />)}</div>
+            <div className="space-y-3">{(employees.data?.employees ?? []).map((employee: any, index: number) => <EmployeePayEditor key={employee.id} employee={employee} onRefresh={refresh} readOnly={!canManage} tone={(["violet", "mint", "amber"] as const)[index % 3]} />)}</div>
           </CardContent>
         </Card>
       </div>}
