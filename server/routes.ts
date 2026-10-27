@@ -13345,6 +13345,27 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/attendance/admin/logs/team-members", requirePermission("attendance", "view_logs"), async (req, res) => {
+    try {
+      const user = (req as any).authUser;
+      if (!(await canViewAllAttendance(user))) {
+        return res.status(403).json({ error: "Full attendance access is required." });
+      }
+      const users = await storage.getAllUsers();
+      res.json(users
+        .filter((employee) => employee.is_enabled && employee.attendance_tracking_enabled)
+        .map((employee) => ({
+          id: employee.id,
+          name: employee.name,
+          username: employee.username,
+          is_enabled: employee.is_enabled,
+          attendance_tracking_enabled: employee.attendance_tracking_enabled,
+        })));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/attendance/admin/logs/:id", requirePermission("attendance", "view_logs"), async (req, res) => {
     try {
       const user = (req as any).authUser;

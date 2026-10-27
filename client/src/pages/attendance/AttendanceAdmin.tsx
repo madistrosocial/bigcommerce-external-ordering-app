@@ -600,7 +600,7 @@ function Logs() {
   const scopedUserId = canViewAll ? userId : signedInUserId;
   const usersQuery = useQuery({
     queryKey: ["attendance", "team-members"],
-    queryFn: () => apiJson("/api/users"),
+    queryFn: () => apiJson("/api/attendance/admin/logs/team-members"),
     enabled: canViewAll && !permissionsLoading,
     staleTime: 0,
     refetchOnMount: "always",

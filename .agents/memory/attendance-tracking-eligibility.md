@@ -7,4 +7,4 @@ Attendance tracking is a per-user setting across all system accounts, including 
 
 **Why:** The user clarified that account role must not determine who can be tracked; the tracking toggle is the source of truth for attendance eligibility.
 
-**How to apply:** Keep all accounts manageable in payroll settings, and ensure both the Attendance Logs selector and its selected-user state only resolve to enabled, tracking-on users.
+**How to apply:** Keep all accounts manageable in payroll settings, and ensure both the Attendance Logs selector and its selected-user state only resolve to enabled, tracking-on users. The team selector must use an attendance-scoped endpoint; `/api/users` is admin-only and blocks non-admin attendance managers.
