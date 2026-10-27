@@ -2978,7 +2978,29 @@ export async function registerRoutes(
           WHERE UPPER(BTRIM(li.sku)) = requested.sku
         )
       `);
-      res.json({ usedSkus: result.rows.map((row: any) => String(row.sku)) });
+      const usedSkus = new Set(result.rows.map((row: any) => String(row.sku)));
+      const bigCommerceSkusToCheck = skus.filter((sku) => !usedSkus.has(sku));
+      if (bigCommerceSkusToCheck.length) {
+        const { storeHash, headers } = await getBcCreds();
+        const root = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products`;
+        for (const sku of bigCommerceSkusToCheck) {
+          const response = await fetch(`${root}?sku=${encodeURIComponent(sku)}&include=variants&limit=250`, {
+            headers,
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!response.ok) throw new Error(`BigCommerce SKU lookup failed (${response.status}).`);
+          const payload: any = await response.json();
+          const products = Array.isArray(payload.data) ? payload.data : [];
+          const isUsedInBigCommerce = products.some((product: any) =>
+            String(product.sku || "").trim().toUpperCase() === sku
+            || (Array.isArray(product.variants) && product.variants.some(
+              (variant: any) => String(variant.sku || "").trim().toUpperCase() === sku,
+            )),
+          );
+          if (isUsedInBigCommerce) usedSkus.add(sku);
+        }
+      }
+      res.json({ usedSkus: skus.filter((sku) => usedSkus.has(sku)) });
     } catch (error) {
       console.error("[Product 360] SKU availability check failed:", error);
       res.status(500).json({ error: "Could not check SKU availability." });
