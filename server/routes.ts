@@ -2958,9 +2958,11 @@ export async function registerRoutes(
       .filter(Boolean)));
     if (!skus.length) return res.json({ usedSkus: [] });
     try {
+      const requestedSkuRows = sql.join(skus.map((sku) => sql`(${sku})`), sql`,`);
       const result = await db.execute(sql`
+        WITH requested(sku) AS (VALUES ${requestedSkuRows})
         SELECT requested.sku
-        FROM unnest(${skus}::text[]) AS requested(sku)
+        FROM requested
         WHERE EXISTS (
           SELECT 1
           FROM products p
