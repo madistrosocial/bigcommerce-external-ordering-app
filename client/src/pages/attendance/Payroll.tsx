@@ -287,11 +287,10 @@ function PayStatement({
         <CardContent className="max-w-full overflow-x-auto pt-0">
           {canEditEarnings && <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p className="mb-1 text-sm font-semibold text-slate-800">Adjust this employee’s pay for the period</p>
-            <p className="mb-3 text-xs text-slate-500">Enter the quoted PayPal transfer fee to subtract it from net pay.</p>
             <div className="grid items-end gap-3 sm:grid-cols-[1fr_1fr_1fr_auto]">
               <div><Label htmlFor={`commission-${slip.id}`}>Commission</Label><Input id={`commission-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={commission} onChange={event => setCommission(event.target.value)} /></div>
               <div><Label htmlFor={`incentives-${slip.id}`}>Incentives</Label><Input id={`incentives-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={incentives} onChange={event => setIncentives(event.target.value)} /></div>
-              <div><Label htmlFor={`paypal-fee-${slip.id}`}>PayPal fee (quoted)</Label><Input id={`paypal-fee-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={paypalFee} onChange={event => setPaypalFee(event.target.value)} /></div>
+              <div><Label htmlFor={`paypal-fee-${slip.id}`}>PayPal fee</Label><Input id={`paypal-fee-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={paypalFee} onChange={event => setPaypalFee(event.target.value)} /></div>
               <Button type="button" disabled={saveEarnings.isPending} onClick={() => saveEarnings.mutate()}>{saveEarnings.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Save amounts</Button>
             </div>
             {saveEarnings.error && <p role="alert" className="mt-2 text-sm text-rose-600">{saveEarnings.error.message}</p>}
@@ -843,8 +842,8 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
 
       {mode === "management" && canViewPayroll && <nav aria-label="Payroll management sections" className="flex flex-wrap gap-2 border-t border-slate-200 pt-5">
         <Button type="button" variant={section === "overview" ? "default" : "outline"} onClick={() => setLocation("/payroll")}>Payroll Management</Button>
-        <Button type="button" variant={section === "schedules" ? "default" : "outline"} onClick={() => setLocation("/payroll/schedules")}><CalendarDays className="mr-2 h-4 w-4" />Existing User-Group Schedules</Button>
-        <Button type="button" variant={section === "employee-rates" ? "default" : "outline"} onClick={() => setLocation("/payroll/employee-rates")}><UserRound className="mr-2 h-4 w-4" />Employee Rates and Recurring Items</Button>
+        <Button type="button" variant={section === "schedules" ? "default" : "outline"} onClick={() => setLocation("/payroll/schedules")}><CalendarDays className="mr-2 h-4 w-4" />Schedules</Button>
+        <Button type="button" variant={section === "employee-rates" ? "default" : "outline"} onClick={() => setLocation("/payroll/employee-rates")}><UserRound className="mr-2 h-4 w-4" />Rates</Button>
       </nav>}
 
       {mode === "management" && canViewPayroll && section === "schedules" && <div className="space-y-5">
@@ -885,7 +884,6 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
                 <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Cutoff end</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.period_end)}</p></div>
                 <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Payday</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.payday)}</p></div>
               </> : <p className="text-sm text-amber-700 md:col-span-3">Configure this group’s payday anchor or twice-monthly paydays before creating a run.</p>}
-              <p className="text-xs text-slate-500 md:col-span-4">Coverage runs from the previous payday through the last weekday before this payday.</p>
               <div className="md:col-span-4 flex flex-wrap items-center gap-3">
                 <Button type="submit" disabled={createRun.isPending || !nextPayrollPeriod}>{createRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}Build draft payroll</Button>
                 {createRun.error && !createReviewSessions.length && <span role="alert" className="text-sm text-rose-600">{createRun.error.message}</span>}
@@ -910,7 +908,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
         {selectedRunId != null && <Card className="border-slate-200 shadow-sm">
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div><CardTitle className="text-base">Run details</CardTitle>{runDetails.data?.run && <p className="mt-1 text-sm text-slate-500">{runDetails.data.run.group_name_snapshot} · {dateLabel(runDetails.data.run.period_start)} – {dateLabel(runDetails.data.run.period_end)}</p>}</div>
+              <div><CardTitle className="text-base">Run details</CardTitle></div>
               {runDetails.data?.run && <div className="flex flex-wrap gap-2">
                 {canManage && runDetails.data.run.status === "draft" && <>
                   <Button size="sm" variant="outline" disabled={rebuildRun.isPending || finalizeRun.isPending || deleteRun.isPending} onClick={() => { finalizeRun.reset(); rebuildRun.mutate(selectedRunId); }}>{rebuildRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rebuild draft</Button>
