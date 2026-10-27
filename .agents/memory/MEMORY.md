@@ -24,6 +24,7 @@
 - [Zoho marketing delivery boundary](zoho-marketing-delivery.md) — ZeptoMail is transactional-only; compliant campaign delivery requires Zoho Campaigns/Email API access.
 - [Attendance accounting baseline](attendance-accounting-baseline.md) — ledger excludes weekends and observed US holidays; short hours use an 8-hour weekday expectation until schedules are configurable.
 - [Payroll group work-time policies](payroll-group-work-time-policies.md) — groups choose scheduled-start vs clock-in counting and fixed one-hour vs actual break deductions.
+- [Payroll schedule calculation](payroll-schedule-calculation.md) — group schedules derive runs from user-configured paydays and prior-payday coverage, not fixed run dates.
 - [Payroll and leave boundaries](payroll-leave-boundaries.md) — Attendance owns self-service/time capture; separate Payroll owns pay settings, runs, and overtime review.
 - [Payroll run deletion](payroll-run-deletion.md) — payroll history deletion is admin-only; remove generated slips, reopen linked approved overtime, retain audit records.
 - [Payslip calculation scope](payslip-calculation-scope.md) — compute rates, regular pay, paid work hours, and worked days; keep unavailable deductions, metrics, FX, commission, and incentives at zero.

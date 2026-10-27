@@ -4,6 +4,8 @@ import { z } from "zod";
 import { db } from "../db";
 import { getCompanyTimezone } from "./attendance";
 import { calculateAttendanceDayPay } from "./attendance-pay-calculation";
+import { dateOnlyInTimeZone } from "@shared/timezone";
+import { calculateNextPayrollPeriod } from "@shared/payroll-schedule";
 import { storage } from "./storage";
 import {
   attendanceLeaveRequests,
@@ -823,15 +825,34 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
 
   app.get("/api/attendance/payroll/admin/config", canViewPayroll, async (_req, res) => {
     try {
-      const groups = await db.select({
+      const [groups, existingRuns] = await Promise.all([
+        db.select({
         id: roles.id,
         name: roles.name,
         description: roles.description,
         schedule: attendancePayrollGroupSchedules,
       }).from(roles)
         .leftJoin(attendancePayrollGroupSchedules, eq(attendancePayrollGroupSchedules.role_id, roles.id))
-        .orderBy(asc(roles.name));
-      res.json({ groups });
+          .orderBy(asc(roles.name)),
+        db.select({ role_id: payrollRuns.role_id, payday: payrollRuns.payday })
+          .from(payrollRuns)
+          .orderBy(desc(payrollRuns.payday)),
+      ]);
+      const latestPaydayByRole = new Map<number, string>();
+      for (const run of existingRuns) {
+        if (!latestPaydayByRole.has(run.role_id)) latestPaydayByRole.set(run.role_id, run.payday);
+      }
+      const groupsWithNextPeriod = groups.map((group) => ({
+        ...group,
+        next_period: group.schedule
+          ? calculateNextPayrollPeriod(
+            group.schedule,
+            latestPaydayByRole.get(group.id),
+            dateOnlyInTimeZone(new Date(), group.schedule.timezone || "UTC"),
+          )
+          : null,
+      }));
+      res.json({ groups: groupsWithNextPeriod });
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? "Could not load payroll groups." });
     }
@@ -839,7 +860,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
 
   app.put("/api/attendance/payroll/admin/groups/:roleId/schedule", canManagePayroll, async (req, res) => {
     const schema = z.object({
-      cadence: z.enum(["biweekly_friday", "semimonthly_15_30"]),
+      cadence: z.enum(["biweekly", "semimonthly", "biweekly_friday", "semimonthly_15_30"]),
       biweekly_anchor_date: z.string().refine((value) => value === "" || isDateOnly(value), "Enter a valid anchor date."),
       semimonthly_first_payday: z.coerce.number().int().min(1).max(31),
       semimonthly_second_payday: z.coerce.number().int().min(1).max(31),
@@ -849,8 +870,8 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the payroll schedule." });
-    if (parsed.data.cadence === "biweekly_friday" && !parsed.data.biweekly_anchor_date) {
-      return res.status(400).json({ error: "A payroll-specific anchor date is required for a 14-day schedule." });
+    if (["biweekly", "biweekly_friday"].includes(parsed.data.cadence) && !parsed.data.biweekly_anchor_date) {
+      return res.status(400).json({ error: "Set an anchor payday for this 14-day schedule." });
     }
     if (parsed.data.semimonthly_first_payday === parsed.data.semimonthly_second_payday) {
       return res.status(400).json({ error: "The two semimonthly payday dates must be different." });
@@ -1064,16 +1085,9 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
   app.post("/api/attendance/payroll/admin/runs", canManagePayroll, async (req, res) => {
     const schema = z.object({
       role_id: z.coerce.number().int().positive(),
-      period_start: z.string().refine(isDateOnly, "Enter a valid period start."),
-      period_end: z.string().refine(isDateOnly, "Enter a valid period end."),
-      payday: z.string().refine(isDateOnly, "Enter a valid payday."),
     });
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the payroll period." });
-    if (parsed.data.period_start > parsed.data.period_end) return res.status(400).json({ error: "The period end must be on or after the start date." });
-    if (Date.parse(`${parsed.data.period_end}T00:00:00Z`) - Date.parse(`${parsed.data.period_start}T00:00:00Z`) > 62 * 24 * 60 * 60 * 1000) {
-      return res.status(400).json({ error: "A payroll period cannot span more than 63 calendar days." });
-    }
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Choose a user group." });
     try {
       const [group] = await db.select({
         id: roles.id,
@@ -1085,13 +1099,20 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
         .limit(1);
       const payrollSchedule = group?.schedule;
       if (!group || !payrollSchedule) return res.status(400).json({ error: "Configure a payroll schedule for this existing user group first." });
-      if (payrollSchedule.cadence === "biweekly_friday" && !payrollSchedule.biweekly_anchor_date) {
-        return res.status(400).json({ error: "Set a payroll-specific 14-day anchor date for this group first." });
-      }
+      const [latestRun] = await db.select({ payday: payrollRuns.payday }).from(payrollRuns)
+        .where(eq(payrollRuns.role_id, group.id))
+        .orderBy(desc(payrollRuns.payday))
+        .limit(1);
+      const nextPeriod = calculateNextPayrollPeriod(
+        payrollSchedule,
+        latestRun?.payday,
+        dateOnlyInTimeZone(new Date(), payrollSchedule.timezone || "UTC"),
+      );
+      if (!nextPeriod) return res.status(400).json({ error: "Complete this group's pay schedule before creating a payroll run." });
       const overlapping = await db.select({ id: payrollRuns.id }).from(payrollRuns).where(and(
         eq(payrollRuns.role_id, parsed.data.role_id),
-        lte(payrollRuns.period_start, parsed.data.period_end),
-        gte(payrollRuns.period_end, parsed.data.period_start),
+        lte(payrollRuns.period_start, nextPeriod.period_end),
+        gte(payrollRuns.period_end, nextPeriod.period_start),
       )).limit(1);
       if (overlapping.length) return res.status(409).json({ error: "A draft or finalized payroll run already overlaps these dates for this user group." });
       const actor = requestUser(req);
@@ -1101,9 +1122,9 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
           group_name_snapshot: group.name,
           cadence_snapshot: payrollSchedule.cadence,
           timezone_snapshot: payrollSchedule.timezone,
-          period_start: parsed.data.period_start,
-          period_end: parsed.data.period_end,
-          payday: parsed.data.payday,
+          period_start: nextPeriod.period_start,
+          period_end: nextPeriod.period_end,
+          payday: nextPeriod.payday,
           created_by: actor.id,
         }).returning();
         await buildDraftPayslips(tx, run);

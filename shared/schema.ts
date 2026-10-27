@@ -597,7 +597,7 @@ export const attendanceAuditLog = pgTable("attendance_audit_log", {
 export const attendancePayrollGroupSchedules = pgTable("attendance_payroll_group_schedules", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   role_id: integer("role_id").notNull().references(() => roles.id, { onDelete: "cascade" }),
-  cadence: text("cadence").notNull().default("biweekly_friday"), // biweekly_friday | semimonthly_15_30
+  cadence: text("cadence").notNull().default("biweekly_friday"), // New values: biweekly | semimonthly; legacy values remain supported.
   biweekly_anchor_date: text("biweekly_anchor_date"),
   semimonthly_first_payday: integer("semimonthly_first_payday").notNull().default(15),
   semimonthly_second_payday: integer("semimonthly_second_payday").notNull().default(30),

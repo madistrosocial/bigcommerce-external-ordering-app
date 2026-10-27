@@ -435,7 +435,8 @@ function SummaryMetric({ label, value, strong = false }: { label: string; value:
 
 function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSaved: () => void; readOnly?: boolean }) {
   const current = group.schedule;
-  const [cadence, setCadence] = useState(current?.cadence ?? "biweekly_friday");
+  const normalizeCadence = (value?: string) => value === "semimonthly" || value === "semimonthly_15_30" ? "semimonthly" : "biweekly";
+  const [cadence, setCadence] = useState(normalizeCadence(current?.cadence));
   const [anchor, setAnchor] = useState(current?.biweekly_anchor_date ?? "");
   const [firstDay, setFirstDay] = useState(String(current?.semimonthly_first_payday ?? 15));
   const [secondDay, setSecondDay] = useState(String(current?.semimonthly_second_payday ?? 30));
@@ -455,7 +456,7 @@ function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSa
     onSuccess: onSaved,
   });
   useEffect(() => {
-    setCadence(current?.cadence ?? "biweekly_friday");
+    setCadence(normalizeCadence(current?.cadence));
     setAnchor(current?.biweekly_anchor_date ?? "");
     setFirstDay(String(current?.semimonthly_first_payday ?? 15));
     setSecondDay(String(current?.semimonthly_second_payday ?? 30));
@@ -466,14 +467,14 @@ function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSa
   return (
     <div className="rounded-lg border border-slate-200 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div><p className="font-semibold text-slate-900">{group.name}</p><p className="text-xs text-slate-500">{current ? `Current: ${current.cadence === "biweekly_friday" ? "Every 2 weeks on Friday" : "Semimonthly"}` : "No payroll schedule assigned"}</p></div>
+        <div><p className="font-semibold text-slate-900">{group.name}</p><p className="text-xs text-slate-500">{current ? `Current: ${normalizeCadence(current.cadence) === "biweekly" ? "Every 2 weeks" : "Twice monthly"}` : "No payroll schedule assigned"}</p></div>
         <Badge variant="outline">{group.description || "Existing user group"}</Badge>
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div><Label>Pay cadence</Label><select disabled={readOnly} className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm disabled:bg-slate-50 disabled:text-slate-500" value={cadence} onChange={event => setCadence(event.target.value)}><option value="biweekly_friday">Every 2 weeks on Friday</option><option value="semimonthly_15_30">Twice monthly (configured dates)</option></select></div>
-        {cadence === "biweekly_friday"
-          ? <div><Label>First payday / 14-day anchor</Label><Input disabled={readOnly} className="mt-1.5" type="date" value={anchor} onChange={event => setAnchor(event.target.value)} /></div>
-          : <div className="grid grid-cols-2 gap-2"><div><Label>First payday</Label><Input disabled={readOnly} className="mt-1.5" type="number" min="1" max="31" value={firstDay} onChange={event => setFirstDay(event.target.value)} /></div><div><Label>Second payday</Label><Input disabled={readOnly} className="mt-1.5" type="number" min="1" max="31" value={secondDay} onChange={event => setSecondDay(event.target.value)} /></div></div>}
+        <div><Label>Pay cadence</Label><select disabled={readOnly} className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm disabled:bg-slate-50 disabled:text-slate-500" value={cadence} onChange={event => setCadence(event.target.value)}><option value="biweekly">Every 2 weeks</option><option value="semimonthly">Twice monthly</option></select></div>
+        {cadence === "biweekly"
+          ? <div><Label>Previous payday / anchor</Label><Input disabled={readOnly} required type="date" className="mt-1.5" value={anchor} onChange={event => setAnchor(event.target.value)} /><p className="mt-1 text-xs text-slate-500">The next period starts on this date. Its payday is 14 days later; paydays then repeat every 14 days.</p></div>
+          : <div className="grid grid-cols-2 gap-2"><div><Label>First payday (day of month)</Label><Input disabled={readOnly} required className="mt-1.5" type="number" min="1" max="31" value={firstDay} onChange={event => setFirstDay(event.target.value)} /></div><div><Label>Second payday (day of month)</Label><Input disabled={readOnly} required className="mt-1.5" type="number" min="1" max="31" value={secondDay} onChange={event => setSecondDay(event.target.value)} /></div></div>}
         <div><Label>Payroll timezone</Label><Input disabled={readOnly} className="mt-1.5" value={timezone} onChange={event => setTimezone(event.target.value)} placeholder="America/New_York" /></div>
         {!readOnly && <div className="flex items-end"><Button type="button" variant="outline" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Settings2 className="mr-2 h-4 w-4" />}Save schedule</Button></div>}
       </div>
@@ -488,7 +489,7 @@ function ScheduleEditor({ group, onSaved, readOnly = false }: { group: any; onSa
         </label>
       </div>
       {!readOnly && save.error && <p role="alert" className="mt-2 text-sm text-rose-600">{save.error.message}</p>}
-      {cadence === "semimonthly_15_30" && <p className="mt-2 text-xs text-slate-500">Enter the actual pay date for each run. For February or a short month, choose the payday explicitly when creating the run.</p>}
+      {cadence === "semimonthly" && <p className="mt-2 text-xs text-slate-500">Set the two recurring calendar days. Short months use their last calendar day when a configured day does not exist.</p>}
     </div>
   );
 }
@@ -637,9 +638,6 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
     && hasPermission("attendance", "view_all")
     && hasPermission("attendance", "manage");
   const [runRoleId, setRunRoleId] = useState("");
-  const [periodStart, setPeriodStart] = useState("");
-  const [periodEnd, setPeriodEnd] = useState("");
-  const [payday, setPayday] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [selectedRunEmployeeId, setSelectedRunEmployeeId] = useState("");
   const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
@@ -697,9 +695,6 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const createRun = useMutation({
     mutationFn: () => apiJson("/api/attendance/payroll/admin/runs", jsonInit("POST", {
       role_id: Number(runRoleId),
-      period_start: periodStart,
-      period_end: periodEnd,
-      payday,
     })),
     onSuccess: result => {
       setSelectedRunId(result.run.id);
@@ -727,6 +722,8 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
     const firstGroup = config.data?.groups?.[0]?.id;
     if (!runRoleId && firstGroup) setRunRoleId(String(firstGroup));
   }, [config.data, runRoleId]);
+  const selectedPayrollGroup = (config.data?.groups ?? []).find((group: any) => String(group.id) === runRoleId);
+  const nextPayrollPeriod = selectedPayrollGroup?.next_period;
 
   function reviewClaim(request: any, status: "approved" | "rejected") {
     const note = window.prompt(status === "approved" ? "Optional manager note" : "Reason for rejecting this claim") ?? "";
@@ -874,12 +871,15 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
           <CardHeader><CardTitle className="text-base">Create a payroll run</CardTitle></CardHeader>
           <CardContent>
             <form className="grid gap-3 md:grid-cols-4" onSubmit={event => { event.preventDefault(); createRun.mutate(); }}>
-              <div><Label>User group</Label><select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" required value={runRoleId} onChange={event => setRunRoleId(event.target.value)}><option value="">Choose a group</option>{(config.data?.groups ?? []).map((group: any) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></div>
-              <div><Label>Period start</Label><Input className="mt-1.5" type="date" required value={periodStart} onChange={event => setPeriodStart(event.target.value)} /></div>
-              <div><Label>Period end</Label><Input className="mt-1.5" type="date" min={periodStart || undefined} required value={periodEnd} onChange={event => setPeriodEnd(event.target.value)} /></div>
-              <div><Label>Payday</Label><Input className="mt-1.5" type="date" required value={payday} onChange={event => setPayday(event.target.value)} /></div>
+              <div><Label>Pay schedule</Label><select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" required value={runRoleId} onChange={event => setRunRoleId(event.target.value)}><option value="">Choose a group schedule</option>{(config.data?.groups ?? []).map((group: any) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></div>
+              {nextPayrollPeriod ? <>
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Cutoff start</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.period_start)}</p></div>
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Cutoff end</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.period_end)}</p></div>
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Payday</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.payday)}</p></div>
+              </> : <p className="text-sm text-amber-700 md:col-span-3">Configure this group’s payday anchor or twice-monthly paydays before creating a run.</p>}
+              <p className="text-xs text-slate-500 md:col-span-4">Coverage runs from the previous payday through the last weekday before this payday.</p>
               <div className="md:col-span-4 flex flex-wrap items-center gap-3">
-                <Button type="submit" disabled={createRun.isPending}>{createRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}Build draft payroll</Button>
+                <Button type="submit" disabled={createRun.isPending || !nextPayrollPeriod}>{createRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}Build draft payroll</Button>
                 {createRun.error && !createReviewSessions.length && <span role="alert" className="text-sm text-rose-600">{createRun.error.message}</span>}
               </div>
               {createReviewSessions.length > 0 && <div className="md:col-span-4"><AttendanceReviewBlockerList sessions={createReviewSessions} canReviewAttendance={canReviewAttendance} /></div>}
