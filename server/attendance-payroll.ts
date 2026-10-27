@@ -23,6 +23,7 @@ import {
 } from "@shared/schema";
 
 type PermissionMiddleware = (module: string, action: string) => RequestHandler;
+type AnyPermissionMiddleware = (requirements: Array<{ module: string; action: string }>) => RequestHandler;
 
 class PayrollRequestError extends Error {
   status: number;
@@ -474,20 +475,16 @@ async function fetchRunDetails(runId: number) {
   };
 }
 
-export function registerAttendancePayrollRoutes(app: Express, requirePermission: PermissionMiddleware) {
+export function registerAttendancePayrollRoutes(
+  app: Express,
+  requirePermission: PermissionMiddleware,
+  requireAnyPermission: AnyPermissionMiddleware,
+) {
   const canUseAttendance = requirePermission("attendance", "view");
-  const canViewPayroll: RequestHandler = async (req, res, next) => {
-    const actor = requestUser(req);
-    if (!actor?.id) return res.status(401).json({ error: "Unauthorized" });
-    if (actor.role === "admin") return next();
-    try {
-      const permissions = await storage.getUserPermissionStrings(actor.id);
-      if (permissions.includes("payroll:view") || permissions.includes("payroll:manage")) return next();
-      return res.status(403).json({ error: "Forbidden" });
-    } catch (error) {
-      next(error);
-    }
-  };
+  const canViewPayroll = requireAnyPermission([
+    { module: "payroll", action: "view" },
+    { module: "payroll", action: "manage" },
+  ]);
   const canManagePayroll = requirePermission("payroll", "manage");
   const canApproveOvertime = requirePermission("payroll", "approve_overtime");
   const canDeletePayrollRuns = requirePermission("payroll", "delete_runs");

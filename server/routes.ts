@@ -12702,7 +12702,7 @@ export async function registerRoutes(
   });
 
   // ── Attendance ──────────────────────────────────────────────────────────────────
-  registerAttendancePayrollRoutes(app, requirePermission);
+  registerAttendancePayrollRoutes(app, requirePermission, requireAnyPermission);
 
   app.get("/api/attendance/today", requireAuth, async (req, res) => {
     try {
