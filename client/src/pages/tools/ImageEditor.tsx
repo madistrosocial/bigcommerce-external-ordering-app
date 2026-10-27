@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 const MAX_REFERENCE_FILE_BYTES = 4 * 1024 * 1024;
@@ -98,8 +99,6 @@ async function compositeLogoOverlay(generatedImage: string, logoDataUrl: string)
 export default function ImageEditor() {
   const { toast } = useToast();
   const referenceFileInputRef = useRef<HTMLInputElement>(null);
-  const darkLogoFileInputRef = useRef<HTMLInputElement>(null);
-  const lightLogoFileInputRef = useRef<HTMLInputElement>(null);
   const settingsEditedRef = useRef({
     generalDirection: false,
     specificCustomization: false,
@@ -118,8 +117,8 @@ export default function ImageEditor() {
   const [lightLogoDataUrl, setLightLogoDataUrl] = useState("");
   const [lightLogoFileName, setLightLogoFileName] = useState("");
   const [selectedLogoTone, setSelectedLogoTone] = useState<LogoTone>("dark");
+  const [autoApplyWatermark, setAutoApplyWatermark] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
-  const [hasSharedWatermarkSettings, setHasSharedWatermarkSettings] = useState(false);
   const [savedSettings, setSavedSettings] = useState<ImageEditorSettings | null>(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsStorageError, setSettingsStorageError] = useState("");
@@ -298,21 +297,12 @@ export default function ImageEditor() {
           if (!settingsEditedRef.current.specificCustomization) {
             setSpecificCustomization(settings.specificCustomization);
           }
-          if (!settingsEditedRef.current.darkLogo) {
-            setDarkLogoDataUrl(settings.darkLogoDataUrl);
-            setDarkLogoFileName(settings.darkLogoFileName);
-          }
-          if (!settingsEditedRef.current.lightLogo) {
-            setLightLogoDataUrl(settings.lightLogoDataUrl);
-            setLightLogoFileName(settings.lightLogoFileName);
-          }
           if (!settingsEditedRef.current.logoTone) {
             setSelectedLogoTone(settings.selectedLogoTone);
           }
           setSavedSettings(settings);
         }
         if (sharedWatermark?.hasSavedSettings) {
-          setHasSharedWatermarkSettings(true);
           setDarkLogoDataUrl(sharedWatermark.darkLogoDataUrl);
           setDarkLogoFileName(sharedWatermark.darkLogoFileName);
           setLightLogoDataUrl(sharedWatermark.lightLogoDataUrl);
@@ -332,9 +322,21 @@ export default function ImageEditor() {
   }, []);
 
   useEffect(() => {
-    if (!generatedImage || !selectedLogoDataUrl) {
+    if (!generatedImage) {
       setFinalImage("");
       setFinalImageError("");
+      setIsPreparingFinalImage(false);
+      return;
+    }
+    if (!autoApplyWatermark) {
+      setFinalImage(generatedImage);
+      setFinalImageError("");
+      setIsPreparingFinalImage(false);
+      return;
+    }
+    if (!selectedLogoDataUrl) {
+      setFinalImage("");
+      setFinalImageError(`The ${selectedLogoTone} logo is not saved yet. Upload it in Admin → Integration Settings.`);
       setIsPreparingFinalImage(false);
       return;
     }
@@ -358,30 +360,24 @@ export default function ImageEditor() {
     return () => {
       cancelled = true;
     };
-  }, [generatedImage, selectedLogoDataUrl]);
+  }, [generatedImage, selectedLogoDataUrl, autoApplyWatermark, selectedLogoTone]);
 
   const hasUnsavedSettings = settingsReady && (
     savedSettings
       ? generalDirection !== savedSettings.generalDirection
         || specificCustomization !== savedSettings.specificCustomization
-        || (!hasSharedWatermarkSettings && (
-          darkLogoDataUrl !== savedSettings.darkLogoDataUrl
-          || darkLogoFileName !== savedSettings.darkLogoFileName
-          || lightLogoDataUrl !== savedSettings.lightLogoDataUrl
-          || lightLogoFileName !== savedSettings.lightLogoFileName
-        ))
         || selectedLogoTone !== savedSettings.selectedLogoTone
-      : Boolean(generalDirection || specificCustomization || darkLogoDataUrl || darkLogoFileName || lightLogoDataUrl || lightLogoFileName)
+      : Boolean(generalDirection || specificCustomization)
   );
 
   const saveSettings = async () => {
     const settings: ImageEditorSettings = {
       generalDirection,
       specificCustomization,
-      darkLogoDataUrl,
-      darkLogoFileName,
-      lightLogoDataUrl,
-      lightLogoFileName,
+      darkLogoDataUrl: "",
+      darkLogoFileName: "",
+      lightLogoDataUrl: "",
+      lightLogoFileName: "",
       selectedLogoTone,
     };
     setIsSavingSettings(true);
@@ -398,7 +394,7 @@ export default function ImageEditor() {
       };
       toast({
         title: "Editor setup saved",
-        description: "Your directions and dark/light logo options are saved in this browser.",
+        description: "Your prompt directions and preview tone are saved in this browser.",
       });
     } catch {
       setSettingsStorageError("This browser could not save your setup. Check its storage settings and try again.");
@@ -473,7 +469,7 @@ export default function ImageEditor() {
         throw new Error("The image service returned an invalid result. Please try again.");
       }
       setGeneratedImage(payload.imageDataUrl);
-      toast({ title: "Image ready", description: "The generated image is shown without a logo. Choose a logo for the BigCommerce preview." });
+      toast({ title: "Image ready", description: "The generated image stays unchanged. Use the watermark toggle to prepare the BigCommerce preview." });
     } catch (error) {
       toast({
         title: "Image generation failed",
@@ -522,12 +518,8 @@ export default function ImageEditor() {
 
   const chooseLogoTone = (tone: LogoTone) => {
     if (tone === selectedLogoTone) return;
-    if (tone === "dark" ? !darkLogoDataUrl : !lightLogoDataUrl) return;
     settingsEditedRef.current.logoTone = true;
     setSelectedLogoTone(tone);
-    setFinalImage("");
-    setFinalImageError("");
-    setIsPreparingFinalImage(true);
     setUploadResult(null);
   };
 
@@ -559,25 +551,6 @@ export default function ImageEditor() {
     setIsDraggingLogo(null);
     void setLogo(tone, event.dataTransfer.files[0]);
   };
-
-  const logoUploadOptions = [
-    {
-      tone: "dark" as const,
-      label: "Dark logo",
-      description: "Use on light or bright backgrounds.",
-      dataUrl: darkLogoDataUrl,
-      fileName: darkLogoFileName,
-      inputRef: darkLogoFileInputRef,
-    },
-    {
-      tone: "light" as const,
-      label: "Light logo",
-      description: "Use on dark or busy backgrounds.",
-      dataUrl: lightLogoDataUrl,
-      fileName: lightLogoFileName,
-      inputRef: lightLogoFileInputRef,
-    },
-  ];
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 md:p-6">
@@ -737,83 +710,33 @@ export default function ImageEditor() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">3. Add dark and light logo options</CardTitle>
+              <CardTitle className="text-base">3. Watermark overlay</CardTitle>
               <CardDescription>
-                Upload prepared 1200 × 1200 transparent PNG overlays. The generated image stays untouched; logos are only used in the BigCommerce preview.
+                Use the shared dark or light logo saved in Admin Settings. The generated image remains unchanged.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                {logoUploadOptions.map((option) => (
-                  <div
-                    key={option.tone}
-                    className={`rounded-lg border-2 border-dashed p-3 transition-colors ${hasSharedWatermarkSettings ? "pointer-events-none opacity-75" : ""} ${
-                      isDraggingLogo === option.tone ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-slate-50/70"
-                    }`}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      setIsDraggingLogo(option.tone);
-                    }}
-                    onDragLeave={() => setIsDraggingLogo(null)}
-                    onDrop={(event) => { if (!hasSharedWatermarkSettings) handleLogoDrop(option.tone, event); }}
-                    data-testid={`image-editor-${option.tone}-logo-dropzone`}
-                  >
-                    <div className="flex items-center gap-3">
-                      {option.dataUrl ? (
-                        <img src={option.dataUrl} alt={`${option.label} preview`} className="h-14 w-14 rounded border bg-white object-contain p-1" />
-                      ) : (
-                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded border bg-white text-slate-400">
-                          <ImageIcon className="h-5 w-5" />
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium text-slate-800">{option.label}</div>
-                        <div className="text-xs text-slate-500">{option.description}</div>
-                        <div className="mt-1 truncate text-xs text-slate-500">
-                          {option.fileName || "Drop a prepared PNG here"}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between gap-2">
-                      <span className="text-[11px] text-slate-500">1200 × 1200 · 2 MB max</span>
-                      <div className="flex gap-1">
-                        <Button type="button" variant="outline" size="sm" disabled={hasSharedWatermarkSettings} onClick={() => option.inputRef.current?.click()}>
-                          {option.dataUrl ? "Replace" : "Choose"}
-                        </Button>
-                        {option.dataUrl && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            disabled={hasSharedWatermarkSettings}
-                            aria-label={`Remove ${option.label.toLowerCase()}`}
-                            onClick={() => removeLogo(option.tone)}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    <input
-                      ref={option.inputRef}
-                      type="file"
-                      accept="image/png"
-                      className="hidden"
-                      disabled={hasSharedWatermarkSettings}
-                      onChange={(event) => {
-                        void setLogo(option.tone, event.target.files?.[0]);
-                        event.currentTarget.value = "";
-                      }}
-                      data-testid={`image-editor-${option.tone}-logo-input`}
-                    />
-                  </div>
-                ))}
+              <div className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-800">Automatically add watermark</p>
+                  <p className="mt-1 text-xs text-slate-500">The overlay is applied to the BigCommerce preview, not to image generation.</p>
+                </div>
+                <Switch checked={autoApplyWatermark} onCheckedChange={setAutoApplyWatermark} aria-label="Automatically add watermark overlay" data-testid="image-editor-watermark-toggle" />
               </div>
-              <p className="text-xs text-slate-500">
-                {hasSharedWatermarkSettings
-                  ? "Shared overlays are managed in Admin → Integration Settings and are applied only in the BigCommerce preview."
-                  : "Each logo is preserved at its original 1200 × 1200 size and placement. You can generate without either logo."}
-              </p>
+              {autoApplyWatermark && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Watermark logo color">
+                    {(["dark", "light"] as const).map((tone) => (
+                      <Button key={tone} type="button" variant={selectedLogoTone === tone ? "default" : "outline"} role="radio" aria-checked={selectedLogoTone === tone} onClick={() => chooseLogoTone(tone)} data-testid={`image-editor-watermark-${tone}`}>
+                        {tone === "dark" ? "Dark watermark" : "Light watermark"}
+                      </Button>
+                    ))}
+                  </div>
+                  {!(selectedLogoTone === "dark" ? darkLogoDataUrl : lightLogoDataUrl) && (
+                    <p className="text-xs text-amber-700">Upload the {selectedLogoTone} logo in Admin → Integration Settings to use this watermark.</p>
+                  )}
+                </div>
+              )}
               <p className="mt-3 text-xs text-slate-500">
                 Each generation uses your OpenAI account. Limit: 10 generations per user per hour.
               </p>
@@ -909,33 +832,9 @@ export default function ImageEditor() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">BigCommerce preview</CardTitle>
-              <CardDescription>Choose the dark or light overlay. This composited version is the image sent to BigCommerce.</CardDescription>
+              <CardDescription>{autoApplyWatermark ? `The ${selectedLogoTone} watermark is included in this preview.` : "Watermarking is off; the generated image will be uploaded without an overlay."}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="BigCommerce logo choice">
-                <Button
-                  type="button"
-                  variant={selectedLogoTone === "dark" ? "default" : "outline"}
-                  role="radio"
-                  aria-checked={selectedLogoTone === "dark"}
-                  disabled={!darkLogoDataUrl}
-                  onClick={() => chooseLogoTone("dark")}
-                  data-testid="select-dark-logo"
-                >
-                  Dark logo
-                </Button>
-                <Button
-                  type="button"
-                  variant={selectedLogoTone === "light" ? "default" : "outline"}
-                  role="radio"
-                  aria-checked={selectedLogoTone === "light"}
-                  disabled={!lightLogoDataUrl}
-                  onClick={() => chooseLogoTone("light")}
-                  data-testid="select-light-logo"
-                >
-                  Light logo
-                </Button>
-              </div>
               {selectedLogoFileName && (
                 <p className="truncate text-xs text-slate-500" title={selectedLogoFileName}>
                   Selected overlay: {selectedLogoFileName}
@@ -954,14 +853,14 @@ export default function ImageEditor() {
                   <div className="overflow-hidden rounded-lg border bg-slate-50">
                     <img
                       src={finalImage}
-                      alt={`BigCommerce product preview with ${selectedLogoTone} logo`}
+                      alt={autoApplyWatermark ? `BigCommerce product preview with ${selectedLogoTone} watermark` : "BigCommerce preview without watermark"}
                       className="aspect-square w-full object-contain"
                     />
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <a
                       href={finalImage}
-                      download={`image-editor-${selectedLogoTone}-logo.jpg`}
+                      download={autoApplyWatermark ? `image-editor-${selectedLogoTone}-watermark.jpg` : "image-editor-no-watermark.jpg"}
                       className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
                       data-testid="download-bigcommerce-preview"
                     >
@@ -970,7 +869,7 @@ export default function ImageEditor() {
                     </a>
                     <Badge variant="outline" className="gap-1">
                       <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                      {selectedLogoTone === "dark" ? "Dark" : "Light"} logo applied
+                      {autoApplyWatermark ? `${selectedLogoTone === "dark" ? "Dark" : "Light"} watermark applied` : "Watermark off"}
                     </Badge>
                   </div>
                 </div>
@@ -984,7 +883,7 @@ export default function ImageEditor() {
                     <ImageIcon className="h-7 w-7" />
                   </div>
                   <div className="mt-3 text-sm font-medium text-slate-700">
-                    {selectedLogoDataUrl ? "Generate an image to preview this logo" : "Upload a dark or light logo"}
+                    {autoApplyWatermark ? "Generate an image to preview the watermark" : "Generate an image for the preview"}
                   </div>
                   <p className="mt-1 max-w-xs text-xs text-slate-500">
                     The generated image stays logo-free. This window shows the version prepared for BigCommerce.
