@@ -18,6 +18,7 @@ import {
 } from "@shared/schema";
 import { getKoleExtendedCost } from "@shared/kole-pricing";
 import { resolveBigCommerceOrderLinePrice } from "./sales-report-pricing";
+import { checkProduct360SkuAvailability } from "./product360-sku-availability";
 import { parseSalesReportIds, validateSalesReportFilters } from "./sales-report-filters";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
@@ -2980,29 +2981,19 @@ export async function registerRoutes(
           WHERE UPPER(BTRIM(li.sku)) = requested.sku
         )
       `);
-      const usedSkus = new Set(result.rows.map((row: any) => String(row.sku)));
-      const bigCommerceSkusToCheck = skus.filter((sku) => !usedSkus.has(sku));
-      if (bigCommerceSkusToCheck.length) {
-        const { storeHash, headers } = await getBcCreds();
-        const root = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products`;
-        for (const sku of bigCommerceSkusToCheck) {
-          const response = await fetch(`${root}?sku=${encodeURIComponent(sku)}&include=variants&limit=250`, {
-            headers,
-            signal: AbortSignal.timeout(15000),
-          });
-          if (!response.ok) throw new Error(`BigCommerce SKU lookup failed (${response.status}).`);
-          const payload: any = await response.json();
-          const products = Array.isArray(payload.data) ? payload.data : [];
-          const isUsedInBigCommerce = products.some((product: any) =>
-            String(product.sku || "").trim().toUpperCase() === sku
-            || (Array.isArray(product.variants) && product.variants.some(
-              (variant: any) => String(variant.sku || "").trim().toUpperCase() === sku,
-            )),
-          );
-          if (isUsedInBigCommerce) usedSkus.add(sku);
-        }
+      let bigCommerceCredentials: Awaited<ReturnType<typeof getBcCreds>> | undefined;
+      if (result.rows.length < skus.length) {
+        bigCommerceCredentials = await getBcCreds();
       }
-      res.json({ usedSkus: skus.filter((sku) => usedSkus.has(sku)) });
+      const usedSkus = await checkProduct360SkuAvailability(
+        skus,
+        result.rows.map((row: any) => String(row.sku)),
+        {
+          storeHash: bigCommerceCredentials?.storeHash ?? "",
+          headers: bigCommerceCredentials?.headers ?? {},
+        },
+      );
+      res.json({ usedSkus });
     } catch (error) {
       console.error("[Product 360] SKU availability check failed:", error);
       res.status(500).json({ error: "Could not check SKU availability." });
