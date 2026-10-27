@@ -67,6 +67,7 @@ import {
 } from "@/lib/api";
 
 import { useTimeService } from "@/hooks/useTimeService";
+import { usePermissions } from "@/hooks/usePermissions";
 import { dateOnlyInTimeZone } from "@shared/timezone";
 import { useStore } from "@/lib/store";
 import { applyProductPhotoWatermark, loadProductPhotoWatermarkSettings } from "@/lib/product-photo-watermark";
@@ -953,6 +954,8 @@ function DetailTabs({ active, onChange }: { active: string; onChange: (value: st
 function ProductDetailsTab({ id }: { id: number }) {
   const queryClient = useQueryClient();
   const currentUser = useStore((state) => state.currentUser);
+  const { hasPermission } = usePermissions();
+  const canUsePhotoWatermark = hasPermission("product_photo_watermark");
   const canEdit = currentUser?.role === "admin";
   const query = useQuery({ queryKey: ["product-360-catalog-details", id], queryFn: () => getProduct360CatalogDetails(id), enabled: id > 0 });
   const [draft, setDraft] = useState<Record<string, any>>({});
@@ -965,7 +968,7 @@ function ProductDetailsTab({ id }: { id: number }) {
   const [imageDescriptionDrafts, setImageDescriptionDrafts] = useState<Record<string, string>>({});
   const [primaryImageId, setPrimaryImageId] = useState<number | null>(null);
   const [photoError, setPhotoError] = useState("");
-  const [autoWatermarkProductPhotos, setAutoWatermarkProductPhotos] = useState(false);
+  const [autoWatermarkProductPhotos, setAutoWatermarkProductPhotos] = useState(true);
   const [productPhotoWatermarkTone, setProductPhotoWatermarkTone] = useState<"dark" | "light">("dark");
   const [draggingPhotos, setDraggingPhotos] = useState(false);
   const [categorySearch, setCategorySearch] = useState("");
@@ -1080,7 +1083,7 @@ function ProductDetailsTab({ id }: { id: number }) {
           reader.onerror = () => reject(new Error("Could not read this photo."));
           reader.readAsDataURL(blob);
         });
-        converted.push(await applyProductPhotoWatermark(imageDataUrl, watermarkSettings, autoWatermarkProductPhotos, productPhotoWatermarkTone));
+        converted.push(await applyProductPhotoWatermark(imageDataUrl, watermarkSettings, canUsePhotoWatermark && autoWatermarkProductPhotos, productPhotoWatermarkTone));
       }
       setUploadedPhotos((current) => [...current, ...converted]);
       setSaved(false);
@@ -1092,7 +1095,7 @@ function ProductDetailsTab({ id }: { id: number }) {
     <Card className="min-w-0 border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div><h3 className="text-sm font-semibold text-slate-800">Product photos</h3><p className="mt-1 text-xs text-slate-500">Edit captions below each photo. Changes are saved with the product.</p></div>
-        {canEdit && <div className="flex flex-wrap items-center gap-3 rounded-md border border-slate-200 px-3 py-2">
+        {canUsePhotoWatermark && <div className="flex flex-wrap items-center gap-3 rounded-md border border-slate-200 px-3 py-2">
           <label className="flex items-center gap-2 text-xs font-medium text-slate-700"><Switch checked={autoWatermarkProductPhotos} onCheckedChange={setAutoWatermarkProductPhotos} aria-label="Automatically watermark product photos" />Automatic watermark</label>
           {autoWatermarkProductPhotos && <label className="flex items-center gap-2 text-xs text-slate-600">Logo
             <select className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs" value={productPhotoWatermarkTone} onChange={(event) => setProductPhotoWatermarkTone(event.target.value as "dark" | "light")}><option value="dark">Dark</option><option value="light">Light</option></select>
@@ -1201,11 +1204,13 @@ async function prepareVariantImage(file: File): Promise<string> {
 function DetailBody({ data, tab, id }: { data: Product360Detail; tab: string; id: number }) {
   const fmt = useTimeService();
   const queryClient = useQueryClient();
+  const { hasPermission } = usePermissions();
+  const canUsePhotoWatermark = hasPermission("product_photo_watermark");
   const canUploadVariantImages = useStore((state) => state.currentUser?.role === "admin");
   const [uploadingVariantIds, setUploadingVariantIds] = useState<Set<number>>(new Set());
   const [draggingVariantId, setDraggingVariantId] = useState<number | null>(null);
   const [variantImageErrors, setVariantImageErrors] = useState<Record<number, string>>({});
-  const [autoWatermarkVariantPhotos, setAutoWatermarkVariantPhotos] = useState(false);
+  const [autoWatermarkVariantPhotos, setAutoWatermarkVariantPhotos] = useState(true);
   const [variantPhotoWatermarkTone, setVariantPhotoWatermarkTone] = useState<"dark" | "light">("dark");
   const product = data.product || {};
   const trend = data.trend.map((row) => ({ ...row, revenue: Number(row.revenue || 0), units: Number(row.units || 0), gross_profit: Number(row.gross_profit || 0) }));
@@ -1217,7 +1222,7 @@ function DetailBody({ data, tab, id }: { data: Product360Detail; tab: string; id
     try {
       const processedImage = await prepareVariantImage(file);
       const watermarkSettings = await loadProductPhotoWatermarkSettings();
-      const imageDataUrl = await applyProductPhotoWatermark(processedImage, watermarkSettings, autoWatermarkVariantPhotos, variantPhotoWatermarkTone);
+      const imageDataUrl = await applyProductPhotoWatermark(processedImage, watermarkSettings, canUsePhotoWatermark && autoWatermarkVariantPhotos, variantPhotoWatermarkTone);
       await uploadProduct360VariantImage(id, variantId, imageDataUrl);
       await queryClient.invalidateQueries({ queryKey: ["product-360-detail", id] });
     } catch (error) {

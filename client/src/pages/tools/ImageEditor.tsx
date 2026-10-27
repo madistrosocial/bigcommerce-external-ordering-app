@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { usePermissions } from "@/hooks/usePermissions";
 import { getAuthHeaders } from "@/lib/api";
 import {
   loadImageEditorSettings,
@@ -98,6 +99,8 @@ async function compositeLogoOverlay(generatedImage: string, logoDataUrl: string)
 
 export default function ImageEditor() {
   const { toast } = useToast();
+  const { hasPermission } = usePermissions();
+  const canUsePhotoWatermark = hasPermission("product_photo_watermark");
   const referenceFileInputRef = useRef<HTMLInputElement>(null);
   const settingsEditedRef = useRef({
     generalDirection: false,
@@ -117,7 +120,7 @@ export default function ImageEditor() {
   const [lightLogoDataUrl, setLightLogoDataUrl] = useState("");
   const [lightLogoFileName, setLightLogoFileName] = useState("");
   const [selectedLogoTone, setSelectedLogoTone] = useState<LogoTone>("dark");
-  const [autoApplyWatermark, setAutoApplyWatermark] = useState(false);
+  const [autoApplyWatermark, setAutoApplyWatermark] = useState(true);
   const [settingsReady, setSettingsReady] = useState(false);
   const [savedSettings, setSavedSettings] = useState<ImageEditorSettings | null>(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -147,6 +150,7 @@ export default function ImageEditor() {
 
   const selectedLogoDataUrl = selectedLogoTone === "dark" ? darkLogoDataUrl : lightLogoDataUrl;
   const selectedLogoFileName = selectedLogoTone === "dark" ? darkLogoFileName : lightLogoFileName;
+  const shouldApplyWatermark = canUsePhotoWatermark && autoApplyWatermark;
 
   const setReferenceFile = async (file?: File) => {
     if (!file) return;
@@ -328,7 +332,7 @@ export default function ImageEditor() {
       setIsPreparingFinalImage(false);
       return;
     }
-    if (!autoApplyWatermark) {
+    if (!shouldApplyWatermark) {
       setFinalImage(generatedImage);
       setFinalImageError("");
       setIsPreparingFinalImage(false);
@@ -360,7 +364,7 @@ export default function ImageEditor() {
     return () => {
       cancelled = true;
     };
-  }, [generatedImage, selectedLogoDataUrl, autoApplyWatermark, selectedLogoTone]);
+  }, [generatedImage, selectedLogoDataUrl, shouldApplyWatermark, selectedLogoTone]);
 
   const hasUnsavedSettings = settingsReady && (
     savedSettings
@@ -708,7 +712,7 @@ export default function ImageEditor() {
             </CardContent>
           </Card>
 
-          <Card>
+          {canUsePhotoWatermark && <Card>
             <CardHeader>
               <CardTitle className="text-base">3. Watermark overlay</CardTitle>
               <CardDescription>
@@ -774,7 +778,7 @@ export default function ImageEditor() {
                 </p>
               </div>
             </CardContent>
-          </Card>
+          </Card>}
 
           <Button
             type="button"
@@ -832,7 +836,7 @@ export default function ImageEditor() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">BigCommerce preview</CardTitle>
-              <CardDescription>{autoApplyWatermark ? `The ${selectedLogoTone} watermark is included in this preview.` : "Watermarking is off; the generated image will be uploaded without an overlay."}</CardDescription>
+              <CardDescription>{shouldApplyWatermark ? `The ${selectedLogoTone} watermark is included in this preview.` : "Watermarking is off; the generated image will be uploaded without an overlay."}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {selectedLogoFileName && (
@@ -853,14 +857,14 @@ export default function ImageEditor() {
                   <div className="overflow-hidden rounded-lg border bg-slate-50">
                     <img
                       src={finalImage}
-                      alt={autoApplyWatermark ? `BigCommerce product preview with ${selectedLogoTone} watermark` : "BigCommerce preview without watermark"}
+                      alt={shouldApplyWatermark ? `BigCommerce product preview with ${selectedLogoTone} watermark` : "BigCommerce preview without watermark"}
                       className="aspect-square w-full object-contain"
                     />
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <a
                       href={finalImage}
-                      download={autoApplyWatermark ? `image-editor-${selectedLogoTone}-watermark.jpg` : "image-editor-no-watermark.jpg"}
+                      download={shouldApplyWatermark ? `image-editor-${selectedLogoTone}-watermark.jpg` : "image-editor-no-watermark.jpg"}
                       className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
                       data-testid="download-bigcommerce-preview"
                     >
@@ -869,7 +873,7 @@ export default function ImageEditor() {
                     </a>
                     <Badge variant="outline" className="gap-1">
                       <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                      {autoApplyWatermark ? `${selectedLogoTone === "dark" ? "Dark" : "Light"} watermark applied` : "Watermark off"}
+                      {shouldApplyWatermark ? `${selectedLogoTone === "dark" ? "Dark" : "Light"} watermark applied` : "Watermark off"}
                     </Badge>
                   </div>
                 </div>
@@ -883,7 +887,7 @@ export default function ImageEditor() {
                     <ImageIcon className="h-7 w-7" />
                   </div>
                   <div className="mt-3 text-sm font-medium text-slate-700">
-                    {autoApplyWatermark ? "Generate an image to preview the watermark" : "Generate an image for the preview"}
+                    {shouldApplyWatermark ? "Generate an image to preview the watermark" : "Generate an image for the preview"}
                   </div>
                   <p className="mt-1 max-w-xs text-xs text-slate-500">
                     The generated image stays logo-free. This window shows the version prepared for BigCommerce.

@@ -69,6 +69,7 @@ export const MODULES = [
   { key: "reporting_sales",                label: "Reporting › Sales Report" },
   { key: "reporting_exports",              label: "Reporting › Exports" },
   { key: "tools_image_editor", label: "Tools › Image Editor" },
+  { key: "product_photo_watermark", label: "Product Photo Watermark" },
   { key: "tools_bc_link",      label: "Tools › BC Product Link" },
   { key: "tools_bc_link_logs", label: "Tools › Product Link Logs" },
   { key: "promo_sku_tracker",  label: "Tools › Promo SKU Tracker" },

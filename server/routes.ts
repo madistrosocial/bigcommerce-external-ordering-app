@@ -11342,6 +11342,7 @@ export async function registerRoutes(
     const PRODUCT_360_PERMS: Array<{ module: string; action: string; description: string }> = [
       { module: "product_360", action: "view", description: "Product 360: view product intelligence, analytics, inventory, and customer relationships" },
       { module: "product_360", action: "export", description: "Product 360: export product performance and replenishment data" },
+      { module: "product_photo_watermark", action: "view", description: "Control automatic product-photo watermarking in Product 360 and Image Editor" },
     ];
     try {
       const existing = await storage.getAllPermissions();
