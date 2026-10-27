@@ -2,8 +2,6 @@ import { getSetting } from "@/lib/api";
 
 export type ProductPhotoWatermarkSettings = {
   hasSavedSettings?: boolean;
-  enabled: boolean;
-  logoTone: "dark" | "light";
   darkLogoDataUrl: string;
   darkLogoFileName: string;
   lightLogoDataUrl: string;
@@ -16,8 +14,6 @@ export async function loadProductPhotoWatermarkSettings(): Promise<ProductPhotoW
   const { value } = await getSetting(SETTING_KEY);
   return {
     hasSavedSettings: value != null,
-    enabled: value?.enabled === true,
-    logoTone: value?.logoTone === "light" ? "light" : "dark",
     darkLogoDataUrl: typeof value?.darkLogoDataUrl === "string" ? value.darkLogoDataUrl : "",
     darkLogoFileName: typeof value?.darkLogoFileName === "string" ? value.darkLogoFileName : "",
     lightLogoDataUrl: typeof value?.lightLogoDataUrl === "string" ? value.lightLogoDataUrl : "",
@@ -28,10 +24,12 @@ export async function loadProductPhotoWatermarkSettings(): Promise<ProductPhotoW
 export async function applyProductPhotoWatermark(
   imageDataUrl: string,
   settings: ProductPhotoWatermarkSettings,
+  enabled: boolean,
+  logoTone: "dark" | "light",
 ): Promise<string> {
-  if (!settings.enabled) return imageDataUrl;
-  const logo = settings.logoTone === "light" ? settings.lightLogoDataUrl : settings.darkLogoDataUrl;
-  if (!logo) throw new Error(`Automatic watermarking is on, but the ${settings.logoTone} logo is not configured in Admin Settings.`);
+  if (!enabled) return imageDataUrl;
+  const logo = logoTone === "light" ? settings.lightLogoDataUrl : settings.darkLogoDataUrl;
+  if (!logo) throw new Error(`Automatic watermarking is on, but the ${logoTone} logo is not configured in Admin Settings.`);
 
   const [base, overlay] = await Promise.all([
     loadImage(imageDataUrl),

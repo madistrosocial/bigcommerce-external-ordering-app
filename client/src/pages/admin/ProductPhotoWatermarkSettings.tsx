@@ -2,14 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Loader2, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { getSetting, saveSetting } from "@/lib/api";
 import type { ProductPhotoWatermarkSettings } from "@/lib/product-photo-watermark";
 
 const initial: ProductPhotoWatermarkSettings = {
-  enabled: false,
-  logoTone: "dark",
   darkLogoDataUrl: "",
   darkLogoFileName: "",
   lightLogoDataUrl: "",
@@ -75,15 +72,15 @@ export default function ProductPhotoWatermarkSettingsCard() {
   };
 
   const save = async () => {
-    const selectedLogo = settings.logoTone === "dark" ? settings.darkLogoDataUrl : settings.lightLogoDataUrl;
-    if (settings.enabled && !selectedLogo) {
-      toast({ title: "Upload the selected logo first", description: `Automatic watermarking uses the ${settings.logoTone} logo.`, variant: "destructive" });
-      return;
-    }
     setSaving(true);
     try {
-      await saveSetting("product_photo_watermark", settings);
-      toast({ title: "Watermark settings saved", description: "Product 360 uploads and Image Editor now use these shared logos." });
+      await saveSetting("product_photo_watermark", {
+        darkLogoDataUrl: settings.darkLogoDataUrl,
+        darkLogoFileName: settings.darkLogoFileName,
+        lightLogoDataUrl: settings.lightLogoDataUrl,
+        lightLogoFileName: settings.lightLogoFileName,
+      });
+      toast({ title: "Watermark logos saved", description: "Product 360 and Image Editor now use these shared logos." });
     } catch (error) {
       toast({ title: "Could not save watermark settings", description: error instanceof Error ? error.message : "Try again.", variant: "destructive" });
     } finally {
@@ -93,22 +90,11 @@ export default function ProductPhotoWatermarkSettingsCard() {
 
   return <Card className="shadow-sm">
     <CardHeader className="pb-3">
-      <CardTitle className="text-sm">Product photo watermark</CardTitle>
-      <CardDescription className="text-xs">Shared logo overlays for Product 360 product and variant photos, and the Image Editor.</CardDescription>
+      <CardTitle className="text-sm">Product photo watermark logos</CardTitle>
+      <CardDescription className="text-xs">Save shared dark and light logo overlays for Product 360 and the Image Editor.</CardDescription>
     </CardHeader>
     <CardContent className="space-y-4">
       {loading ? <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div> : <>
-        <div className="flex items-center justify-between rounded-md border p-3">
-          <div><p className="text-sm font-medium">Automatically add watermark</p><p className="text-xs text-slate-500">Applied when photos are added through Product 360.</p></div>
-          <Switch checked={settings.enabled} onCheckedChange={(enabled) => {
-            const selectedLogo = settings.logoTone === "dark" ? settings.darkLogoDataUrl : settings.lightLogoDataUrl;
-            if (enabled && !selectedLogo) {
-              toast({ title: "Upload the selected logo first", description: `Automatic watermarking uses the ${settings.logoTone} logo.`, variant: "destructive" });
-              return;
-            }
-            setSettings((current) => ({ ...current, enabled }));
-          }} aria-label="Automatically add watermark" />
-        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           {(["dark", "light"] as const).map((tone) => {
             const data = tone === "dark" ? settings.darkLogoDataUrl : settings.lightLogoDataUrl;
@@ -128,13 +114,8 @@ export default function ProductPhotoWatermarkSettingsCard() {
             </div>;
           })}
         </div>
-        <label className="block text-sm font-medium">Logo used for automatic watermarking
-          <select className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={settings.logoTone} onChange={(event) => setSettings((current) => ({ ...current, logoTone: event.target.value as "dark" | "light" }))}>
-            <option value="dark">Dark logo</option><option value="light">Light logo</option>
-          </select>
-        </label>
-        <p className="text-xs text-slate-500">Use prepared transparent 1200 × 1200 PNG overlays. The selected logo must be uploaded before automatic watermarking can be used.</p>
-        <Button size="sm" onClick={() => void save()} disabled={saving}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Save watermark settings</Button>
+        <p className="text-xs text-slate-500">Use prepared transparent 1200 × 1200 PNG overlays. Automatic watermarking and logo selection are controlled separately in Product 360.</p>
+        <Button size="sm" onClick={() => void save()} disabled={saving}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Save logo overlays</Button>
       </>}
     </CardContent>
   </Card>;

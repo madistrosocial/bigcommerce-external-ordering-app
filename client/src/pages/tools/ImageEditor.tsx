@@ -317,7 +317,6 @@ export default function ImageEditor() {
           setDarkLogoFileName(sharedWatermark.darkLogoFileName);
           setLightLogoDataUrl(sharedWatermark.lightLogoDataUrl);
           setLightLogoFileName(sharedWatermark.lightLogoFileName);
-          setSelectedLogoTone(sharedWatermark.logoTone);
         }
       } catch {
         if (!cancelled) setSettingsStorageError("Saved settings could not be loaded from this browser.");

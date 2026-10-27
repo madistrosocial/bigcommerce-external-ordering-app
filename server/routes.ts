@@ -6466,11 +6466,8 @@ export async function registerRoutes(
             && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(candidate));
         if (
           !value || typeof value !== "object"
-          || typeof value.enabled !== "boolean"
-          || !["dark", "light"].includes(value.logoTone)
           || !validLogo(value.darkLogoDataUrl)
           || !validLogo(value.lightLogoDataUrl)
-          || (value.enabled && !(value.logoTone === "light" ? value.lightLogoDataUrl : value.darkLogoDataUrl))
           || typeof value.darkLogoFileName !== "string" || value.darkLogoFileName.length > 255
           || typeof value.lightLogoFileName !== "string" || value.lightLogoFileName.length > 255
         ) {
