@@ -922,6 +922,7 @@ export default function AdminUsersPage() {
       if (enabled) await addPermissionToUser(userId, permId);
       else await removePermissionFromUser(userId, permId);
       await queryClient.invalidateQueries({ queryKey: ["admin-users-rbac"] });
+      await queryClient.invalidateQueries({ queryKey: ["user-permissions", userId] });
       toast({ title: enabled ? "Permission Granted" : "Permission Revoked", description: `${key} access ${enabled ? "granted to" : "revoked from"} user.` });
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });

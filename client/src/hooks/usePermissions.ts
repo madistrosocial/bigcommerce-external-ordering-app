@@ -9,7 +9,10 @@ export function usePermissions() {
     queryKey: ["user-permissions", currentUser?.id],
     queryFn: api.getMyPermissions,
     enabled: !!currentUser,
-    staleTime: 60_000,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+    refetchInterval: 15_000,
   });
 
   function hasPermission(module: string, action: string = "view"): boolean {
