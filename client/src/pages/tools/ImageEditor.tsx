@@ -19,6 +19,7 @@ import {
   type ImageEditorSettings,
   type LogoTone,
 } from "@/lib/image-editor-settings";
+import { loadProductPhotoWatermarkSettings } from "@/lib/product-photo-watermark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -118,6 +119,7 @@ export default function ImageEditor() {
   const [lightLogoFileName, setLightLogoFileName] = useState("");
   const [selectedLogoTone, setSelectedLogoTone] = useState<LogoTone>("dark");
   const [settingsReady, setSettingsReady] = useState(false);
+  const [hasSharedWatermarkSettings, setHasSharedWatermarkSettings] = useState(false);
   const [savedSettings, setSavedSettings] = useState<ImageEditorSettings | null>(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsStorageError, setSettingsStorageError] = useState("");
@@ -284,7 +286,10 @@ export default function ImageEditor() {
     let cancelled = false;
     const restoreSettings = async () => {
       try {
-        const settings = await loadImageEditorSettings();
+        const [settings, sharedWatermark] = await Promise.all([
+          loadImageEditorSettings(),
+          loadProductPhotoWatermarkSettings().catch(() => null),
+        ]);
         if (cancelled) return;
         if (settings) {
           if (!settingsEditedRef.current.generalDirection) {
@@ -305,6 +310,14 @@ export default function ImageEditor() {
             setSelectedLogoTone(settings.selectedLogoTone);
           }
           setSavedSettings(settings);
+        }
+        if (sharedWatermark?.hasSavedSettings) {
+          setHasSharedWatermarkSettings(true);
+          setDarkLogoDataUrl(sharedWatermark.darkLogoDataUrl);
+          setDarkLogoFileName(sharedWatermark.darkLogoFileName);
+          setLightLogoDataUrl(sharedWatermark.lightLogoDataUrl);
+          setLightLogoFileName(sharedWatermark.lightLogoFileName);
+          setSelectedLogoTone(sharedWatermark.logoTone);
         }
       } catch {
         if (!cancelled) setSettingsStorageError("Saved settings could not be loaded from this browser.");
@@ -352,10 +365,12 @@ export default function ImageEditor() {
     savedSettings
       ? generalDirection !== savedSettings.generalDirection
         || specificCustomization !== savedSettings.specificCustomization
-        || darkLogoDataUrl !== savedSettings.darkLogoDataUrl
-        || darkLogoFileName !== savedSettings.darkLogoFileName
-        || lightLogoDataUrl !== savedSettings.lightLogoDataUrl
-        || lightLogoFileName !== savedSettings.lightLogoFileName
+        || (!hasSharedWatermarkSettings && (
+          darkLogoDataUrl !== savedSettings.darkLogoDataUrl
+          || darkLogoFileName !== savedSettings.darkLogoFileName
+          || lightLogoDataUrl !== savedSettings.lightLogoDataUrl
+          || lightLogoFileName !== savedSettings.lightLogoFileName
+        ))
         || selectedLogoTone !== savedSettings.selectedLogoTone
       : Boolean(generalDirection || specificCustomization || darkLogoDataUrl || darkLogoFileName || lightLogoDataUrl || lightLogoFileName)
   );
@@ -733,7 +748,7 @@ export default function ImageEditor() {
                 {logoUploadOptions.map((option) => (
                   <div
                     key={option.tone}
-                    className={`rounded-lg border-2 border-dashed p-3 transition-colors ${
+                    className={`rounded-lg border-2 border-dashed p-3 transition-colors ${hasSharedWatermarkSettings ? "pointer-events-none opacity-75" : ""} ${
                       isDraggingLogo === option.tone ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-slate-50/70"
                     }`}
                     onDragOver={(event) => {
@@ -741,7 +756,7 @@ export default function ImageEditor() {
                       setIsDraggingLogo(option.tone);
                     }}
                     onDragLeave={() => setIsDraggingLogo(null)}
-                    onDrop={(event) => handleLogoDrop(option.tone, event)}
+                    onDrop={(event) => { if (!hasSharedWatermarkSettings) handleLogoDrop(option.tone, event); }}
                     data-testid={`image-editor-${option.tone}-logo-dropzone`}
                   >
                     <div className="flex items-center gap-3">
@@ -763,7 +778,7 @@ export default function ImageEditor() {
                     <div className="mt-3 flex items-center justify-between gap-2">
                       <span className="text-[11px] text-slate-500">1200 × 1200 · 2 MB max</span>
                       <div className="flex gap-1">
-                        <Button type="button" variant="outline" size="sm" onClick={() => option.inputRef.current?.click()}>
+                        <Button type="button" variant="outline" size="sm" disabled={hasSharedWatermarkSettings} onClick={() => option.inputRef.current?.click()}>
                           {option.dataUrl ? "Replace" : "Choose"}
                         </Button>
                         {option.dataUrl && (
@@ -771,6 +786,7 @@ export default function ImageEditor() {
                             type="button"
                             variant="ghost"
                             size="icon"
+                            disabled={hasSharedWatermarkSettings}
                             aria-label={`Remove ${option.label.toLowerCase()}`}
                             onClick={() => removeLogo(option.tone)}
                           >
@@ -784,6 +800,7 @@ export default function ImageEditor() {
                       type="file"
                       accept="image/png"
                       className="hidden"
+                      disabled={hasSharedWatermarkSettings}
                       onChange={(event) => {
                         void setLogo(option.tone, event.target.files?.[0]);
                         event.currentTarget.value = "";
@@ -794,7 +811,9 @@ export default function ImageEditor() {
                 ))}
               </div>
               <p className="text-xs text-slate-500">
-                Each logo is preserved at its original 1200 × 1200 size and placement. You can generate without either logo.
+                {hasSharedWatermarkSettings
+                  ? "Shared overlays are managed in Admin → Integration Settings and are applied only in the BigCommerce preview."
+                  : "Each logo is preserved at its original 1200 × 1200 size and placement. You can generate without either logo."}
               </p>
               <p className="mt-3 text-xs text-slate-500">
                 Each generation uses your OpenAI account. Limit: 10 generations per user per hour.
@@ -812,8 +831,8 @@ export default function ImageEditor() {
                         ? settingsStorageError
                         : hasUnsavedSettings
                           ? "You have unsaved changes."
-                          : savedSettings
-                            ? "Your setup is saved in this browser."
+                      : savedSettings
+                            ? "Your prompt setup is saved in this browser."
                             : "No setup saved yet."}
                   </p>
                   <Button
@@ -829,7 +848,7 @@ export default function ImageEditor() {
                   </Button>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Saved in this browser only. Your directions and both logo options are not synced to other devices.
+                  Prompt directions are saved in this browser. Shared logo overlays are managed in Admin → Integration Settings.
                 </p>
               </div>
             </CardContent>

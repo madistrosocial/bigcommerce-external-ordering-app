@@ -68,6 +68,7 @@ import {
 import { useTimeService } from "@/hooks/useTimeService";
 import { dateOnlyInTimeZone } from "@shared/timezone";
 import { useStore } from "@/lib/store";
+import { applyProductPhotoWatermark, loadProductPhotoWatermarkSettings } from "@/lib/product-photo-watermark";
 
 const COLORS = ["#2563eb", "#14b8a6", "#f59e0b", "#8b5cf6", "#ef4444", "#64748b"];
 const MAIN_CATEGORY_LABELS = ["Disposables", "E-Liquid", "Hardware", "Smoke Shop"];
@@ -1058,6 +1059,7 @@ function ProductDetailsTab({ id }: { id: number }) {
     if (uploadedPhotos.length + selected.length > 3) return setPhotoError("Add up to 3 photos per save.");
     try {
       const converted: string[] = [];
+      const watermarkSettings = await loadProductPhotoWatermarkSettings();
       for (const file of selected) {
         if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 20 * 1024 * 1024) throw new Error("Choose JPEG, PNG, or WebP photos under 20 MB.");
         const bitmap = await createImageBitmap(file);
@@ -1069,12 +1071,13 @@ function ProductDetailsTab({ id }: { id: number }) {
         bitmap.close();
         const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((result) => result ? resolve(result) : reject(new Error("Could not process this photo.")), "image/jpeg", 0.82));
         if (blob.size > 2 * 1024 * 1024) throw new Error("A photo is still over 2 MB after resizing.");
-        converted.push(await new Promise<string>((resolve, reject) => {
+        const imageDataUrl = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result));
           reader.onerror = () => reject(new Error("Could not read this photo."));
           reader.readAsDataURL(blob);
-        }));
+        });
+        converted.push(await applyProductPhotoWatermark(imageDataUrl, watermarkSettings));
       }
       setUploadedPhotos((current) => [...current, ...converted]);
       setSaved(false);
@@ -1199,7 +1202,9 @@ function DetailBody({ data, tab, id }: { data: Product360Detail; tab: string; id
     setVariantImageErrors((current) => ({ ...current, [variantId]: "" }));
     setUploadingVariantIds((current) => new Set(current).add(variantId));
     try {
-      const imageDataUrl = await prepareVariantImage(file);
+      const processedImage = await prepareVariantImage(file);
+      const watermarkSettings = await loadProductPhotoWatermarkSettings();
+      const imageDataUrl = await applyProductPhotoWatermark(processedImage, watermarkSettings);
       await uploadProduct360VariantImage(id, variantId, imageDataUrl);
       await queryClient.invalidateQueries({ queryKey: ["product-360-detail", id] });
     } catch (error) {

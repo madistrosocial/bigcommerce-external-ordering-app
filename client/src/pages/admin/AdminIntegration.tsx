@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useUpdateTimezone } from "@/contexts/TimezoneContext";
 import { Loader2, CheckCircle2, AlertCircle, Plug, ExternalLink, CalendarClock, ImageIcon, Trash2, Upload, Globe, Layers } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import ProductPhotoWatermarkSettingsCard from "@/pages/admin/ProductPhotoWatermarkSettings";
 
 export default function AdminIntegrationPage() {
   const { toast } = useToast();
@@ -226,6 +227,8 @@ export default function AdminIntegrationPage() {
         <h2 className="text-lg font-bold text-slate-800">Integration Settings</h2>
       </div>
       <p className="text-sm text-slate-500">Configure your BigCommerce connection for product sync and order submission.</p>
+
+      <ProductPhotoWatermarkSettingsCard />
 
       {/* Business Logo Upload */}
       <Card className="shadow-sm">
