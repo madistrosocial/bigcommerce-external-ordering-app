@@ -668,7 +668,13 @@ function Logs() {
     return `${values.slice(0, 3).join(", ")}${values.length > 3 ? ` +${values.length - 3}` : ""}`;
   };
   const formatDailyBreaks = (records: any[]) => {
-    const values = records.flatMap(row => (row.breaks ?? []).map((breakItem: any) => `${fmt.dateTime(breakItem.break_started_at)} → ${breakItem.break_ended_at ? fmt.dateTime(breakItem.break_ended_at) : "In progress"}`));
+    const values = records.flatMap(row => (row.breaks ?? []).map((breakItem: any) => {
+      const start = new Date(breakItem.break_started_at).getTime();
+      const end = breakItem.break_ended_at ? new Date(breakItem.break_ended_at).getTime() : Date.now();
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "—";
+      const duration = compactDuration((end - start) / 1000);
+      return breakItem.break_ended_at ? duration : `${duration} ongoing`;
+    }));
     if (values.length <= 1) return values[0] ?? "—";
     return `${values.slice(0, 2).join("; ")}${values.length > 2 ? ` +${values.length - 2}` : ""}`;
   };
