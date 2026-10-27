@@ -2947,6 +2947,43 @@ export async function registerRoutes(
     if (!result.rows[0]) return res.status(404).json({ error: "Draft not found or already synced." });
     res.json(result.rows[0]);
   });
+  app.post("/api/product-360/check-skus", requireAdmin, async (req, res) => {
+    const rawSkus = req.body?.skus;
+    if (!Array.isArray(rawSkus) || rawSkus.length > 100) {
+      return res.status(400).json({ error: "Provide up to 100 SKUs to check." });
+    }
+    const skus = Array.from(new Set(rawSkus
+      .filter((sku): sku is string => typeof sku === "string")
+      .map((sku) => sku.trim().toUpperCase())
+      .filter(Boolean)));
+    if (!skus.length) return res.json({ usedSkus: [] });
+    try {
+      const result = await db.execute(sql`
+        SELECT requested.sku
+        FROM unnest(${skus}::text[]) AS requested(sku)
+        WHERE EXISTS (
+          SELECT 1
+          FROM products p
+          WHERE UPPER(BTRIM(p.sku)) = requested.sku
+             OR EXISTS (
+               SELECT 1
+               FROM jsonb_array_elements(
+                 CASE WHEN jsonb_typeof(p.variants) = 'array' THEN p.variants ELSE '[]'::jsonb END
+               ) AS variant_item
+               WHERE UPPER(BTRIM(COALESCE(variant_item->>'sku', ''))) = requested.sku
+             )
+        )
+        OR EXISTS (
+          SELECT 1 FROM bc_order_line_items li
+          WHERE UPPER(BTRIM(li.sku)) = requested.sku
+        )
+      `);
+      res.json({ usedSkus: result.rows.map((row: any) => String(row.sku)) });
+    } catch (error) {
+      console.error("[Product 360] SKU availability check failed:", error);
+      res.status(500).json({ error: "Could not check SKU availability." });
+    }
+  });
   app.get("/api/product-360/create-options", requireAdmin, async (_req, res) => {
     try {
       const { storeHash, headers } = await getBcCreds();

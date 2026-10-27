@@ -126,6 +126,17 @@ export const syncProduct360Draft = (id: number) =>
   fetch(`${API_BASE}/product-360/drafts/${id}/sync`, { method: "POST", headers: getAuthHeaders() }).then(async (res) => { const body = await res.json().catch(() => ({})); if (!res.ok) throw new Error(body.error || "Could not sync product draft"); return body as { success: boolean; bigcommerceId: number }; });
 export const getProduct360CreateOptions = () => product360Request<{ categories: Array<{ id: number; name: string; parent_id: number }>; brands: Array<{ id: number; name: string }> }>("/product-360/create-options");
 
+export async function checkProduct360Skus(skus: string[]): Promise<{ usedSkus: string[] }> {
+  const response = await fetch(`${API_BASE}/product-360/check-skus`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ skus }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Could not check SKU availability.");
+  return { usedSkus: Array.isArray(body.usedSkus) ? body.usedSkus.map((sku: unknown) => String(sku)) : [] };
+}
+
 export async function saveProduct360CatalogDetails(id: number, changes: Record<string, unknown>) {
   const response = await fetch(`${API_BASE}/product-360/products/${id}/catalog-details`, {
     method: "PUT",

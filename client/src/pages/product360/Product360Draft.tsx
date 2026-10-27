@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import RichTextEditor from "@/components/editor/RichTextEditor";
-import { createProduct360Draft, getProduct360CreateOptions, getProduct360Draft, saveProduct360Draft, syncProduct360Draft, type Product360Draft } from "@/lib/api";
+import { checkProduct360Skus, createProduct360Draft, getProduct360CreateOptions, getProduct360Draft, saveProduct360Draft, syncProduct360Draft, type Product360Draft } from "@/lib/api";
 
 const emptyProduct = {
   name: "", skuPrefix: "", description: "", type: "physical", price: "", cost_price: "", retail_price: "", sale_price: "",
@@ -35,6 +35,42 @@ export default function Product360DraftPage() {
   const options = useQuery({ queryKey: ["product-360-create-options"], queryFn: getProduct360CreateOptions });
   const [data, setData] = useState<any>(emptyProduct);
   const [error, setError] = useState("");
+  const generatedSkuList = useMemo<string[]>(
+    () => (data.variants || [])
+      .map((variant: any) => {
+        const prefix = String(data.skuPrefix || "").trim();
+        const shorthand = String(variant.shorthand || "").trim();
+        return prefix && shorthand ? `${prefix}-${shorthand}`.toUpperCase() : "";
+      })
+      .filter(Boolean),
+    [data.skuPrefix, data.variants],
+  );
+  const uniqueGeneratedSkus = useMemo<string[]>(() => Array.from(new Set(generatedSkuList)), [generatedSkuList]);
+  const [skuCheckSkus, setSkuCheckSkus] = useState<string[]>([]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setSkuCheckSkus(uniqueGeneratedSkus), 250);
+    return () => window.clearTimeout(timeout);
+  }, [uniqueGeneratedSkus]);
+  const skuCheckQuery = useQuery({
+    queryKey: ["product-360-sku-check", skuCheckSkus],
+    queryFn: () => checkProduct360Skus(skuCheckSkus),
+    enabled: skuCheckSkus.length > 0,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
+  const skuCheckMatchesCurrent = skuCheckSkus.join("\u0000") === uniqueGeneratedSkus.join("\u0000");
+  const usedSkuSet = useMemo(() => new Set(skuCheckQuery.data?.usedSkus || []), [skuCheckQuery.data]);
+  const generatedSkuCounts = useMemo<Map<string, number>>(() => generatedSkuList.reduce((counts, sku) => {
+    counts.set(sku, (counts.get(sku) || 0) + 1);
+    return counts;
+  }, new Map<string, number>()), [generatedSkuList]);
+  const getSkuStatus = (sku: string): "used" | "available" | "checking" | "unknown" | "empty" => {
+    if (!sku) return "empty";
+    if (!skuCheckMatchesCurrent || skuCheckQuery.isFetching) return "checking";
+    if (skuCheckQuery.isError) return "unknown";
+    if (usedSkuSet.has(sku) || (generatedSkuCounts.get(sku) || 0) > 1) return "used";
+    return "available";
+  };
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [categorySearch, setCategorySearch] = useState("");
   const [openCategoryIds, setOpenCategoryIds] = useState<Set<number>>(new Set());
@@ -114,6 +150,62 @@ export default function Product360DraftPage() {
     {query.data?.error && <Card className="border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Previous sync attempt: {query.data.error}</Card>}
      <Card className="overflow-hidden border-slate-200 bg-white p-4"><h2 className="mb-2 text-sm font-semibold">Product details</h2><div className="overflow-x-auto"><table className="border-collapse text-left text-xs"><thead><tr>{gridFields.map(([key,label])=><th key={key} className="min-w-36 border bg-slate-50 p-2 font-semibold text-slate-600">{label}</th>)}</tr></thead><tbody><tr>{gridFields.map(([key,label])=><td key={key} className="border p-1">{key==="type" ? <select aria-label={label} className="h-9 w-full rounded border px-2" value={data[key]} onChange={e=>setField(key,e.target.value)}><option value="physical">Physical</option><option value="digital">Digital</option></select> : key==="availability" ? <select aria-label={label} className="h-9 w-full rounded border px-2" value={data[key]} onChange={e=>setField(key,e.target.value)}><option value="available">Available</option><option value="disabled">Disabled</option><option value="preorder">Preorder</option></select> : key==="brand_id" ? <><Input aria-label={label} className="h-9 min-w-40" list="product-360-brand-options" placeholder="No brand or enter a brand" value={brandInputValue} onChange={(event) => { const brandName = event.target.value; const existing = options.data?.brands.find((brand) => brand.name.trim().toLocaleLowerCase() === brandName.trim().toLocaleLowerCase()); setData((current: any) => ({ ...current, brand_name: brandName, brand_id: existing ? String(existing.id) : "" })); setError(""); }} /><datalist id="product-360-brand-options"><option value="">No brand</option>{(options.data?.brands || []).map((brand) => <option key={brand.id} value={brand.name} />)}</datalist></> : key==="categories" ? <Popover open={categoryPickerOpen} onOpenChange={setCategoryPickerOpen}><PopoverTrigger asChild><Button type="button" variant="outline" size="sm" aria-label="Categories" className="h-9 w-full min-w-48 justify-between text-xs font-normal"><span className="truncate">{(data.categories||[]).length ? `${(data.categories||[]).length} selected` : "Select categories"}</span><ChevronRight className="ml-2 h-3.5 w-3.5 rotate-90 shrink-0 text-slate-400" /></Button></PopoverTrigger><PopoverContent align="start" className="w-[min(32rem,calc(100vw-2rem))] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-semibold text-slate-800">Assigned categories</h3><p className="mt-1 text-xs text-slate-500">{(data.categories||[]).length} selected</p></div><Input className="h-8 w-full sm:max-w-[190px]" placeholder="Search categories" value={categorySearch} onChange={(event) => setCategorySearch(event.target.value)} /></div><p className="mt-2 text-[10px] text-slate-500">Expand a category to browse its subcategories.</p><div className="mt-2 max-h-[min(24rem,60vh)] overflow-y-auto rounded-md border border-slate-200 py-2">{categories.filter((category) => !categories.some((parent) => parent.id === category.parent_id)).map((category) => categoryNode(category))}</div></PopoverContent></Popover> : key==="is_visible" ? <input aria-label={label} type="checkbox" checked={!!data[key]} onChange={e=>setField(key,e.target.checked)} /> : <Input aria-label={label} className="h-9 min-w-36 text-xs" value={Array.isArray(data[key])?data[key].join(","):data[key] ?? ""} onChange={e=>setField(key,e.target.value)} />}</td>)}</tr></tbody></table></div></Card>
      <Card className="border-slate-200 bg-white p-4"><label className="mb-2 block text-sm font-semibold" htmlFor="new-product-description-editor">Description</label><RichTextEditor id="new-product-description-editor" value={String(data.description || "")} onChange={(html) => setField("description", html)} minHeight={180} /></Card>
-    <Card className="overflow-hidden border-slate-200 bg-white p-4"><div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold">Variants</h2><Button size="sm" variant="outline" onClick={addVariant}><Plus className="mr-1 h-4 w-4" />Add variant row</Button></div><div className="overflow-x-auto"><table className="w-full min-w-[1100px] border-collapse text-xs"><thead><tr>{["Variant name","SKU shorthand","Generated SKU","Price","Cost","Stock","Weight","Width","Height","Depth","UPC",""].map(x=><th key={x} className="border bg-slate-50 p-2 text-left">{x}</th>)}</tr></thead><tbody>{data.variants.map((v:any,i:number)=><tr key={i}>{["name","shorthand"].map(k=><td key={k} className="border p-1"><Input className="h-8 text-xs" value={v[k]} onChange={e=>updateVariant(i,k,e.target.value)} /></td>)}<td className="border bg-slate-50 p-2 font-mono">{data.skuPrefix && v.shorthand ? `${data.skuPrefix}-${v.shorthand}`.toUpperCase() : "—"}</td>{["price","cost_price","inventory_level","weight","width","height","depth","upc"].map(k=><td key={k} className="border p-1"><Input className="h-8 min-w-20 text-xs" value={k==="price"?(v.price==null||v.price===""?data.price:v.price):k==="cost_price"?(v.cost_price==null||v.cost_price===""?data.cost_price:v.cost_price):v[k]||""} onChange={e=>updateVariant(i,k,e.target.value)} /></td>)}<td className="border p-1"><button aria-label="Remove variant" onClick={()=>setField("variants",data.variants.filter((_:any,j:number)=>j!==i))} className="text-red-600"><Trash2 className="h-4 w-4" /></button></td></tr>)}</tbody></table></div></Card>
+    <Card className="overflow-hidden border-slate-200 bg-white p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Variants</h2>
+        <Button size="sm" variant="outline" onClick={addVariant}><Plus className="mr-1 h-4 w-4" />Add variant row</Button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1100px] border-collapse text-xs">
+          <thead><tr>{["Variant name","SKU shorthand","Generated SKU","Price","Cost","Stock","Weight","Width","Height","Depth","UPC",""].map((label) => <th key={label} className="border bg-slate-50 p-2 text-left">{label}</th>)}</tr></thead>
+          <tbody>
+            {data.variants.map((v: any, i: number) => {
+              const prefix = String(data.skuPrefix || "").trim();
+              const shorthand = String(v.shorthand || "").trim();
+              const sku = prefix && shorthand ? `${prefix}-${shorthand}`.toUpperCase() : "";
+              const status = getSkuStatus(sku);
+              const skuClassName = status === "used"
+                ? "bg-red-100 text-red-900"
+                : status === "available"
+                  ? "bg-green-100 text-green-900"
+                  : "bg-slate-50 text-slate-700";
+              const skuStatusLabel = status === "used"
+                ? "This SKU already exists in the database or this draft."
+                : status === "available"
+                  ? "This SKU is available."
+                  : status === "checking"
+                    ? "Checking this SKU."
+                    : status === "unknown"
+                      ? "SKU availability could not be checked."
+                      : "Enter a SKU shorthand to check availability.";
+              return (
+                <tr key={i}>
+                  {["name", "shorthand"].map((key) => (
+                    <td key={key} className="border p-1">
+                      <Input className="h-8 text-xs" value={v[key]} onChange={(event) => updateVariant(i, key, event.target.value)} />
+                    </td>
+                  ))}
+                  <td className={`border p-2 font-mono transition-colors ${skuClassName}`} title={skuStatusLabel} aria-label={`${sku || "No generated SKU"}. ${skuStatusLabel}`} data-testid={`generated-sku-${i}`}>
+                    {sku || "—"}
+                  </td>
+                  {["price", "cost_price", "inventory_level", "weight", "width", "height", "depth", "upc"].map((key) => (
+                    <td key={key} className="border p-1">
+                      <Input
+                        className="h-8 min-w-20 text-xs"
+                        value={key === "price" ? (v.price == null || v.price === "" ? data.price : v.price) : key === "cost_price" ? (v.cost_price == null || v.cost_price === "" ? data.cost_price : v.cost_price) : v[key] || ""}
+                        onChange={(event) => updateVariant(i, key, event.target.value)}
+                      />
+                    </td>
+                  ))}
+                  <td className="border p-1">
+                    <button aria-label="Remove variant" onClick={() => setField("variants", data.variants.filter((_: any, index: number) => index !== i))} className="text-red-600"><Trash2 className="h-4 w-4" /></button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   </div>;
 }
