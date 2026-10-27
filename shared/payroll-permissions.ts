@@ -3,7 +3,7 @@ export const PAYROLL_ACTION_PERMS = [
     module: "payroll",
     action: "manage",
     label: "Manage Payroll",
-    description: "Can edit pay rates, schedules, and recurring items, and create, rebuild, or finalize payroll runs. Also requires Payroll module access.",
+    description: "Can view and edit pay rates, schedules, and recurring items, and create, rebuild, or finalize payroll runs.",
   },
   {
     module: "payroll",

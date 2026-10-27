@@ -476,7 +476,18 @@ async function fetchRunDetails(runId: number) {
 
 export function registerAttendancePayrollRoutes(app: Express, requirePermission: PermissionMiddleware) {
   const canUseAttendance = requirePermission("attendance", "view");
-  const canViewPayroll = requirePermission("payroll", "view");
+  const canViewPayroll: RequestHandler = async (req, res, next) => {
+    const actor = requestUser(req);
+    if (!actor?.id) return res.status(401).json({ error: "Unauthorized" });
+    if (actor.role === "admin") return next();
+    try {
+      const permissions = await storage.getUserPermissionStrings(actor.id);
+      if (permissions.includes("payroll:view") || permissions.includes("payroll:manage")) return next();
+      return res.status(403).json({ error: "Forbidden" });
+    } catch (error) {
+      next(error);
+    }
+  };
   const canManagePayroll = requirePermission("payroll", "manage");
   const canApproveOvertime = requirePermission("payroll", "approve_overtime");
   const canApproveLeave = requirePermission("attendance", "approve_leave");

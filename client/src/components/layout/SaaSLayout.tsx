@@ -246,7 +246,7 @@ export function SaaSLayout({ children }: { children: React.ReactNode }) {
     ...(canViewAllAttendance && hasPermission("attendance", "view_reports") ? [{ label: "Reports", path: "/attendance/reports" }] : []),
     ...(hasPermission("attendance", "view_home_locations") ? [{ label: "Home Locations", path: "/attendance/locations" }] : []),
     ...(hasPermission("attendance", "view") ? [{ label: "Payroll", path: "/attendance/payroll" }] : []),
-    ...(hasPermission("payroll", "view") || hasPermission("payroll", "approve_overtime") ? [{ label: "Payroll Management", path: "/payroll" }] : []),
+    ...(hasPermission("payroll", "view") || hasPermission("payroll", "manage") || hasPermission("payroll", "approve_overtime") ? [{ label: "Payroll Management", path: "/payroll" }] : []),
     ...(hasPermission("attendance", "view") ? [{ label: "Leave", path: "/attendance/leave" }] : []),
   ];
 

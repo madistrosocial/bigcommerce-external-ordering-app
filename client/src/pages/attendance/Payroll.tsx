@@ -626,7 +626,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const { hasPermission } = usePermissions();
   const [, setLocation] = useLocation();
   const isEmployeePage = mode === "employee";
-  const canViewPayroll = mode === "management" && hasPermission("payroll", "view");
+  const canViewPayroll = mode === "management" && (hasPermission("payroll", "view") || hasPermission("payroll", "manage"));
   const canManage = mode === "management" && hasPermission("payroll", "manage");
   const canReviewOvertime = mode === "management" && hasPermission("payroll", "approve_overtime");
   const canReviewAttendance = mode === "management"

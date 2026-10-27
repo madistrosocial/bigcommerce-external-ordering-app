@@ -139,7 +139,7 @@ function PayrollModuleRoute({ section = "overview" }: { section?: PayrollManagem
   const { hasPermission, isLoading } = usePermissions();
   if (!currentUser || !currentUser.is_enabled) return <Redirect to="/" />;
   if (isLoading) return null;
-  if (!hasPermission("payroll", "view") && !hasPermission("payroll", "approve_overtime")) {
+  if (!hasPermission("payroll", "view") && !hasPermission("payroll", "manage") && !hasPermission("payroll", "approve_overtime")) {
     return <Redirect to="/dashboard" />;
   }
   return <PayrollManagementPage section={section} />;
