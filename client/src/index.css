@@ -3,6 +3,71 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Tailwind preflight resets heading, paragraph, and list styles. Restore
+   document-like formatting inside rich-text editors without affecting app UI. */
+.rich-text-editor-content {
+  color: inherit;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.rich-text-editor-content p {
+  margin: 0 0 0.8em;
+}
+
+.rich-text-editor-content > :last-child {
+  margin-bottom: 0;
+}
+
+.rich-text-editor-content h1,
+.rich-text-editor-content h2,
+.rich-text-editor-content h3,
+.rich-text-editor-content h4,
+.rich-text-editor-content h5,
+.rich-text-editor-content h6 {
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 1.1em 0 0.55em;
+}
+
+.rich-text-editor-content h1 { font-size: 1.75em; }
+.rich-text-editor-content h2 { font-size: 1.5em; }
+.rich-text-editor-content h3 { font-size: 1.25em; }
+.rich-text-editor-content h4 { font-size: 1.1em; }
+.rich-text-editor-content h5,
+.rich-text-editor-content h6 { font-size: 1em; }
+
+.rich-text-editor-content ul,
+.rich-text-editor-content ol {
+  margin: 0 0 0.9em;
+  padding-left: 1.6em;
+}
+
+.rich-text-editor-content ul { list-style: disc; }
+.rich-text-editor-content ol { list-style: decimal; }
+.rich-text-editor-content li { margin: 0.2em 0; }
+.rich-text-editor-content li p { margin: 0.2em 0; }
+.rich-text-editor-content ul ul { list-style: circle; }
+.rich-text-editor-content ul ul ul { list-style: square; }
+
+.rich-text-editor-content blockquote {
+  border-left: 3px solid #cbd5e1;
+  color: #475569;
+  margin: 0.9em 0;
+  padding-left: 1em;
+}
+
+.rich-text-editor-content hr {
+  border: 0;
+  border-top: 1px solid #cbd5e1;
+  margin: 1em 0;
+}
+
+.rich-text-editor-content img {
+  height: auto;
+  max-width: 100%;
+}
+
 @theme inline {
   --font-sans: 'Inter', sans-serif;
   --font-heading: 'Roboto Condensed', sans-serif;

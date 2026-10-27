@@ -123,7 +123,7 @@ export default function RichTextEditor({ value, onChange, minHeight = 300, readO
     editorProps: {
       attributes: {
         ...(id ? { id } : {}),
-        class: "prose prose-sm max-w-none focus:outline-none px-4 py-3",
+        class: "rich-text-editor-content max-w-none focus:outline-none px-4 py-3",
         style: `min-height: ${minHeight}px;`,
       },
     },
