@@ -11,6 +11,12 @@ export const PAYROLL_ACTION_PERMS = [
     label: "Review Overtime Claims",
     description: "Can review, adjust, or reject employee overtime claims without access to pay rates or payroll runs.",
   },
+  {
+    module: "payroll",
+    action: "delete_runs",
+    label: "Delete Payroll Runs",
+    description: "Can delete draft and finalized payroll runs, including generated payslips; linked approved overtime becomes available for a later run.",
+  },
 ] as const;
 
 export const PAYROLL_PERMISSION_DEFINITIONS = [

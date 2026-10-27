@@ -490,6 +490,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
   };
   const canManagePayroll = requirePermission("payroll", "manage");
   const canApproveOvertime = requirePermission("payroll", "approve_overtime");
+  const canDeletePayrollRuns = requirePermission("payroll", "delete_runs");
   const canApproveLeave = requirePermission("attendance", "approve_leave");
   const canViewAll = requirePermission("attendance", "view_all");
 
@@ -1086,8 +1087,12 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
 
   app.get("/api/attendance/payroll/admin/runs", canViewPayroll, async (req, res) => {
     try {
-      const rows = await db.select().from(payrollRuns).orderBy(desc(payrollRuns.period_start), desc(payrollRuns.created_at));
-      res.json({ rows, canDelete: requestUser(req).role === "admin" });
+      const actor = requestUser(req);
+      const [rows, permissions] = await Promise.all([
+        db.select().from(payrollRuns).orderBy(desc(payrollRuns.period_start), desc(payrollRuns.created_at)),
+        actor.role === "admin" ? Promise.resolve([]) : storage.getUserPermissionStrings(actor.id),
+      ]);
+      res.json({ rows, canDelete: actor.role === "admin" || permissions.includes("payroll:delete_runs") });
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? "Could not load payroll runs." });
     }
@@ -1306,8 +1311,7 @@ export function registerAttendancePayrollRoutes(app: Express, requirePermission:
     }
   });
 
-  app.delete("/api/attendance/payroll/admin/runs/:id", canManagePayroll, async (req, res) => {
-    if (requestUser(req).role !== "admin") return res.status(403).json({ error: "Only an administrator can delete payroll runs." });
+  app.delete("/api/attendance/payroll/admin/runs/:id", canViewPayroll, canDeletePayrollRuns, async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid payroll run." });
     try {
