@@ -294,6 +294,7 @@ export interface IStorage {
   deleteCrmTodo(id: number): Promise<void>;
   // CRM Users list
   getCrmUsers(): Promise<{ id: number; name: string }[]>;
+  getUserAvatarThumbnails(userIds: number[]): Promise<Array<{ user_id: number; avatar_thumbnail: string | null }>>;
   createCustomerSignup(entry: InsertCustomerSignup): Promise<CustomerSignup>;
   getCustomerSignups(opts: { userId?: number; signedUpByUserId?: number; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<{ rows: (CustomerSignup & { crm_customer_id?: number | null; primary_rep_name?: string | null })[]; total: number }>;
   getCustomerSignupAttempt(key: string): Promise<CustomerSignupAttempt | undefined>;
@@ -3248,6 +3249,18 @@ export class DatabaseStorage implements IStorage {
       id: r.id,
       name: r.name ?? "",
       avatar_thumbnail: await getCrmUserAvatarThumbnail(r.id, r.avatar_data),
+    })));
+  }
+
+  async getUserAvatarThumbnails(userIds: number[]): Promise<Array<{ user_id: number; avatar_thumbnail: string | null }>> {
+    const ids = [...new Set(userIds.filter((id) => Number.isSafeInteger(id) && id > 0))];
+    if (!ids.length) return [];
+    const rows = await db.select({ id: users.id, avatar_data: users.avatar_data })
+      .from(users)
+      .where(inArray(users.id, ids));
+    return Promise.all(rows.map(async (row) => ({
+      user_id: row.id,
+      avatar_thumbnail: await getCrmUserAvatarThumbnail(row.id, row.avatar_data),
     })));
   }
 

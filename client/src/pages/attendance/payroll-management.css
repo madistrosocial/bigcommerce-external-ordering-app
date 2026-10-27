@@ -171,6 +171,11 @@
 .payroll-management-page .schedule-card--mint .schedule-card__icon { background: #d9f3e7; color: #188761; }
 .payroll-management-page .schedule-card--amber .schedule-card__icon { background: #ffedc9; color: #bc7614; }
 
+.payroll-management-page .employee-rate-card__avatar-fallback {
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
 .payroll-management-page .schedule-card__badge {
   border-radius: 999px;
   padding: 0.2rem 0.55rem;

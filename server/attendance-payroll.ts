@@ -951,6 +951,8 @@ export function registerAttendancePayrollRoutes(
         db.select().from(employeePayProfiles).where(inArray(employeePayProfiles.user_id, ids)),
         db.select().from(employeePayItems).where(inArray(employeePayItems.user_id, ids)).orderBy(asc(employeePayItems.id)),
       ]);
+      const avatars = await storage.getUserAvatarThumbnails(ids);
+      const avatarByUserId = new Map(avatars.map((avatar) => [avatar.user_id, avatar.avatar_thumbnail]));
       const profilesByUser = new Map(profiles.map((profile) => [profile.user_id, profile]));
       const itemsByUser = new Map<number, any[]>();
       for (const item of items) {
@@ -961,6 +963,7 @@ export function registerAttendancePayrollRoutes(
       res.json({
         employees: employees.map((employee) => ({
           ...employee,
+          avatar_thumbnail: avatarByUserId.get(employee.id) ?? null,
           profile: profilesByUser.get(employee.id) ?? null,
           payItems: itemsByUser.get(employee.id) ?? [],
         })),

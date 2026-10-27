@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useLocation } from "wouter";
 import PayslipDocument, { type PayslipDocumentData } from "@/components/payroll/PayslipDocument";
 import { getAuthHeaders } from "@/lib/api";
@@ -558,7 +559,12 @@ function EmployeePayEditor({ employee, onRefresh, readOnly = false, tone = "viol
     <div className={`schedule-card schedule-card--${tone} employee-rate-card`}>
       <div className="schedule-card__head employee-rate-card__head">
         <div className="schedule-card__identity">
-          <span className="schedule-card__icon"><UserRound className="h-[18px] w-[18px]" /></span>
+          <Avatar className="schedule-card__icon employee-rate-card__avatar">
+            <AvatarImage src={employee.avatar_thumbnail || undefined} alt={`${employee.name || employee.username} profile photo`} />
+            <AvatarFallback className="employee-rate-card__avatar-fallback bg-blue-100 text-blue-700">
+              {(employee.name || employee.username || "U").split(/\s+/).slice(0, 2).map((part: string) => part[0]).join("").toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
           <div><p className="font-semibold text-slate-900">{employee.name || employee.username}</p><p className="text-xs text-slate-500">{employee.username}{employee.is_enabled ? "" : " · account disabled"}</p></div>
         </div>
         <div className="employee-rate-card__controls">
@@ -870,7 +876,6 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
         <Card className="border-slate-200 shadow-sm">
           <CardHeader><CardTitle className="text-base">Employee rates and recurring items</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-slate-500">All user accounts are listed here, including admins and accounts with tracking turned off. Only enabled accounts with tracking on appear in Attendance Logs.</p>
             {employees.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
             {employees.error && <p role="alert" className="text-sm text-rose-600">{employees.error.message}</p>}
             {!employees.isLoading && !employees.data?.employees?.length && <EmptyState>No user accounts found.</EmptyState>}
