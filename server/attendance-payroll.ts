@@ -108,6 +108,15 @@ function weekdaysInRange(from: string, to: string): string[] {
   return dates;
 }
 
+function calendarDatesInRange(from: string, to: string): string[] {
+  const dates: string[] = [];
+  const endTime = new Date(`${to}T00:00:00.000Z`).getTime();
+  for (let currentTime = new Date(`${from}T00:00:00.000Z`).getTime(); currentTime <= endTime; currentTime += 24 * 60 * 60 * 1000) {
+    dates.push(new Date(currentTime).toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
 function validTimezone(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 80) return false;
   try {
@@ -480,15 +489,51 @@ async function fetchRunDetails(runId: number) {
       .where(inArray(employeePayProfiles.user_id, slips.map((slip) => slip.user_id)))
     : [];
   const profileRateByUser = new Map(profiles.map((profile) => [profile.user_id, profile.hourly_rate]));
+  const attendanceRows = slips.length
+    ? await db.select().from(attendanceSessions).where(and(
+      inArray(attendanceSessions.user_id, slips.map((slip) => slip.user_id)),
+      gte(attendanceSessions.work_date, run.period_start),
+      lte(attendanceSessions.work_date, run.period_end),
+    )).orderBy(asc(attendanceSessions.work_date), asc(attendanceSessions.time_in), asc(attendanceSessions.id))
+    : [];
+  const attendanceIds = attendanceRows.map((session) => session.id);
+  const [breaksByAttendance, attendancePay] = await Promise.all([
+    storage.getAttendanceBreakIntervals(attendanceIds),
+    getAttendancePayBreakdowns(attendanceRows),
+  ]);
+  const attendanceByUserDate = new Map<number, Map<string, any[]>>();
+  for (const session of attendanceRows) {
+    const byDate = attendanceByUserDate.get(session.user_id) ?? new Map<string, any[]>();
+    const dateSessions = byDate.get(session.work_date) ?? [];
+    dateSessions.push({
+      id: session.id,
+      session_number: session.session_number,
+      status: session.status,
+      time_in: session.time_in,
+      time_out: session.time_out,
+      break_seconds: session.break_seconds,
+      break_started_at: session.break_started_at,
+      breaks: breaksByAttendance[session.id] ?? [],
+      worked_seconds: attendancePay.get(session.id)?.workedSeconds ?? Math.max(0, Number(session.total_seconds) || 0),
+    });
+    byDate.set(session.work_date, dateSessions);
+    attendanceByUserDate.set(session.user_id, byDate);
+  }
+  const periodDates = calendarDatesInRange(run.period_start, run.period_end);
   return {
     run,
     payslips: slips.map((slip) => {
       const slipLines = linesBySlip.get(slip.id) ?? [];
+      const attendanceByDate = attendanceByUserDate.get(slip.user_id) ?? new Map<string, any[]>();
       return {
         ...slip,
         avatar_thumbnail: avatarByUserId.get(slip.user_id) ?? null,
         hourly_rate: resolvePayslipHourlyRate(slip, slipLines, profileRateByUser.get(slip.user_id)),
         lines: slipLines,
+        attendance_days: periodDates.map((work_date) => ({
+          work_date,
+          sessions: attendanceByDate.get(work_date) ?? [],
+        })),
       };
     }),
   };

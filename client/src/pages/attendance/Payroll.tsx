@@ -119,6 +119,17 @@ function dateLabel(value: string) {
   return Number.isFinite(date.getTime()) ? date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : value;
 }
 
+function timeLabel(value: string | null | undefined, timeZone: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "—";
+  try {
+    return new Intl.DateTimeFormat(undefined, { timeZone, hour: "numeric", minute: "2-digit" }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
+  }
+}
+
 function StatusBadge({ status }: { status: string }) {
   const style = status === "finalized" || status === "approved"
     ? "bg-emerald-100 text-emerald-700"
@@ -135,6 +146,24 @@ function EmptyState({ children }: { children: React.ReactNode }) {
 type PayslipForView = PayslipDocumentData & {
   id: number;
   employee_email?: string | null;
+  attendance_days?: Array<{
+    work_date: string;
+    sessions: Array<{
+      id: number;
+      session_number: number | null;
+      status: string;
+      time_in: string | null;
+      time_out: string | null;
+      break_seconds: number | null;
+      break_started_at: string | null;
+      breaks: Array<{
+        break_started_at: string;
+        break_ended_at: string | null;
+        duration_seconds: number | null;
+      }>;
+      worked_seconds: number;
+    }>;
+  }>;
 };
 
 function PayStatement({
@@ -443,11 +472,13 @@ function PayrollRunEmployeeRow({
   slip,
   canEdit,
   showPaypalFee,
+  timeZone,
   onSaved,
 }: {
   slip: PayslipForView;
   canEdit: boolean;
   showPaypalFee: boolean;
+  timeZone: string;
   onSaved: () => void;
 }) {
   const amountFor = (type: string) => (slip.lines ?? [])
@@ -459,6 +490,7 @@ function PayrollRunEmployeeRow({
   const [commission, setCommission] = useState(amountFor("commission").toFixed(2));
   const [incentives, setIncentives] = useState(amountFor("incentive").toFixed(2));
   const [paypalFee, setPaypalFee] = useState(feeFor().toFixed(2));
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     setCommission(amountFor("commission").toFixed(2));
     setIncentives(amountFor("incentive").toFixed(2));
@@ -473,9 +505,21 @@ function PayrollRunEmployeeRow({
     onSuccess: onSaved,
   });
   const totalHours = Number(slip.regular_hours || 0) + Number(slip.overtime_hours || 0);
+  const columnCount = 5 + (showPaypalFee ? 1 : 0) + (canEdit ? 1 : 0);
   return <>
     <tr className="border-t border-slate-200 hover:bg-slate-50/70">
-      <th scope="row" className="min-w-48 px-3 py-2.5 text-left font-medium text-slate-800">{slip.employee_name_snapshot}</th>
+      <th scope="row" className="min-w-48 px-3 py-2.5 text-left font-medium text-slate-800">
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 text-left hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          aria-expanded={expanded}
+          aria-controls={`payroll-attendance-${slip.id}`}
+          onClick={() => setExpanded(value => !value)}
+        >
+          <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} />
+          {slip.employee_name_snapshot}
+        </button>
+      </th>
       <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-slate-700">{totalHours.toFixed(2)}</td>
       <td className="min-w-32 px-2 py-2">
         {canEdit
@@ -499,7 +543,47 @@ function PayrollRunEmployeeRow({
         </Button>
       </td>}
     </tr>
-    {save.error && <tr><td colSpan={canEdit ? (showPaypalFee ? 7 : 6) : (showPaypalFee ? 6 : 5)} className="px-3 pb-2 text-xs text-rose-600" role="alert">{save.error.message}</td></tr>}
+    {expanded && <tr id={`payroll-attendance-${slip.id}`} className="bg-slate-50">
+      <td colSpan={columnCount} className="px-3 pb-4 pt-2">
+        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+          <table className="w-full min-w-[680px] text-xs">
+            <thead className="bg-slate-100 text-slate-600">
+              <tr>
+                <th scope="col" className="px-3 py-2 text-left">Work date</th>
+                <th scope="col" className="px-3 py-2 text-left">Time in</th>
+                <th scope="col" className="px-3 py-2 text-left">Breaks</th>
+                <th scope="col" className="px-3 py-2 text-left">Time out</th>
+                <th scope="col" className="px-3 py-2 text-right">Total worked hours</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(slip.attendance_days ?? []).map(day => day.sessions.length
+                ? day.sessions.map(session => <tr key={session.id} className="border-t border-slate-100">
+                  <td className="whitespace-nowrap px-3 py-2 text-slate-700">{dateLabel(day.work_date)}<span className="ml-1.5 text-slate-400">Shift {session.session_number ?? 1}</span></td>
+                  <td className="whitespace-nowrap px-3 py-2 text-slate-700">{timeLabel(session.time_in, timeZone)}</td>
+                  <td className="px-3 py-2 text-slate-700">
+                    {session.breaks.length
+                      ? session.breaks.map((item, index) => <span key={`${item.break_started_at}-${index}`} className="block whitespace-nowrap">{timeLabel(item.break_started_at, timeZone)} – {item.break_ended_at ? timeLabel(item.break_ended_at, timeZone) : "In progress"}</span>)
+                      : session.break_started_at
+                        ? <span>{timeLabel(session.break_started_at, timeZone)} – In progress</span>
+                        : Number(session.break_seconds || 0) > 0
+                          ? <span>Recorded break · {Math.round(Number(session.break_seconds) / 60)} min</span>
+                          : "—"}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-slate-700">{timeLabel(session.time_out, timeZone)}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-700">{(Number(session.worked_seconds || 0) / 3600).toFixed(2)}</td>
+                </tr>)
+                : <tr key={day.work_date} className="border-t border-slate-100">
+                  <td className="whitespace-nowrap px-3 py-2 text-slate-700">{dateLabel(day.work_date)}</td>
+                  <td colSpan={3} className="px-3 py-2 text-slate-400">No attendance recorded</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">0.00</td>
+                </tr>)}
+            </tbody>
+          </table>
+        </div>
+      </td>
+    </tr>}
+    {save.error && <tr><td colSpan={columnCount} className="px-3 pb-2 text-xs text-rose-600" role="alert">{save.error.message}</td></tr>}
   </>;
 }
 
@@ -1154,7 +1238,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
                     <th scope="col" className="px-3 py-3 text-right">Gross Earnings</th>
                     {canManage && runDetails.data.run.status === "draft" && <th scope="col" className="px-3 py-3 text-right">Action</th>}
                   </tr></thead>
-                  <tbody>{runSlips.map((slip: PayslipForView) => <PayrollRunEmployeeRow key={slip.id} slip={slip} canEdit={canManage && runDetails.data.run.status === "draft"} showPaypalFee={Boolean(runDetails.data.run.paypal_php_conversion_enabled)} onSaved={() => { void queryClient.invalidateQueries({ queryKey: ["attendance-payroll-run", selectedRunId] }); }} />)}</tbody>
+                  <tbody>{runSlips.map((slip: PayslipForView) => <PayrollRunEmployeeRow key={slip.id} slip={slip} canEdit={canManage && runDetails.data.run.status === "draft"} showPaypalFee={Boolean(runDetails.data.run.paypal_php_conversion_enabled)} timeZone={runDetails.data.run.timezone_snapshot || "UTC"} onSaved={() => { void queryClient.invalidateQueries({ queryKey: ["attendance-payroll-run", selectedRunId] }); }} />)}</tbody>
                 </table>
               </div>
             </>}
