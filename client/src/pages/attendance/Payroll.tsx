@@ -1168,7 +1168,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
                         <td className="px-3 py-3 text-right tabular-nums">{amount(run.net_wages)}</td>
                         <td className="px-3 py-3 text-right tabular-nums">{amount(run.gross_wages)}</td>
                         <td className="px-3 py-3"><StatusBadge status={run.status} /></td>
-                        <td className="px-3 py-3 text-right"><Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-semibold uppercase text-slate-600" onClick={() => setSelectedRunId(run.id)}>View slips</Button></td>
+                        <td className="px-3 py-3 text-right"><Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-semibold uppercase text-slate-600" onClick={() => { setSelectedRunId(run.id); setNewRunReviewOpen(run.status === "draft"); }}>{run.status === "draft" ? "Continue draft" : "View slips"}</Button></td>
                       </tr>;
                     }),
                   ])}
