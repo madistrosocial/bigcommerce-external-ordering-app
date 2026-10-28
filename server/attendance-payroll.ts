@@ -507,6 +507,10 @@ export function registerAttendancePayrollRoutes(
   const canManagePayroll = requirePermission("payroll", "manage");
   const canApproveOvertime = requirePermission("payroll", "approve_overtime");
   const canDeletePayrollRuns = requirePermission("payroll", "delete_runs");
+  const canManageOrDeletePayrollRun = requireAnyPermission([
+    { module: "payroll", action: "manage" },
+    { module: "payroll", action: "delete_runs" },
+  ]);
   const canApproveLeave = requirePermission("attendance", "approve_leave");
   const canViewAll = requirePermission("attendance", "view_all");
 
@@ -1373,6 +1377,9 @@ export function registerAttendancePayrollRoutes(
       const result = await db.transaction(async (tx) => {
         const [run] = await tx.select().from(payrollRuns).where(eq(payrollRuns.id, id)).limit(1);
         if (!run) throw new PayrollRequestError(404, "Payroll run not found.");
+        if (run.status !== "draft") {
+          throw new PayrollRequestError(409, "Only draft payroll runs can be deleted. Revert a finalized run to draft first.");
+        }
         const linkedOvertime = await tx.select({ id: attendanceOvertimeRequests.id })
           .from(attendanceOvertimeRequests)
           .where(eq(attendanceOvertimeRequests.paid_in_run_id, id));
@@ -1398,6 +1405,42 @@ export function registerAttendancePayrollRoutes(
     } catch (error: any) {
       if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message });
       res.status(500).json({ error: error?.message ?? "Could not delete the payroll run." });
+    }
+  });
+
+  app.post("/api/attendance/payroll/admin/runs/:id/revert", canViewPayroll, canManageOrDeletePayrollRun, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid payroll run." });
+    try {
+      const updatedRun = await db.transaction(async (tx) => {
+        const [run] = await tx.select().from(payrollRuns).where(eq(payrollRuns.id, id)).limit(1);
+        if (!run) throw new PayrollRequestError(404, "Payroll run not found.");
+        if (run.status !== "finalized") {
+          throw new PayrollRequestError(409, "Only finalized payroll runs can be reverted to draft.");
+        }
+
+        const [updated] = await tx.update(payrollRuns).set({
+          status: "draft",
+          finalized_by: null,
+          finalized_at: null,
+        }).where(and(eq(payrollRuns.id, id), eq(payrollRuns.status, "finalized"))).returning();
+        if (!updated) throw new PayrollRequestError(409, "The run was changed by another manager. Refresh and try again.");
+
+        const linkedOvertime = await tx.select({ id: attendanceOvertimeRequests.id })
+          .from(attendanceOvertimeRequests)
+          .where(eq(attendanceOvertimeRequests.paid_in_run_id, id));
+        if (linkedOvertime.length) {
+          await tx.update(attendanceOvertimeRequests)
+            .set({ paid_in_run_id: null, updated_at: new Date() })
+            .where(eq(attendanceOvertimeRequests.paid_in_run_id, id));
+        }
+        await writePayrollAudit(tx, requestUser(req).id, "payroll_run", id, "reverted_to_draft", run, updated);
+        return updated;
+      });
+      res.json({ run: updatedRun, details: await fetchRunDetails(id) });
+    } catch (error: any) {
+      if (error instanceof PayrollRequestError) return res.status(error.status).json({ error: error.message });
+      res.status(500).json({ error: error?.message ?? "Could not revert the payroll run to draft." });
     }
   });
 

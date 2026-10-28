@@ -674,6 +674,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [selectedRunEmployeeId, setSelectedRunEmployeeId] = useState("");
   const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
+  const [revertRunDialogOpen, setRevertRunDialogOpen] = useState(false);
   const [reviewError, setReviewError] = useState("");
   const me = useQuery({ queryKey: ["attendance-payroll-me"], queryFn: () => apiJson("/api/attendance/payroll/me"), enabled: isEmployeePage });
   const eligible = useQuery({ queryKey: ["attendance-overtime-eligible"], queryFn: () => apiJson("/api/attendance/payroll/overtime/eligible"), enabled: isEmployeePage });
@@ -743,6 +744,14 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const finalizeRun = useMutation({
     mutationFn: (id: number) => apiJson(`/api/attendance/payroll/admin/runs/${id}/finalize`, jsonInit("POST", {})),
     onSuccess: result => { setSelectedRunId(result.run.id); refresh(); },
+  });
+  const revertRun = useMutation({
+    mutationFn: (id: number) => apiJson(`/api/attendance/payroll/admin/runs/${id}/revert`, jsonInit("POST", {})),
+    onSuccess: result => {
+      setRevertRunDialogOpen(false);
+      setSelectedRunId(result.run.id);
+      refresh();
+    },
   });
   const deleteRun = useMutation({
     mutationFn: (id: number) => apiJson(`/api/attendance/payroll/admin/runs/${id}`, { method: "DELETE" }),
@@ -951,15 +960,16 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
               <div><CardTitle className="text-base">Run details</CardTitle></div>
               {runDetails.data?.run && <div className="flex flex-wrap gap-2">
                 {canManage && runDetails.data.run.status === "draft" && <>
-                  <Button size="sm" variant="outline" disabled={rebuildRun.isPending || finalizeRun.isPending || deleteRun.isPending} onClick={() => { finalizeRun.reset(); rebuildRun.mutate(selectedRunId); }}>{rebuildRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rebuild draft</Button>
-                  <Button size="sm" disabled={finalizeRun.isPending || rebuildRun.isPending || deleteRun.isPending} onClick={() => finalizeRun.mutate(selectedRunId)}>{finalizeRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Finalize and lock</Button>
+                  <Button size="sm" variant="outline" disabled={rebuildRun.isPending || finalizeRun.isPending || deleteRun.isPending || revertRun.isPending} onClick={() => { finalizeRun.reset(); rebuildRun.mutate(selectedRunId); }}>{rebuildRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rebuild draft</Button>
+                  <Button size="sm" disabled={finalizeRun.isPending || rebuildRun.isPending || deleteRun.isPending || revertRun.isPending} onClick={() => finalizeRun.mutate(selectedRunId)}>{finalizeRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Finalize and lock</Button>
                 </>}
-                {runs.data?.canDelete && <Button size="sm" variant="destructive" disabled={deleteRun.isPending || rebuildRun.isPending || finalizeRun.isPending} onClick={() => setDeleteRunDialogOpen(true)}><Trash2 className="mr-2 h-4 w-4" />Delete run</Button>}
+                {(canManage || runs.data?.canDelete) && runDetails.data.run.status === "finalized" && <Button size="sm" variant="outline" disabled={revertRun.isPending || deleteRun.isPending || rebuildRun.isPending || finalizeRun.isPending} onClick={() => { revertRun.reset(); setRevertRunDialogOpen(true); }}>{revertRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Revert to Draft</Button>}
+                {runs.data?.canDelete && runDetails.data.run.status === "draft" && <Button size="sm" variant="destructive" disabled={deleteRun.isPending || rebuildRun.isPending || finalizeRun.isPending || revertRun.isPending} onClick={() => setDeleteRunDialogOpen(true)}><Trash2 className="mr-2 h-4 w-4" />Delete run</Button>}
               </div>}
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {(runDetails.error || (rebuildRun.error && !rebuildReviewSessions.length) || (finalizeRun.error && !openAttendanceSessions.length) || deleteRun.error) && <p role="alert" className="text-sm text-rose-600">{runDetails.error?.message || rebuildRun.error?.message || finalizeRun.error?.message || deleteRun.error?.message}</p>}
+            {(runDetails.error || (rebuildRun.error && !rebuildReviewSessions.length) || (finalizeRun.error && !openAttendanceSessions.length) || deleteRun.error || revertRun.error) && <p role="alert" className="text-sm text-rose-600">{runDetails.error?.message || rebuildRun.error?.message || finalizeRun.error?.message || revertRun.error?.message || deleteRun.error?.message}</p>}
             {rebuildReviewSessions.length > 0 && <AttendanceReviewBlockerList sessions={rebuildReviewSessions} canReviewAttendance={canReviewAttendance} />}
             {openAttendanceSessions.length > 0 && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4">
               <div className="flex items-start gap-2"><Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" /><div>
@@ -1026,6 +1036,26 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
                 onClick={event => { event.preventDefault(); if (selectedRunId != null) deleteRun.mutate(selectedRunId); }}
               >
                 {deleteRun.isPending ? "Deleting…" : "Delete payroll run"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        <AlertDialog open={revertRunDialogOpen} onOpenChange={open => { if (!revertRun.isPending) setRevertRunDialogOpen(open); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Revert this payroll run to draft?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The run will become editable, and overtime linked to it will be available for a later run. This will not reverse payments already made or recall payslip emails already sent. Review those separately before finalizing again.
+              </AlertDialogDescription>
+              {revertRun.error && <p role="alert" className="text-sm text-rose-600">{revertRun.error.message}</p>}
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={revertRun.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={revertRun.isPending || selectedRunId == null}
+                onClick={event => { event.preventDefault(); if (selectedRunId != null) revertRun.mutate(selectedRunId); }}
+              >
+                {revertRun.isPending ? "Reverting…" : "Revert to Draft"}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
