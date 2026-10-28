@@ -2943,6 +2943,83 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/product-360/products/:id/primary-image", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid product ID." });
+    let imageBuffer: Buffer;
+    try {
+      imageBuffer = decodeGeneratedImageDataUrl(req.body?.imageDataUrl);
+      if (imageBuffer.length > 2 * 1024 * 1024) {
+        return res.status(400).json({ error: "Product photos must be no larger than 2 MB after resizing." });
+      }
+    } catch {
+      return res.status(400).json({ error: "Choose a valid JPEG photo no larger than 2 MB after resizing." });
+    }
+
+    try {
+      const local = await db.execute(sql`SELECT bigcommerce_id FROM products WHERE id = ${id} LIMIT 1`);
+      const bcId = Number((local.rows[0] as any)?.bigcommerce_id);
+      if (!bcId) return res.status(404).json({ error: "Product is not linked to BigCommerce." });
+
+      const { storeHash, token, headers } = await getBcCreds();
+      const root = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products/${bcId}`;
+      const currentResponse = await fetch(`${root}?include=images`, { headers, signal: AbortSignal.timeout(30000) });
+      const currentPayload: any = await currentResponse.json().catch(() => ({}));
+      if (!currentResponse.ok) {
+        return res.status(502).json({ error: currentPayload.title || currentPayload.detail || "Could not verify the product's primary photo." });
+      }
+      const currentImages = currentPayload?.data?.images;
+      if (!Array.isArray(currentImages)) {
+        return res.status(502).json({ error: "Could not verify whether this product already has a primary photo." });
+      }
+      if (currentImages.some((image: any) => image.is_thumbnail === true)) {
+        return res.status(409).json({ error: "This product already has a primary photo. Drag-and-drop upload is only available when it has none." });
+      }
+
+      const form = new FormData();
+      form.append("image_file", new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" }), `product-${bcId}-primary.jpg`);
+      form.append("is_thumbnail", "false");
+      const uploadResponse = await fetch(`${root}/images`, {
+        method: "POST",
+        headers: { "X-Auth-Token": token, Accept: "application/json" },
+        body: form,
+        signal: AbortSignal.timeout(60000),
+      });
+      const uploadPayload: any = await uploadResponse.json().catch(() => ({}));
+      const uploadedImageId = Number(uploadPayload?.data?.id);
+      if (!uploadResponse.ok || !Number.isSafeInteger(uploadedImageId) || uploadedImageId <= 0) {
+        return res.status(502).json({ error: uploadPayload.title || uploadPayload.detail || `BigCommerce could not upload the product photo (${uploadResponse.status}).` });
+      }
+
+      const primaryResponse = await fetch(`${root}/images/${uploadedImageId}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ is_thumbnail: true }),
+        signal: AbortSignal.timeout(30000),
+      });
+      const primaryPayload: any = await primaryResponse.json().catch(() => ({}));
+      if (!primaryResponse.ok) {
+        return res.status(502).json({ error: primaryPayload.title || primaryPayload.detail || "The photo uploaded, but BigCommerce could not set it as primary." });
+      }
+
+      const freshResponse = await fetch(`${root}?include=images`, { headers, signal: AbortSignal.timeout(30000) });
+      const freshPayload: any = await freshResponse.json().catch(() => ({}));
+      if (!freshResponse.ok) {
+        return res.status(502).json({ error: freshPayload.title || freshPayload.detail || "The primary photo was set, but the product could not be refreshed." });
+      }
+      const primaryImage = (freshPayload?.data?.images ?? []).find((image: any) => image.is_thumbnail === true);
+      const imageUrl = primaryImage?.url_thumbnail || primaryImage?.url_standard || primaryImage?.image_url;
+      if (typeof imageUrl !== "string" || !imageUrl) {
+        return res.status(502).json({ error: "BigCommerce did not return the newly set primary photo." });
+      }
+      await storage.updateProductByBigCommerceId(bcId, { image: imageUrl });
+      res.json({ success: true, imageUrl });
+    } catch (error: any) {
+      console.error("[Product 360] primary photo upload failed:", error);
+      res.status(500).json({ error: "Unable to upload the primary product photo." });
+    }
+  });
+
   app.get("/api/product-360/drafts", requireAdmin, async (_req, res) => {
     const result = await db.execute(sql`SELECT id, data, status, bigcommerce_id, error, updated_at FROM product_360_drafts WHERE status <> 'synced' ORDER BY updated_at DESC`);
     res.json(result.rows);

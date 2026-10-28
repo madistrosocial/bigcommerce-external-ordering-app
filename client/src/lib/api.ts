@@ -236,6 +236,17 @@ export async function uploadProduct360VariantImage(productId: number, variantId:
   return body as { success: boolean; imageUrl: string };
 }
 
+export async function uploadProduct360PrimaryImage(productId: number, imageDataUrl: string) {
+  const response = await fetch(`${API_BASE}/product-360/products/${productId}/primary-image`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ imageDataUrl }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Could not upload the product photo");
+  return body as { success: boolean; imageUrl: string };
+}
+
 export interface User {
   id: number;
   username: string;

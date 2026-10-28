@@ -64,6 +64,7 @@ import {
   type Product360Detail,
   type Product360Overview,
   getAuthHeaders,
+  uploadProduct360PrimaryImage,
 } from "@/lib/api";
 
 import { useTimeService } from "@/hooks/useTimeService";
@@ -901,9 +902,76 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
 
 function ProductTable({ rows, drafts = [] }: { rows: Record<string, unknown>[]; drafts?: Product360Draft[] }) {
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const currentUser = useStore((state) => state.currentUser);
+  const { hasPermission } = usePermissions();
+  const canDropPhotos = currentUser?.role === "admin";
+  const canUsePhotoWatermark = hasPermission("product_photo_watermark");
+  const [draggingProductId, setDraggingProductId] = useState<number | null>(null);
+  const [photoError, setPhotoError] = useState<{ productId: number; message: string } | null>(null);
+  const uploadPrimary = useMutation({
+    mutationFn: ({ productId, imageDataUrl }: { productId: number; imageDataUrl: string }) =>
+      uploadProduct360PrimaryImage(productId, imageDataUrl),
+    onSuccess: async (_result, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["product-360-products"] }),
+        queryClient.invalidateQueries({ queryKey: ["product-360-detail", variables.productId] }),
+        queryClient.invalidateQueries({ queryKey: ["product-360-catalog-details", variables.productId] }),
+      ]);
+    },
+  });
+  const handlePrimaryPhotoDrop = async (productId: number, files: FileList) => {
+    setPhotoError(null);
+    const file = files[0];
+    if (!file || !canDropPhotos) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 20 * 1024 * 1024) {
+      setPhotoError({ productId, message: "Choose a JPEG, PNG, or WebP photo under 20 MB." });
+      return;
+    }
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 1800 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Could not process this photo.");
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      const blob = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob((result) => result ? resolve(result) : reject(new Error("Could not process this photo.")), "image/jpeg", 0.82),
+      );
+      if (blob.size > 2 * 1024 * 1024) throw new Error("This photo is still over 2 MB after resizing.");
+      const imageDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Could not read this photo."));
+        reader.readAsDataURL(blob);
+      });
+      const watermarkSettings = await loadProductPhotoWatermarkSettings();
+      const preparedImage = await applyProductPhotoWatermark(imageDataUrl, watermarkSettings, canUsePhotoWatermark, "dark");
+      await uploadPrimary.mutateAsync({ productId, imageDataUrl: preparedImage });
+    } catch (error) {
+      setPhotoError({ productId, message: error instanceof Error ? error.message : "Could not upload this photo." });
+    }
+  };
   return <div className="w-full min-w-0 overflow-x-auto"><table className="w-full min-w-[820px] table-fixed text-left text-sm lg:min-w-0"><colgroup><col style={{ width: "33%" }} /><col style={{ width: "12%" }} /><col style={{ width: "7%" }} /><col style={{ width: "8%" }} /><col style={{ width: "11%" }} /><col style={{ width: "7%" }} /><col style={{ width: "8%" }} /><col style={{ width: "11%" }} /><col style={{ width: "3%" }} /></colgroup><thead className="whitespace-nowrap border-b border-slate-200 bg-slate-50 text-[10px] uppercase tracking-normal text-slate-500"><tr><th className="px-3 py-3">Product</th><th className="px-2 py-3">Brand</th><th className="px-2 py-3 text-right">Units</th><th className="px-2 py-3 text-right">Revenue</th><th className="px-2 py-3 text-right">Gross profit</th><th className="px-2 py-3 text-right">Stock</th><th className="px-2 py-3 text-right">Velocity</th><th className="px-2 py-3">Status</th><th className="px-1 py-3"></th></tr></thead><tbody className="divide-y divide-slate-100">
      {drafts.map((draft) => <tr key={`draft-${draft.id}`} className="cursor-pointer bg-emerald-50 hover:bg-emerald-100" onClick={() => setLocation(`/product-360/products/drafts/${draft.id}`)}><td className="px-3 py-3"><div className="flex items-center gap-3"><div className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-slate-100">{draft.data.image_url ? <img src={String(draft.data.image_url)} className="h-full w-full object-cover" alt="" /> : <PackageSearch className="m-2 h-5 w-5 text-slate-400" />}</div><div className="min-w-0 flex-1"><p className="w-full whitespace-normal break-words text-[13px] font-semibold leading-4 text-slate-800">{String(draft.data.name || "Unnamed draft")}</p><p className="text-[11px] text-slate-400">{String(draft.data.skuPrefix || "No SKU")} · Not synced</p></div></div></td><td className="whitespace-normal break-words px-2 py-3 text-[13px] leading-4 text-slate-600">{String(draft.data.brand_name || "—")}</td><td className="whitespace-nowrap px-2 py-3 text-right font-medium">—</td><td className="whitespace-nowrap px-2 py-3 text-right">—</td><td className="whitespace-nowrap px-2 py-3 text-right"><span className="text-xs text-slate-400">No cost data</span></td><td className="whitespace-nowrap px-2 py-3 text-right">—</td><td className="whitespace-nowrap px-2 py-3 text-right">—</td><td className="px-1 py-3"><span className="inline-flex rounded-full border border-emerald-200 bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">{draft.status === "failed" ? "Sync failed" : "Draft"}</span></td><td className="px-1 py-3"><ChevronRight className="h-4 w-4 text-slate-300" /></td></tr>)}
-     {rows.map((row) => <tr key={String(row.id)} className="cursor-pointer hover:bg-slate-50" onClick={() => setLocation(`/product-360/products/${row.id}`)}><td className="px-3 py-3"><div className="flex items-center gap-3"><div className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-slate-100">{row.image ? <img src={String(row.image)} className="h-full w-full object-cover" alt="" /> : <PackageSearch className="m-2 h-5 w-5 text-slate-400" />}</div><div className="min-w-0 flex-1"><p className="w-full whitespace-normal break-words text-[13px] font-semibold leading-4 text-slate-800">{String(row.name || "Unnamed")}</p><p className="text-[11px] text-slate-400">{String(row.sku || "No SKU")} · BC {String(row.bigcommerce_id || "")}</p></div></div></td><td className="whitespace-normal break-words px-2 py-3 text-[13px] leading-4 text-slate-600">{String(row.brand_name || "—")}</td><td className="whitespace-nowrap px-2 py-3 text-right font-medium">{number(row.units_sold)}</td><td className="whitespace-nowrap px-2 py-3 text-right">{money(row.revenue)}</td><td className="whitespace-nowrap px-2 py-3 text-right">{row.gross_profit == null ? <span className="text-xs text-slate-400">No cost data</span> : money(row.gross_profit)}</td><td className="whitespace-nowrap px-2 py-3 text-right">{number(row.current_stock)}</td><td className="whitespace-nowrap px-2 py-3 text-right">{number(row.sales_velocity, 1)}/day</td><td className="px-1 py-3"><StatusBadge status={getStatus(row)} /></td><td className="px-1 py-3"><ChevronRight className="h-4 w-4 text-slate-300" /></td></tr>)}
+     {rows.map((row) => {
+       const productId = Number(row.id);
+       const canDropHere = canDropPhotos && !row.image;
+       const isUploading = uploadPrimary.isPending && uploadPrimary.variables?.productId === productId;
+       const photoMessage = photoError?.productId === productId ? photoError.message : null;
+       return <tr key={String(row.id)} className="cursor-pointer hover:bg-slate-50" onClick={() => setLocation(`/product-360/products/${row.id}`)}><td className="px-3 py-3"><div className="flex items-center gap-3"><div
+         onDragOver={canDropHere ? (event) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "copy"; setDraggingProductId(productId); } : undefined}
+         onDragLeave={canDropHere ? (event) => { event.preventDefault(); setDraggingProductId(null); } : undefined}
+         onDrop={canDropHere ? (event) => { event.preventDefault(); event.stopPropagation(); setDraggingProductId(null); if (!uploadPrimary.isPending) void handlePrimaryPhotoDrop(productId, event.dataTransfer.files); } : undefined}
+         title={canDropHere ? "Drop a photo here to set it as the primary product image" : undefined}
+         className={`relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md ${row.image ? "bg-slate-100" : canDropHere ? "border border-dashed border-blue-300 bg-blue-50/60" : "bg-slate-100"} ${draggingProductId === productId ? "border-blue-600 bg-blue-100 ring-2 ring-blue-200" : ""}`}
+       >
+         {row.image ? <img src={String(row.image)} className="h-full w-full object-cover" alt="" /> : canDropHere ? <span className="flex flex-col items-center text-blue-600">{isUploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}<span className="text-[7px] leading-3">{isUploading ? "Saving" : "Drop photo"}</span></span> : <PackageSearch className="h-5 w-5 text-slate-400" />}
+       </div><div className="min-w-0 flex-1">{photoMessage && <p role="alert" className="mb-1 text-[9px] leading-tight text-red-600">{photoMessage}</p>}<p className="w-full whitespace-normal break-words text-[13px] font-semibold leading-4 text-slate-800">{String(row.name || "Unnamed")}</p><p className="text-[11px] text-slate-400">{String(row.sku || "No SKU")} · BC {String(row.bigcommerce_id || "")}</p></div></div></td><td className="whitespace-normal break-words px-2 py-3 text-[13px] leading-4 text-slate-600">{String(row.brand_name || "—")}</td><td className="whitespace-nowrap px-2 py-3 text-right font-medium">{number(row.units_sold)}</td><td className="whitespace-nowrap px-2 py-3 text-right">{money(row.revenue)}</td><td className="whitespace-nowrap px-2 py-3 text-right">{row.gross_profit == null ? <span className="text-xs text-slate-400">No cost data</span> : money(row.gross_profit)}</td><td className="whitespace-nowrap px-2 py-3 text-right">{number(row.current_stock)}</td><td className="whitespace-nowrap px-2 py-3 text-right">{number(row.sales_velocity, 1)}/day</td><td className="px-1 py-3"><StatusBadge status={getStatus(row)} /></td><td className="px-1 py-3"><ChevronRight className="h-4 w-4 text-slate-300" /></td></tr>;
+     })}
   </tbody></table></div>;
 }
 
