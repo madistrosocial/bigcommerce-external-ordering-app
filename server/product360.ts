@@ -343,6 +343,41 @@ function categoryTrail(categoryId: number, categories: Map<number, Product360Cat
   return rootIndex >= 0 ? trail.slice(rootIndex) : [];
 }
 
+function dashboardCategoryPathsSql(
+  categories: Product360Category[],
+  categoryMap: Map<number, Product360Category>,
+  rootName?: string,
+  drillCategoryId?: number,
+): string {
+  const candidates = categories
+    .map((category) => {
+      const trail = categoryTrail(category.id, categoryMap);
+      return {
+        category,
+        trail,
+        rootIndex: PRODUCT_360_MAIN_CATEGORIES.findIndex((name) => categoryKey(name) === categoryKey(trail[0]?.name)),
+      };
+    })
+    .filter(({ trail, rootIndex }) =>
+      trail.length > 0
+      && rootIndex >= 0
+      && (!rootName || categoryKey(trail[0].name) === categoryKey(rootName))
+      && (!drillCategoryId || trail.some((item) => item.id === drillCategoryId)),
+    )
+    .sort((a, b) =>
+      a.rootIndex - b.rootIndex
+      || b.trail.length - a.trail.length
+      || a.category.id - b.category.id,
+    );
+
+  if (!candidates.length) return "";
+  const values = candidates.map(({ category, trail }, priority) => {
+    const path = trail.slice(0, 3).map((item) => item.name).join(" > ");
+    return `(${category.id}, ${quote(path)}, ${priority})`;
+  }).join(", ");
+  return `(VALUES ${values}) AS product_category_paths(category_id, category_path, priority)`;
+}
+
 function directChildUnder(categoryId: number, parentId: number, categories: Map<number, Product360Category>): number | undefined {
   let current = categories.get(categoryId);
   let childId: number | undefined;
@@ -708,6 +743,28 @@ export async function getProduct360DashboardList(input: {
     categoryIds: effectiveRoot ? (categoryIds?.length ? categoryIds : [0]) : undefined,
     categoryExcludeIds,
   };
+  const categoryPathsSql = dashboardCategoryPathsSql(
+    catalog.categories,
+    categoryMap,
+    effectiveRoot,
+    drillCategoryId,
+  );
+  const categoryPathJoin = categoryPathsSql
+    ? `LEFT JOIN LATERAL (
+         SELECT product_category_paths.category_path
+         FROM jsonb_array_elements_text(COALESCE(matching_products.categories, '[]'::jsonb)) AS assigned_category(category_id)
+         JOIN ${categoryPathsSql}
+           ON product_category_paths.category_id::text = assigned_category.category_id
+         ORDER BY product_category_paths.priority
+         LIMIT 1
+       ) product_category ON TRUE`
+    : "";
+  const categoryPathSelect = categoryPathsSql
+    ? "COALESCE(product_category.category_path, 'Other / Uncategorized') AS category_path"
+    : "'Other / Uncategorized'::text AS category_path";
+  const categoryOrder = kind === "sales"
+    ? "category_path ASC, sales_velocity DESC, units_sold DESC"
+    : definition.order;
   const base = productBaseCte(range, undefined, filters);
   const page = Math.max(0, Math.trunc(Number(input.page) || 0));
   const limit = Math.min(100, Math.max(1, Math.trunc(Number(input.limit) || 25)));
@@ -722,8 +779,10 @@ export async function getProduct360DashboardList(input: {
     SELECT product_page.*, totals.total AS total_count
     FROM totals
     LEFT JOIN (
-      SELECT * FROM matching_products
-      ORDER BY ${definition.order}
+      SELECT matching_products.*, ${categoryPathSelect}
+      FROM matching_products
+      ${categoryPathJoin}
+      ORDER BY ${categoryOrder}
       LIMIT ${limit} OFFSET ${page * limit}
     ) product_page ON TRUE
   `));

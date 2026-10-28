@@ -490,15 +490,22 @@ function DashboardListDialog({
         const result = await getProduct360DashboardList({ kind, ...filters, page: nextPage, limit: 100 });
         rows.push(...result.rows);
       }
+      if (kind === "sales") {
+        rows.sort((a, b) =>
+          String(a.category_path || "Other / Uncategorized").localeCompare(String(b.category_path || "Other / Uncategorized"), undefined, { numeric: true, sensitivity: "base" })
+          || Number(b.sales_velocity || 0) - Number(a.sales_velocity || 0)
+          || String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }),
+        );
+      }
       const headers = kind === "sales"
-        ? ["Product", "SKU", "Units sold", "Revenue", "Sales velocity (per day)"]
+        ? ["Category", "Product", "SKU", "Units sold", "Revenue", "Sales velocity (per day)"]
         : kind === "profit"
           ? ["Product", "SKU", "Gross profit", "Revenue", "Margin (%)"]
           : kind === "restock"
             ? ["Product", "SKU", "Current stock", "Days of stock", "Status"]
             : ["Product", "SKU", "Units sold", "Current stock", "Days of stock"];
       const csvRows = rows.map((row) => {
-        if (kind === "sales") return [row.name, row.sku, row.units_sold, row.revenue, row.sales_velocity];
+        if (kind === "sales") return [row.category_path || "Other / Uncategorized", row.name, row.sku, row.units_sold, row.revenue, row.sales_velocity];
         if (kind === "profit") {
           const revenue = Number(row.revenue);
           const margin = revenue > 0 ? Number(row.gross_profit || 0) / revenue * 100 : 0;
@@ -532,10 +539,11 @@ function DashboardListDialog({
           : query.isError ? <div className="py-12 text-center text-sm text-red-600">Could not load this list. Close and try again.</div>
             : query.data?.rows.length ? <>
               <div className="max-h-[58vh] overflow-auto rounded-md border border-slate-200">
-                <table className="w-full min-w-[650px] text-left text-sm">
+                <table className={`w-full ${kind === "sales" ? "min-w-[850px]" : "min-w-[650px]"} text-left text-sm`}>
                   <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
                     <tr>
                       <th className="px-3 py-2.5">Product</th>
+                      {kind === "sales" && <th className="px-3 py-2.5">Category</th>}
                       {kind === "sales" && <><th className="px-3 py-2.5 text-right">Units sold</th><th className="px-3 py-2.5 text-right">Revenue</th><th className="px-3 py-2.5 text-right">Velocity</th></>}
                       {kind === "profit" && <><th className="px-3 py-2.5 text-right">Gross profit</th><th className="px-3 py-2.5 text-right">Revenue</th><th className="px-3 py-2.5 text-right">Margin</th></>}
                       {kind === "restock" && <><th className="px-3 py-2.5 text-right">Current stock</th><th className="px-3 py-2.5 text-right">Days of stock</th><th className="px-3 py-2.5">Status</th></>}
@@ -550,6 +558,7 @@ function DashboardListDialog({
                           <button type="button" className="block max-w-full truncate text-left font-medium text-blue-700 hover:underline" onClick={() => row.id && setLocation(`/product-360/products/${row.id}`)}>{String(row.name || "Unnamed product")}</button>
                           <span className="block truncate text-xs text-slate-400">{String(row.sku || "")}</span>
                         </td>
+                        {kind === "sales" && <td className="max-w-[260px] px-3 py-2.5 text-xs text-slate-600">{String(row.category_path || "Other / Uncategorized")}</td>}
                         {kind === "sales" && <><td className="px-3 py-2.5 text-right">{number(row.units_sold)}</td><td className="px-3 py-2.5 text-right">{money(row.revenue)}</td><td className="px-3 py-2.5 text-right">{number(row.sales_velocity, 1)}/day</td></>}
                         {kind === "profit" && <><td className="px-3 py-2.5 text-right">{money(row.gross_profit)}</td><td className="px-3 py-2.5 text-right">{money(row.revenue)}</td><td className="px-3 py-2.5 text-right">{margin.toFixed(1)}%</td></>}
                         {kind === "restock" && <><td className="px-3 py-2.5 text-right">{number(row.current_stock)}</td><td className="px-3 py-2.5 text-right">{number(row.days_of_stock, 1)}</td><td className="px-3 py-2.5"><StatusBadge status={getStatus(row)} /></td></>}
