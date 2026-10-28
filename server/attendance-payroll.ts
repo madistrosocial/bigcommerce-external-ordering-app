@@ -1,5 +1,5 @@
 import type { Express, Request, RequestHandler } from "express";
-import { and, asc, desc, eq, gte, gt, inArray, isNotNull, isNull, lte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, gt, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { getCompanyTimezone } from "./attendance";
@@ -1113,10 +1113,31 @@ export function registerAttendancePayrollRoutes(
   app.get("/api/attendance/payroll/admin/runs", canViewPayroll, async (req, res) => {
     try {
       const actor = requestUser(req);
-      const [rows, permissions] = await Promise.all([
+      const [runs, summaries, permissions] = await Promise.all([
         db.select().from(payrollRuns).orderBy(desc(payrollRuns.period_start), desc(payrollRuns.created_at)),
+        db.select({
+          payroll_run_id: payslips.payroll_run_id,
+          employee_count: sql<number>`count(*)::int`,
+          total_hours: sql<string>`COALESCE(SUM(${payslips.regular_hours} + ${payslips.overtime_hours}), 0)::text`,
+          net_wages: sql<string>`COALESCE(SUM(${payslips.net_amount}), 0)::text`,
+          gross_wages: sql<string>`COALESCE(SUM(${payslips.gross_amount}), 0)::text`,
+          currency_count: sql<number>`count(DISTINCT ${payslips.currency})::int`,
+          currency: sql<string>`MIN(${payslips.currency})`,
+        }).from(payslips).groupBy(payslips.payroll_run_id),
         actor.role === "admin" ? Promise.resolve([]) : storage.getUserPermissionStrings(actor.id),
       ]);
+      const summaryByRunId = new Map(summaries.map((summary) => [summary.payroll_run_id, summary]));
+      const rows = runs.map((run) => ({
+        ...run,
+        ...(summaryByRunId.get(run.id) ?? {
+          employee_count: 0,
+          total_hours: "0",
+          net_wages: "0",
+          gross_wages: "0",
+          currency_count: 0,
+          currency: null,
+        }),
+      }));
       res.json({ rows, canDelete: actor.role === "admin" || permissions.includes("payroll:delete_runs") });
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? "Could not load payroll runs." });

@@ -673,6 +673,10 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const [usdToPhpRate, setUsdToPhpRate] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [selectedRunEmployeeId, setSelectedRunEmployeeId] = useState("");
+  const [createRunDialogOpen, setCreateRunDialogOpen] = useState(false);
+  const [runStatusFilter, setRunStatusFilter] = useState("all");
+  const [runScheduleFilter, setRunScheduleFilter] = useState("all");
+  const [runHistoryPage, setRunHistoryPage] = useState(1);
   const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
   const [revertRunDialogOpen, setRevertRunDialogOpen] = useState(false);
   const [reviewError, setReviewError] = useState("");
@@ -734,6 +738,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
     onSuccess: result => {
       setUsdToPhpRate("");
       setSelectedRunId(result.run.id);
+      setCreateRunDialogOpen(false);
       refresh();
     },
   });
@@ -769,6 +774,34 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const selectedPayrollGroup = (config.data?.groups ?? []).find((group: any) => String(group.id) === runRoleId);
   const nextPayrollPeriod = selectedPayrollGroup?.next_period;
   const paypalPhpEnabledForRun = Boolean(selectedPayrollGroup?.schedule?.paypal_php_conversion_enabled);
+  const allRunRows = runs.data?.rows ?? [];
+  const scheduleOptions = Array.from(new Map(allRunRows.map((run: any) => [String(run.role_id), {
+    id: String(run.role_id),
+    name: run.group_name_snapshot || "Unknown schedule",
+  }])).values());
+  const filteredRunRows = allRunRows.filter((run: any) =>
+    (runStatusFilter === "all" || run.status === runStatusFilter)
+    && (runScheduleFilter === "all" || String(run.role_id) === runScheduleFilter),
+  ).sort((a: any, b: any) =>
+    (a.status === "draft" ? 0 : 1) - (b.status === "draft" ? 0 : 1)
+    || String(b.period_start).localeCompare(String(a.period_start))
+    || Number(b.id) - Number(a.id),
+  );
+  const runPageSize = 12;
+  const runPageCount = Math.max(1, Math.ceil(filteredRunRows.length / runPageSize));
+  const visibleRunRows = filteredRunRows.slice((runHistoryPage - 1) * runPageSize, runHistoryPage * runPageSize);
+  const runHistoryGroups = visibleRunRows.reduce((groups: Array<{ title: string; rows: any[] }>, run: any) => {
+    const title = run.status === "draft"
+      ? "Incomplete pay runs"
+      : new Date(`${run.period_start}T00:00:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    let group = groups[groups.length - 1];
+    if (!group || group.title !== title) {
+      group = { title, rows: [] };
+      groups.push(group);
+    }
+    group.rows.push(run);
+    return groups;
+  }, []);
 
   function reviewClaim(request: any, status: "approved" | "rejected") {
     const note = window.prompt(status === "approved" ? "Optional manager note" : "Reason for rejecting this claim") ?? "";
@@ -906,52 +939,102 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
       </div>}
 
       {mode === "management" && canViewPayroll && section === "overview" && <div className="space-y-5">
-        <div className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-slate-600" /><h2 className="text-lg font-bold text-slate-900">Payroll runs</h2></div>
-        {canManage && <Card className="border-slate-200 shadow-sm">
-          <CardHeader><CardTitle className="text-base">Create a payroll run</CardTitle></CardHeader>
-          <CardContent>
-            <form className="grid gap-3 md:grid-cols-4" onSubmit={event => { event.preventDefault(); createRun.mutate(); }}>
-              <div><Label>Pay schedule</Label><select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" required value={runRoleId} onChange={event => setRunRoleId(event.target.value)}><option value="">Choose a group schedule</option>{(config.data?.groups ?? []).map((group: any) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></div>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h2 className="text-xl font-bold tracking-tight text-slate-900">Pay Runs</h2><p className="mt-1 text-sm text-slate-500">Create new pay runs and browse previous pay runs.</p></div>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setLocation("/payroll/schedules")}><Settings2 className="mr-2 h-4 w-4" />Manage schedules</Button>
+            {canManage && <Button type="button" size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => { createRun.reset(); setCreateRunDialogOpen(true); }}><CircleDollarSign className="mr-2 h-4 w-4" />New pay run</Button>}
+          </div>
+        </div>
+
+        {canManage && <Dialog open={createRunDialogOpen} onOpenChange={setCreateRunDialogOpen}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader><DialogTitle>Create a payroll run</DialogTitle><DialogDescription>Build a draft for the next period in the selected schedule.</DialogDescription></DialogHeader>
+            <form className="grid gap-3 md:grid-cols-2" onSubmit={event => { event.preventDefault(); createRun.mutate(); }}>
+              <div className="md:col-span-2"><Label>Pay schedule</Label><select className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" required value={runRoleId} onChange={event => setRunRoleId(event.target.value)}><option value="">Choose a group schedule</option>{(config.data?.groups ?? []).map((group: any) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></div>
               {nextPayrollPeriod ? <>
                 <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Cutoff start</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.period_start)}</p></div>
                 <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Cutoff end</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.period_end)}</p></div>
                 <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Payday</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.payday)}</p></div>
-              </> : <p className="text-sm text-amber-700 md:col-span-3">Configure this group’s payday anchor or twice-monthly paydays before creating a run.</p>}
+              </> : <p className="text-sm text-amber-700 md:col-span-2">Configure this group’s payday anchor or twice-monthly paydays before creating a run.</p>}
               {paypalPhpEnabledForRun && <div className="md:col-span-2">
                 <Label htmlFor="payroll-usd-to-php-rate">USD to PHP rate (₱ per US$1)</Label>
-                <Input
-                  id="payroll-usd-to-php-rate"
-                  className="mt-1.5"
-                  type="number"
-                  min="0.0001"
-                  max="99999999.9999"
-                  step="0.0001"
-                  placeholder="Enter current rate"
-                  required
-                  value={usdToPhpRate}
-                  onChange={event => setUsdToPhpRate(event.target.value)}
-                />
+                <Input id="payroll-usd-to-php-rate" className="mt-1.5" type="number" min="0.0001" max="99999999.9999" step="0.0001" placeholder="Enter current rate" required value={usdToPhpRate} onChange={event => setUsdToPhpRate(event.target.value)} />
                 <p className="mt-1 text-xs text-slate-500">Saved with this payroll run and used on its payslips.</p>
               </div>}
-              <div className="md:col-span-4 flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3 md:col-span-2">
                 <Button type="submit" disabled={createRun.isPending || !nextPayrollPeriod || (paypalPhpEnabledForRun && (!Number.isFinite(Number(usdToPhpRate)) || Number(usdToPhpRate) <= 0))}>{createRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}Build draft payroll</Button>
                 {createRun.error && !createReviewSessions.length && <span role="alert" className="text-sm text-rose-600">{createRun.error.message}</span>}
               </div>
-              {createReviewSessions.length > 0 && <div className="md:col-span-4"><AttendanceReviewBlockerList sessions={createReviewSessions} canReviewAttendance={canReviewAttendance} /></div>}
+              {createReviewSessions.length > 0 && <div className="md:col-span-2"><AttendanceReviewBlockerList sessions={createReviewSessions} canReviewAttendance={canReviewAttendance} /></div>}
             </form>
-          </CardContent>
-        </Card>}
+          </DialogContent>
+        </Dialog>}
 
-        <Card className="border-slate-200 shadow-sm">
-          <CardHeader><CardTitle className="text-base">Payroll run history</CardTitle></CardHeader>
-          <CardContent className="grid gap-2 md:grid-cols-2">
-            {runs.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
-            {runs.error && <p role="alert" className="text-sm text-rose-600">{runs.error.message}</p>}
-            {(runs.data?.rows ?? []).map((run: any) => <button key={run.id} type="button" onClick={() => setSelectedRunId(run.id)} className={`flex items-center justify-between gap-3 rounded-lg border p-3 text-left transition ${selectedRunId === run.id ? "border-indigo-300 bg-indigo-50" : "border-slate-200 hover:bg-slate-50"}`}>
-              <span><span className="block font-semibold text-slate-900">{run.group_name_snapshot}</span><span className="mt-1 block text-xs text-slate-500">{dateLabel(run.period_start)} – {dateLabel(run.period_end)} · Payday {dateLabel(run.payday)}</span></span><StatusBadge status={run.status} />
-            </button>)}
-            {!runs.isLoading && !runs.data?.rows?.length && <div className="md:col-span-2"><EmptyState>No payroll runs yet.</EmptyState></div>}
-          </CardContent>
+        <Card className="overflow-hidden border-slate-200 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-medium text-slate-700">Show pay runs from</span>
+              <select aria-label="Filter pay runs by status" className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm" value={runStatusFilter} onChange={event => { setRunStatusFilter(event.target.value); setRunHistoryPage(1); }}>
+                <option value="all">All pay runs</option><option value="draft">Incomplete pay runs</option><option value="finalized">Finalized pay runs</option>
+              </select>
+              <select aria-label="Filter pay runs by schedule" className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm" value={runScheduleFilter} onChange={event => { setRunScheduleFilter(event.target.value); setRunHistoryPage(1); }}>
+                <option value="all">All pay schedules</option>{scheduleOptions.map((schedule: any) => <option key={schedule.id} value={schedule.id}>{schedule.name}</option>)}
+              </select>
+            </div>
+            <span className="text-xs text-slate-500">{filteredRunRows.length} {filteredRunRows.length === 1 ? "run" : "runs"}</span>
+          </div>
+          {runs.error && <p role="alert" className="m-4 text-sm text-rose-600">{runs.error.message}</p>}
+          {runs.isLoading ? <div className="p-5"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div> : filteredRunRows.length === 0
+            ? <div className="p-4"><EmptyState>{allRunRows.length ? "No pay runs match these filters." : "No payroll runs yet."}</EmptyState></div>
+            : <div className="overflow-x-auto">
+              <table className="w-full min-w-[1120px] border-collapse text-left text-xs">
+                <thead className="bg-slate-100 text-[11px] font-semibold text-slate-700">
+                  <tr>
+                    <th className="px-3 py-3">Pay period</th><th className="px-3 py-3">Payday</th><th className="px-3 py-3">Pay schedule</th>
+                    <th className="px-3 py-3 text-right">Employees</th><th className="px-3 py-3 text-right">Total hours</th>
+                    <th className="px-3 py-3 text-right">Net wages</th><th className="px-3 py-3 text-right">Gross wages</th>
+                    <th className="px-3 py-3">Status</th><th className="px-3 py-3 text-right">Payslips</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runHistoryGroups.flatMap((group: { title: string; rows: any[] }, groupIndex: number) => [
+                    <tr key={`pay-run-group-${groupIndex}`} className="bg-slate-50"><th colSpan={9} className="px-3 py-2 text-left text-xs font-semibold text-slate-700">{group.title}</th></tr>,
+                    ...group.rows.map((run: any) => {
+                      const mixedCurrency = Number(run.currency_count || 0) > 1;
+                      const amount = (value: unknown) => mixedCurrency
+                        ? <span title="This run includes more than one currency">Mixed currencies</span>
+                        : formatMoney(Number(value || 0), run.currency || "PHP");
+                      const cadence = String(run.cadence_snapshot || "schedule").replace(/_/g, " ");
+                      return <tr key={run.id} className={`border-t border-slate-100 ${selectedRunId === run.id ? "bg-emerald-50/70" : "hover:bg-slate-50"}`}>
+                        <td className="px-3 py-3">
+                          <button type="button" className="text-left font-medium text-teal-700 hover:underline" onClick={() => setSelectedRunId(run.id)}>{dateLabel(run.period_start)} – {dateLabel(run.period_end)}</button>
+                          <p className="mt-1 text-[10px] text-slate-500">{run.group_name_snapshot}</p>
+                        </td>
+                        <td className="px-3 py-3 text-slate-600">{dateLabel(run.payday)}</td>
+                        <td className="px-3 py-3"><span className="capitalize text-slate-700">{cadence}</span><p className="mt-1 text-[10px] text-slate-500">{run.group_name_snapshot}</p></td>
+                        <td className="px-3 py-3 text-right tabular-nums">{Number(run.employee_count || 0)}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{Number(run.total_hours || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{amount(run.net_wages)}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{amount(run.gross_wages)}</td>
+                        <td className="px-3 py-3"><StatusBadge status={run.status} /></td>
+                        <td className="px-3 py-3 text-right"><Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-semibold uppercase text-slate-600" onClick={() => setSelectedRunId(run.id)}>View slips</Button></td>
+                      </tr>;
+                    }),
+                  ])}
+                </tbody>
+              </table>
+            </div>}
+          {filteredRunRows.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-500">
+            <span>{(runHistoryPage - 1) * runPageSize + 1}–{Math.min(runHistoryPage * runPageSize, filteredRunRows.length)} of {filteredRunRows.length} total runs</span>
+            <div className="flex items-center gap-1">
+              <Button type="button" variant="outline" size="sm" className="h-8" disabled={runHistoryPage <= 1} onClick={() => setRunHistoryPage(1)}>First</Button>
+              <Button type="button" variant="outline" size="sm" className="h-8" disabled={runHistoryPage <= 1} onClick={() => setRunHistoryPage(page => page - 1)}>Previous</Button>
+              <span className="px-2">Page {runHistoryPage} of {runPageCount}</span>
+              <Button type="button" variant="outline" size="sm" className="h-8" disabled={runHistoryPage >= runPageCount} onClick={() => setRunHistoryPage(page => page + 1)}>Next</Button>
+              <Button type="button" variant="outline" size="sm" className="h-8" disabled={runHistoryPage >= runPageCount} onClick={() => setRunHistoryPage(runPageCount)}>Last</Button>
+            </div>
+          </div>}
         </Card>
 
         {selectedRunId != null && <Card className="border-slate-200 shadow-sm">
