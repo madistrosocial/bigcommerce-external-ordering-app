@@ -80,3 +80,4 @@
 - [BigCommerce customer-group visibility](customer-groups-bigcommerce.md) — keep category visibility group-based and native to BigCommerce; customers inherit access from their assigned group.
 - [Tiptap version alignment](tiptap-version-alignment.md) — upgrade Tiptap packages as one peer-locked set; partial bumps fail npm resolution.
 - [BigCommerce Promotions API scope](bigcommerce-promotions.md) — native promotion listing and creation require the store API account's Marketing read/modify scopes.
+- [BigCommerce variant image removal](bc-variant-image-removal.md) — variant-only uploads are not gallery images; empty-string image updates work and must be read back before success.
