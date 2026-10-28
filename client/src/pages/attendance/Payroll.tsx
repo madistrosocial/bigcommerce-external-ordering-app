@@ -439,6 +439,70 @@ function EmployeePayslipList({
   );
 }
 
+function PayrollRunEmployeeRow({
+  slip,
+  canEdit,
+  showPaypalFee,
+  onSaved,
+}: {
+  slip: PayslipForView;
+  canEdit: boolean;
+  showPaypalFee: boolean;
+  onSaved: () => void;
+}) {
+  const amountFor = (type: string) => (slip.lines ?? [])
+    .filter((line: any) => line.line_type === type)
+    .reduce((sum: number, line: any) => sum + Number(line.amount || 0), 0);
+  const feeFor = () => (slip.lines ?? [])
+    .filter((line: any) => line.line_type === "deduction" && line.source_type === "paypal_transfer_fee")
+    .reduce((sum: number, line: any) => sum + Math.abs(Number(line.amount || 0)), 0);
+  const [commission, setCommission] = useState(amountFor("commission").toFixed(2));
+  const [incentives, setIncentives] = useState(amountFor("incentive").toFixed(2));
+  const [paypalFee, setPaypalFee] = useState(feeFor().toFixed(2));
+  useEffect(() => {
+    setCommission(amountFor("commission").toFixed(2));
+    setIncentives(amountFor("incentive").toFixed(2));
+    setPaypalFee(feeFor().toFixed(2));
+  }, [slip.id, slip.lines]);
+  const save = useMutation({
+    mutationFn: () => apiJson(`/api/attendance/payroll/admin/payslips/${slip.id}/earnings`, jsonInit("PATCH", {
+      commission: Number(commission),
+      incentives: Number(incentives),
+      ...(showPaypalFee ? { paypalFee: Number(paypalFee) } : {}),
+    })),
+    onSuccess: onSaved,
+  });
+  const totalHours = Number(slip.regular_hours || 0) + Number(slip.overtime_hours || 0);
+  return <>
+    <tr className="border-t border-slate-200 hover:bg-slate-50/70">
+      <th scope="row" className="min-w-48 px-3 py-2.5 text-left font-medium text-slate-800">{slip.employee_name_snapshot}</th>
+      <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-slate-700">{totalHours.toFixed(2)}</td>
+      <td className="min-w-32 px-2 py-2">
+        {canEdit
+          ? <Input aria-label={`Commission for ${slip.employee_name_snapshot}`} className="h-9 min-w-24 text-right tabular-nums" type="number" min="0" step="0.01" value={commission} onChange={event => setCommission(event.target.value)} />
+          : <span className="block text-right tabular-nums">{formatMoney(amountFor("commission"), slip.currency)}</span>}
+      </td>
+      <td className="min-w-32 px-2 py-2">
+        {canEdit
+          ? <Input aria-label={`Incentives for ${slip.employee_name_snapshot}`} className="h-9 min-w-24 text-right tabular-nums" type="number" min="0" step="0.01" value={incentives} onChange={event => setIncentives(event.target.value)} />
+          : <span className="block text-right tabular-nums">{formatMoney(amountFor("incentive"), slip.currency)}</span>}
+      </td>
+      {showPaypalFee && <td className="min-w-32 px-2 py-2">
+        {canEdit
+          ? <Input aria-label={`PayPal fee for ${slip.employee_name_snapshot}`} className="h-9 min-w-24 text-right tabular-nums" type="number" min="0" step="0.01" value={paypalFee} onChange={event => setPaypalFee(event.target.value)} />
+          : <span className="block text-right tabular-nums">{formatMoney(feeFor(), slip.currency)}</span>}
+      </td>}
+      <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-slate-900">{formatMoney(slip.gross_amount, slip.currency)}</td>
+      {canEdit && <td className="whitespace-nowrap px-3 py-2 text-right">
+        <Button type="button" size="sm" variant="outline" className="h-8" disabled={save.isPending} onClick={() => save.mutate()}>
+          {save.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}Save
+        </Button>
+      </td>}
+    </tr>
+    {save.error && <tr><td colSpan={canEdit ? (showPaypalFee ? 7 : 6) : (showPaypalFee ? 6 : 5)} className="px-3 pb-2 text-xs text-rose-600" role="alert">{save.error.message}</td></tr>}
+  </>;
+}
+
 function SummaryMetric({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return <div className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</p><p className={`mt-1 tabular-nums ${strong ? "text-lg font-bold text-slate-900" : "font-semibold text-slate-700"}`}>{value}</p></div>;
 }
@@ -674,6 +738,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [selectedRunEmployeeId, setSelectedRunEmployeeId] = useState("");
   const [createRunDialogOpen, setCreateRunDialogOpen] = useState(false);
+  const [newRunReviewOpen, setNewRunReviewOpen] = useState(false);
   const [runStatusFilter, setRunStatusFilter] = useState("all");
   const [runScheduleFilter, setRunScheduleFilter] = useState("all");
   const [runHistoryPage, setRunHistoryPage] = useState(1);
@@ -738,6 +803,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
     onSuccess: result => {
       setUsdToPhpRate("");
       setSelectedRunId(result.run.id);
+      setNewRunReviewOpen(true);
       setCreateRunDialogOpen(false);
       refresh();
     },
@@ -1037,7 +1103,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
           </div>}
         </Card>
 
-        {selectedRunId != null && <Card className="border-slate-200 shadow-sm">
+        {selectedRunId != null && !newRunReviewOpen && <Card className="border-slate-200 shadow-sm">
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div><CardTitle className="text-base">Run details</CardTitle></div>
@@ -1055,53 +1121,45 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
             {(runDetails.error || (rebuildRun.error && !rebuildReviewSessions.length) || (finalizeRun.error && !openAttendanceSessions.length) || deleteRun.error || revertRun.error) && <p role="alert" className="text-sm text-rose-600">{runDetails.error?.message || rebuildRun.error?.message || finalizeRun.error?.message || revertRun.error?.message || deleteRun.error?.message}</p>}
             {rebuildReviewSessions.length > 0 && <AttendanceReviewBlockerList sessions={rebuildReviewSessions} canReviewAttendance={canReviewAttendance} />}
             {openAttendanceSessions.length > 0 && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4">
-              <div className="flex items-start gap-2"><Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" /><div>
-                <p className="font-semibold text-amber-950">Open attendance shifts block payroll finalization</p>
-                <p className="mt-1 text-sm text-amber-900">Verify each shift with the employee, then enter the confirmed attendance times before finalizing.</p>
-              </div></div>
-              <ul className="mt-3 space-y-2">
-                {openAttendanceSessions.map(session => <li key={session.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-white px-3 py-2">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{session.employee_name || session.employee_username || "Employee"} · {dateLabel(session.work_date)}</p>
-                    <p className="mt-0.5 text-xs text-slate-600">Session {session.session_number ?? 1} · {session.status === "on_break" ? "On break" : "Still clocked in"}</p>
-                  </div>
-                  {canCorrectAttendance
-                    ? <a href={`/attendance/logs?record=${session.id}`} className="text-sm font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900">Open attendance record</a>
-                    : <p className="text-xs text-slate-500">Ask an Attendance manager with log access to correct this shift.</p>}
-                </li>)}
-              </ul>
+              <div className="flex items-start gap-2"><Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" /><div><p className="font-semibold text-amber-950">Open attendance shifts block payroll finalization</p><p className="mt-1 text-sm text-amber-900">Verify each shift with the employee, then enter the confirmed attendance times before finalizing.</p></div></div>
+              <ul className="mt-3 space-y-2">{openAttendanceSessions.map(session => <li key={session.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-white px-3 py-2"><div><p className="text-sm font-semibold text-slate-900">{session.employee_name || session.employee_username || "Employee"} · {dateLabel(session.work_date)}</p><p className="mt-0.5 text-xs text-slate-600">Session {session.session_number ?? 1} · {session.status === "on_break" ? "On break" : "Still clocked in"}</p></div>{canCorrectAttendance ? <a href={`/attendance/logs?record=${session.id}`} className="text-sm font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900">Open attendance record</a> : <p className="text-xs text-slate-500">Ask an Attendance manager with log access to correct this shift.</p>}</li>)}</ul>
             </div>}
             {runDetails.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
             {!runDetails.isLoading && !runSlips.length && <EmptyState>This run has no payslips.</EmptyState>}
             {runSlips.length > 0 && <>
-              <div className="max-w-md">
-                <Label htmlFor="run-payslip-employee">Preview employee</Label>
-                <div className="mt-1.5 flex items-center gap-3">
-                  <select id="run-payslip-employee" className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm" value={selectedRunSlip ? String(selectedRunSlip.id) : ""} onChange={event => setSelectedRunEmployeeId(event.target.value)}>
-                    {runSlips.map((slip: any) => <option key={slip.id} value={String(slip.id)}>{slip.employee_name_snapshot}</option>)}
-                  </select>
-                  <Avatar className="h-10 w-10 shrink-0 border border-slate-200 shadow-sm">
-                    <AvatarImage
-                      src={selectedRunSlip?.avatar_thumbnail || undefined}
-                      alt={`${selectedRunSlip?.employee_name_snapshot || "Employee"} profile photo`}
-                    />
-                    <AvatarFallback className="bg-blue-100 text-sm font-semibold text-blue-700">
-                      {(selectedRunSlip?.employee_name_snapshot || "Employee").split(/\s+/).slice(0, 2).map((part: string) => part[0]).join("").toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                </div>
-              </div>
-              {selectedRunSlip && <PayStatement
-                key={selectedRunSlip.id}
-                slip={{ ...selectedRunSlip, run: runDetails.data.run }}
-                canEmail={canManage}
-                canEditEarnings={canManage && runDetails.data.run.status === "draft"}
-                onEarningsSaved={() => { void queryClient.invalidateQueries({ queryKey: ["attendance-payroll-run", selectedRunId] }); }}
-                company={invoiceRenderSettings.data}
-              />}
+              <div className="max-w-md"><Label htmlFor="run-payslip-employee">Preview employee</Label><div className="mt-1.5 flex items-center gap-3">
+                <select id="run-payslip-employee" className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm" value={selectedRunSlip ? String(selectedRunSlip.id) : ""} onChange={event => setSelectedRunEmployeeId(event.target.value)}>{runSlips.map((slip: any) => <option key={slip.id} value={String(slip.id)}>{slip.employee_name_snapshot}</option>)}</select>
+                <Avatar className="h-10 w-10 shrink-0 border border-slate-200 shadow-sm"><AvatarImage src={selectedRunSlip?.avatar_thumbnail || undefined} alt={`${selectedRunSlip?.employee_name_snapshot || "Employee"} profile photo`} /><AvatarFallback className="bg-blue-100 text-sm font-semibold text-blue-700">{(selectedRunSlip?.employee_name_snapshot || "Employee").split(/\s+/).slice(0, 2).map((part: string) => part[0]).join("").toUpperCase()}</AvatarFallback></Avatar>
+              </div></div>
+              {selectedRunSlip && <PayStatement key={selectedRunSlip.id} slip={{ ...selectedRunSlip, run: runDetails.data.run }} canEmail={canManage} canEditEarnings={canManage && runDetails.data.run.status === "draft"} onEarningsSaved={() => { void queryClient.invalidateQueries({ queryKey: ["attendance-payroll-run", selectedRunId] }); }} company={invoiceRenderSettings.data} />}
             </>}
           </CardContent>
         </Card>}
+        <Dialog open={newRunReviewOpen} onOpenChange={open => { setNewRunReviewOpen(open); if (!open) setSelectedRunId(null); }}>
+          <DialogContent className="max-h-[92vh] max-w-[min(96vw,1200px)] overflow-y-auto">
+            <DialogHeader><DialogTitle>Review new payroll run</DialogTitle><DialogDescription>Check employee hours and gross earnings, then enter any commission, incentives, and applicable PayPal fees.</DialogDescription></DialogHeader>
+            {runDetails.isLoading && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
+            {runDetails.error && <p role="alert" className="text-sm text-rose-600">{runDetails.error.message}</p>}
+            {!runDetails.isLoading && !runSlips.length && !runDetails.error && <EmptyState>This run has no payslips.</EmptyState>}
+            {runSlips.length > 0 && runDetails.data?.run && <>
+              <p className="text-sm text-slate-600">{runSlips.length} total employee{runSlips.length === 1 ? "" : "s"}</p>
+              <div className="max-w-full overflow-x-auto rounded-lg border border-slate-200">
+                <table className="w-full min-w-[900px] border-collapse text-sm">
+                  <thead className="bg-slate-50 text-xs font-semibold text-slate-600"><tr>
+                    <th scope="col" className="px-3 py-3 text-left">Employee</th>
+                    <th scope="col" className="px-3 py-3 text-right">Total Hours</th>
+                    <th scope="col" className="px-3 py-3 text-right">Commission</th>
+                    <th scope="col" className="px-3 py-3 text-right">Incentives</th>
+                    {runDetails.data.run.paypal_php_conversion_enabled && <th scope="col" className="px-3 py-3 text-right">PayPal fee</th>}
+                    <th scope="col" className="px-3 py-3 text-right">Gross Earnings</th>
+                    {canManage && runDetails.data.run.status === "draft" && <th scope="col" className="px-3 py-3 text-right">Action</th>}
+                  </tr></thead>
+                  <tbody>{runSlips.map((slip: PayslipForView) => <PayrollRunEmployeeRow key={slip.id} slip={slip} canEdit={canManage && runDetails.data.run.status === "draft"} showPaypalFee={Boolean(runDetails.data.run.paypal_php_conversion_enabled)} onSaved={() => { void queryClient.invalidateQueries({ queryKey: ["attendance-payroll-run", selectedRunId] }); }} />)}</tbody>
+                </table>
+              </div>
+            </>}
+          </DialogContent>
+        </Dialog>
         <AlertDialog open={deleteRunDialogOpen} onOpenChange={open => { if (!deleteRun.isPending) setDeleteRunDialogOpen(open); }}>
           <AlertDialogContent>
             <AlertDialogHeader>
