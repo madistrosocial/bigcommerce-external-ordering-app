@@ -961,6 +961,7 @@ export async function getProduct360Detail(input: {
         v->>'id' AS variant_id,
         COALESCE(NULLIF(v->>'sku', ''), '') AS sku,
         NULLIF(v->>'image_url', '') AS image_url,
+        COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(v->'option_values') = 'array' THEN v->'option_values' ELSE '[]'::jsonb END), 0)::int AS option_value_count,
         COALESCE(
           NULLIF((
             SELECT string_agg(

@@ -247,6 +247,22 @@ export async function deleteProduct360VariantImage(productId: number, variantId:
   return body as { success: boolean };
 }
 
+export async function updateProduct360Variant(
+  productId: number,
+  variantId: number,
+  changes: { label?: string; sku?: string; price?: number; cost_price?: number | null; inventory_level?: number },
+) {
+  const response = await fetch(`${API_BASE}/product-360/products/${productId}/variants/${variantId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(changes),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Could not save variant changes");
+  if (body.success !== true) throw new Error("BigCommerce did not confirm that the variant was saved.");
+  return body as { success: boolean; variantId: number };
+}
+
 export async function uploadProduct360PrimaryImage(productId: number, imageDataUrl: string) {
   const response = await fetch(`${API_BASE}/product-360/products/${productId}/primary-image`, {
     method: "POST",

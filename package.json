@@ -17,6 +17,7 @@
     "verify:kole-variant-sync": "tsx script/verify-kole-variant-sync.ts",
     "verify:product360-sku-availability": "tsx script/verify-product360-sku-availability.ts",
     "verify:product360-variant-images": "tsx script/verify-product360-variant-images.ts",
+    "verify:product360-variant-edits": "tsx script/verify-product360-variant-edits.ts",
     "verify:security-controls": "tsx script/verify-security-controls.ts",
     "verify:email-editor-compat": "tsx script/verify-email-editor-compat.ts",
     "verify:xlsx-uuid-boundary": "tsx script/verify-xlsx-uuid-boundary.ts",

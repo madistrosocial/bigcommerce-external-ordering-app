@@ -20,6 +20,11 @@ import { getKoleExtendedCost } from "@shared/kole-pricing";
 import { resolveBigCommerceOrderLinePrice } from "./sales-report-pricing";
 import { checkProduct360SkuAvailability } from "./product360-sku-availability";
 import { BigCommerceVariantImageError, clearBigCommerceVariantImage } from "./product360-variant-images";
+import {
+  BigCommerceVariantEditError,
+  updateBigCommerceVariantFields,
+  updateBigCommerceVariantOptionLabel,
+} from "./product360-variant-edit";
 import { parseSalesReportIds, validateSalesReportFilters } from "./sales-report-filters";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
@@ -2941,6 +2946,92 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[Product 360] variant image upload failed:", error);
       return res.status(500).json({ error: "Unable to upload the variant photo." });
+    }
+  });
+
+  app.put("/api/product-360/products/:id/variants/:variantId", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    const variantId = Number(req.params.variantId);
+    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(variantId) || variantId <= 0) {
+      return res.status(400).json({ error: "Invalid product or variant ID." });
+    }
+    const parsed = z.object({
+      label: z.string().trim().min(1).max(255).optional(),
+      sku: z.string().trim().max(255).optional(),
+      price: z.number().finite().min(0).optional(),
+      cost_price: z.number().finite().min(0).nullable().optional(),
+      inventory_level: z.number().int().min(0).optional(),
+    }).strict().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Enter a valid name, SKU, price, cost, or stock amount." });
+    const changes = parsed.data;
+    if (Object.keys(changes).length === 0) return res.status(400).json({ error: "No variant changes were provided." });
+
+    try {
+      const local = await db.execute(sql`SELECT bigcommerce_id, variants, inventory_tracking FROM products WHERE id = ${id} LIMIT 1`);
+      const product = local.rows[0] as any;
+      const bcId = Number(product?.bigcommerce_id);
+      const variants = Array.isArray(product?.variants) ? product.variants : [];
+      if (!bcId) return res.status(404).json({ error: "Product is not linked to BigCommerce." });
+      const localVariant = variants.find((item: any) => Number(item?.id) === variantId);
+      if (!localVariant) return res.status(404).json({ error: "Variant does not belong to this product." });
+      if (changes.inventory_level !== undefined && String(product.inventory_tracking).toLowerCase() !== "variant") {
+        return res.status(400).json({ error: "Stock can only be edited when BigCommerce tracks inventory by variant." });
+      }
+      if (changes.label !== undefined && (!Array.isArray(localVariant.option_values) || localVariant.option_values.length !== 1)) {
+        return res.status(400).json({ error: "The name can only be changed for a variant with one option value." });
+      }
+
+      const { storeHash, token } = await getBcCreds();
+      const bcOptions = { storeHash, token, productId: bcId, variantId };
+      const persistPatch = async (patch: Record<string, unknown>) => db.execute(sql`
+        UPDATE products p
+        SET variants = (
+          SELECT jsonb_agg(
+            CASE WHEN NULLIF(variant->>'id', '')::bigint = ${variantId}
+              THEN variant || ${JSON.stringify(patch)}::jsonb
+              ELSE variant
+            END
+            ORDER BY ordinal
+          )
+          FROM jsonb_array_elements(COALESCE(p.variants, '[]'::jsonb)) WITH ORDINALITY AS item(variant, ordinal)
+        )
+        WHERE p.id = ${id} AND p.bigcommerce_id = ${bcId}
+      `);
+
+      const fieldChanges = {
+        ...(changes.sku !== undefined ? { sku: changes.sku } : {}),
+        ...(changes.price !== undefined ? { price: changes.price } : {}),
+        ...(changes.cost_price !== undefined ? { cost_price: changes.cost_price } : {}),
+        ...(changes.inventory_level !== undefined ? { inventory_level: changes.inventory_level } : {}),
+      };
+      if (Object.keys(fieldChanges).length > 0) {
+        const updated = await updateBigCommerceVariantFields(bcOptions, fieldChanges);
+        const patch: Record<string, unknown> = {};
+        if (changes.sku !== undefined) patch.sku = updated.sku;
+        if (changes.price !== undefined) patch.price = String(updated.price);
+        if (changes.cost_price !== undefined) patch.cost_price = updated.cost_price == null ? null : String(updated.cost_price);
+        if (changes.inventory_level !== undefined) patch.stock_level = Number(updated.inventory_level);
+        await persistPatch(patch);
+      }
+
+      if (changes.label !== undefined) {
+        const updatedName = await updateBigCommerceVariantOptionLabel(bcOptions, changes.label);
+        const optionValues = localVariant.option_values.map((option: any) =>
+          Number(option?.id) === updatedName.valueId ? { ...option, label: updatedName.label } : option,
+        );
+        if (!optionValues.some((option: any) => Number(option?.id) === updatedName.valueId)) {
+          return res.status(502).json({ error: "BigCommerce saved the name, but the local option mapping is missing. Refresh the catalog to update the display." });
+        }
+        await persistPatch({ option_values: optionValues });
+      }
+
+      return res.json({ success: true, variantId });
+    } catch (error: any) {
+      if (error instanceof BigCommerceVariantEditError) {
+        return res.status(502).json({ error: error.message });
+      }
+      console.error("[Product 360] variant update failed:", error);
+      return res.status(500).json({ error: "Unable to save these variant changes." });
     }
   });
 
