@@ -47,6 +47,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import RichTextEditor from "@/components/editor/RichTextEditor";
 import {
   getProduct360Detail,
@@ -69,6 +75,7 @@ import {
 
 import { useTimeService } from "@/hooks/useTimeService";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useToast } from "@/hooks/use-toast";
 import { dateOnlyInTimeZone } from "@shared/timezone";
 import { useStore } from "@/lib/store";
 import { applyProductPhotoWatermark, loadProductPhotoWatermarkSettings } from "@/lib/product-photo-watermark";
@@ -978,6 +985,7 @@ function ProductTable({ rows, drafts = [] }: { rows: Record<string, unknown>[]; 
 export function Product360ProductsPage() {
   const [, setLocation] = useLocation();
   const currentUser = useStore((state) => state.currentUser);
+  const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [sortBy, setSortBy] = useState("bigcommerce_id");
@@ -985,29 +993,62 @@ export function Product360ProductsPage() {
   const [stockStatus, setStockStatus] = useState("");
   const [replenishmentStatus, setReplenishmentStatus] = useState("");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const query = useQuery({ queryKey: ["product-360-products", search, page, sortBy, sortDir, stockStatus, replenishmentStatus], queryFn: () => getProduct360Products({ search, page, limit: 25, sortBy, sortDir, stockStatus, replenishmentStatus }) });
   const drafts = useQuery({ queryKey: ["product-360-drafts"], queryFn: getProduct360Drafts, enabled: currentUser?.role === "admin" });
   const rows = query.data?.rows || [];
   const totalPages = Math.max(1, Math.ceil((query.data?.total || 0) / 25));
-  function exportCsv() {
-    const headers = ["Product", "SKU", "Brand", "Units sold", "Revenue", "Gross profit", "Stock", "Velocity", "Days of stock", "Status"];
-    const body = rows.map((row) => [row.name, row.sku, row.brand_name, row.units_sold, row.revenue, row.gross_profit ?? "No cost data", row.current_stock, row.sales_velocity, row.days_of_stock ?? "", getStatus(row)].map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","));
-    const blob = new Blob([[headers.join(","), ...body].join("\n")], { type: "text/csv;charset=utf-8" });
-    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "product-360-performance.csv"; link.click(); URL.revokeObjectURL(link.href);
-    void fetch("/api/reports/export-log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-      body: JSON.stringify({
-        report: "product_360",
-        view: "product-performance",
-        filters: { search, stockStatus, replenishmentStatus, page },
-        exportType: "csv",
-        rowCount: rows.length,
-      }),
-    }).catch(() => {});
+  async function exportCsv(scope: "page" | "all") {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      let exportRows = rows;
+      let rowCount = rows.length;
+      if (scope === "all") {
+        const firstPage = await getProduct360Products({
+          search, page: 0, limit: 100, sortBy, sortDir, stockStatus, replenishmentStatus,
+        });
+        exportRows = firstPage.rows;
+        const pageCount = Math.ceil(firstPage.total / firstPage.limit);
+        for (let exportPage = 1; exportPage < pageCount; exportPage += 1) {
+          const result = await getProduct360Products({
+            search, page: exportPage, limit: 100, sortBy, sortDir, stockStatus, replenishmentStatus,
+          });
+          exportRows = exportRows.concat(result.rows);
+        }
+        rowCount = exportRows.length;
+      }
+      const headers = ["Product", "SKU", "Brand", "Units sold", "Revenue", "Gross profit", "Stock", "Velocity", "Days of stock", "Status"];
+      const body = exportRows.map((row) => [row.name, row.sku, row.brand_name, row.units_sold, row.revenue, row.gross_profit ?? "No cost data", row.current_stock, row.sales_velocity, row.days_of_stock ?? "", getStatus(row)].map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","));
+      const blob = new Blob([[headers.join(","), ...body].join("\n")], { type: "text/csv;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `product-360-performance-${scope === "page" ? "current-page" : "all-products"}.csv`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      void fetch("/api/reports/export-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          report_name: "product_360",
+          view_name: "product-performance",
+          filters: { search, stockStatus, replenishmentStatus, page: scope === "page" ? page : null, export_scope: scope },
+          export_type: "csv",
+          row_count: rowCount,
+        }),
+      }).catch(() => {});
+    } catch (error) {
+      toast({
+        title: "Product export failed",
+        description: error instanceof Error ? error.message : "Could not export products.",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
   }
   return (
-    <PageFrame title="Products workspace" actions={<div className="flex flex-wrap gap-2">{currentUser?.role === "admin" && <Button size="sm" onClick={() => setLocation("/product-360/products/drafts/new")}><Plus className="mr-2 h-4 w-4" />Create Product</Button>}<Button className="sm:hidden" variant="outline" size="sm" aria-label="Toggle filters" aria-expanded={mobileFiltersOpen} onClick={() => setMobileFiltersOpen((open) => !open)}><ListFilter className="mr-2 h-4 w-4" /> Filters</Button><Button variant="outline" size="sm" onClick={exportCsv} disabled={!rows.length}><Download className="mr-2 h-4 w-4" /> Export current page</Button></div>}>
+    <PageFrame title="Products workspace" actions={<div className="flex flex-wrap gap-2">{currentUser?.role === "admin" && <Button size="sm" onClick={() => setLocation("/product-360/products/drafts/new")}><Plus className="mr-2 h-4 w-4" />Create Product</Button>}<Button className="sm:hidden" variant="outline" size="sm" aria-label="Toggle filters" aria-expanded={mobileFiltersOpen} onClick={() => setMobileFiltersOpen((open) => !open)}><ListFilter className="mr-2 h-4 w-4" /> Filters</Button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm" disabled={!rows.length || exporting}><Download className="mr-2 h-4 w-4" />{exporting ? "Exporting…" : "Export"}</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => void exportCsv("page")}>Export current page</DropdownMenuItem><DropdownMenuItem onSelect={() => void exportCsv("all")}>Export all products</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>}>
       <Card className={`${mobileFiltersOpen ? "block" : "hidden"} mb-5 border-slate-200 bg-white p-4 shadow-sm sm:block`}><div className="flex flex-col gap-3 xl:flex-row xl:items-center"><div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><Input className="pl-9" placeholder="Search product, SKU, brand, variant, or BigCommerce ID" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} /></div><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={stockStatus} onChange={(e) => { setStockStatus(e.target.value); setPage(0); }}><option value="">All stock</option><option value="low">Low stock</option><option value="healthy">Healthy stock</option></select><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={replenishmentStatus} onChange={(e) => { setReplenishmentStatus(e.target.value); setPage(0); }}><option value="">All replenishment</option><option value="urgent">Urgent</option><option value="soon">Restock soon</option><option value="overstock">Overstock</option></select><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={`${sortBy}|${sortDir}`} onChange={(e) => { const [s, d] = e.target.value.split("|"); setSortBy(s); setSortDir(d as "asc" | "desc"); setPage(0); }}><option value="bigcommerce_id|desc">Sort: newest to oldest (BigCommerce)</option><option value="units_sold|desc">Sort: units sold</option><option value="revenue|desc">Sort: revenue</option><option value="gross_profit|desc">Sort: gross profit</option><option value="sales_velocity|desc">Sort: velocity</option><option value="current_stock|asc">Sort: stock low to high</option><option value="name|asc">Sort: name</option></select></div></Card>
       <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">{query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : rows.length || drafts.data?.length ? <ProductTable rows={rows} drafts={drafts.data || []} /> : <EmptyState message="No products match these filters. Clear the search or stock and replenishment filters." />}<div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><span>{query.data?.total ? `${page * 25 + 1}–${Math.min((page + 1) * 25, query.data.total)} of ${query.data.total}` : "0 products"}{drafts.data?.length ? ` · ${drafts.data.length} drafts` : ""}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button></div></div></Card>
     </PageFrame>
