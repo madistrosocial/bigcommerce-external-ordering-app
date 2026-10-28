@@ -27,24 +27,34 @@ export async function applyProductPhotoWatermark(
   enabled: boolean,
   logoTone: "dark" | "light",
 ): Promise<string> {
-  if (!enabled) return imageDataUrl;
-  const logo = logoTone === "light" ? settings.lightLogoDataUrl : settings.darkLogoDataUrl;
-  if (!logo) throw new Error(`Automatic watermarking is on, but the ${logoTone} logo is not configured in Admin Settings.`);
-
-  const [base, overlay] = await Promise.all([
-    loadImage(imageDataUrl),
-    loadImage(logo),
-  ]);
-  if (overlay.naturalWidth !== 1200 || overlay.naturalHeight !== 1200) {
-    throw new Error("The saved watermark logo must be a 1200 × 1200 PNG.");
+  const base = await loadImage(imageDataUrl);
+  let overlay: HTMLImageElement | null = null;
+  if (enabled) {
+    const logo = logoTone === "light" ? settings.lightLogoDataUrl : settings.darkLogoDataUrl;
+    if (!logo) throw new Error(`Automatic watermarking is on, but the ${logoTone} logo is not configured in Admin Settings.`);
+    overlay = await loadImage(logo);
+    if (overlay.naturalWidth !== 1200 || overlay.naturalHeight !== 1200) {
+      throw new Error("The saved watermark logo must be a 1200 × 1200 PNG.");
+    }
   }
   const canvas = document.createElement("canvas");
-  canvas.width = base.naturalWidth;
-  canvas.height = base.naturalHeight;
+  canvas.width = 1200;
+  canvas.height = 1200;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Could not prepare the watermarked photo.");
-  context.drawImage(base, 0, 0, canvas.width, canvas.height);
-  context.drawImage(overlay, 0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  const scale = Math.min(canvas.width / base.naturalWidth, canvas.height / base.naturalHeight);
+  const imageWidth = base.naturalWidth * scale;
+  const imageHeight = base.naturalHeight * scale;
+  context.drawImage(
+    base,
+    (canvas.width - imageWidth) / 2,
+    (canvas.height - imageHeight) / 2,
+    imageWidth,
+    imageHeight,
+  );
+  if (overlay) context.drawImage(overlay, 0, 0);
   for (const quality of [0.82, 0.7, 0.58]) {
     const output = canvas.toDataURL("image/jpeg", quality);
     if (output.length <= 1_300_000) return output;
