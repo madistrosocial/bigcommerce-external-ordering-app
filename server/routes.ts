@@ -728,7 +728,19 @@ export async function registerRoutes(
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data text;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS company_role text NOT NULL DEFAULT '';
     ALTER TABLE IF EXISTS payslips ADD COLUMN IF NOT EXISTS position_snapshot text NOT NULL DEFAULT '';
+    ALTER TABLE IF EXISTS attendance_payroll_group_schedules ADD COLUMN IF NOT EXISTS paypal_php_conversion_enabled boolean NOT NULL DEFAULT false;
+    ALTER TABLE IF EXISTS payroll_runs ADD COLUMN IF NOT EXISTS paypal_php_conversion_enabled boolean NOT NULL DEFAULT false;
     ALTER TABLE IF EXISTS payroll_runs ADD COLUMN IF NOT EXISTS usd_to_php_rate numeric(12,4) NOT NULL DEFAULT 0;
+    UPDATE payroll_runs pr
+    SET paypal_php_conversion_enabled = true
+    WHERE COALESCE(pr.usd_to_php_rate, 0) > 0
+      OR EXISTS (
+        SELECT 1
+        FROM payslips p
+        JOIN payslip_line_items li ON li.payslip_id = p.id
+        WHERE p.payroll_run_id = pr.id
+          AND li.source_type = 'paypal_transfer_fee'
+      );
     UPDATE payslips AS p
     SET position_snapshot = BTRIM(u.company_role)
     FROM users AS u

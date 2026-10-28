@@ -19,6 +19,7 @@ export interface PayslipRunSnapshot {
   period_end: string;
   payday: string;
   status: string;
+  paypal_php_conversion_enabled?: boolean;
   usd_to_php_rate?: PayslipAmount;
 }
 
@@ -79,7 +80,7 @@ function formatPeso(value: number): string {
 
 function formatConversionRate(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "Not set";
-  return `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} per US$1`;
+  return `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
 }
 
 function formatHours(value: PayslipAmount): string {
@@ -153,10 +154,11 @@ export default function PayslipDocument({ payslip, branding }: PayslipDocumentPr
     .filter((date): date is string => Boolean(date))).size;
   const totalPaidHours = roundMoney(regularHours + overtimeHours);
   const conversionRate = numberValue(payslip.run?.usd_to_php_rate);
+  const paypalPhpEnabled = Boolean(payslip.run?.paypal_php_conversion_enabled);
   const netPay = numberValue(payslip.net_amount);
   const netTakeHomePhp = currency === "PHP"
     ? netPay
-    : currency === "USD" && conversionRate > 0
+    : paypalPhpEnabled && currency === "USD" && conversionRate > 0
       ? roundMoney(netPay * conversionRate)
       : null;
   const contactDetails = [
@@ -232,7 +234,7 @@ export default function PayslipDocument({ payslip, branding }: PayslipDocumentPr
         <section className="payslip-section" aria-labelledby="payslip-deductions-heading">
           <h2 id="payslip-deductions-heading">DEDUCTIONS ({currency})</h2>
           <div className="payslip-rows" data-testid="payslip-deductions">
-            <PayslipRow label="PayPal Transfer Fee" value={formatMoney(paypalFee, currency)} />
+            {paypalPhpEnabled && <PayslipRow label="PayPal Transfer Fee" value={formatMoney(paypalFee, currency)} />}
             {otherDeductions > 0 && <PayslipRow label="Other Deductions" value={formatMoney(otherDeductions, currency)} />}
             <PayslipRow label="TOTAL DEDUCTIONS" value={formatMoney(deductions, currency)} strong testId="payslip-deductions-total" />
           </div>
@@ -241,12 +243,12 @@ export default function PayslipDocument({ payslip, branding }: PayslipDocumentPr
         <section className="payslip-net" aria-label="Net pay and conversion">
           <div className="payslip-rows">
             <PayslipRow label={`NET PAY (${currency})`} value={formatMoney(netPay, currency)} strong testId="payslip-net" />
-            <PayslipRow label="Current Conversion Rate" value={formatConversionRate(conversionRate)} />
+            {paypalPhpEnabled && <PayslipRow label="Current Conversion Rate" value={formatConversionRate(conversionRate)} />}
           </div>
-          <div className="payslip-take-home">
+          {paypalPhpEnabled && <div className="payslip-take-home">
             <span>NET TAKE-HOME (PHP)</span>
             <strong data-testid="payslip-net-php">{netTakeHomePhp === null ? "—" : formatPeso(netTakeHomePhp)}</strong>
-          </div>
+          </div>}
         </section>
       </main>
 

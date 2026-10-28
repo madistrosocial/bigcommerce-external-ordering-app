@@ -890,6 +890,7 @@ export function registerAttendancePayrollRoutes(
       timezone: z.string().refine(validTimezone, "Enter a valid timezone."),
       count_from_clock_in: z.boolean().default(false),
       deduct_fixed_break_hour: z.boolean().default(false),
+      paypal_php_conversion_enabled: z.boolean().default(false),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the payroll schedule." });
@@ -914,6 +915,7 @@ export function registerAttendancePayrollRoutes(
         timezone: parsed.data.timezone,
         count_from_clock_in: parsed.data.count_from_clock_in,
         deduct_fixed_break_hour: parsed.data.deduct_fixed_break_hour,
+        paypal_php_conversion_enabled: parsed.data.paypal_php_conversion_enabled,
         updated_by: actor.id,
         updated_at: new Date(),
       };
@@ -1115,7 +1117,7 @@ export function registerAttendancePayrollRoutes(
   app.post("/api/attendance/payroll/admin/runs", canManagePayroll, async (req, res) => {
     const schema = z.object({
       role_id: z.coerce.number().int().positive(),
-      usd_to_php_rate: z.coerce.number().finite().gt(0).max(99999999.9999),
+      usd_to_php_rate: z.coerce.number().finite().min(0).max(99999999.9999).default(0),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Choose a user group and enter a valid USD to PHP rate." });
@@ -1130,6 +1132,9 @@ export function registerAttendancePayrollRoutes(
         .limit(1);
       const payrollSchedule = group?.schedule;
       if (!group || !payrollSchedule) return res.status(400).json({ error: "Configure a payroll schedule for this existing user group first." });
+      if (payrollSchedule.paypal_php_conversion_enabled && parsed.data.usd_to_php_rate <= 0) {
+        return res.status(400).json({ error: "Enter a positive USD to PHP conversion rate for this group." });
+      }
       const [latestRun] = await db.select({ payday: payrollRuns.payday }).from(payrollRuns)
         .where(eq(payrollRuns.role_id, group.id))
         .orderBy(desc(payrollRuns.payday))
@@ -1156,7 +1161,8 @@ export function registerAttendancePayrollRoutes(
           period_start: nextPeriod.period_start,
           period_end: nextPeriod.period_end,
           payday: nextPeriod.payday,
-          usd_to_php_rate: parsed.data.usd_to_php_rate.toFixed(4),
+          paypal_php_conversion_enabled: payrollSchedule.paypal_php_conversion_enabled,
+          usd_to_php_rate: payrollSchedule.paypal_php_conversion_enabled ? parsed.data.usd_to_php_rate.toFixed(4) : "0.0000",
           created_by: actor.id,
         }).returning();
         await buildDraftPayslips(tx, run);
@@ -1258,12 +1264,16 @@ export function registerAttendancePayrollRoutes(
           slip: payslips,
           run_status: payrollRuns.status,
           period_start: payrollRuns.period_start,
+          paypal_php_conversion_enabled: payrollRuns.paypal_php_conversion_enabled,
         }).from(payslips)
           .innerJoin(payrollRuns, eq(payrollRuns.id, payslips.payroll_run_id))
           .where(eq(payslips.id, id))
           .limit(1);
         if (!record) throw new PayrollRequestError(404, "Payslip not found.");
         if (record.run_status !== "draft") throw new PayrollRequestError(409, "Earnings can only be changed on a draft payroll run.");
+        if (!record.paypal_php_conversion_enabled && Number(parsed.data.paypalFee ?? 0) > 0) {
+          throw new PayrollRequestError(400, "PayPal fees are not enabled for this payroll group.");
+        }
 
         const oldLines = await tx.select().from(payslipLineItems).where(eq(payslipLineItems.payslip_id, id));
         const oldCommission = roundMoney(oldLines
@@ -1277,7 +1287,9 @@ export function registerAttendancePayrollRoutes(
           .reduce((sum: number, line: any) => sum + Math.abs(Number(line.amount)), 0));
         const commission = roundMoney(parsed.data.commission);
         const incentives = roundMoney(parsed.data.incentives);
-        const paypalFee = parsed.data.paypalFee === undefined ? oldPaypalFee : roundMoney(parsed.data.paypalFee);
+        const paypalFee = record.paypal_php_conversion_enabled
+          ? parsed.data.paypalFee === undefined ? oldPaypalFee : roundMoney(parsed.data.paypalFee)
+          : 0;
         const gross = roundMoney(Number(record.slip.gross_amount) - oldCommission - oldIncentives + commission + incentives);
         const deductions = roundMoney(Number(record.slip.deductions_amount) - oldPaypalFee + paypalFee);
         const net = roundMoney(gross - deductions);

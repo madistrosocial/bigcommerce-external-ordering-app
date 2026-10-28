@@ -604,6 +604,7 @@ export const attendancePayrollGroupSchedules = pgTable("attendance_payroll_group
   timezone: text("timezone").notNull().default("UTC"),
   count_from_clock_in: boolean("count_from_clock_in").notNull().default(false),
   deduct_fixed_break_hour: boolean("deduct_fixed_break_hour").notNull().default(false),
+  paypal_php_conversion_enabled: boolean("paypal_php_conversion_enabled").notNull().default(false),
   updated_by: integer("updated_by").references(() => users.id),
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
@@ -648,6 +649,7 @@ export const payrollRuns = pgTable("payroll_runs", {
   period_start: text("period_start").notNull(),
   period_end: text("period_end").notNull(),
   payday: text("payday").notNull(),
+  paypal_php_conversion_enabled: boolean("paypal_php_conversion_enabled").notNull().default(false),
   usd_to_php_rate: decimal("usd_to_php_rate", { precision: 12, scale: 4 }).notNull().default("0"),
   status: text("status").notNull().default("draft"), // draft | finalized
   snapshot_updated_at: timestamp("snapshot_updated_at").notNull().defaultNow(),

@@ -170,6 +170,7 @@ function PayStatement({
   const currentPaypalFee = () => (slip.lines ?? [])
     .filter((line: any) => line.line_type === "deduction" && line.source_type === "paypal_transfer_fee")
     .reduce((sum: number, line: any) => sum + Math.abs(Number(line.amount || 0)), 0);
+  const paypalPhpEnabled = Boolean(slip.run?.paypal_php_conversion_enabled);
   const [commission, setCommission] = useState("0.00");
   const [incentives, setIncentives] = useState("0.00");
   const [paypalFee, setPaypalFee] = useState("0.00");
@@ -183,7 +184,7 @@ function PayStatement({
     mutationFn: () => apiJson(`/api/attendance/payroll/admin/payslips/${slip.id}/earnings`, jsonInit("PATCH", {
       commission: Number(commission),
       incentives: Number(incentives),
-      paypalFee: Number(paypalFee),
+      ...(paypalPhpEnabled ? { paypalFee: Number(paypalFee) } : {}),
     })),
     onSuccess: onEarningsSaved,
   });
@@ -289,10 +290,10 @@ function PayStatement({
         <CardContent className="max-w-full overflow-x-auto pt-0">
           {canEditEarnings && <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p className="mb-1 text-sm font-semibold text-slate-800">Adjust this employee’s pay for the period</p>
-            <div className="grid items-end gap-3 sm:grid-cols-[1fr_1fr_1fr_auto]">
+            <div className={`grid items-end gap-3 ${paypalPhpEnabled ? "sm:grid-cols-[1fr_1fr_1fr_auto]" : "sm:grid-cols-[1fr_1fr_auto]"}`}>
               <div><Label htmlFor={`commission-${slip.id}`}>Commission</Label><Input id={`commission-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={commission} onChange={event => setCommission(event.target.value)} /></div>
               <div><Label htmlFor={`incentives-${slip.id}`}>Incentives</Label><Input id={`incentives-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={incentives} onChange={event => setIncentives(event.target.value)} /></div>
-              <div><Label htmlFor={`paypal-fee-${slip.id}`}>PayPal fee</Label><Input id={`paypal-fee-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={paypalFee} onChange={event => setPaypalFee(event.target.value)} /></div>
+              {paypalPhpEnabled && <div><Label htmlFor={`paypal-fee-${slip.id}`}>PayPal fee</Label><Input id={`paypal-fee-${slip.id}`} className="mt-1" type="number" min="0" step="0.01" value={paypalFee} onChange={event => setPaypalFee(event.target.value)} /></div>}
               <Button type="button" disabled={saveEarnings.isPending} onClick={() => saveEarnings.mutate()}>{saveEarnings.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Save amounts</Button>
             </div>
             {saveEarnings.error && <p role="alert" className="mt-2 text-sm text-rose-600">{saveEarnings.error.message}</p>}
@@ -452,6 +453,7 @@ function ScheduleEditor({ group, onSaved, readOnly = false, tone = "violet" }: {
   const [timezone, setTimezone] = useState(current?.timezone ?? "UTC");
   const [countFromClockIn, setCountFromClockIn] = useState(current?.count_from_clock_in ?? false);
   const [deductFixedBreakHour, setDeductFixedBreakHour] = useState(current?.deduct_fixed_break_hour ?? false);
+  const [paypalPhpConversionEnabled, setPaypalPhpConversionEnabled] = useState(Boolean(current?.paypal_php_conversion_enabled));
   const save = useMutation({
     mutationFn: () => apiJson(`/api/attendance/payroll/admin/groups/${group.id}/schedule`, jsonInit("PUT", {
       cadence,
@@ -461,6 +463,7 @@ function ScheduleEditor({ group, onSaved, readOnly = false, tone = "violet" }: {
       timezone,
       count_from_clock_in: countFromClockIn,
       deduct_fixed_break_hour: deductFixedBreakHour,
+      paypal_php_conversion_enabled: paypalPhpConversionEnabled,
     })),
     onSuccess: onSaved,
   });
@@ -472,6 +475,7 @@ function ScheduleEditor({ group, onSaved, readOnly = false, tone = "violet" }: {
     setTimezone(current?.timezone ?? "UTC");
     setCountFromClockIn(current?.count_from_clock_in ?? false);
     setDeductFixedBreakHour(current?.deduct_fixed_break_hour ?? false);
+    setPaypalPhpConversionEnabled(Boolean(current?.paypal_php_conversion_enabled));
   }, [group.id, current?.updated_at]);
   return (
     <div className={`schedule-card schedule-card--${tone}`}>
@@ -499,6 +503,10 @@ function ScheduleEditor({ group, onSaved, readOnly = false, tone = "violet" }: {
         <label className="schedule-card__option">
           <span className="schedule-card__option-icon"><Coffee /></span><span className="text-sm font-medium text-slate-800">Deduct a fixed 1-hour break</span>
           <Switch checked={deductFixedBreakHour} disabled={readOnly} onCheckedChange={setDeductFixedBreakHour} aria-label={`Deduct a fixed one-hour break for ${group.name}`} />
+        </label>
+        <label className="schedule-card__option">
+          <span className="schedule-card__option-icon"><CircleDollarSign /></span><span className="text-sm font-medium text-slate-800">PayPal fee and PHP conversion</span>
+          <Switch checked={paypalPhpConversionEnabled} disabled={readOnly} onCheckedChange={setPaypalPhpConversionEnabled} aria-label={`Enable PayPal fees and PHP conversion for ${group.name}`} />
         </label>
       </div>
       {!readOnly && save.error && <p role="alert" className="mt-2 text-sm text-rose-600">{save.error.message}</p>}
@@ -751,6 +759,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
   }, [config.data, runRoleId]);
   const selectedPayrollGroup = (config.data?.groups ?? []).find((group: any) => String(group.id) === runRoleId);
   const nextPayrollPeriod = selectedPayrollGroup?.next_period;
+  const paypalPhpEnabledForRun = Boolean(selectedPayrollGroup?.schedule?.paypal_php_conversion_enabled);
 
   function reviewClaim(request: any, status: "approved" | "rejected") {
     const note = window.prompt(status === "approved" ? "Optional manager note" : "Reason for rejecting this claim") ?? "";
@@ -899,7 +908,7 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
                 <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Cutoff end</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.period_end)}</p></div>
                 <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"><Label>Payday</Label><p className="mt-1 text-sm font-medium text-slate-800">{dateLabel(nextPayrollPeriod.payday)}</p></div>
               </> : <p className="text-sm text-amber-700 md:col-span-3">Configure this group’s payday anchor or twice-monthly paydays before creating a run.</p>}
-              <div className="md:col-span-2">
+              {paypalPhpEnabledForRun && <div className="md:col-span-2">
                 <Label htmlFor="payroll-usd-to-php-rate">USD to PHP rate (₱ per US$1)</Label>
                 <Input
                   id="payroll-usd-to-php-rate"
@@ -914,9 +923,9 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
                   onChange={event => setUsdToPhpRate(event.target.value)}
                 />
                 <p className="mt-1 text-xs text-slate-500">Saved with this payroll run and used on its payslips.</p>
-              </div>
+              </div>}
               <div className="md:col-span-4 flex flex-wrap items-center gap-3">
-                <Button type="submit" disabled={createRun.isPending || !nextPayrollPeriod || !Number.isFinite(Number(usdToPhpRate)) || Number(usdToPhpRate) <= 0}>{createRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}Build draft payroll</Button>
+                <Button type="submit" disabled={createRun.isPending || !nextPayrollPeriod || (paypalPhpEnabledForRun && (!Number.isFinite(Number(usdToPhpRate)) || Number(usdToPhpRate) <= 0))}>{createRun.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleDollarSign className="mr-2 h-4 w-4" />}Build draft payroll</Button>
                 {createRun.error && !createReviewSessions.length && <span role="alert" className="text-sm text-rose-600">{createRun.error.message}</span>}
               </div>
               {createReviewSessions.length > 0 && <div className="md:col-span-4"><AttendanceReviewBlockerList sessions={createReviewSessions} canReviewAttendance={canReviewAttendance} /></div>}

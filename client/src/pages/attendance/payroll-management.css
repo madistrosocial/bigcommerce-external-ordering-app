@@ -233,7 +233,7 @@
 
 .payroll-management-page .schedule-card__options {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 0.7rem;
   overflow: hidden;
   border-radius: 8px;
