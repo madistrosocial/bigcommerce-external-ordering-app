@@ -2955,28 +2955,50 @@ export async function registerRoutes(
       const bcId = Number(product?.bigcommerce_id);
       const variants = Array.isArray(product?.variants) ? product.variants : [];
       if (!bcId) return res.status(404).json({ error: "Product is not linked to BigCommerce." });
-      if (!variants.some((variant: any) => Number(variant?.id) === variantId)) {
-        return res.status(404).json({ error: "Variant does not belong to this product." });
-      }
+      const variant = variants.find((item: any) => Number(item?.id) === variantId);
+      if (!variant) return res.status(404).json({ error: "Variant does not belong to this product." });
+      const variantImageUrl = String(variant.image_url ?? "").trim();
+      if (!variantImageUrl) return res.json({ success: true });
 
       const { storeHash, token } = await getBcCreds();
-      const response = await fetch(
-        `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products/${bcId}/variants/${variantId}`,
-        {
-          method: "PUT",
-          headers: {
-            "X-Auth-Token": token,
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ image_url: "" }),
-          signal: AbortSignal.timeout(30000),
-        },
-      );
-      const payload: any = await response.json().catch(() => ({}));
-      if (!response.ok) {
+      const apiRoot = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products/${bcId}`;
+      const imagesResponse = await fetch(`${apiRoot}/images?limit=250`, {
+        headers: { "X-Auth-Token": token, Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      const imagesPayload: any = await imagesResponse.json().catch(() => ({}));
+      if (!imagesResponse.ok || !Array.isArray(imagesPayload?.data)) {
         return res.status(502).json({
-          error: payload.title || payload.detail || `BigCommerce could not remove the variant photo (${response.status}).`,
+          error: imagesPayload.title || imagesPayload.detail || `BigCommerce could not find the variant photo (${imagesResponse.status}).`,
+        });
+      }
+
+      const matchesVariant = imagesPayload.data.filter((image: any) =>
+        Array.isArray(image?.variant_ids) && image.variant_ids.some((value: unknown) => Number(value) === variantId),
+      );
+      const matchingImage = matchesVariant[0] ?? imagesPayload.data.find((image: any) =>
+        [image?.url_zoom, image?.url_standard, image?.url_thumbnail, image?.url_tiny, image?.image_url]
+          .some((url) => typeof url === "string" && url === variantImageUrl),
+      );
+      if (!matchingImage?.id) {
+        return res.status(404).json({ error: "Could not find this variant image in BigCommerce. The image was not changed." });
+      }
+      const linkedVariantIds = Array.isArray(matchingImage.variant_ids)
+        ? matchingImage.variant_ids.map(Number).filter(Number.isSafeInteger)
+        : [];
+      if (linkedVariantIds.some((linkedId: number) => linkedId !== variantId)) {
+        return res.status(409).json({ error: "This image is shared by other variants and cannot be deleted separately." });
+      }
+
+      const deleteResponse = await fetch(`${apiRoot}/images/${Number(matchingImage.id)}`, {
+        method: "DELETE",
+        headers: { "X-Auth-Token": token, Accept: "application/json" },
+        signal: AbortSignal.timeout(30000),
+      });
+      const deletePayload: any = await deleteResponse.json().catch(() => ({}));
+      if (!deleteResponse.ok) {
+        return res.status(502).json({
+          error: deletePayload.title || deletePayload.detail || `BigCommerce could not remove the variant photo (${deleteResponse.status}).`,
         });
       }
 

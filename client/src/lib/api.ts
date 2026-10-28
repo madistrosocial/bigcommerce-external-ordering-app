@@ -243,6 +243,7 @@ export async function deleteProduct360VariantImage(productId: number, variantId:
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || "Could not delete the variant photo");
+  if (body.success !== true) throw new Error("The server did not confirm that the variant photo was deleted.");
   return body as { success: boolean };
 }
 
