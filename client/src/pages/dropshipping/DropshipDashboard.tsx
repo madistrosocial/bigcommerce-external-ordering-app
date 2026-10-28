@@ -95,7 +95,7 @@ export function DropshipDashboardPanel({ embedded = false }: { embedded?: boolea
   const saveTracking = useMutation({
     mutationFn: ({ orderId, status, trackingNumber }: {
       orderId: number;
-      status: "Sent to vendor" | "Awaiting Shipment" | "Shipped";
+      status: "Awaiting Action" | "Sent to Vendor" | "Cancelled" | "Shipped";
       trackingNumber: string;
     }) => api.saveDropshipOrderTracking(orderId, { status, trackingNumber }),
     onSuccess: (_result, variables) => {

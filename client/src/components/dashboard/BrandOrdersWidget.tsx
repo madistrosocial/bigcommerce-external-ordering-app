@@ -15,7 +15,7 @@ export interface BrandOrdersWidgetOrder {
   customer_email: string | null;
   crm_customer_id: number | null;
   order_total: string | null;
-  dropship_status?: "Sent to vendor" | "Awaiting Shipment" | "Shipped" | null;
+  dropship_status?: "Awaiting Action" | "Sent to Vendor" | "Cancelled" | "Shipped" | null;
   tracking_number?: string | null;
 }
 
@@ -61,7 +61,7 @@ export interface BrandOrdersWidgetProps {
   onRemoveBrand?: (brandId: number) => void;
   onMetricClick?: (brand: BrandOrdersWidgetBrand, metric: BrandOrdersMetricKey) => void;
   onOrderClick?: (order: BrandOrdersWidgetOrder) => void;
-  onSaveTracking?: (orderId: number, status: "Sent to vendor" | "Awaiting Shipment" | "Shipped", trackingNumber: string) => void;
+  onSaveTracking?: (orderId: number, status: "Awaiting Action" | "Sent to Vendor" | "Cancelled" | "Shipped", trackingNumber: string) => void;
 }
 
 const metricLabels: Record<BrandOrdersMetricKey, { title: string; caption: string }> = {
@@ -297,16 +297,17 @@ export function BrandOrdersWidget({
                                   <select
                                     aria-label={`Dropship status for order ${order.order_number}`}
                                     className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[10px] text-slate-800 disabled:bg-slate-50"
-                                    value={order.dropship_status || "Sent to vendor"}
+                                    value={order.dropship_status || "Awaiting Action"}
                                     disabled={!canManageTracking || !onSaveTracking}
                                     onChange={(event) => onSaveTracking?.(
                                       order.bigcommerce_order_id,
-                                      event.target.value as "Sent to vendor" | "Awaiting Shipment" | "Shipped",
+                                      event.target.value as "Awaiting Action" | "Sent to Vendor" | "Cancelled" | "Shipped",
                                       order.tracking_number || "",
                                     )}
                                   >
-                                    <option>Sent to vendor</option>
-                                    <option>Awaiting Shipment</option>
+                                    <option>Awaiting Action</option>
+                                    <option>Sent to Vendor</option>
+                                    <option>Cancelled</option>
                                     <option>Shipped</option>
                                   </select>
                                 </td>
@@ -323,7 +324,7 @@ export function BrandOrdersWidget({
                                       if (trackingNumber !== (order.tracking_number || "")) {
                                         onSaveTracking?.(
                                           order.bigcommerce_order_id,
-                                          order.dropship_status || "Sent to vendor",
+                                          order.dropship_status || "Awaiting Action",
                                           trackingNumber,
                                         );
                                       }

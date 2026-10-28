@@ -8131,12 +8131,30 @@ export async function registerRoutes(
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS dropship_order_tracking (
       bigcommerce_order_id integer PRIMARY KEY,
-      status text NOT NULL DEFAULT 'Sent to vendor'
-        CHECK (status IN ('Sent to vendor', 'Awaiting Shipment', 'Shipped')),
+      status text NOT NULL DEFAULT 'Awaiting Action'
+        CHECK (status IN ('Awaiting Action', 'Sent to Vendor', 'Cancelled', 'Shipped')),
       tracking_number text NOT NULL DEFAULT '',
       updated_by_user_id integer REFERENCES users(id) ON DELETE SET NULL,
       updated_at timestamp NOT NULL DEFAULT NOW()
     )
+  `));
+  await db.execute(sql.raw(`
+    DO $dropship_order_tracking_status_migration$
+    BEGIN
+      ALTER TABLE dropship_order_tracking
+        ALTER COLUMN status SET DEFAULT 'Awaiting Action';
+      ALTER TABLE dropship_order_tracking
+        DROP CONSTRAINT IF EXISTS dropship_order_tracking_status_check;
+      ALTER TABLE dropship_order_tracking
+        DROP CONSTRAINT IF EXISTS dropship_order_tracking_status_allowed_check;
+      UPDATE dropship_order_tracking
+        SET status = 'Sent to Vendor'
+        WHERE status IN ('Sent to vendor', 'Awaiting Shipment');
+      ALTER TABLE dropship_order_tracking
+        ADD CONSTRAINT dropship_order_tracking_status_allowed_check
+        CHECK (status IN ('Awaiting Action', 'Sent to Vendor', 'Cancelled', 'Shipped'));
+    END
+    $dropship_order_tracking_status_migration$;
   `));
 
   app.get("/api/dropshipping/dashboard/brands", requirePermission("dropshipping_dashboard", "view"), async (_req, res) => {
@@ -8221,7 +8239,7 @@ export async function registerRoutes(
 
   app.put("/api/dropshipping/dashboard/orders/:orderId/tracking", requirePermission("dropshipping_catalog", "manage"), async (req, res) => {
     const parsed = z.object({
-      status: z.enum(["Sent to vendor", "Awaiting Shipment", "Shipped"]),
+      status: z.enum(["Awaiting Action", "Sent to Vendor", "Cancelled", "Shipped"]),
       trackingNumber: z.string().trim().max(200),
     }).safeParse(req.body);
     const orderId = Number(req.params.orderId);

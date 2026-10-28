@@ -401,7 +401,7 @@ export interface DropshipDashboardOrder {
   customer_email: string | null;
   crm_customer_id: number | null;
   order_total: string | null;
-  dropship_status?: "Sent to vendor" | "Awaiting Shipment" | "Shipped" | null;
+  dropship_status?: "Awaiting Action" | "Sent to Vendor" | "Cancelled" | "Shipped" | null;
   tracking_number?: string | null;
 }
 
@@ -670,7 +670,7 @@ export function getDropshipDashboardOrders(brandId: number, metric: "today" | "y
 }
 
 export function saveDropshipOrderTracking(orderId: number, data: {
-  status: "Sent to vendor" | "Awaiting Shipment" | "Shipped";
+  status: "Awaiting Action" | "Sent to Vendor" | "Cancelled" | "Shipped";
   trackingNumber: string;
 }) {
   return dropshipRequest<{ success: true }>(`/dropshipping/dashboard/orders/${orderId}/tracking`, {

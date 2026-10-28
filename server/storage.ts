@@ -52,7 +52,7 @@ export interface DropshipDashboardOrder {
   customer_email: string | null;
   crm_customer_id: number | null;
   order_total: string | null;
-  dropship_status: "Sent to vendor" | "Awaiting Shipment" | "Shipped" | null;
+  dropship_status: "Awaiting Action" | "Sent to Vendor" | "Cancelled" | "Shipped" | null;
   tracking_number: string | null;
 }
 
