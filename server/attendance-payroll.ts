@@ -456,6 +456,10 @@ async function fetchRunDetails(runId: number) {
     .where(eq(payslips.payroll_run_id, runId))
     .orderBy(asc(payslips.employee_name_snapshot));
   const slips = slipRows.map(({ slip, employee_email }) => ({ ...slip, employee_email }));
+  const avatars = slips.length
+    ? await storage.getUserAvatarThumbnails(slips.map((slip) => slip.user_id))
+    : [];
+  const avatarByUserId = new Map(avatars.map((avatar) => [avatar.user_id, avatar.avatar_thumbnail]));
   const slipIds = slips.map((slip) => slip.id);
   const lines = slipIds.length
     ? await db.select().from(payslipLineItems)
@@ -482,6 +486,7 @@ async function fetchRunDetails(runId: number) {
       const slipLines = linesBySlip.get(slip.id) ?? [];
       return {
         ...slip,
+        avatar_thumbnail: avatarByUserId.get(slip.user_id) ?? null,
         hourly_rate: resolvePayslipHourlyRate(slip, slipLines, profileRateByUser.get(slip.user_id)),
         lines: slipLines,
       };

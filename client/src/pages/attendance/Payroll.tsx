@@ -983,9 +983,20 @@ function PayrollPage({ mode, section = "overview" }: { mode: "employee" | "manag
             {runSlips.length > 0 && <>
               <div className="max-w-md">
                 <Label htmlFor="run-payslip-employee">Preview employee</Label>
-                <select id="run-payslip-employee" className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" value={selectedRunSlip ? String(selectedRunSlip.id) : ""} onChange={event => setSelectedRunEmployeeId(event.target.value)}>
-                  {runSlips.map((slip: any) => <option key={slip.id} value={String(slip.id)}>{slip.employee_name_snapshot}</option>)}
-                </select>
+                <div className="mt-1.5 flex items-center gap-3">
+                  <select id="run-payslip-employee" className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm" value={selectedRunSlip ? String(selectedRunSlip.id) : ""} onChange={event => setSelectedRunEmployeeId(event.target.value)}>
+                    {runSlips.map((slip: any) => <option key={slip.id} value={String(slip.id)}>{slip.employee_name_snapshot}</option>)}
+                  </select>
+                  <Avatar className="h-10 w-10 shrink-0 border border-slate-200 shadow-sm">
+                    <AvatarImage
+                      src={selectedRunSlip?.avatar_thumbnail || undefined}
+                      alt={`${selectedRunSlip?.employee_name_snapshot || "Employee"} profile photo`}
+                    />
+                    <AvatarFallback className="bg-blue-100 text-sm font-semibold text-blue-700">
+                      {(selectedRunSlip?.employee_name_snapshot || "Employee").split(/\s+/).slice(0, 2).map((part: string) => part[0]).join("").toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                </div>
               </div>
               {selectedRunSlip && <PayStatement
                 key={selectedRunSlip.id}
