@@ -2943,6 +2943,64 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/product-360/products/:id/variants/:variantId/image", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    const variantId = Number(req.params.variantId);
+    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(variantId) || variantId <= 0) {
+      return res.status(400).json({ error: "Invalid product or variant ID." });
+    }
+    try {
+      const local = await db.execute(sql`SELECT bigcommerce_id, variants FROM products WHERE id = ${id} LIMIT 1`);
+      const product = local.rows[0] as any;
+      const bcId = Number(product?.bigcommerce_id);
+      const variants = Array.isArray(product?.variants) ? product.variants : [];
+      if (!bcId) return res.status(404).json({ error: "Product is not linked to BigCommerce." });
+      if (!variants.some((variant: any) => Number(variant?.id) === variantId)) {
+        return res.status(404).json({ error: "Variant does not belong to this product." });
+      }
+
+      const { storeHash, token } = await getBcCreds();
+      const response = await fetch(
+        `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products/${bcId}/variants/${variantId}`,
+        {
+          method: "PUT",
+          headers: {
+            "X-Auth-Token": token,
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ image_url: "" }),
+          signal: AbortSignal.timeout(30000),
+        },
+      );
+      const payload: any = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return res.status(502).json({
+          error: payload.title || payload.detail || `BigCommerce could not remove the variant photo (${response.status}).`,
+        });
+      }
+
+      await db.execute(sql`
+        UPDATE products p
+        SET variants = (
+          SELECT jsonb_agg(
+            CASE WHEN NULLIF(variant->>'id', '')::bigint = ${variantId}
+              THEN jsonb_set(variant, '{image_url}', '""'::jsonb, true)
+              ELSE variant
+            END
+            ORDER BY ordinal
+          )
+          FROM jsonb_array_elements(COALESCE(p.variants, '[]'::jsonb)) WITH ORDINALITY AS item(variant, ordinal)
+        )
+        WHERE p.id = ${id} AND p.bigcommerce_id = ${bcId}
+      `);
+      return res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Product 360] variant image deletion failed:", error);
+      return res.status(500).json({ error: "Unable to delete the variant photo." });
+    }
+  });
+
   app.post("/api/product-360/products/:id/primary-image", requireAdmin, async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid product ID." });

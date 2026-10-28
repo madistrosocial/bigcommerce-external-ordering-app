@@ -236,6 +236,16 @@ export async function uploadProduct360VariantImage(productId: number, variantId:
   return body as { success: boolean; imageUrl: string };
 }
 
+export async function deleteProduct360VariantImage(productId: number, variantId: number) {
+  const response = await fetch(`${API_BASE}/product-360/products/${productId}/variants/${variantId}/image`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Could not delete the variant photo");
+  return body as { success: boolean };
+}
+
 export async function uploadProduct360PrimaryImage(productId: number, imageDataUrl: string) {
   const response = await fetch(`${API_BASE}/product-360/products/${productId}/primary-image`, {
     method: "POST",
