@@ -994,22 +994,105 @@ function ProductTable({ rows, drafts = [] }: { rows: Record<string, unknown>[]; 
   </tbody></table></div>;
 }
 
+const PRODUCT_360_PRODUCTS_STATE_KEY = "product-360-products-list-state";
+const PRODUCT_360_PRODUCT_SORTS = ["bigcommerce_id", "units_sold", "revenue", "gross_profit", "sales_velocity", "current_stock", "name"] as const;
+
+type Product360ProductsListState = {
+  search: string;
+  brand: string;
+  page: number;
+  sortBy: string;
+  sortDir: "asc" | "desc";
+  stockStatus: string;
+  replenishmentStatus: string;
+};
+
+function readProduct360ProductsListState(): Product360ProductsListState {
+  const fallback: Product360ProductsListState = {
+    search: "",
+    brand: "",
+    page: 0,
+    sortBy: "bigcommerce_id",
+    sortDir: "desc",
+    stockStatus: "",
+    replenishmentStatus: "",
+  };
+  if (typeof window === "undefined") return fallback;
+  try {
+    const saved = JSON.parse(window.sessionStorage.getItem(PRODUCT_360_PRODUCTS_STATE_KEY) || "null");
+    if (!saved || typeof saved !== "object") return fallback;
+    return {
+      search: typeof saved.search === "string" ? saved.search : fallback.search,
+      brand: typeof saved.brand === "string" ? saved.brand : fallback.brand,
+      page: Number.isInteger(saved.page) && saved.page >= 0 ? saved.page : fallback.page,
+      sortBy: PRODUCT_360_PRODUCT_SORTS.includes(saved.sortBy) ? saved.sortBy : fallback.sortBy,
+      sortDir: saved.sortDir === "asc" ? "asc" : "desc",
+      stockStatus: ["", "low", "healthy"].includes(saved.stockStatus) ? saved.stockStatus : fallback.stockStatus,
+      replenishmentStatus: ["", "urgent", "soon", "overstock"].includes(saved.replenishmentStatus)
+        ? saved.replenishmentStatus
+        : fallback.replenishmentStatus,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export function Product360ProductsPage() {
   const [, setLocation] = useLocation();
   const currentUser = useStore((state) => state.currentUser);
   const { toast } = useToast();
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(0);
-  const [sortBy, setSortBy] = useState("bigcommerce_id");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [stockStatus, setStockStatus] = useState("");
-  const [replenishmentStatus, setReplenishmentStatus] = useState("");
+  const [initialListState] = useState(readProduct360ProductsListState);
+  const [search, setSearch] = useState(initialListState.search);
+  const [brand, setBrand] = useState(initialListState.brand);
+  const [page, setPage] = useState(initialListState.page);
+  const [sortBy, setSortBy] = useState(initialListState.sortBy);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(initialListState.sortDir);
+  const [stockStatus, setStockStatus] = useState(initialListState.stockStatus);
+  const [replenishmentStatus, setReplenishmentStatus] = useState(initialListState.replenishmentStatus);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const query = useQuery({ queryKey: ["product-360-products", search, page, sortBy, sortDir, stockStatus, replenishmentStatus], queryFn: () => getProduct360Products({ search, page, limit: 25, sortBy, sortDir, stockStatus, replenishmentStatus }) });
+  const brandOptionsQuery = useQuery({
+    queryKey: ["product-360-bigcommerce-brands"],
+    queryFn: getProduct360BrandOptions,
+    staleTime: 60 * 60 * 1000,
+  });
+  const brandOptions = brandOptionsQuery.data || [];
+  const query = useQuery({ queryKey: ["product-360-products", search, brand, page, sortBy, sortDir, stockStatus, replenishmentStatus], queryFn: () => getProduct360Products({ search, brand, page, limit: 25, sortBy, sortDir, stockStatus, replenishmentStatus }) });
   const drafts = useQuery({ queryKey: ["product-360-drafts"], queryFn: getProduct360Drafts, enabled: currentUser?.role === "admin" });
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(PRODUCT_360_PRODUCTS_STATE_KEY, JSON.stringify({
+        search,
+        brand,
+        page,
+        sortBy,
+        sortDir,
+        stockStatus,
+        replenishmentStatus,
+      }));
+    } catch {
+      // Keep the list usable if browser storage is unavailable.
+    }
+  }, [search, brand, page, sortBy, sortDir, stockStatus, replenishmentStatus]);
   const rows = query.data?.rows || [];
+  const visibleDrafts = (drafts.data || []).filter((draft) => {
+    const draftBrand = String(draft.data.brand_name || "");
+    if (brand && draftBrand.toLocaleLowerCase() !== brand.toLocaleLowerCase()) return false;
+    if (stockStatus || replenishmentStatus) return false;
+    if (!search.trim()) return true;
+    return JSON.stringify(draft.data).toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
+  });
   const totalPages = Math.max(1, Math.ceil((query.data?.total || 0) / 25));
+  const hasActiveFilters = Boolean(search || brand || stockStatus || replenishmentStatus);
+  const clearFilters = () => {
+    setSearch("");
+    setBrand("");
+    setStockStatus("");
+    setReplenishmentStatus("");
+    setSortBy("bigcommerce_id");
+    setSortDir("desc");
+    setPage(0);
+  };
   async function exportCsv(scope: "page" | "all") {
     if (exporting) return;
     setExporting(true);
@@ -1018,13 +1101,13 @@ export function Product360ProductsPage() {
       let rowCount = rows.length;
       if (scope === "all") {
         const firstPage = await getProduct360Products({
-          search, page: 0, limit: 100, sortBy, sortDir, stockStatus, replenishmentStatus,
+          search, brand, page: 0, limit: 100, sortBy, sortDir, stockStatus, replenishmentStatus,
         });
         exportRows = firstPage.rows;
         const pageCount = Math.ceil(firstPage.total / firstPage.limit);
         for (let exportPage = 1; exportPage < pageCount; exportPage += 1) {
           const result = await getProduct360Products({
-            search, page: exportPage, limit: 100, sortBy, sortDir, stockStatus, replenishmentStatus,
+              search, brand, page: exportPage, limit: 100, sortBy, sortDir, stockStatus, replenishmentStatus,
           });
           exportRows = exportRows.concat(result.rows);
         }
@@ -1044,7 +1127,7 @@ export function Product360ProductsPage() {
         body: JSON.stringify({
           report_name: "product_360",
           view_name: "product-performance",
-          filters: { search, stockStatus, replenishmentStatus, page: scope === "page" ? page : null, export_scope: scope },
+          filters: { search, brand, stockStatus, replenishmentStatus, page: scope === "page" ? page : null, export_scope: scope },
           export_type: "csv",
           row_count: rowCount,
         }),
@@ -1061,8 +1144,21 @@ export function Product360ProductsPage() {
   }
   return (
     <PageFrame title="Products workspace" actions={<div className="flex flex-wrap gap-2">{currentUser?.role === "admin" && <Button size="sm" onClick={() => setLocation("/product-360/products/drafts/new")}><Plus className="mr-2 h-4 w-4" />Create Product</Button>}<Button className="sm:hidden" variant="outline" size="sm" aria-label="Toggle filters" aria-expanded={mobileFiltersOpen} onClick={() => setMobileFiltersOpen((open) => !open)}><ListFilter className="mr-2 h-4 w-4" /> Filters</Button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm" disabled={!rows.length || exporting}><Download className="mr-2 h-4 w-4" />{exporting ? "Exporting…" : "Export"}</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => void exportCsv("page")}>Export current page</DropdownMenuItem><DropdownMenuItem onSelect={() => void exportCsv("all")}>Export all products</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>}>
-      <Card className={`${mobileFiltersOpen ? "block" : "hidden"} mb-5 border-slate-200 bg-white p-4 shadow-sm sm:block`}><div className="flex flex-col gap-3 xl:flex-row xl:items-center"><div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><Input className="pl-9" placeholder="Search product, SKU, brand, variant, or BigCommerce ID" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} /></div><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={stockStatus} onChange={(e) => { setStockStatus(e.target.value); setPage(0); }}><option value="">All stock</option><option value="low">Low stock</option><option value="healthy">Healthy stock</option></select><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={replenishmentStatus} onChange={(e) => { setReplenishmentStatus(e.target.value); setPage(0); }}><option value="">All replenishment</option><option value="urgent">Urgent</option><option value="soon">Restock soon</option><option value="overstock">Overstock</option></select><select className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={`${sortBy}|${sortDir}`} onChange={(e) => { const [s, d] = e.target.value.split("|"); setSortBy(s); setSortDir(d as "asc" | "desc"); setPage(0); }}><option value="bigcommerce_id|desc">Sort: newest to oldest (BigCommerce)</option><option value="units_sold|desc">Sort: units sold</option><option value="revenue|desc">Sort: revenue</option><option value="gross_profit|desc">Sort: gross profit</option><option value="sales_velocity|desc">Sort: velocity</option><option value="current_stock|asc">Sort: stock low to high</option><option value="name|asc">Sort: name</option></select></div></Card>
-      <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">{query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : rows.length || drafts.data?.length ? <ProductTable rows={rows} drafts={drafts.data || []} /> : <EmptyState message="No products match these filters. Clear the search or stock and replenishment filters." />}<div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><span>{query.data?.total ? `${page * 25 + 1}–${Math.min((page + 1) * 25, query.data.total)} of ${query.data.total}` : "0 products"}{drafts.data?.length ? ` · ${drafts.data.length} drafts` : ""}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button></div></div></Card>
+      <Card className={`${mobileFiltersOpen ? "block" : "hidden"} mb-5 border-slate-200 bg-white p-4 shadow-sm sm:block`}>
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+          <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><Input className="pl-9" placeholder="Search product, SKU, brand, variant, or BigCommerce ID" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} /></div>
+          <select aria-label="Filter by brand" className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={brand} onChange={(e) => { setBrand(e.target.value); setPage(0); }} disabled={brandOptionsQuery.isLoading || brandOptionsQuery.isError} title={brandOptionsQuery.isError ? "Could not load brands. Run catalog sync and try again." : undefined}>
+            <option value="">All brands</option>
+            {brandOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+          <select aria-label="Filter by stock status" className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={stockStatus} onChange={(e) => { setStockStatus(e.target.value); setPage(0); }}><option value="">All stock</option><option value="low">Low stock</option><option value="healthy">Healthy stock</option></select>
+          <select aria-label="Filter by replenishment status" className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={replenishmentStatus} onChange={(e) => { setReplenishmentStatus(e.target.value); setPage(0); }}><option value="">All replenishment</option><option value="urgent">Urgent</option><option value="soon">Restock soon</option><option value="overstock">Overstock</option></select>
+          <select aria-label="Sort products" className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" value={`${sortBy}|${sortDir}`} onChange={(e) => { const [s, d] = e.target.value.split("|"); setSortBy(s); setSortDir(d as "asc" | "desc"); setPage(0); }}><option value="bigcommerce_id|desc">Sort: newest to oldest (BigCommerce)</option><option value="units_sold|desc">Sort: units sold</option><option value="revenue|desc">Sort: revenue</option><option value="gross_profit|desc">Sort: gross profit</option><option value="sales_velocity|desc">Sort: velocity</option><option value="current_stock|asc">Sort: stock low to high</option><option value="name|asc">Sort: name</option></select>
+          {hasActiveFilters && <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={clearFilters}>Clear filters</Button>}
+        </div>
+        {brandOptionsQuery.isError && <p role="status" className="mt-2 text-xs text-amber-700">Brand options are unavailable. Run Product 360 catalog sync to load them.</p>}
+      </Card>
+      <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">{query.isLoading ? <LoadingState /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : rows.length || visibleDrafts.length ? <ProductTable rows={rows} drafts={visibleDrafts} /> : <EmptyState message="No products match these filters. Clear the search or filters." />}<div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><span>{query.data?.total ? `${page * 25 + 1}–${Math.min((page + 1) * 25, query.data.total)} of ${query.data.total}` : "0 products"}{visibleDrafts.length ? ` · ${visibleDrafts.length} drafts` : ""}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button></div></div></Card>
     </PageFrame>
   );
 }

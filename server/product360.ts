@@ -904,6 +904,7 @@ export async function getProduct360Products(input: {
   dateFrom?: unknown;
   dateTo?: unknown;
   search?: unknown;
+  brand?: unknown;
   stockStatus?: unknown;
   replenishmentStatus?: unknown;
   page?: unknown;
@@ -913,6 +914,7 @@ export async function getProduct360Products(input: {
 }) {
   const range = await dateRange(input.dateFrom, input.dateTo);
   const search = safeSearch(input.search);
+  const brand = String(input.brand ?? "").trim().slice(0, 100);
   const stockStatus = String(input.stockStatus ?? "");
   const replenishmentStatus = String(input.replenishmentStatus ?? "");
   const page = Math.max(0, Number(input.page) || 0);
@@ -933,6 +935,7 @@ export async function getProduct360Products(input: {
   const searchCondition = search
     ? `AND (name ILIKE ${quote(`%${search}%`)} ESCAPE E'\\\\' OR sku ILIKE ${quote(`%${search}%`)} ESCAPE E'\\\\' OR brand_name ILIKE ${quote(`%${search}%`)} ESCAPE E'\\\\' OR bigcommerce_id::text ILIKE ${quote(`%${search}%`)} ESCAPE E'\\\\' OR variants::text ILIKE ${quote(`%${search}%`)} ESCAPE E'\\\\')`
     : "";
+  const brandCondition = brand ? `AND brand_name = ${quote(brand)}` : "";
   const stockCondition = stockStatus === "low"
     ? "AND current_stock <= 10"
     : stockStatus === "healthy"
@@ -953,6 +956,7 @@ export async function getProduct360Products(input: {
     FROM (${base}) product_base
     WHERE 1=1
       ${searchCondition}
+      ${brandCondition}
       ${stockCondition}
       ${replenishCondition}
     ORDER BY ${sortBy} ${sortDir} NULLS LAST, name ASC
