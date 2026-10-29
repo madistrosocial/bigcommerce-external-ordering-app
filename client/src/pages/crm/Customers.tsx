@@ -916,27 +916,7 @@ export default function CRMCustomers() {
                           </div>
                           {personName && <p className="mt-0.5 truncate text-[11px] text-slate-500">{personName}</p>}
                           {(cityVal || stateVal) && <p className="mt-1 flex items-center gap-1 truncate text-[10px] text-slate-400"><MapPin className="h-3 w-3 shrink-0" />{[cityVal, stateVal].filter(Boolean).join(", ")}</p>}
-                          {(c.primary_rep_name || c.secondary_rep_name) && (
-                            <div className="mt-1 flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-[10px] text-slate-500">
-                              {c.primary_rep_name && (
-                                <span className="inline-flex min-w-0 flex-1 items-center gap-1">
-                                  <User className="h-3 w-3 shrink-0" aria-hidden="true" />
-                                  <span className="truncate">{c.primary_rep_name}</span>
-                                </span>
-                              )}
-                              {c.secondary_rep_name && (
-                                <span className="inline-flex min-w-0 flex-1 items-center gap-1">
-                                  <User className="h-3 w-3 shrink-0" aria-hidden="true" />
-                                  <span className="truncate">{c.secondary_rep_name}</span>
-                                </span>
-                              )}
-                            </div>
-                          )}
                         </div>
-                      </div>
-                      <div className="mt-2.5 flex flex-wrap items-center gap-1">
-                        <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${healthStyle}`}>{health || "Health n/a"}</span>
-                        <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700">{(c.lifetime_orders ?? 0).toLocaleString()} orders</span>
                       </div>
                     </div>
                     <div className="flex min-w-0 flex-col border-l border-slate-100 pl-3">
@@ -969,6 +949,26 @@ export default function CRMCustomers() {
                         )}
                       </div>
                     </div>
+                  </div>
+                  {(c.primary_rep_name || c.secondary_rep_name) && (
+                    <div className="mt-2 flex w-full min-w-0 items-center gap-3 overflow-hidden whitespace-nowrap text-[10px] text-slate-500">
+                      {c.primary_rep_name && (
+                        <span className="inline-flex min-w-0 flex-1 items-center gap-1">
+                          <User className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          <span className="truncate">{c.primary_rep_name}</span>
+                        </span>
+                      )}
+                      {c.secondary_rep_name && (
+                        <span className="inline-flex min-w-0 flex-1 items-center gap-1">
+                          <User className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          <span className="truncate">{c.secondary_rep_name}</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1">
+                    <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${healthStyle}`}>{health || "Health n/a"}</span>
+                    <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700">{(c.lifetime_orders ?? 0).toLocaleString()} orders</span>
                   </div>
                 </article>
               );
