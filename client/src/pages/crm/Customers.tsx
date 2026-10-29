@@ -904,19 +904,17 @@ export default function CRMCustomers() {
                   onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLocation(`/crm/customers/${c.id}`); } }}
                   className="cursor-pointer rounded-2xl border border-slate-200/90 bg-white p-3 shadow-[0_2px_8px_rgba(15,23,42,0.045)] transition-colors active:bg-slate-50"
                 >
-                  <div className="flex min-w-0 items-center gap-1">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold ${getCustomerAvatarColor(c.id)}`}>{initials}</div>
                     <h2 className="min-w-0 flex-1 truncate text-[13px] font-bold leading-tight text-slate-900">{c.company || personName || "—"}</h2>
                     {c.inactive_at && <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">Inactive</span>}
                     {c.account_type && c.account_type !== "customer" && <span className="shrink-0 rounded-full bg-cyan-50 px-1.5 py-0.5 text-[9px] font-bold capitalize text-cyan-700">{c.account_type}</span>}
                   </div>
-                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,0.68fr)] gap-3">
+                  <div className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,0.68fr)] gap-3">
                     <div className="min-w-0">
-                      <div className="flex items-start gap-2.5">
-                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold ${getCustomerAvatarColor(c.id)}`}>{initials}</div>
-                        <div className="min-w-0 flex-1 pt-0.5">
-                          {c.company && personName && <p className="truncate text-[11px] text-slate-500">{personName}</p>}
-                          {(cityVal || stateVal) && <p className="mt-1 flex items-center gap-1 truncate text-[10px] text-slate-400"><MapPin className="h-3 w-3 shrink-0" />{[cityVal, stateVal].filter(Boolean).join(", ")}</p>}
-                        </div>
+                      <div className="min-w-0 pt-0.5">
+                        {c.company && personName && <p className="truncate text-[11px] text-slate-500">{personName}</p>}
+                        {(cityVal || stateVal) && <p className="mt-1 flex items-center gap-1 truncate text-[10px] text-slate-400"><MapPin className="h-3 w-3 shrink-0" />{[cityVal, stateVal].filter(Boolean).join(", ")}</p>}
                       </div>
                       {(c.primary_rep_name || c.secondary_rep_name) && (
                         <div className="mt-2 flex min-w-0 items-center gap-3 overflow-hidden whitespace-nowrap text-[10px] text-slate-500">
