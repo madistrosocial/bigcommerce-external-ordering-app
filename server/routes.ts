@@ -25,6 +25,12 @@ import {
   updateBigCommerceVariantFields,
   updateBigCommerceVariantOptionLabel,
 } from "./product360-variant-edit";
+import {
+  ensureProduct360HistoryTable,
+  product360HistoryValuesEqual,
+  recordProduct360History,
+  type Product360HistoryEntry,
+} from "./product360-history";
 import { parseSalesReportIds, validateSalesReportFilters } from "./sales-report-filters";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
@@ -121,6 +127,62 @@ import {
 import { getAttendancePayBreakdowns, registerAttendancePayrollRoutes } from "./attendance-payroll";
 import { lookupActivityLogLocation, normalizeClientIp } from "./activity-log-location";
 import { loginRateLimit, passwordResetRateLimit } from "./security";
+
+const PRODUCT_360_FIELD_LABELS: Record<string, string> = {
+  name: "Product name",
+  sku: "SKU",
+  description: "Description",
+  price: "Price",
+  cost_price: "Cost",
+  retail_price: "Retail price",
+  sale_price: "Sale price",
+  weight: "Weight",
+  width: "Width",
+  height: "Height",
+  depth: "Depth",
+  type: "Product type",
+  brand_id: "Brand",
+  categories: "Categories",
+  is_visible: "Storefront visibility",
+  availability: "Availability",
+  condition: "Condition",
+  warranty: "Warranty",
+  sort_order: "Sort order",
+  search_keywords: "Search keywords",
+  custom_url: "Custom URL",
+  page_title: "Page title",
+  meta_description: "Meta description",
+  meta_keywords: "Meta keywords",
+};
+
+function product360Actor(req: Request) {
+  const user = (req as any).authUser;
+  return {
+    userId: Number(user?.id) || 0,
+    userName: String(user?.name || user?.username || "Unknown user"),
+  };
+}
+
+function product360VariantLabel(variant: any) {
+  const options = Array.isArray(variant?.option_values) ? variant.option_values : [];
+  const label = options
+    .map((option: any) => String(option?.label || option?.value || "").trim())
+    .filter(Boolean)
+    .join(" / ");
+  return label || String(variant?.sku || `Variant ${variant?.id || ""}`).trim();
+}
+
+function product360CatalogFieldValue(product: any, key: string): unknown {
+  if (key === "custom_url") return product?.custom_url?.url ?? "";
+  if (key === "categories") return Array.isArray(product?.categories) ? product.categories.map(Number) : [];
+  return product?.[key] ?? null;
+}
+
+async function writeProduct360AuditChanges(entries: Product360HistoryEntry[]) {
+  await recordProduct360History(entries.filter((entry) =>
+    !product360HistoryValuesEqual(entry.fieldKey, entry.oldValue, entry.newValue),
+  ));
+}
 
 // ─── Default invoice HTML template ───────────────────────────────────────────
 const DEFAULT_INVOICE_TEMPLATE = `<!DOCTYPE html>
@@ -689,6 +751,8 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express,
 ): Promise<Server> {
+  await ensureProduct360HistoryTable();
+
   // Keep the customer-signup audit table available on every environment before
   // requests are accepted. Older deployments predate this table and do not run
   // a separate migration command during boot.
@@ -2912,7 +2976,8 @@ export async function registerRoutes(
       const bcId = Number(product?.bigcommerce_id);
       const variants = Array.isArray(product?.variants) ? product.variants : [];
       if (!bcId) return res.status(404).json({ error: "Product is not linked to BigCommerce." });
-      if (!variants.some((variant: any) => Number(variant?.id) === variantId)) {
+      const localVariant = variants.find((variant: any) => Number(variant?.id) === variantId);
+      if (!localVariant) {
         return res.status(404).json({ error: "Variant does not belong to this product." });
       }
 
@@ -2942,6 +3007,18 @@ export async function registerRoutes(
         )
         WHERE p.id = ${id} AND p.bigcommerce_id = ${bcId}
       `);
+      const actor = product360Actor(req);
+      await writeProduct360AuditChanges([{
+        productId: id,
+        bigcommerceId: bcId,
+        variantId,
+        variantLabel: product360VariantLabel(localVariant),
+        fieldKey: "variant_image",
+        fieldLabel: "Variant photo",
+        oldValue: localVariant.image_url || null,
+        newValue: imageUrl,
+        ...actor,
+      }]);
       return res.json({ success: true, imageUrl });
     } catch (error: any) {
       console.error("[Product 360] variant image upload failed:", error);
@@ -3004,6 +3081,8 @@ export async function registerRoutes(
         ...(changes.cost_price !== undefined ? { cost_price: changes.cost_price } : {}),
         ...(changes.inventory_level !== undefined ? { inventory_level: changes.inventory_level } : {}),
       };
+      const actor = product360Actor(req);
+      const originalVariantLabel = product360VariantLabel(localVariant);
       if (Object.keys(fieldChanges).length > 0) {
         const updated = await updateBigCommerceVariantFields(bcOptions, fieldChanges);
         const patch: Record<string, unknown> = {};
@@ -3011,11 +3090,40 @@ export async function registerRoutes(
         if (changes.price !== undefined) patch.price = String(updated.price);
         if (changes.cost_price !== undefined) patch.cost_price = updated.cost_price == null ? null : String(updated.cost_price);
         if (changes.inventory_level !== undefined) patch.stock_level = Number(updated.inventory_level);
+        const auditEntries: Product360HistoryEntry[] = [];
+        if (changes.sku !== undefined) auditEntries.push({
+          productId: id, bigcommerceId: bcId, variantId, variantLabel: originalVariantLabel,
+          fieldKey: "sku", fieldLabel: "Variant SKU", oldValue: localVariant.sku ?? "", newValue: patch.sku, ...actor,
+        });
+        if (changes.price !== undefined) auditEntries.push({
+          productId: id, bigcommerceId: bcId, variantId, variantLabel: originalVariantLabel,
+          fieldKey: "price", fieldLabel: "Variant price", oldValue: localVariant.price ?? null, newValue: patch.price, ...actor,
+        });
+        if (changes.cost_price !== undefined) auditEntries.push({
+          productId: id, bigcommerceId: bcId, variantId, variantLabel: originalVariantLabel,
+          fieldKey: "cost_price", fieldLabel: "Variant cost", oldValue: localVariant.cost_price ?? null, newValue: patch.cost_price, ...actor,
+        });
+        if (changes.inventory_level !== undefined) auditEntries.push({
+          productId: id, bigcommerceId: bcId, variantId, variantLabel: originalVariantLabel,
+          fieldKey: "inventory_level", fieldLabel: "Variant stock", oldValue: localVariant.stock_level ?? 0, newValue: patch.stock_level, ...actor,
+        });
+        await writeProduct360AuditChanges(auditEntries);
         await persistPatch(patch);
       }
 
       if (changes.label !== undefined) {
         const updatedName = await updateBigCommerceVariantOptionLabel(bcOptions, changes.label);
+        await writeProduct360AuditChanges([{
+          productId: id,
+          bigcommerceId: bcId,
+          variantId,
+          variantLabel: updatedName.label,
+          fieldKey: "label",
+          fieldLabel: "Variant name",
+          oldValue: originalVariantLabel,
+          newValue: updatedName.label,
+          ...actor,
+        }]);
         const optionValues = localVariant.option_values.map((option: any) =>
           Number(option?.id) === updatedName.valueId ? { ...option, label: updatedName.label } : option,
         );
@@ -3072,6 +3180,17 @@ export async function registerRoutes(
         )
         WHERE p.id = ${id} AND p.bigcommerce_id = ${bcId}
       `);
+      await writeProduct360AuditChanges([{
+        productId: id,
+        bigcommerceId: bcId,
+        variantId,
+        variantLabel: product360VariantLabel(variant),
+        fieldKey: "variant_image",
+        fieldLabel: "Variant photo",
+        oldValue: variant.image_url || null,
+        newValue: null,
+        ...product360Actor(req),
+      }]);
       return res.json({ success: true });
     } catch (error: any) {
       if (error instanceof BigCommerceVariantImageError) {
@@ -3152,6 +3271,15 @@ export async function registerRoutes(
         return res.status(502).json({ error: "BigCommerce did not return the newly set primary photo." });
       }
       await storage.updateProductByBigCommerceId(bcId, { image: imageUrl });
+      await writeProduct360AuditChanges([{
+        productId: id,
+        bigcommerceId: bcId,
+        fieldKey: "primary_image",
+        fieldLabel: "Primary product photo",
+        oldValue: null,
+        newValue: imageUrl,
+        ...product360Actor(req),
+      }]);
       res.json({ success: true, imageUrl });
     } catch (error: any) {
       console.error("[Product 360] primary photo upload failed:", error);
@@ -3339,6 +3467,25 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/product-360/products/:id/history", requirePermission("product_360", "view"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid product id" });
+    try {
+      const result = await db.execute(sql`
+        SELECT id, bigcommerce_id, variant_id, variant_label, field_key, field_label,
+               old_value, new_value, user_id, user_name, created_at
+        FROM product_change_history
+        WHERE product_id = ${id}
+        ORDER BY created_at DESC, id DESC
+        LIMIT 500
+      `);
+      res.json(result.rows);
+    } catch (error) {
+      console.error("[Product 360] history lookup failed:", error);
+      res.status(500).json({ error: "Unable to load product change history." });
+    }
+  });
+
   app.get("/api/product-360/products/:id/catalog-details", requirePermission("product_360", "view"), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid product id" });
@@ -3422,21 +3569,63 @@ export async function registerRoutes(
       }
       const { storeHash, token, headers } = await getBcCreds();
       const root = `https://api.bigcommerce.com/stores/${encodeURIComponent(storeHash)}/v3/catalog/products/${bcId}`;
+      const beforeResponse = await fetch(`${root}?include=images`, { headers, signal: AbortSignal.timeout(30000) });
+      const beforePayload: any = await beforeResponse.json().catch(() => ({}));
+      if (!beforeResponse.ok || !beforePayload?.data) {
+        return res.status(502).json({ error: beforePayload.title || beforePayload.detail || "Could not read the current product before saving changes." });
+      }
+      const beforeProduct = beforePayload.data;
+      const beforeImages = Array.isArray(beforeProduct.images) ? beforeProduct.images : [];
+      const actor = product360Actor(req);
       if (Object.keys(patch).length) {
         const response = await fetch(root, { method: "PUT", headers, body: JSON.stringify(patch), signal: AbortSignal.timeout(30000) });
         const payload: any = await response.json().catch(() => ({}));
         if (!response.ok) return res.status(502).json({ error: payload.title || payload.detail || `BigCommerce rejected the product update (${response.status}).` });
+        const updatedProduct = payload?.data && !Array.isArray(payload.data)
+          ? { ...beforeProduct, ...payload.data }
+          : { ...beforeProduct, ...patch };
+        await writeProduct360AuditChanges(Object.keys(patch).map((key) => ({
+          productId: id,
+          bigcommerceId: bcId,
+          fieldKey: key,
+          fieldLabel: PRODUCT_360_FIELD_LABELS[key] || key,
+          oldValue: product360CatalogFieldValue(beforeProduct, key),
+          newValue: product360CatalogFieldValue(updatedProduct, key),
+          ...actor,
+        })));
       }
       for (const imageUrl of validImageUrls) {
         const imageResponse = await fetch(`${root}/images`, { method: "POST", headers, body: JSON.stringify({ image_url: imageUrl }), signal: AbortSignal.timeout(60000) });
-        if (!imageResponse.ok) throw new Error(`BigCommerce could not add image (${imageResponse.status}).`);
+        const imagePayload: any = await imageResponse.json().catch(() => ({}));
+        if (!imageResponse.ok) throw new Error(imagePayload.title || imagePayload.detail || `BigCommerce could not add image (${imageResponse.status}).`);
+        const savedImage = imagePayload?.data || {};
+        await writeProduct360AuditChanges([{
+          productId: id,
+          bigcommerceId: bcId,
+          fieldKey: "product_image",
+          fieldLabel: "Product photo added",
+          oldValue: null,
+          newValue: savedImage.url_standard || savedImage.url_thumbnail || savedImage.image_url || imageUrl,
+          ...actor,
+        }]);
       }
       for (const [index, imageBuffer] of preparedUploads.entries()) {
         const form = new FormData();
         form.append("image_file", new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" }), `product-${bcId}-${index + 1}.jpg`);
         form.append("is_thumbnail", "false");
         const imageResponse = await fetch(`${root}/images`, { method: "POST", headers: { "X-Auth-Token": token, Accept: "application/json" }, body: form, signal: AbortSignal.timeout(60000) });
-        if (!imageResponse.ok) throw new Error(`BigCommerce could not upload photo ${index + 1} (${imageResponse.status}).`);
+        const imagePayload: any = await imageResponse.json().catch(() => ({}));
+        if (!imageResponse.ok) throw new Error(imagePayload.title || imagePayload.detail || `BigCommerce could not upload photo ${index + 1} (${imageResponse.status}).`);
+        const savedImage = imagePayload?.data || {};
+        await writeProduct360AuditChanges([{
+          productId: id,
+          bigcommerceId: bcId,
+          fieldKey: "product_image",
+          fieldLabel: "Product photo added",
+          oldValue: null,
+          newValue: savedImage.url_standard || savedImage.url_thumbnail || savedImage.image_url || `Uploaded photo ${index + 1}`,
+          ...actor,
+        }]);
       }
       for (const image of validImageUpdates) {
         const imageResponse = await fetch(`${root}/images/${image.id}`, {
@@ -3446,6 +3635,16 @@ export async function registerRoutes(
           signal: AbortSignal.timeout(30000),
         });
         if (!imageResponse.ok) throw new Error(`BigCommerce could not update photo ${image.id} (${imageResponse.status}).`);
+        const priorImage = beforeImages.find((item: any) => Number(item.id) === image.id);
+        await writeProduct360AuditChanges([{
+          productId: id,
+          bigcommerceId: bcId,
+          fieldKey: "product_image_caption",
+          fieldLabel: "Product photo caption",
+          oldValue: priorImage?.description || "",
+          newValue: image.description,
+          ...actor,
+        }]);
       }
       if (primaryImageId) {
         const imageResponse = await fetch(`${root}/images/${primaryImageId}`, {
@@ -3455,11 +3654,35 @@ export async function registerRoutes(
           signal: AbortSignal.timeout(30000),
         });
         if (!imageResponse.ok) throw new Error(`BigCommerce could not set photo ${primaryImageId} as the product thumbnail (${imageResponse.status}).`);
+        const previousPrimary = beforeImages.find((image: any) => image.is_thumbnail === true);
+        const selectedImage = beforeImages.find((image: any) => Number(image.id) === primaryImageId);
+        const imageValue = (image: any) => image
+          ? image.url_standard || image.url_thumbnail || image.image_url || Number(image.id)
+          : null;
+        await writeProduct360AuditChanges([{
+          productId: id,
+          bigcommerceId: bcId,
+          fieldKey: "primary_image",
+          fieldLabel: "Primary product photo",
+          oldValue: imageValue(previousPrimary),
+          newValue: imageValue(selectedImage) || primaryImageId,
+          ...actor,
+        }]);
       }
       for (const imageId of imagesToDelete) {
         if (!Number.isSafeInteger(Number(imageId)) || Number(imageId) <= 0) continue;
         const imageResponse = await fetch(`${root}/images/${Number(imageId)}`, { method: "DELETE", headers, signal: AbortSignal.timeout(30000) });
         if (!imageResponse.ok) throw new Error(`BigCommerce could not remove image ${imageId} (${imageResponse.status}).`);
+        const removedImage = beforeImages.find((image: any) => Number(image.id) === Number(imageId));
+        await writeProduct360AuditChanges([{
+          productId: id,
+          bigcommerceId: bcId,
+          fieldKey: "product_image",
+          fieldLabel: "Product photo removed",
+          oldValue: removedImage?.url_standard || removedImage?.url_thumbnail || removedImage?.image_url || Number(imageId),
+          newValue: null,
+          ...actor,
+        }]);
       }
       const freshResponse = await fetch(`${root}?include=images`, { headers, signal: AbortSignal.timeout(30000) });
       if (!freshResponse.ok) throw new Error(`BigCommerce saved the update but could not refresh the product (${freshResponse.status}).`);

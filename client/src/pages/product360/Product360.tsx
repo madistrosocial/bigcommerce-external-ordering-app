@@ -63,6 +63,7 @@ import {
   getProduct360DashboardList,
   getProduct360Products,
   getProduct360CatalogDetails,
+  getProduct360History,
   getProduct360Drafts,
   type Product360Draft,
   saveProduct360CatalogDetails,
@@ -118,6 +119,18 @@ function number(value: unknown, digits = 0) {
 function dateLabel(value: unknown, fmt: ReturnType<typeof useTimeService>) {
   if (!value) return "No recent sale";
   return fmt.date(String(value));
+}
+
+function historyValueLabel(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (Array.isArray(value)) return value.length ? value.map(historyValueLabel).join(", ") : "—";
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (typeof record.url === "string") return record.url;
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }
+  return String(value);
 }
 
 function displayVariantLabel(value: unknown) {
@@ -936,6 +949,7 @@ function ProductTable({ rows, drafts = [] }: { rows: Record<string, unknown>[]; 
         queryClient.invalidateQueries({ queryKey: ["product-360-products"] }),
         queryClient.invalidateQueries({ queryKey: ["product-360-detail", variables.productId] }),
         queryClient.invalidateQueries({ queryKey: ["product-360-catalog-details", variables.productId] }),
+        queryClient.invalidateQueries({ queryKey: ["product-360-history", variables.productId] }),
       ]);
     },
   });
@@ -1252,6 +1266,7 @@ function ProductDetailsTab({ id }: { id: number }) {
         queryClient.invalidateQueries({ queryKey: ["product-360-catalog-details", id] }),
         queryClient.invalidateQueries({ queryKey: ["product-360-detail", id] }),
         queryClient.invalidateQueries({ queryKey: ["product-360-products"] }),
+        queryClient.invalidateQueries({ queryKey: ["product-360-history", id] }),
       ]);
     },
   });
@@ -1421,6 +1436,11 @@ async function prepareVariantImage(file: File): Promise<string> {
 function DetailBody({ data, tab, id }: { data: Product360Detail; tab: string; id: number }) {
   const fmt = useTimeService();
   const queryClient = useQueryClient();
+  const historyQuery = useQuery({
+    queryKey: ["product-360-history", id],
+    queryFn: () => getProduct360History(id),
+    enabled: tab === "history" && id > 0,
+  });
   const { hasPermission } = usePermissions();
   const canUsePhotoWatermark = hasPermission("product_photo_watermark");
   const canUploadVariantImages = useStore((state) => state.currentUser?.role === "admin");
@@ -1433,6 +1453,26 @@ function DetailBody({ data, tab, id }: { data: Product360Detail; tab: string; id
   const product = data.product || {};
   const trend = data.trend.map((row) => ({ ...row, revenue: Number(row.revenue || 0), units: Number(row.units || 0), gross_profit: Number(row.gross_profit || 0) }));
   const rows = data.variants || [];
+  const activityRows = [
+    ...(historyQuery.data || []).map((row) => ({
+      id: `change-${row.id}`,
+      label: row.field_label,
+      scope: row.variant_label ? `Variant: ${row.variant_label}` : "Product",
+      actor: row.user_name || "Unknown user",
+      oldValue: row.old_value,
+      newValue: row.new_value,
+      timestamp: row.created_at,
+    })),
+    ...data.history.map((row, index) => ({
+      id: `inventory-${index}`,
+      label: String(row.event || "Inventory activity"),
+      scope: String(row.source || "Inventory"),
+      actor: String(row.user_name || "System"),
+      oldValue: row.previous_value,
+      newValue: row.new_value,
+      timestamp: row.event_date,
+    })),
+  ].sort((left, right) => Date.parse(String(right.timestamp || "")) - Date.parse(String(left.timestamp || "")));
   const uploadVariantImage = async (variantId: number, file?: File) => {
     if (!file) return;
     setVariantImageErrors((current) => ({ ...current, [variantId]: "" }));
@@ -1442,7 +1482,10 @@ function DetailBody({ data, tab, id }: { data: Product360Detail; tab: string; id
       const watermarkSettings = await loadProductPhotoWatermarkSettings();
       const imageDataUrl = await applyProductPhotoWatermark(processedImage, watermarkSettings, canUsePhotoWatermark && autoWatermarkVariantPhotos, variantPhotoWatermarkTone);
       await uploadProduct360VariantImage(id, variantId, imageDataUrl);
-      await queryClient.invalidateQueries({ queryKey: ["product-360-detail", id] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["product-360-detail", id] }),
+        queryClient.invalidateQueries({ queryKey: ["product-360-history", id] }),
+      ]);
     } catch (error) {
       setVariantImageErrors((current) => ({ ...current, [variantId]: error instanceof Error ? error.message : "Could not upload this variant photo." }));
     } finally {
@@ -1455,7 +1498,10 @@ function DetailBody({ data, tab, id }: { data: Product360Detail; tab: string; id
     setDeletingVariantIds((current) => new Set(current).add(variantId));
     try {
       await deleteProduct360VariantImage(id, variantId);
-      await queryClient.invalidateQueries({ queryKey: ["product-360-detail", id] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["product-360-detail", id] }),
+        queryClient.invalidateQueries({ queryKey: ["product-360-history", id] }),
+      ]);
     } catch (error) {
       setVariantImageErrors((current) => ({
         ...current,
@@ -1513,7 +1559,39 @@ function DetailBody({ data, tab, id }: { data: Product360Detail; tab: string; id
     );
   }
   if (tab === "customers") return <Card className="mt-5 overflow-hidden border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-4 py-3"><h3 className="text-sm font-semibold">Customers who bought this product</h3><p className="text-xs text-slate-400">Customer relationship analytics from the order-line mirror</p></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-4 py-3">Customer</th><th className="px-4 py-3 text-right">Units</th><th className="px-4 py-3 text-right">Revenue</th><th className="px-4 py-3 text-right">Orders</th><th className="px-4 py-3">Last purchase</th></tr></thead><tbody className="divide-y divide-slate-100">{data.customers.map((row, i) => <tr key={`${row.customer_id}-${i}`}><td className="px-4 py-3 font-medium">{String(row.customer || "Unknown customer")}</td><td className="px-4 py-3 text-right">{number(row.units_purchased)}</td><td className="px-4 py-3 text-right">{money(row.revenue)}</td><td className="px-4 py-3 text-right">{number(row.orders)}</td><td className="px-4 py-3 text-slate-500">{dateLabel(row.last_purchase, fmt)}</td></tr>)}</tbody></table></div></Card>;
-  if (tab === "history") return <Card className="mt-5 border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-4 py-3"><h3 className="text-sm font-semibold">Product activity</h3><p className="text-xs text-slate-400">Append-only inventory activity available from existing audit logs</p></div>{data.history.length ? <div className="divide-y divide-slate-100">{data.history.map((row, i) => <div key={i} className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium text-slate-800">{String(row.event)}</p><p className="text-xs text-slate-400">{String(row.source)} · {String(row.user_name || "System")}</p></div><div className="text-left sm:text-right"><p className="text-xs text-slate-500">{String(row.previous_value || "—")} → {String(row.new_value || "—")}</p><p className="text-[11px] text-slate-400">{dateLabel(row.event_date, fmt)}</p></div></div>)}</div> : <div className="p-6 text-sm text-slate-400">No product history is recorded for this product.</div>}</Card>;
+  if (tab === "history") return <Card className="mt-5 border-slate-200 bg-white shadow-sm">
+    <div className="border-b border-slate-100 px-4 py-3">
+      <h3 className="text-sm font-semibold">Product activity</h3>
+      <p className="text-xs text-slate-400">Product and variant changes, plus inventory activity recorded in the app.</p>
+    </div>
+    {historyQuery.isError && activityRows.length > 0 && <div role="alert" className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+      Could not load product field changes. <button type="button" className="font-semibold underline" onClick={() => void historyQuery.refetch()}>Retry</button>
+    </div>}
+    {historyQuery.isLoading ? <div className="p-6 text-sm text-slate-500">Loading product history…</div>
+      : historyQuery.isError && activityRows.length === 0 ? <div role="alert" className="flex flex-wrap items-center gap-3 p-6 text-sm text-red-700">Could not load product change history.<Button variant="outline" size="sm" onClick={() => void historyQuery.refetch()}>Retry</Button></div>
+        : activityRows.length ? <div className="divide-y divide-slate-100">{activityRows.map((entry) => {
+          const before = historyValueLabel(entry.oldValue);
+          const after = historyValueLabel(entry.newValue);
+          const changed = before !== after;
+          return <div key={entry.id} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(260px,1fr)] sm:items-start">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-800">{entry.label}</p>
+              <p className="mt-0.5 text-xs text-slate-500">{entry.scope} · {entry.actor}</p>
+              <p className="mt-1 text-[11px] text-slate-400">{entry.timestamp ? fmt.dateTime(String(entry.timestamp)) : "Time unavailable"}</p>
+            </div>
+            <div className={`grid gap-2 ${changed ? "grid-cols-2" : "grid-cols-1"}`}>
+              <div className="min-w-0 rounded-md bg-slate-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{changed ? "Before" : "Value"}</p>
+                <p className="mt-1 break-words text-xs text-slate-700" title={before}>{before}</p>
+              </div>
+              {changed && <div className="min-w-0 rounded-md bg-blue-50/70 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-500">After</p>
+                <p className="mt-1 break-words text-xs text-slate-700" title={after}>{after}</p>
+              </div>}
+            </div>
+          </div>;
+        })}</div> : <div className="p-6 text-sm text-slate-400">No product history is recorded for this product.</div>}
+  </Card>;
   return <div className="mt-5 space-y-5"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><MetricCard label="Units sold" value={number(product.units_sold)} detail={`${number(product.orders)} orders`} icon={ShoppingCart} /><MetricCard label="Revenue" value={money(product.revenue)} detail={`ASP ${money(Number(product.units_sold) ? Number(product.revenue) / Number(product.units_sold) : 0)}`} icon={CircleDollarSign} tone="emerald" /><MetricCard label="Gross profit" value={product.gross_profit == null ? "No cost data" : money(product.gross_profit)} detail={product.gross_profit == null ? "Cost is not available" : `${Number(product.revenue) ? ((Number(product.gross_profit) / Number(product.revenue)) * 100).toFixed(1) : "0.0"}% margin`} icon={BarChart3} tone="violet" /><MetricCard label="Stock coverage" value={product.days_of_stock == null ? "No sales data" : `${number(product.days_of_stock, 1)} days`} detail={`${number(product.current_stock)} units on hand`} icon={PackageCheck} tone="amber" /></div>{tab === "overview" || tab === "sales" || tab === "profitability" ? <Card className="border-slate-200 bg-white p-4 shadow-sm"><h3 className="text-sm font-semibold text-slate-800">{tab === "profitability" ? "Revenue vs gross profit" : "Sales trend"}</h3><div className="mt-3 h-[280px]">{trend.length ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={trend}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" /><XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} /><YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} /><Tooltip formatter={(value: number, name: string) => [name === "units" ? number(value) : money(value), name === "gross_profit" ? "Gross profit" : name === "revenue" ? "Revenue" : "Units"]} /><Area type="monotone" dataKey="revenue" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} /><Area type="monotone" dataKey="gross_profit" stroke="#14b8a6" fill="none" strokeWidth={2} /><Area type="monotone" dataKey="units" stroke="#f59e0b" fill="none" strokeWidth={2} /></AreaChart></ResponsiveContainer> : <div className="flex h-full items-center justify-center text-sm text-slate-400">No sales data for this period.</div>}</div></Card> : null}{(tab === "variants" || tab === "inventory" || tab === "replenishment") && <Card className="overflow-hidden border-slate-200 bg-white shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3"><div><h3 className="text-sm font-semibold">{tab === "replenishment" ? "Variant replenishment" : "Variant intelligence"}</h3><p className="text-xs text-slate-400">Missing costs are shown as unavailable, not treated as zero.</p></div>{tab === "variants" && canUploadVariantImages && <div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 text-xs font-medium text-slate-700"><Switch checked={autoWatermarkVariantPhotos} onCheckedChange={setAutoWatermarkVariantPhotos} aria-label="Automatically watermark variant photos" />Automatic watermark</label>{autoWatermarkVariantPhotos && <label className="flex items-center gap-2 text-xs text-slate-600">Logo<select className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs" value={variantPhotoWatermarkTone} onChange={(event) => setVariantPhotoWatermarkTone(event.target.value as "dark" | "light")}><option value="dark">Dark</option><option value="light">Light</option></select></label>}</div>}</div>{rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[950px] text-left text-sm"><thead className="bg-slate-50 text-[11px] uppercase text-slate-500"><tr><th className="px-4 py-3">Variant</th><th className="px-3 py-3">SKU</th><th className="px-3 py-3 text-right">Price</th><th className="px-3 py-3 text-right">Cost</th><th className="px-3 py-3 text-right">Stock</th><th className="px-3 py-3 text-right">Units</th><th className="px-3 py-3 text-right">Velocity</th><th className="px-3 py-3">Status</th></tr></thead><tbody className="divide-y divide-slate-100">{rows.map((row, i) => <tr key={`${row.variant_id}-${i}`}><td className="px-4 py-3 font-medium"><div className="flex items-center gap-3">{tab === "variants" && (row.image_url ? canUploadVariantImages ? <div className="w-[76px] shrink-0">{variantImageErrors[Number(row.variant_id)] && <p className="mb-1 max-w-[76px] text-[9px] leading-tight text-red-600">{variantImageErrors[Number(row.variant_id)]}</p>}<div className="group relative h-12 w-12"><img src={String(row.image_url)} alt={`${displayVariantLabel(row.label)} thumbnail`} className="h-12 w-12 rounded border border-slate-200 bg-white object-contain" /><button type="button" disabled={deletingVariantIds.has(Number(row.variant_id)) || uploadingVariantIds.has(Number(row.variant_id))} aria-label={`Delete image for ${displayVariantLabel(row.label)}`} title="Delete variant image" onClick={(event) => { event.stopPropagation(); void deleteVariantImage(Number(row.variant_id), displayVariantLabel(row.label)); }} className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 opacity-0 shadow-sm transition-opacity hover:bg-red-50 focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 disabled:cursor-wait disabled:opacity-60">{deletingVariantIds.has(Number(row.variant_id)) ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button></div></div> : <img src={String(row.image_url)} alt={`${displayVariantLabel(row.label)} thumbnail`} className="h-12 w-12 shrink-0 rounded border border-slate-200 bg-white object-contain" /> : canUploadVariantImages ? <div className="w-[76px] shrink-0">{variantImageErrors[Number(row.variant_id)] && <p className="mb-1 max-w-[76px] text-[9px] leading-tight text-red-600">{variantImageErrors[Number(row.variant_id)]}</p>}<label onDragOver={(event) => { event.preventDefault(); setDraggingVariantId(Number(row.variant_id)); }} onDragLeave={() => setDraggingVariantId(null)} onDrop={(event) => { event.preventDefault(); setDraggingVariantId(null); void uploadVariantImage(Number(row.variant_id), event.dataTransfer.files[0]); }} className={`flex h-12 w-14 cursor-pointer flex-col items-center justify-center rounded border border-dashed text-center transition-colors ${draggingVariantId === Number(row.variant_id) ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/50"} ${uploadingVariantIds.has(Number(row.variant_id)) ? "pointer-events-none opacity-60" : ""}`}><input className="hidden" type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingVariantIds.has(Number(row.variant_id))} aria-label={`Upload thumbnail for ${displayVariantLabel(row.label)}`} onChange={(event) => { if (event.target.files?.[0]) void uploadVariantImage(Number(row.variant_id), event.target.files[0]); event.target.value = ""; }} />{uploadingVariantIds.has(Number(row.variant_id)) ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-600" /> : <><ImagePlus className="h-3.5 w-3.5 text-slate-400" /><span className="mt-0.5 text-[8px] text-slate-500">Drop / add</span></>}</label></div> : <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50"><PackageSearch className="h-5 w-5 text-slate-400" /></div>)}<span>{displayVariantLabel(row.label)}</span></div></td><td className="px-3 py-3 text-slate-500">{String(row.sku || "—")}</td><td className="px-3 py-3 text-right">{money(row.price)}</td><td className="px-3 py-3 text-right">{row.cost_price == null ? <span className="text-xs text-slate-400">No cost data</span> : money(row.cost_price)}</td><td className="px-3 py-3 text-right">{number(row.current_stock)}</td><td className="px-3 py-3 text-right">{number(row.units_sold)}</td><td className="px-3 py-3 text-right">{number(row.sales_velocity, 1)}/day</td><td className="px-3 py-3"><StatusBadge status={getStatus(row)} /></td></tr>)}</tbody></table></div> : <div className="p-6 text-sm text-slate-400">This product has no normalized variant records.</div>}</Card>}</div>;
 }
 

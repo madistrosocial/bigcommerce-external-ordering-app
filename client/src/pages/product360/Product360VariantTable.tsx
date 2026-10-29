@@ -141,6 +141,7 @@ export default function Product360VariantTable({
         queryClient.invalidateQueries({ queryKey: ["product-360-detail", productId] }),
         queryClient.invalidateQueries({ queryKey: ["product-360-products"] }),
         queryClient.invalidateQueries({ queryKey: ["product-360-overview"] }),
+        queryClient.invalidateQueries({ queryKey: ["product-360-history", productId] }),
       ]);
       toast({ title: "Variant saved", description: "Changes were confirmed by BigCommerce." });
       stopEditing();

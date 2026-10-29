@@ -89,6 +89,20 @@ export interface Product360Detail {
   history: Record<string, unknown>[];
 }
 
+export interface Product360HistoryEntry {
+  id: number;
+  bigcommerce_id: number;
+  variant_id: number | null;
+  variant_label: string | null;
+  field_key: string;
+  field_label: string;
+  old_value: unknown;
+  new_value: unknown;
+  user_id: number | null;
+  user_name: string;
+  created_at: string;
+}
+
 export interface Product360CatalogDetails {
   product: Record<string, any>;
   categories: Array<{ id: number; name: string; parent_id: number }>;
@@ -105,6 +119,10 @@ function product360Request<T>(path: string): Promise<T> {
 
 export function getProduct360CatalogDetails(id: number) {
   return product360Request<Product360CatalogDetails>(`/product-360/products/${id}/catalog-details`);
+}
+
+export function getProduct360History(id: number) {
+  return product360Request<Product360HistoryEntry[]>(`/product-360/products/${id}/history`);
 }
 
 export type Product360Draft = {
