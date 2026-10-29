@@ -77,6 +77,7 @@
 - [Company timezone display](company-timezone-display.md) — use the configured IANA timezone for app timestamps and local-day boundaries; preserve date-only values and Payroll's separate timezone.
 - [Attendance spreadsheet scope](attendance-spreadsheet-scope.md) — use the workbook as a feature reference only; never import its records or synchronize it.
 - [CRM rep avatar thumbnails](crm-rep-avatar-thumbnails.md) — fetch cached 32px thumbnails through the shared users lookup; avoid repeating full data URLs on customer rows.
+- [CRM mobile customer cards](crm-mobile-card-layout.md) — keep the company name full-width; align reps at the card edge but constrain them to the left details column.
 - [BigCommerce customer-group visibility](customer-groups-bigcommerce.md) — keep category visibility group-based and native to BigCommerce; customers inherit access from their assigned group.
 - [Tiptap version alignment](tiptap-version-alignment.md) — upgrade Tiptap packages as one peer-locked set; partial bumps fail npm resolution.
 - [BigCommerce Promotions API scope](bigcommerce-promotions.md) — native promotion listing and creation require the store API account's Marketing read/modify scopes.
