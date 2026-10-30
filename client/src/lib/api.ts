@@ -499,6 +499,7 @@ export function getKoleConnection() {
     displayName: string;
     lastTestedAt: string | null;
     lastTestOk: boolean | null;
+    draftMarkupPercent: number;
   }>("/dropshipping/kole/connection");
 }
 
@@ -708,8 +709,8 @@ export function saveDropshipDashboardPins(brandIds: number[]) {
   });
 }
 
-export function saveKoleConnection(data: { accountId?: string; apiKey?: string; displayName?: string }) {
-  return dropshipRequest<{ ok: boolean; hasCredentials: boolean; displayName: string }>("/dropshipping/kole/connection", {
+export function saveKoleConnection(data: { accountId?: string; apiKey?: string; displayName?: string; draftMarkupPercent?: number }) {
+  return dropshipRequest<{ ok: boolean; hasCredentials: boolean; displayName: string; draftMarkupPercent: number }>("/dropshipping/kole/connection", {
     method: "PUT",
     body: JSON.stringify(data),
   });
@@ -774,7 +775,7 @@ export async function uploadKoleCsv(file: File) {
   });
 }
 
-export function createKoleDrafts(items: Array<{ id: number; price: number; categoryId: number }>) {
+export function createKoleDrafts(items: Array<{ id: number; title: string; price: number; categoryId: number }>) {
   return dropshipRequest<{
     ok: boolean;
     created: number;

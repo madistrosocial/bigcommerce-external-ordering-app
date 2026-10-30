@@ -1232,6 +1232,17 @@ export async function registerRoutes(
     }
   };
 
+  const DEFAULT_KOLE_DRAFT_MARKUP_PERCENT = 20;
+  const normalizeKoleDraftMarkupPercent = (value: unknown) => {
+    if (value === null || value === undefined || (typeof value === "string" && !value.trim())) {
+      return DEFAULT_KOLE_DRAFT_MARKUP_PERCENT;
+    }
+    const markupPercent = Number(value);
+    return Number.isFinite(markupPercent) && markupPercent >= 0 && markupPercent <= 1000
+      ? markupPercent
+      : DEFAULT_KOLE_DRAFT_MARKUP_PERCENT;
+  };
+
   const normalizeVendorDisplayName = (value: unknown): string => {
     const name = String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
     return name && !/kole/i.test(name) ? name : DEFAULT_VENDOR_DISPLAY_NAME;
@@ -1371,6 +1382,7 @@ export async function registerRoutes(
         displayName: await getKoleDisplayName(value),
         lastTestedAt: value?.lastTestedAt ?? null,
         lastTestOk: value?.lastTestOk ?? null,
+        draftMarkupPercent: normalizeKoleDraftMarkupPercent(value?.draftMarkupPercent),
       });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to load vendor connection status" });
@@ -1384,6 +1396,19 @@ export async function registerRoutes(
       const suppliedApiKey = String(req.body?.apiKey ?? "").trim();
       const accountId = suppliedAccountId || String(currentValue?.accountId ?? "").trim();
       const apiKey = suppliedApiKey || String(currentValue?.apiKey ?? "").trim();
+      let draftMarkupPercent: number | undefined;
+      if (req.body?.draftMarkupPercent !== undefined) {
+        const rawMarkupPercent = req.body.draftMarkupPercent;
+        draftMarkupPercent = typeof rawMarkupPercent === "number"
+          ? rawMarkupPercent
+          : typeof rawMarkupPercent === "string" && rawMarkupPercent.trim()
+            ? Number(rawMarkupPercent)
+            : Number.NaN;
+        if (!Number.isFinite(draftMarkupPercent) || draftMarkupPercent < 0 || draftMarkupPercent > 1000) {
+          return res.status(400).json({ error: "Draft markup must be a number from 0% to 1,000%." });
+        }
+        draftMarkupPercent = Math.round(draftMarkupPercent * 100) / 100;
+      }
       if ((suppliedAccountId || suppliedApiKey) && (!accountId || !apiKey) && !(process.env.KOLE_ACCOUNT_ID && process.env.KOLE_API_KEY)) {
         return res.status(400).json({ error: "Vendor account ID and API key are required together." });
       }
@@ -1396,8 +1421,14 @@ export async function registerRoutes(
       };
       if (suppliedAccountId) nextValue.accountId = suppliedAccountId;
       if (suppliedApiKey) nextValue.apiKey = suppliedApiKey;
+      if (draftMarkupPercent !== undefined) nextValue.draftMarkupPercent = draftMarkupPercent;
       await storage.setSetting("kole_imports_config", nextValue);
-      res.json({ ok: true, hasCredentials: Boolean(await getKoleConfig()), displayName });
+      res.json({
+        ok: true,
+        hasCredentials: Boolean(await getKoleConfig()),
+        displayName,
+        draftMarkupPercent: normalizeKoleDraftMarkupPercent(nextValue.draftMarkupPercent),
+      });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to save vendor connection" });
     }
@@ -1759,18 +1790,19 @@ export async function registerRoutes(
       return res.status(400).json({ error: "Select between 1 and 25 vendor products to create drafts." });
     }
 
-    const requestedItems: Array<{ id: number; price: number; categoryId: number }> = [];
+    const requestedItems: Array<{ id: number; title: string; price: number; categoryId: number }> = [];
     const seenIds = new Set<number>();
     for (const item of inputItems) {
       const id = Number(item?.id);
+      const title = String(item?.title ?? "").trim();
       const price = Number(item?.price);
       const categoryId = Number(item?.categoryId);
-      if (!Number.isInteger(id) || id <= 0 || !Number.isFinite(price) || price <= 0 || !Number.isInteger(categoryId) || categoryId <= 0) {
-        return res.status(400).json({ error: "Every selected product needs a valid positive retail price and BigCommerce category." });
+      if (!Number.isInteger(id) || id <= 0 || !title || title.length > 250 || !Number.isFinite(price) || price <= 0 || !Number.isInteger(categoryId) || categoryId <= 0) {
+        return res.status(400).json({ error: "Every selected product needs a title of 1 to 250 characters, a valid positive retail price, and a BigCommerce category." });
       }
       if (seenIds.has(id)) return res.status(400).json({ error: "A vendor product was selected more than once." });
       seenIds.add(id);
-      requestedItems.push({ id, price, categoryId });
+      requestedItems.push({ id, title, price, categoryId });
     }
 
     const credentials = await getBcCreds().catch(() => null);
@@ -1854,7 +1886,7 @@ export async function registerRoutes(
               method: "POST",
               headers,
               body: JSON.stringify({
-                name: product.title.slice(0, 250),
+                name: requested.title,
                 type: "physical",
                 weight: Number.isFinite(weight) && weight >= 0 ? weight : 0,
                 price: requested.price,

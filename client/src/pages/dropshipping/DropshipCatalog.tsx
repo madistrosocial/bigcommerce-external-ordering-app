@@ -84,10 +84,10 @@ function extendedSupplierCost(product: api.DropshipProduct) {
   return getKoleExtendedCost(product.raw_data, product.cost);
 }
 
-function suggestedRetailPrice(product: api.DropshipProduct) {
+function suggestedRetailPrice(product: api.DropshipProduct, markupPercent: number) {
   const cost = extendedSupplierCost(product);
   if (cost === null) return "";
-  const price = Math.round((cost * 1.2 + Number.EPSILON) * 100) / 100;
+  const price = Math.round((cost * (1 + markupPercent / 100) + Number.EPSILON) * 100) / 100;
   return price > 0 ? price.toFixed(2) : "";
 }
 
@@ -170,7 +170,7 @@ export default function DropshipCatalogPage() {
   const canManageDropshipping = hasPermission("dropshipping_catalog", "manage");
   const canSyncVendor = hasPermission("dropshipping_vendor", "sync");
   const queryClient = useQueryClient();
-  const { data: connection } = useQuery({ queryKey: ["dropship-connection"], queryFn: api.getKoleConnection });
+  const { data: connection, isLoading: isLoadingConnection, isError: isConnectionError } = useQuery({ queryKey: ["dropship-connection"], queryFn: api.getKoleConnection });
   const { data: mappingBrandSetting } = useQuery({ queryKey: ["kole-mapping-brand"], queryFn: api.getKoleMappingBrand });
   const [mappingBrandName, setMappingBrandName] = useState<string | null>(null);
   const [mappingResult, setMappingResult] = useState<api.KoleProductMappingResult | null>(null);
@@ -187,6 +187,7 @@ export default function DropshipCatalogPage() {
   const [selectedProducts, setSelectedProducts] = useState<Map<number, api.DropshipProduct>>(new Map());
   const [detail, setDetail] = useState<api.DropshipProduct | null>(null);
   const [draftProducts, setDraftProducts] = useState<api.DropshipProduct[]>([]);
+  const [draftTitles, setDraftTitles] = useState<Record<number, string>>({});
   const [draftPrices, setDraftPrices] = useState<Record<number, string>>({});
   const [draftCategoryIds, setDraftCategoryIds] = useState<Record<number, string>>({});
   const [bulkDraftCategoryId, setBulkDraftCategoryId] = useState("");
@@ -215,6 +216,7 @@ export default function DropshipCatalogPage() {
       .sort((a, b) => a.label.localeCompare(b.label)),
     [bcCategories],
   );
+  const draftMarkupPercent = connection?.draftMarkupPercent ?? 20;
 
   const runSkuMapping = useMutation({
     mutationFn: api.mapExistingKoleProducts,
@@ -306,6 +308,10 @@ export default function DropshipCatalogPage() {
     });
   };
   const openDraftDialog = (products: api.DropshipProduct[]) => {
+    if (isLoadingConnection || isConnectionError || !connection) {
+      toast({ title: "Draft pricing is unavailable", description: "Load the KCDS vendor settings before creating drafts.", variant: "destructive" });
+      return;
+    }
     const eligible = products.filter((product) => !product.bigcommerce_product_id);
     if (!eligible.length) {
       toast({ title: "No products to create", description: "Selected products are already mapped to BigCommerce." });
@@ -316,7 +322,8 @@ export default function DropshipCatalogPage() {
       return;
     }
     setDraftProducts(eligible);
-    setDraftPrices(Object.fromEntries(eligible.map((product) => [product.id, suggestedRetailPrice(product)])));
+    setDraftTitles(Object.fromEntries(eligible.map((product) => [product.id, product.title.slice(0, 250)])));
+    setDraftPrices(Object.fromEntries(eligible.map((product) => [product.id, suggestedRetailPrice(product, draftMarkupPercent)])));
     setDraftCategoryIds(Object.fromEntries(eligible.map((product) => [product.id, ""])));
     setBulkDraftCategoryId("");
     setDraftDialogOpen(true);
@@ -324,10 +331,15 @@ export default function DropshipCatalogPage() {
   const submitDrafts = () => {
     createDrafts.mutate(draftProducts.map((product) => ({
       id: product.id,
+      title: draftTitles[product.id]?.trim() || "",
       price: Number(draftPrices[product.id]),
       categoryId: Number(draftCategoryIds[product.id]),
     })));
   };
+  const draftTitlesValid = draftProducts.length > 0 && draftProducts.every((product) => {
+    const title = draftTitles[product.id]?.trim() || "";
+    return title.length > 0 && title.length <= 250;
+  });
   const draftPricesValid = draftProducts.length > 0 && draftProducts.every((product) => {
     const price = Number(draftPrices[product.id]);
     return Number.isFinite(price) && price > 0;
@@ -500,12 +512,9 @@ export default function DropshipCatalogPage() {
       </Dialog>
 
       <Dialog open={draftDialogOpen} onOpenChange={setDraftDialogOpen}>
-        <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent aria-describedby={undefined} className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create hidden BigCommerce drafts</DialogTitle>
-            <DialogDescription>
-              Drafts stay hidden and disabled. Photos are added later through Product Sync → Image Sync so the first upload is watermarked. The suggested price is the supplier ext_price × 1.20; ext_price already includes the minimum order quantity. You can edit the price. Choose an existing BigCommerce category for each item. Existing SKU matches are skipped.
-            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -540,11 +549,22 @@ export default function DropshipCatalogPage() {
                 return (
                   <div key={product.id} className="grid grid-cols-1 sm:grid-cols-[1fr_240px] gap-3 rounded-md border border-slate-200 p-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-800 line-clamp-2">{product.title}</p>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`draft-title-${product.id}`} className="text-xs">Product title</Label>
+                        <Input
+                          id={`draft-title-${product.id}`}
+                          value={draftTitles[product.id] ?? ""}
+                          onChange={(event) => setDraftTitles((current) => ({ ...current, [product.id]: event.target.value }))}
+                          maxLength={250}
+                          required
+                          placeholder="Enter product title"
+                          disabled={createDrafts.isPending}
+                        />
+                      </div>
                       <p className="text-xs font-mono text-slate-500 mt-1">{product.vendor_sku}</p>
                       <p className="text-xs text-slate-500 mt-1">Extended supplier cost (MOQ included): {formatCost(extendedSupplierCost(product)?.toFixed(2) ?? null)} · Minimum order quantity: {quantity === null ? "Not provided" : quantity.toLocaleString()}</p>
                       <p className="text-xs text-slate-500 mt-1">Inventory: {inventoryLabel(product)}</p>
-                      {!suggestedRetailPrice(product) && <p className="text-xs text-amber-700 mt-1">A positive ext_price is needed for an automatic price; enter the price manually.</p>}
+                      {extendedSupplierCost(product) === null && <p className="text-xs text-amber-700 mt-1">No positive supplier cost is available; enter the selling price manually.</p>}
                     </div>
                     <div className="space-y-3">
                       <div className="space-y-1.5">
@@ -563,7 +583,7 @@ export default function DropshipCatalogPage() {
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label htmlFor={`draft-price-${product.id}`} className="text-xs">Selling price</Label>
+                        <Label htmlFor={`draft-price-${product.id}`} className="text-xs">Selling price · {draftMarkupPercent}% markup</Label>
                         <Input
                           id={`draft-price-${product.id}`}
                           type="number"
@@ -584,7 +604,7 @@ export default function DropshipCatalogPage() {
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDraftDialogOpen(false)} disabled={createDrafts.isPending}>Cancel</Button>
-            <Button onClick={submitDrafts} disabled={createDrafts.isPending || !draftPricesValid || !draftCategoriesValid || !bcCategoryOptions.length}>
+            <Button onClick={submitDrafts} disabled={createDrafts.isPending || !draftTitlesValid || !draftPricesValid || !draftCategoriesValid || !bcCategoryOptions.length}>
               {createDrafts.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
               Create {draftProducts.length} Draft{draftProducts.length === 1 ? "" : "s"}
             </Button>

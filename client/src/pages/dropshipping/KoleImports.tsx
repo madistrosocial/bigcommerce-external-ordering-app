@@ -36,9 +36,11 @@ export default function KoleImportsPage() {
   const [draggingCsv, setDraggingCsv] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingMarkup, setSavingMarkup] = useState(false);
   const [testing, setTesting] = useState(false);
   const [hasCredentials, setHasCredentials] = useState(false);
   const [displayName, setDisplayName] = useState("Vendor Catalog");
+  const [markupPercent, setMarkupPercent] = useState("20");
   const [lastTestedAt, setLastTestedAt] = useState<string | null>(null);
   const [lastTestOk, setLastTestOk] = useState<boolean | null>(null);
   const [accountId, setAccountId] = useState("");
@@ -85,6 +87,7 @@ export default function KoleImportsPage() {
       const data = await api.getKoleConnection();
       setHasCredentials(data.hasCredentials);
       setDisplayName(toPublicVendorName(data.displayName || data.vendor.name));
+      setMarkupPercent(String(data.draftMarkupPercent ?? 20));
       setLastTestedAt(data.lastTestedAt);
       setLastTestOk(data.lastTestOk);
     } catch (error: any) {
@@ -113,6 +116,25 @@ export default function KoleImportsPage() {
       toast({ title: "Save failed", description: toPublicVendorMessage(error.message), variant: "destructive" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveMarkup = async () => {
+    const value = Number(markupPercent);
+    if (!Number.isFinite(value) || value < 0 || value > 1000) {
+      toast({ title: "Invalid markup", description: "Enter a markup from 0% to 1,000%.", variant: "destructive" });
+      return;
+    }
+    setSavingMarkup(true);
+    try {
+      const saved = await api.saveKoleConnection({ draftMarkupPercent: value });
+      setMarkupPercent(String(saved.draftMarkupPercent));
+      await queryClient.invalidateQueries({ queryKey: ["dropship-connection"] });
+      toast({ title: "Draft markup saved", description: `New BigCommerce drafts will use a ${saved.draftMarkupPercent}% markup suggestion.` });
+    } catch (error: any) {
+      toast({ title: "Could not save draft markup", description: toPublicVendorMessage(error.message), variant: "destructive" });
+    } finally {
+      setSavingMarkup(false);
     }
   };
 
@@ -195,6 +217,40 @@ export default function KoleImportsPage() {
           </div>
         </CardContent>
       </Card>}
+
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold">BigCommerce Draft Pricing</CardTitle>
+          <CardDescription>Suggested selling price = extended supplier cost plus this markup. For example, 20% adds 20% to the cost.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {!canManageVendor && <p className="text-xs text-slate-500">View-only access. Ask an administrator to change the draft markup.</p>}
+          <div className="max-w-xs space-y-1.5">
+            <Label htmlFor="kole-draft-markup">Markup percentage</Label>
+            <div className="relative">
+              <Input
+                id="kole-draft-markup"
+                type="number"
+                min="0"
+                max="1000"
+                step="0.01"
+                inputMode="decimal"
+                value={markupPercent}
+                onChange={(event) => setMarkupPercent(event.target.value)}
+                disabled={!canManageVendor || savingMarkup}
+                className="pr-8"
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">%</span>
+            </div>
+          </div>
+          {canManageVendor && (
+            <Button onClick={handleSaveMarkup} disabled={savingMarkup || markupPercent.trim() === ""}>
+              {savingMarkup ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}
+              Save Markup
+            </Button>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-2 gap-3">
         <Card>
