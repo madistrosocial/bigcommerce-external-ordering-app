@@ -254,6 +254,23 @@ export default function CRMCustomers() {
   const [inactiveReason, setInactiveReason] = useState<string>("");
   const [inactiveNotes, setInactiveNotes] = useState<string>("");
   const [savingInactive, setSavingInactive] = useState(false);
+  const customerListRef = useRef<HTMLDivElement>(null);
+  const lastCustomerScrollTop = useRef(0);
+  const ignoreScrollDirectionUntil = useRef(0);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [showMobileCustomerControls, setShowMobileCustomerControls] = useState(true);
+
+  useEffect(() => {
+    const mobileQuery = window.matchMedia("(max-width: 767px)");
+    const syncViewport = () => {
+      setIsMobileViewport(mobileQuery.matches);
+      if (!mobileQuery.matches) setShowMobileCustomerControls(true);
+      lastCustomerScrollTop.current = customerListRef.current?.scrollTop ?? 0;
+    };
+    syncViewport();
+    mobileQuery.addEventListener("change", syncViewport);
+    return () => mobileQuery.removeEventListener("change", syncViewport);
+  }, []);
 
   // Persist filter state to localStorage whenever anything changes
   useEffect(() => {
@@ -499,9 +516,37 @@ export default function CRMCustomers() {
     </th>
   );
 
+  const mobileCustomerControlsHidden = isMobileViewport && !showMobileCustomerControls;
+  const handleCustomerListScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const scrollTop = event.currentTarget.scrollTop;
+    const previousScrollTop = lastCustomerScrollTop.current;
+    const setControlsVisible = (visible: boolean) => {
+      if (visible === showMobileCustomerControls) return;
+      ignoreScrollDirectionUntil.current = performance.now() + 250;
+      setShowMobileCustomerControls(visible);
+    };
+
+    if (scrollTop <= 1) {
+      setControlsVisible(true);
+    } else if (isMobileViewport && performance.now() >= ignoreScrollDirectionUntil.current) {
+      if (scrollTop > previousScrollTop + 1) setControlsVisible(true);
+      else if (scrollTop < previousScrollTop - 1) setControlsVisible(false);
+    }
+    lastCustomerScrollTop.current = scrollTop;
+  };
+
   return (
     <div className="flex flex-col h-full bg-white">
 
+      <div
+        className={`shrink-0 overflow-hidden transition-[max-height,opacity,transform] duration-200 ease-in-out motion-reduce:transition-none ${
+          mobileCustomerControlsHidden
+            ? "max-h-0 -translate-y-2 opacity-0"
+            : "max-h-[24rem] translate-y-0 opacity-100"
+        }`}
+        aria-hidden={mobileCustomerControlsHidden}
+        inert={mobileCustomerControlsHidden}
+      >
       {/* ── Health Cards ─────────────────────────────────────────────────────── */}
       {metrics && (
         <div className="border-b bg-white px-3 sm:px-4 py-2 sm:py-3 shrink-0">
@@ -702,6 +747,8 @@ export default function CRMCustomers() {
         </div>
       </div>
 
+      </div>
+
       {/* ── Filter drawer ─────────────────────────────────────────────────────── */}
       {showFilters && (
         <div className="border-b bg-white px-4 pb-3 pt-2 shrink-0">
@@ -870,7 +917,7 @@ export default function CRMCustomers() {
       )}
 
       {/* ── Table ────────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto">
+      <div ref={customerListRef} onScroll={handleCustomerListScroll} className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading customers…</div>
         ) : customers.length === 0 ? (
