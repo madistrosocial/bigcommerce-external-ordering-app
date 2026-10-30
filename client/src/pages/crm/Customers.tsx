@@ -529,8 +529,8 @@ export default function CRMCustomers() {
     if (scrollTop <= 1) {
       setControlsVisible(true);
     } else if (isMobileViewport && performance.now() >= ignoreScrollDirectionUntil.current) {
-      if (scrollTop > previousScrollTop + 1) setControlsVisible(true);
-      else if (scrollTop < previousScrollTop - 1) setControlsVisible(false);
+      if (scrollTop > previousScrollTop + 1) setControlsVisible(false);
+      else if (scrollTop < previousScrollTop - 1) setControlsVisible(true);
     }
     lastCustomerScrollTop.current = scrollTop;
   };
