@@ -16,7 +16,11 @@ import {
   type InsertInventoryRemoveLog,
   type InsertProductLinkLog,
 } from "@shared/schema";
-import { getKoleExtendedCost } from "@shared/kole-pricing";
+import {
+  DEFAULT_KOLE_DRAFT_MARKUP_PERCENT,
+  getKoleExtendedCost,
+  KOLE_DRAFT_MARKUP_PERCENT_OPTIONS,
+} from "@shared/kole-pricing";
 import { resolveBigCommerceOrderLinePrice } from "./sales-report-pricing";
 import { checkProduct360SkuAvailability } from "./product360-sku-availability";
 import { BigCommerceVariantImageError, clearBigCommerceVariantImage } from "./product360-variant-images";
@@ -1232,13 +1236,12 @@ export async function registerRoutes(
     }
   };
 
-  const DEFAULT_KOLE_DRAFT_MARKUP_PERCENT = 20;
   const normalizeKoleDraftMarkupPercent = (value: unknown) => {
     if (value === null || value === undefined || (typeof value === "string" && !value.trim())) {
       return DEFAULT_KOLE_DRAFT_MARKUP_PERCENT;
     }
     const markupPercent = Number(value);
-    return Number.isFinite(markupPercent) && markupPercent >= 0 && markupPercent <= 1000
+    return Number.isFinite(markupPercent) && KOLE_DRAFT_MARKUP_PERCENT_OPTIONS.includes(markupPercent)
       ? markupPercent
       : DEFAULT_KOLE_DRAFT_MARKUP_PERCENT;
   };
@@ -1404,10 +1407,9 @@ export async function registerRoutes(
           : typeof rawMarkupPercent === "string" && rawMarkupPercent.trim()
             ? Number(rawMarkupPercent)
             : Number.NaN;
-        if (!Number.isFinite(draftMarkupPercent) || draftMarkupPercent < 0 || draftMarkupPercent > 1000) {
-          return res.status(400).json({ error: "Draft markup must be a number from 0% to 1,000%." });
+        if (!Number.isFinite(draftMarkupPercent) || !KOLE_DRAFT_MARKUP_PERCENT_OPTIONS.includes(draftMarkupPercent)) {
+          return res.status(400).json({ error: "Choose a draft markup from 20% to 80% in 5% increments." });
         }
-        draftMarkupPercent = Math.round(draftMarkupPercent * 100) / 100;
       }
       if ((suppliedAccountId || suppliedApiKey) && (!accountId || !apiKey) && !(process.env.KOLE_ACCOUNT_ID && process.env.KOLE_API_KEY)) {
         return res.status(400).json({ error: "Vendor account ID and API key are required together." });

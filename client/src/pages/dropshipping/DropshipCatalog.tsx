@@ -4,7 +4,11 @@ import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import * as api from "@/lib/api";
 import { toPublicVendorMessage } from "@/lib/vendor-display";
-import { getKoleExtendedCost } from "@shared/kole-pricing";
+import {
+  DEFAULT_KOLE_DRAFT_MARKUP_PERCENT,
+  getKoleExtendedCost,
+  KOLE_DRAFT_MARKUP_PERCENT_OPTIONS,
+} from "@shared/kole-pricing";
 import * as HoverCardPrimitive from "@radix-ui/react-hover-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -189,6 +193,7 @@ export default function DropshipCatalogPage() {
   const [draftProducts, setDraftProducts] = useState<api.DropshipProduct[]>([]);
   const [draftTitles, setDraftTitles] = useState<Record<number, string>>({});
   const [draftPrices, setDraftPrices] = useState<Record<number, string>>({});
+  const [draftMarkupPercent, setDraftMarkupPercent] = useState(DEFAULT_KOLE_DRAFT_MARKUP_PERCENT);
   const [draftCategoryIds, setDraftCategoryIds] = useState<Record<number, string>>({});
   const [bulkDraftCategoryId, setBulkDraftCategoryId] = useState("");
   const [draftDialogOpen, setDraftDialogOpen] = useState(false);
@@ -216,7 +221,7 @@ export default function DropshipCatalogPage() {
       .sort((a, b) => a.label.localeCompare(b.label)),
     [bcCategories],
   );
-  const draftMarkupPercent = connection?.draftMarkupPercent ?? 20;
+  const savedDraftMarkupPercent = connection?.draftMarkupPercent ?? DEFAULT_KOLE_DRAFT_MARKUP_PERCENT;
 
   const runSkuMapping = useMutation({
     mutationFn: api.mapExistingKoleProducts,
@@ -323,7 +328,8 @@ export default function DropshipCatalogPage() {
     }
     setDraftProducts(eligible);
     setDraftTitles(Object.fromEntries(eligible.map((product) => [product.id, product.title.slice(0, 250)])));
-    setDraftPrices(Object.fromEntries(eligible.map((product) => [product.id, suggestedRetailPrice(product, draftMarkupPercent)])));
+    setDraftMarkupPercent(savedDraftMarkupPercent);
+    setDraftPrices(Object.fromEntries(eligible.map((product) => [product.id, suggestedRetailPrice(product, savedDraftMarkupPercent)])));
     setDraftCategoryIds(Object.fromEntries(eligible.map((product) => [product.id, ""])));
     setBulkDraftCategoryId("");
     setDraftDialogOpen(true);
@@ -517,6 +523,31 @@ export default function DropshipCatalogPage() {
             <DialogTitle>Create hidden BigCommerce drafts</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-1.5 rounded-md border border-slate-200 p-3">
+              <Label htmlFor="draft-markup-percent" className="text-xs">Markup percentage</Label>
+              <Select
+                value={String(draftMarkupPercent)}
+                onValueChange={(value) => {
+                  const nextMarkupPercent = Number(value);
+                  if (!KOLE_DRAFT_MARKUP_PERCENT_OPTIONS.includes(nextMarkupPercent)) return;
+                  setDraftMarkupPercent(nextMarkupPercent);
+                  setDraftPrices(Object.fromEntries(
+                    draftProducts.map((product) => [product.id, suggestedRetailPrice(product, nextMarkupPercent)]),
+                  ));
+                }}
+                disabled={createDrafts.isPending}
+              >
+                <SelectTrigger id="draft-markup-percent" className="h-9 bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {KOLE_DRAFT_MARKUP_PERCENT_OPTIONS.map((value) => (
+                    <SelectItem key={value} value={String(value)}>{value}%</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-500">Default from KCDS settings: {savedDraftMarkupPercent}%.</p>
+            </div>
             <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
               <Label htmlFor="bulk-draft-category" className="text-xs">Apply one BigCommerce category to all selected products</Label>
               <DraftCategoryTreePicker

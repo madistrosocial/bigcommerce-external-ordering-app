@@ -1,3 +1,9 @@
+export const DEFAULT_KOLE_DRAFT_MARKUP_PERCENT = 20;
+export const KOLE_DRAFT_MARKUP_PERCENT_OPTIONS = Array.from(
+  { length: 13 },
+  (_, index) => DEFAULT_KOLE_DRAFT_MARKUP_PERCENT + index * 5,
+);
+
 function positiveNumber(value: unknown): number | null {
   if (value === undefined || value === null || String(value).trim() === "") return null;
   const number = Number(String(value).trim().replace(/[$,]/g, ""));

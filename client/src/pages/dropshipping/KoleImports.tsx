@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle2, Eye, EyeOff, KeyRound, Loader2, Plug, RefreshCw, Save, Upload, XCircle } from "lucide-react";
 import { toPublicVendorMessage, toPublicVendorName } from "@/lib/vendor-display";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTimeService } from "@/hooks/useTimeService";
+import { KOLE_DRAFT_MARKUP_PERCENT_OPTIONS } from "@shared/kole-pricing";
 
 function importSourceLabel(log?: api.DropshipSyncLog) {
   const source = log?.detail?.source;
@@ -121,8 +123,8 @@ export default function KoleImportsPage() {
 
   const handleSaveMarkup = async () => {
     const value = Number(markupPercent);
-    if (!Number.isFinite(value) || value < 0 || value > 1000) {
-      toast({ title: "Invalid markup", description: "Enter a markup from 0% to 1,000%.", variant: "destructive" });
+    if (!KOLE_DRAFT_MARKUP_PERCENT_OPTIONS.includes(value)) {
+      toast({ title: "Invalid markup", description: "Choose a markup from 20% to 80% in 5% increments.", variant: "destructive" });
       return;
     }
     setSavingMarkup(true);
@@ -227,21 +229,16 @@ export default function KoleImportsPage() {
           {!canManageVendor && <p className="text-xs text-slate-500">View-only access. Ask an administrator to change the draft markup.</p>}
           <div className="max-w-xs space-y-1.5">
             <Label htmlFor="kole-draft-markup">Markup percentage</Label>
-            <div className="relative">
-              <Input
-                id="kole-draft-markup"
-                type="number"
-                min="0"
-                max="1000"
-                step="0.01"
-                inputMode="decimal"
-                value={markupPercent}
-                onChange={(event) => setMarkupPercent(event.target.value)}
-                disabled={!canManageVendor || savingMarkup}
-                className="pr-8"
-              />
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">%</span>
-            </div>
+            <Select value={markupPercent} onValueChange={setMarkupPercent} disabled={!canManageVendor || savingMarkup}>
+              <SelectTrigger id="kole-draft-markup">
+                <SelectValue placeholder="Choose markup" />
+              </SelectTrigger>
+              <SelectContent>
+                {KOLE_DRAFT_MARKUP_PERCENT_OPTIONS.map((value) => (
+                  <SelectItem key={value} value={String(value)}>{value}%</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           {canManageVendor && (
             <Button onClick={handleSaveMarkup} disabled={savingMarkup || markupPercent.trim() === ""}>
