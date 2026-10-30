@@ -13,8 +13,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChevronLeft, ChevronRight, Eye, Filter, Link2, Loader2, Package, Plus, Search, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Eye, Filter, Link2, Loader2, Package, Plus, Search, X } from "lucide-react";
+import BigCommerceCategoryTree from "@/components/BigCommerceCategoryTree";
 
 const PAGE_SIZE = 50;
 
@@ -100,6 +102,57 @@ function categoryPath(category: api.BcCategory, categories: api.BcCategory[]) {
     current = byId.get(current.parent_id);
   }
   return names.reverse().join(" / ");
+}
+
+function DraftCategoryTreePicker({
+  id,
+  value,
+  categories,
+  categoryOptions,
+  placeholder,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  categories: api.BcCategory[];
+  categoryOptions: Array<{ id: number; label: string }>;
+  placeholder: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedCategory = categoryOptions.find((item) => String(item.id) === value);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          id={id}
+          type="button"
+          variant="outline"
+          className="h-9 w-full justify-between bg-white text-left text-xs font-normal"
+          disabled={disabled}
+        >
+          <span className="truncate">{selectedCategory?.label || placeholder}</span>
+          <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-slate-400" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="z-[70] w-[min(32rem,calc(100vw-2rem))] p-3">
+        <BigCommerceCategoryTree
+          categories={categories}
+          selectedIds={value ? [Number(value)] : []}
+          onChange={(selectedIds) => {
+            onChange(selectedIds[0] ? String(selectedIds[0]) : "");
+            setOpen(false);
+          }}
+          disabled={disabled}
+          singleSelect
+          title="Choose a category"
+          maxHeightClassName="max-h-[min(24rem,55vh)]"
+        />
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 function statusLabel(status: string) {
@@ -457,23 +510,18 @@ export default function DropshipCatalogPage() {
           <div className="space-y-4">
             <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
               <Label htmlFor="bulk-draft-category" className="text-xs">Apply one BigCommerce category to all selected products</Label>
-              <Select
-                value={bulkDraftCategoryId || "__choose__"}
-                onValueChange={(value) => {
-                  const nextCategoryId = value === "__choose__" ? "" : value;
+              <DraftCategoryTreePicker
+                id="bulk-draft-category"
+                value={bulkDraftCategoryId}
+                categories={bcCategories}
+                categoryOptions={bcCategoryOptions}
+                placeholder="Choose a category for all selected items"
+                disabled={createDrafts.isPending || isLoadingBcCategories || Boolean(bcCategoriesError) || !bcCategoryOptions.length}
+                onChange={(nextCategoryId) => {
                   setBulkDraftCategoryId(nextCategoryId);
                   setDraftCategoryIds(Object.fromEntries(draftProducts.map((product) => [product.id, nextCategoryId])));
                 }}
-                disabled={createDrafts.isPending || isLoadingBcCategories || Boolean(bcCategoriesError) || !bcCategoryOptions.length}
-              >
-                <SelectTrigger id="bulk-draft-category" className="h-9 bg-white">
-                  <SelectValue placeholder="Choose a category for all selected items" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__choose__">Choose a category for all items</SelectItem>
-                  {bcCategoryOptions.map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              />
               {isLoadingBcCategories && <p className="text-xs text-slate-500">Loading BigCommerce categories…</p>}
               {bcCategoriesError && (
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-red-600">
@@ -501,22 +549,18 @@ export default function DropshipCatalogPage() {
                     <div className="space-y-3">
                       <div className="space-y-1.5">
                         <Label htmlFor={`draft-category-${product.id}`} className="text-xs">BigCommerce category</Label>
-                        <Select
-                          value={draftCategoryIds[product.id] || "__choose__"}
-                          onValueChange={(value) => {
-                            setDraftCategoryIds((current) => ({ ...current, [product.id]: value === "__choose__" ? "" : value }));
+                        <DraftCategoryTreePicker
+                          id={`draft-category-${product.id}`}
+                          value={draftCategoryIds[product.id] || ""}
+                          categories={bcCategories}
+                          categoryOptions={bcCategoryOptions}
+                          placeholder="Choose category"
+                          disabled={createDrafts.isPending || isLoadingBcCategories || Boolean(bcCategoriesError) || !bcCategoryOptions.length}
+                          onChange={(value) => {
+                            setDraftCategoryIds((current) => ({ ...current, [product.id]: value }));
                             setBulkDraftCategoryId("");
                           }}
-                          disabled={createDrafts.isPending || isLoadingBcCategories || Boolean(bcCategoriesError) || !bcCategoryOptions.length}
-                        >
-                          <SelectTrigger id={`draft-category-${product.id}`} className="h-9">
-                            <SelectValue placeholder="Choose category" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__choose__">Choose category</SelectItem>
-                            {bcCategoryOptions.map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.label}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
+                        />
                       </div>
                       <div className="space-y-1.5">
                         <Label htmlFor={`draft-price-${product.id}`} className="text-xs">Selling price</Label>

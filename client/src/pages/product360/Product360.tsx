@@ -82,6 +82,7 @@ import { useToast } from "@/hooks/use-toast";
 import { dateOnlyInTimeZone } from "@shared/timezone";
 import { useStore } from "@/lib/store";
 import { applyProductPhotoWatermark, loadProductPhotoWatermarkSettings } from "@/lib/product-photo-watermark";
+import BigCommerceCategoryTree from "@/components/BigCommerceCategoryTree";
 import Product360VariantTable from "./Product360VariantTable";
 
 const COLORS = ["#2563eb", "#14b8a6", "#f59e0b", "#8b5cf6", "#ef4444", "#64748b"];
@@ -1202,30 +1203,9 @@ function ProductDetailsTab({ id }: { id: number }) {
   const [autoWatermarkProductPhotos, setAutoWatermarkProductPhotos] = useState(true);
   const [productPhotoWatermarkTone, setProductPhotoWatermarkTone] = useState<"dark" | "light">("dark");
   const [draggingPhotos, setDraggingPhotos] = useState(false);
-  const [categorySearch, setCategorySearch] = useState("");
-  const [openCategoryIds, setOpenCategoryIds] = useState<Set<number>>(new Set());
   const numericValue = (value: unknown) => value === null || value === undefined || value === "" ? null : Number(value);
   const catalogDetails = query.data;
   const categories = catalogDetails?.categories || [];
-  const categoryChildren = useMemo(() => {
-    const children = new Map<number, typeof categories>();
-    for (const category of categories) children.set(category.parent_id || 0, [...(children.get(category.parent_id || 0) || []), category]);
-    return children;
-  }, [categories]);
-  const matchingCategoryIds = useMemo(() => {
-    const search = categorySearch.trim().toLowerCase();
-    if (!search) return null;
-    const visible = new Set<number>();
-    for (const category of categories) {
-      if (!category.name.toLowerCase().includes(search)) continue;
-      let current: typeof category | undefined = category;
-      while (current && !visible.has(current.id)) {
-        visible.add(current.id);
-        current = categories.find((item) => item.id === current?.parent_id);
-      }
-    }
-    return visible;
-  }, [categories, categorySearch]);
   useEffect(() => {
     if (query.data?.product) {
       setDraft({ ...query.data.product, categories: Array.isArray(query.data.product.categories) ? query.data.product.categories.map(Number) : [] });
@@ -1238,15 +1218,6 @@ function ProductDetailsTab({ id }: { id: number }) {
         ? query.data.product.images.find((image: any) => image.is_thumbnail)
         : null;
       setPrimaryImageId(primaryImage ? Number(primaryImage.id) : null);
-      const expanded = new Set<number>();
-      for (const selectedId of Array.isArray(query.data.product.categories) ? query.data.product.categories.map(Number) : []) {
-        let current = query.data.categories.find((category) => category.id === selectedId);
-        while (current?.parent_id) {
-          expanded.add(current.parent_id);
-          current = query.data.categories.find((category) => category.id === current?.parent_id);
-        }
-      }
-      setOpenCategoryIds(expanded);
     }
   }, [query.data]);
   const originalPrimaryImageId = Array.isArray(query.data?.product?.images)
@@ -1278,19 +1249,6 @@ function ProductDetailsTab({ id }: { id: number }) {
   const update = (key: string, value: unknown) => { setSaved(false); setEditedFields((current) => new Set(current).add(key)); setDraft((current) => ({ ...current, [key]: value })); };
   const inputClass = "mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm disabled:bg-slate-50";
   const labelClass = "text-xs font-semibold text-slate-600";
-  const categoryNode = (category: typeof categories[number], depth = 0): React.ReactNode => {
-    if (matchingCategoryIds && !matchingCategoryIds.has(category.id)) return null;
-    const children = (categoryChildren.get(category.id) || []).filter((item) => !matchingCategoryIds || matchingCategoryIds.has(item.id));
-    const expanded = !!matchingCategoryIds || openCategoryIds.has(category.id);
-    return <div key={category.id}>
-      <div className="flex items-center gap-1 rounded py-1.5 pr-2 hover:bg-slate-50" style={{ paddingLeft: 8 + depth * 18 }}>
-        {children.length ? <button type="button" aria-label={`${expanded ? "Collapse" : "Expand"} ${category.name}`} onClick={() => setOpenCategoryIds((current) => { const next = new Set(current); if (next.has(category.id)) next.delete(category.id); else next.add(category.id); return next; })} className="rounded p-0.5 text-slate-400 hover:bg-slate-200"><ChevronRight className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-90" : ""}`} /></button> : <span className="w-5" />}
-        <input type="checkbox" disabled={!canEdit} checked={(draft.categories || []).includes(category.id)} onChange={(event) => update("categories", event.target.checked ? [...(draft.categories || []), category.id] : (draft.categories || []).filter((categoryId: number) => categoryId !== category.id))} />
-        <span className="text-xs text-slate-700">{category.name}</span>
-      </div>
-      {expanded && children.map((child) => categoryNode(child, depth + 1))}
-    </div>;
-  };
   const handlePhotoFiles = async (files: FileList | File[]) => {
     setPhotoError("");
     const selected = Array.from(files);
@@ -1395,9 +1353,13 @@ function ProductDetailsTab({ id }: { id: number }) {
       </div></Card>
       </div>
       <Card className="min-w-0 border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-semibold text-slate-800">Assigned categories</h3><p className="mt-1 text-xs text-slate-500">{(draft.categories || []).length} selected</p></div><Input className="h-8 w-full sm:max-w-[190px]" placeholder="Search categories" value={categorySearch} onChange={(event) => setCategorySearch(event.target.value)} /></div>
-        <p className="mt-2 text-[10px] text-slate-500">Expand a category to browse its subcategories.</p>
-        <div className="mt-2 max-h-[490px] overflow-y-auto rounded-md border border-slate-200 py-2">{categories.filter((category) => !categories.some((parent) => parent.id === category.parent_id)).map((category) => categoryNode(category))}</div>
+        <BigCommerceCategoryTree
+          categories={categories}
+          selectedIds={draft.categories || []}
+          onChange={(selectedIds) => update("categories", selectedIds)}
+          disabled={!canEdit}
+          maxHeightClassName="max-h-[490px]"
+        />
       </Card>
     </div>
   </div>;
